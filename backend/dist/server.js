@@ -4,6 +4,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 require("./config/bootstrapEnv");
+const http_1 = __importDefault(require("http"));
 const express_1 = __importDefault(require("express"));
 const cors_1 = __importDefault(require("cors"));
 const database_1 = __importDefault(require("./config/database"));
@@ -14,6 +15,8 @@ const profileRoutes_1 = __importDefault(require("./routes/profileRoutes"));
 const adminRoutes_1 = __importDefault(require("./routes/adminRoutes"));
 const discoverRoutes_1 = __importDefault(require("./routes/discoverRoutes"));
 const walletRoutes_1 = __importDefault(require("./routes/walletRoutes"));
+const chatRoutes_1 = __importDefault(require("./routes/chatRoutes"));
+const chatSocket_1 = require("./socket/chatSocket");
 const app = (0, express_1.default)();
 const PORT = process.env.PORT ? Number(process.env.PORT) : 5000;
 app.use((0, cors_1.default)());
@@ -28,6 +31,9 @@ app.use('/profile', profileRoutes_1.default);
 app.use('/discover', discoverRoutes_1.default);
 app.use('/wallet', walletRoutes_1.default);
 app.use('/admin', adminRoutes_1.default);
+app.use('/chat', chatRoutes_1.default);
+const httpServer = http_1.default.createServer(app);
+void (0, chatSocket_1.attachChatSocket)(httpServer);
 // 404
 app.use((_req, res) => {
     res.status(404).json({ message: 'Not found' });
@@ -48,7 +54,7 @@ const start = async () => {
             console.warn('[email] OTP mail may fail until SMTP is fixed:', r.error);
         }
     });
-    app.listen(PORT, '0.0.0.0', () => {
+    httpServer.listen(PORT, '0.0.0.0', () => {
         console.log(`Server listening on port ${PORT} (reachable at http://localhost:${PORT} and your LAN IP)`);
     });
 };

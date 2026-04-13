@@ -39,7 +39,7 @@ export const sendOtpEmail = async (
   const auth = getSmtpAuth();
   if (!auth) {
     throw new Error(
-      'EMAIL_USER and EMAIL_PASS must be set in the project root .env. Use a Gmail App Password (Google Account → Security → 2-Step Verification → App passwords).'
+      'EMAIL_USER and EMAIL_PASS must be set in the backend .env. Use a Gmail App Password (Google Account → Security → 2-Step Verification → App passwords).'
     );
   }
 

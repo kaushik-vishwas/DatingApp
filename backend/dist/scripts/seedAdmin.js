@@ -13,7 +13,7 @@ async function main() {
     await (0, superAdminSync_1.syncSuperAdminFromEnv)();
     const email = (0, superAdminSync_1.getConfiguredAdminEmail)();
     if (!email) {
-        console.error('Set ADMIN_EMAIL in the project root .env, then run this script again.');
+        console.error('Set ADMIN_EMAIL in the backend .env, then run this script again.');
         process.exit(1);
         return;
     }

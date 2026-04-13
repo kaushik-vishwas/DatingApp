@@ -14,7 +14,7 @@ export function getConfiguredAdminEmail(): string | null {
 export async function syncSuperAdminFromEnv(): Promise<void> {
   const email = getConfiguredAdminEmail();
   if (!email) {
-    console.warn('[admin] ADMIN_EMAIL is not set — super admin sync skipped. Set ADMIN_EMAIL in the project root .env.');
+    console.warn('[admin] ADMIN_EMAIL is not set — super admin sync skipped. Set ADMIN_EMAIL in the backend .env.');
     return;
   }
 

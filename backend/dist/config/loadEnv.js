@@ -8,24 +8,16 @@ const fs_1 = __importDefault(require("fs"));
 const path_1 = __importDefault(require("path"));
 const dotenv_1 = __importDefault(require("dotenv"));
 /**
- * Loads the nearest `.env` walking up from `process.cwd()`, preferring the one
- * closest to the filesystem root (so repo-root `.env` wins over `backend/.env`).
+ * Loads `backend/.env` next to this package root, whether this file runs from
+ * `backend/config` (ts-node/tsx) or `backend/dist/config` (compiled `node dist/...`).
  */
 function loadEnv() {
-    let dir = path_1.default.resolve(process.cwd());
-    let chosen = null;
-    for (let i = 0; i < 8; i++) {
-        const p = path_1.default.join(dir, '.env');
-        if (fs_1.default.existsSync(p)) {
-            chosen = p;
-        }
-        const parent = path_1.default.dirname(dir);
-        if (parent === dir)
-            break;
-        dir = parent;
-    }
-    if (chosen) {
-        dotenv_1.default.config({ path: chosen });
+    const backendRoot = path_1.default.basename(path_1.default.dirname(__dirname)) === 'dist'
+        ? path_1.default.resolve(__dirname, '..', '..')
+        : path_1.default.resolve(__dirname, '..');
+    const envPath = path_1.default.join(backendRoot, '.env');
+    if (fs_1.default.existsSync(envPath)) {
+        dotenv_1.default.config({ path: envPath });
         return;
     }
     dotenv_1.default.config();

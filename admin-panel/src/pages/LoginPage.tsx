@@ -230,8 +230,8 @@ export function LoginPage() {
 
         <p className="mt-6 text-center text-xs text-neutral-400">
           Default admin is <code className="rounded bg-neutral-100 px-1"></code> with{' '}
-          <code className="rounded bg-neutral-100 px-1"></code> (from env defaults). Change these in project{' '}
-          root <code className="rounded bg-neutral-100 px-1">.env</code>.
+          <code className="rounded bg-neutral-100 px-1"></code> (from env defaults). Change these in the backend{' '}
+          <code className="rounded bg-neutral-100 px-1">.env</code> file.
         </p>
       </div>
     </div>

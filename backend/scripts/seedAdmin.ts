@@ -10,7 +10,7 @@ async function main(): Promise<void> {
 
   const email = getConfiguredAdminEmail();
   if (!email) {
-    console.error('Set ADMIN_EMAIL in the project root .env, then run this script again.');
+    console.error('Set ADMIN_EMAIL in the backend .env, then run this script again.');
     process.exit(1);
     return;
   }

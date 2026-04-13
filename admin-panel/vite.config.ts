@@ -6,6 +6,6 @@ import tailwindcss from '@tailwindcss/vite'
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react(), tailwindcss()],
-  // Single repo-root `.env` — VITE_* vars live there with backend keys
-  envDir: path.resolve(__dirname, '..'),
+  // `backend/.env` — VITE_* vars live alongside backend keys
+  envDir: path.resolve(__dirname, '../backend'),
 })

@@ -22,13 +22,13 @@ const signAdminToken = (adminId) => {
     return jsonwebtoken_1.default.sign(payload, secret, { expiresIn: '7d' });
 };
 /**
- * POST /admin/auth/login — password only; admin identity comes from ADMIN_EMAIL in the project root .env.
+ * POST /admin/auth/login — password only; admin identity comes from ADMIN_EMAIL in the backend .env.
  */
 const adminLogin = async (req, res) => {
     try {
         const configuredEmail = (0, superAdminSync_1.getConfiguredAdminEmail)();
         if (!configuredEmail) {
-            res.status(503).json({ message: 'Admin is not configured: set ADMIN_EMAIL in the project root .env' });
+            res.status(503).json({ message: 'Admin is not configured: set ADMIN_EMAIL in the backend .env' });
             return;
         }
         const bodyEmail = String(req.body.email ?? '').toLowerCase().trim();
@@ -103,7 +103,7 @@ const adminForgotPassword = async (req, res) => {
         const otpBypass = process.env.OTP_BYPASS?.toLowerCase() === 'true';
         const configuredEmail = (0, superAdminSync_1.getConfiguredAdminEmail)();
         if (!configuredEmail) {
-            res.status(503).json({ message: 'Admin is not configured: set ADMIN_EMAIL in the project root .env' });
+            res.status(503).json({ message: 'Admin is not configured: set ADMIN_EMAIL in the backend .env' });
             return;
         }
         const bodyEmail = String(req.body.email ?? '').toLowerCase().trim();
@@ -161,7 +161,7 @@ const adminResetPassword = async (req, res) => {
         const otpBypass = process.env.OTP_BYPASS?.toLowerCase() === 'true';
         const configuredEmail = (0, superAdminSync_1.getConfiguredAdminEmail)();
         if (!configuredEmail) {
-            res.status(503).json({ message: 'Admin is not configured: set ADMIN_EMAIL in the project root .env' });
+            res.status(503).json({ message: 'Admin is not configured: set ADMIN_EMAIL in the backend .env' });
             return;
         }
         const otp = String(req.body.otp ?? '').trim();
@@ -229,7 +229,7 @@ const adminRequestEmailChange = async (req, res) => {
     try {
         if ((0, superAdminSync_1.getConfiguredAdminEmail)()) {
             res.status(403).json({
-                message: 'Admin email is set in ADMIN_EMAIL in the project root .env. Change it there and restart the server.',
+                message: 'Admin email is set in ADMIN_EMAIL in the backend .env. Change it there and restart the server.',
             });
             return;
         }
@@ -301,7 +301,7 @@ const adminConfirmEmailChange = async (req, res) => {
     try {
         if ((0, superAdminSync_1.getConfiguredAdminEmail)()) {
             res.status(403).json({
-                message: 'Admin email is set in ADMIN_EMAIL in the project root .env. Change it there and restart the server.',
+                message: 'Admin email is set in ADMIN_EMAIL in the backend .env. Change it there and restart the server.',
             });
             return;
         }

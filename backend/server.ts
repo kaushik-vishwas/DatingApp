@@ -1,4 +1,5 @@
 import './config/bootstrapEnv';
+import http from 'http';
 import express from 'express';
 import cors from 'cors';
 import connectDB from './config/database';
@@ -9,6 +10,8 @@ import profileRoutes from './routes/profileRoutes';
 import adminRoutes from './routes/adminRoutes';
 import discoverRoutes from './routes/discoverRoutes';
 import walletRoutes from './routes/walletRoutes';
+import chatRoutes from './routes/chatRoutes';
+import { attachChatSocket } from './socket/chatSocket';
 
 const app = express();
 const PORT = process.env.PORT ? Number(process.env.PORT) : 5000;
@@ -27,6 +30,10 @@ app.use('/profile', profileRoutes);
 app.use('/discover', discoverRoutes);
 app.use('/wallet', walletRoutes);
 app.use('/admin', adminRoutes);
+app.use('/chat', chatRoutes);
+
+const httpServer = http.createServer(app);
+void attachChatSocket(httpServer);
 
 // 404
 app.use((_req, res) => {
@@ -52,7 +59,7 @@ const start = async (): Promise<void> => {
     }
   });
 
-  app.listen(PORT, '0.0.0.0', () => {
+  httpServer.listen(PORT, '0.0.0.0', () => {
     console.log(`Server listening on port ${PORT} (reachable at http://localhost:${PORT} and your LAN IP)`);
   });
 };
