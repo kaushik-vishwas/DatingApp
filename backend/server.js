@@ -15,7 +15,7 @@ const PORT = process.env.PORT || 5000;
 app.use(cors({
   origin: [
     'http://localhost:3000', // local admin panel
-    'https://dating-app-admin.vercel.app', // ✅ YOUR LIVE ADMIN PANEL
+    'https://dating-app-admin-six.vercel.app/', // ✅ YOUR LIVE ADMIN PANEL
   ],
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
   credentials: true
