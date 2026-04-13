@@ -11,7 +11,15 @@ const app = express();
 const PORT = process.env.PORT || 5000;
 
 // Middleware
-app.use(cors());
+// app.use(cors());
+app.use(cors({
+  origin: [
+    'http://localhost:3000', // local admin panel
+    'https://dating-app-admin.vercel.app', // ✅ YOUR LIVE ADMIN PANEL
+  ],
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
+  credentials: true
+}));
 app.use(express.json());
 
 // Health check
