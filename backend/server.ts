@@ -17,18 +17,25 @@ const app = express();
 const PORT = process.env.PORT ? Number(process.env.PORT) : 5000;
 
 // app.use(cors());
+// app.use(cors({
+//   origin: [
+//     'http://localhost:3000',
+//     'http://localhost:5173', // vite dev
+//     'https://dating-admin-mocha.vercel.app',
+//     'https://dating-app-drab-omega.vercel.app',
+//     'https://backend.nesthamapp.com',
+//     'https://nesthamapp.com'
+//   ],
+//   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
+//   credentials: true
+// }));
+
 app.use(cors({
-  origin: [
-    'http://localhost:3000',
-    'http://localhost:5173', // vite dev
-    'https://dating-admin-mocha.vercel.app',
-    'https://dating-app-drab-omega.vercel.app',
-    'https://backend.nesthamapp.com',
-    'https://nesthamapp.com'
-  ],
+  origin: true, // reflect any origin
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
   credentials: true
 }));
+
 app.use(express.json());
 
 app.use((req, res, next) => {
