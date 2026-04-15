@@ -31,6 +31,12 @@ app.use(cors({
 }));
 app.use(express.json());
 
+app.use((req, res, next) => {
+  console.log("URL:", req.method, req.url);
+  console.log("BODY:", req.body);
+  next();
+});
+
 // Health check
 app.get('/health', (_req, res) => {
   res.json({ ok: true });
