@@ -14,8 +14,10 @@ const PORT = process.env.PORT || 5000;
 // app.use(cors());
 app.use(cors({
   origin: [
-    'http://localhost:3000', // local admin panel
-    'https://dating-app-admin-six.vercel.app/', // ✅ YOUR LIVE ADMIN PANEL
+    'http://localhost:3000',
+    'https://dating-app-admin-six.vercel.app',
+    'https://backend.nesthamapp.com',   // ✅ your backend domain
+    'https://nesthamapp.com'            // ✅ your main domain
   ],
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
   credentials: true

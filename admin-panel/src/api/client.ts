@@ -1,7 +1,7 @@
 import axios, { AxiosHeaders } from 'axios';
 
 /** 🔥 PRODUCTION SERVER (EC2 + NGINX) */
-const PROD_API = 'http://43.205.217.58';
+const PROD_API = 'https://backend.nesthamapp.com';
 
 /** Normalize URL */
 function normalizeUrl(url: string) {
