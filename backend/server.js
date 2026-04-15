@@ -15,7 +15,7 @@ const PORT = process.env.PORT || 5000;
 app.use(cors({
   origin: [
     'http://localhost:3000',
-    'https://dating-app-admin-six.vercel.app',
+    'https://dating-app-drab-omega.vercel.app',
     'https://backend.nesthamapp.com',   // ✅ your backend domain
     'https://nesthamapp.com'            // ✅ your main domain
   ],
