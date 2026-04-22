@@ -66,6 +66,11 @@ const receiverSchema = new mongoose_1.Schema({
     walletBalance: { type: Number, default: 0 },
     suspended: { type: Boolean, default: false },
     moderationWarningAt: { type: Date, default: null },
+    pendingBankAccountHolderName: { type: String, default: null },
+    pendingBankAccountType: { type: String, enum: ['savings', 'current'], default: null },
+    pendingBankAccountNumber: { type: String, default: null },
+    pendingBankIfsc: { type: String, default: null },
+    pendingBankName: { type: String, default: null },
 }, { timestamps: true });
 const Receiver = mongoose_1.default.model('Receiver', receiverSchema);
 exports.default = Receiver;

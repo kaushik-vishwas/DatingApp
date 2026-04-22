@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.resolveModerationReport = exports.listModerationReports = exports.rejectAppUser = exports.approveAppUser = exports.listPendingAppUsers = exports.rejectReceiver = exports.approveReceiver = exports.listPendingReceivers = exports.getKycStats = exports.listAllReceivers = exports.updateAppUser = exports.listAppUsers = exports.adminConfirmEmailChange = exports.adminRequestEmailChange = exports.adminResetPassword = exports.adminForgotPassword = exports.adminMe = exports.adminLogin = void 0;
+exports.resolveWithdrawal = exports.listWithdrawals = exports.resolveModerationReport = exports.listModerationReports = exports.rejectAppUser = exports.approveAppUser = exports.listPendingAppUsers = exports.rejectReceiver = exports.approveReceiver = exports.listPendingReceivers = exports.getKycStats = exports.listAllReceivers = exports.updateAppUser = exports.listAppUsers = exports.adminConfirmEmailChange = exports.adminRequestEmailChange = exports.adminResetPassword = exports.adminForgotPassword = exports.adminMe = exports.adminLogin = void 0;
 const bcryptjs_1 = __importDefault(require("bcryptjs"));
 const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
 const mongoose_1 = __importDefault(require("mongoose"));
@@ -11,6 +11,7 @@ const Admin_1 = __importDefault(require("../models/Admin"));
 const Receiver_1 = __importDefault(require("../models/Receiver"));
 const User_1 = __importDefault(require("../models/User"));
 const UserReport_1 = __importDefault(require("../models/UserReport"));
+const WithdrawalRequest_1 = __importDefault(require("../models/WithdrawalRequest"));
 const authController_1 = require("./authController");
 const email_1 = require("../config/email");
 const superAdminSync_1 = require("../services/superAdminSync");
@@ -799,40 +800,63 @@ const resolveModerationReport = async (req, res) => {
             return;
         }
         const report = await UserReport_1.default.findById(req.params.id);
-        if (!report || report.status !== 'pending') {
-            res.status(404).json({ message: 'Report not found or already resolved' });
+        if (!report) {
+            res.status(404).json({ message: 'Report not found' });
             return;
         }
+        const previousResolution = report.resolution;
         const resolution = action === 'ignore' ? 'ignored' : action === 'warn' ? 'warned' : 'suspended';
-        if (resolution !== 'ignored') {
-            if (report.reportedKind === 'user') {
-                const u = await User_1.default.findById(report.reportedId);
-                if (!u) {
-                    res.status(404).json({ message: 'Reported user missing' });
-                    return;
-                }
-                if (resolution === 'warned') {
-                    u.moderationWarningAt = new Date();
-                }
-                else {
-                    u.suspended = true;
-                }
-                await u.save();
+        if (report.reportedKind === 'user') {
+            const u = await User_1.default.findById(report.reportedId);
+            if (!u) {
+                res.status(404).json({ message: 'Reported user missing' });
+                return;
             }
-            else {
-                const recv = await Receiver_1.default.findById(report.reportedId);
-                if (!recv) {
-                    res.status(404).json({ message: 'Reported receiver missing' });
-                    return;
-                }
-                if (resolution === 'warned') {
-                    recv.moderationWarningAt = new Date();
-                }
-                else {
-                    recv.suspended = true;
-                }
-                await recv.save();
+            if (resolution === 'warned') {
+                u.moderationWarningAt = new Date();
             }
+            if (resolution === 'suspended') {
+                u.suspended = true;
+            }
+            else if (previousResolution === 'suspended' && u.suspended) {
+                const hasOtherSuspensionReport = await UserReport_1.default.exists({
+                    _id: { $ne: report._id },
+                    reportedKind: 'user',
+                    reportedId: report.reportedId,
+                    status: 'resolved',
+                    resolution: 'suspended',
+                });
+                if (!hasOtherSuspensionReport) {
+                    u.suspended = false;
+                }
+            }
+            await u.save();
+        }
+        else {
+            const recv = await Receiver_1.default.findById(report.reportedId);
+            if (!recv) {
+                res.status(404).json({ message: 'Reported receiver missing' });
+                return;
+            }
+            if (resolution === 'warned') {
+                recv.moderationWarningAt = new Date();
+            }
+            if (resolution === 'suspended') {
+                recv.suspended = true;
+            }
+            else if (previousResolution === 'suspended' && recv.suspended) {
+                const hasOtherSuspensionReport = await UserReport_1.default.exists({
+                    _id: { $ne: report._id },
+                    reportedKind: 'receiver',
+                    reportedId: report.reportedId,
+                    status: 'resolved',
+                    resolution: 'suspended',
+                });
+                if (!hasOtherSuspensionReport) {
+                    recv.suspended = false;
+                }
+            }
+            await recv.save();
         }
         report.status = 'resolved';
         report.resolution = resolution;
@@ -853,3 +877,187 @@ const resolveModerationReport = async (req, res) => {
     }
 };
 exports.resolveModerationReport = resolveModerationReport;
+/**
+ * GET /admin/withdrawals — list + cards for withdrawal dashboard.
+ */
+const listWithdrawals = async (req, res) => {
+    try {
+        const range = String(req.query.range ?? '7d').toLowerCase();
+        const status = String(req.query.status ?? 'all').toLowerCase();
+        const q = String(req.query.q ?? '').trim();
+        const page = Math.max(1, Number(req.query.page ?? 1) || 1);
+        const limit = Math.min(100, Math.max(1, Number(req.query.limit ?? 20) || 20));
+        const skip = (page - 1) * limit;
+        const statusFilter = { status: { $ne: 'verification_pending' } };
+        if (status === 'pending' || status === 'approved' || status === 'rejected') {
+            statusFilter.status = status;
+        }
+        const now = new Date();
+        const since = new Date(now);
+        if (range === '7d')
+            since.setDate(now.getDate() - 7);
+        else if (range === '30d')
+            since.setDate(now.getDate() - 30);
+        const periodFilter = range === 'all' ? {} : { createdAt: { $gte: since } };
+        const baseFilter = { ...statusFilter, ...periodFilter };
+        const [pendingRows, approvedTodayRows, rejectedTodayRows, approvedAllRows, totalBase] = await Promise.all([
+            WithdrawalRequest_1.default.find({ status: 'pending' }).select('amount').lean(),
+            WithdrawalRequest_1.default.find({
+                status: 'approved',
+                reviewedAt: { $gte: new Date(new Date().setHours(0, 0, 0, 0)) },
+            })
+                .select('amount')
+                .lean(),
+            WithdrawalRequest_1.default.find({
+                status: 'rejected',
+                reviewedAt: { $gte: new Date(new Date().setHours(0, 0, 0, 0)) },
+            })
+                .select('amount')
+                .lean(),
+            WithdrawalRequest_1.default.find({ status: 'approved' }).select('amount reviewedAt').lean(),
+            WithdrawalRequest_1.default.countDocuments(baseFilter),
+        ]);
+        const pendingCount = pendingRows.length;
+        const pendingAmount = pendingRows.reduce((sum, row) => sum + Number(row.amount || 0), 0);
+        const approvedTodayCount = approvedTodayRows.length;
+        const approvedTodayAmount = approvedTodayRows.reduce((sum, row) => sum + Number(row.amount || 0), 0);
+        const rejectedTodayCount = rejectedTodayRows.length;
+        const rejectedTodayAmount = rejectedTodayRows.reduce((sum, row) => sum + Number(row.amount || 0), 0);
+        const processedCount = approvedAllRows.length;
+        const processedTodayAmount = approvedAllRows
+            .filter((row) => row.reviewedAt && row.reviewedAt >= new Date(new Date().setHours(0, 0, 0, 0)))
+            .reduce((sum, row) => sum + Number(row.amount || 0), 0);
+        const receiverCandidates = q.length === 0
+            ? []
+            : await Receiver_1.default.find({
+                $or: [
+                    { name: new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i') },
+                    { email: new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i') },
+                ],
+            })
+                .select('_id')
+                .lean();
+        const receiverIdsFromSearch = receiverCandidates.map((r) => r._id);
+        const listFilter = { ...baseFilter };
+        if (q.length > 0) {
+            if (receiverIdsFromSearch.length === 0) {
+                res.status(200).json({
+                    stats: {
+                        pendingCount,
+                        pendingAmount,
+                        approvedTodayCount,
+                        approvedTodayAmount,
+                        rejectedTodayCount,
+                        rejectedTodayAmount,
+                        processedCount,
+                        processedTodayAmount,
+                    },
+                    rows: [],
+                    total: 0,
+                    page,
+                    limit,
+                });
+                return;
+            }
+            listFilter.receiverId = { $in: receiverIdsFromSearch };
+        }
+        const rows = await WithdrawalRequest_1.default.find(listFilter)
+            .sort({ createdAt: -1 })
+            .skip(skip)
+            .limit(limit)
+            .lean();
+        const receiverIds = [...new Set(rows.map((row) => String(row.receiverId)))];
+        const receivers = await Receiver_1.default.find({ _id: { $in: receiverIds } })
+            .select('_id name')
+            .lean();
+        const receiverNameById = new Map(receivers.map((r) => [String(r._id), r.name]));
+        res.status(200).json({
+            stats: {
+                pendingCount,
+                pendingAmount,
+                approvedTodayCount,
+                approvedTodayAmount,
+                rejectedTodayCount,
+                rejectedTodayAmount,
+                processedCount,
+                processedTodayAmount,
+            },
+            rows: rows.map((row) => ({
+                _id: String(row._id),
+                withdrawalId: `W-${String(row._id).slice(-6).toUpperCase()}`,
+                receiverName: receiverNameById.get(String(row.receiverId)) ?? 'Receiver',
+                amount: row.amount,
+                bankName: row.bankName,
+                accountMasked: row.accountMasked,
+                createdAt: row.createdAt.toISOString(),
+                status: row.status,
+            })),
+            total: totalBase,
+            page,
+            limit,
+        });
+    }
+    catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error('listWithdrawals error:', msg);
+        res.status(500).json({ message: msg || 'Server error' });
+    }
+};
+exports.listWithdrawals = listWithdrawals;
+/**
+ * PATCH /admin/withdrawals/:id — body `{ action: 'approve' | 'reject' }`
+ */
+const resolveWithdrawal = async (req, res) => {
+    try {
+        const action = String(req.body.action ?? '').toLowerCase();
+        if (action !== 'approve' && action !== 'reject') {
+            res.status(400).json({ message: 'action must be approve or reject' });
+            return;
+        }
+        if (!mongoose_1.default.Types.ObjectId.isValid(req.params.id)) {
+            res.status(400).json({ message: 'Invalid withdrawal id' });
+            return;
+        }
+        const withdrawal = await WithdrawalRequest_1.default.findById(req.params.id);
+        if (!withdrawal || withdrawal.status === 'verification_pending') {
+            res.status(404).json({ message: 'Withdrawal not found' });
+            return;
+        }
+        const nextStatus = action === 'approve' ? 'approved' : 'rejected';
+        const previousStatus = withdrawal.status;
+        if (previousStatus === nextStatus) {
+            res.status(200).json({ ok: true });
+            return;
+        }
+        const receiver = await Receiver_1.default.findById(withdrawal.receiverId).select('walletBalance');
+        if (!receiver) {
+            res.status(404).json({ message: 'Receiver not found' });
+            return;
+        }
+        if (previousStatus === 'pending' && nextStatus === 'rejected') {
+            receiver.walletBalance = Math.round((receiver.walletBalance + withdrawal.amount) * 100) / 100;
+            await receiver.save();
+        }
+        else if (previousStatus === 'rejected' && nextStatus === 'approved') {
+            if (receiver.walletBalance < withdrawal.amount) {
+                res.status(400).json({ message: 'Cannot approve now: receiver wallet balance is lower than refund amount' });
+                return;
+            }
+            receiver.walletBalance = Math.round((receiver.walletBalance - withdrawal.amount) * 100) / 100;
+            await receiver.save();
+        }
+        withdrawal.status = nextStatus;
+        withdrawal.reviewedAt = new Date();
+        withdrawal.reviewedByAdminId = req.admin?._id ? new mongoose_1.default.Types.ObjectId(String(req.admin._id)) : null;
+        const note = String(req.body.note ?? '').trim();
+        withdrawal.adminNote = note ? note : null;
+        await withdrawal.save();
+        res.status(200).json({ ok: true });
+    }
+    catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error('resolveWithdrawal error:', msg);
+        res.status(500).json({ message: msg || 'Server error' });
+    }
+};
+exports.resolveWithdrawal = resolveWithdrawal;

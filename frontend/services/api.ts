@@ -10,6 +10,10 @@ import type {
   SaveCallerUserAudioResponse,
   CompleteProfilePayload,
   CompleteProfileResponse,
+  UpdateReceiverProfilePayload,
+  DeleteReceiverAccountPayload,
+  ReceiverBankDetailsPayload,
+  ReceiverBankOtpSendResponse,
   DiscoverReceiversResponse,
   LoginResponse,
   MeResponse,
@@ -23,7 +27,14 @@ import type {
   ChatMessagesResponse,
   ChatConversationsResponse,
   ReceiverWalletSummaryResponse,
+  ReceiverWithdrawalOverviewResponse,
+  ReceiverCallInsightsResponse,
   VoiceBootstrapResponse,
+  SendWithdrawalOtpResponse,
+  VerifyWithdrawalOtpResponse,
+  CallerCallHistoryResponse,
+  CallerNotificationsResponse,
+  ReceiverEarningsBreakdownResponse,
 } from '../types/api';
 
 const JWT_KEY = 'jwt';
@@ -38,6 +49,12 @@ function normalizeApiOrigin(raw: string): string {
     u = u.slice(0, -5).replace(/\/+$/, '');
   }
   return u;
+}
+
+function getConfiguredApiBase(): string | undefined {
+  const c = Constants as any;
+  const raw = c.expoConfig?.extra?.apiBaseUrl || c.manifest?.extra?.apiBaseUrl;
+  return typeof raw === 'string' && raw.trim() ? normalizeApiOrigin(raw) : undefined;
 }
 
 /** Local backend for dev: LAN IP from Expo, emulator loopback, or machine localhost. */
@@ -75,6 +92,11 @@ function getDevApiBase(): string | undefined {
 }
 
 const getBaseURL = (): string => {
+  const configured = getConfiguredApiBase();
+  if (configured) {
+    return configured;
+  }
+
   if (!__DEV__) {
     return normalizeApiOrigin(PROD_API);
   }
@@ -205,6 +227,45 @@ export const profileApi = {
 
   receiverWalletSummary: () =>
     api.get<ReceiverWalletSummaryResponse>('/profile/receiver-wallet-summary'),
+
+  receiverWithdrawalOverview: () =>
+    api.get<ReceiverWithdrawalOverviewResponse>('/profile/withdrawals/overview'),
+
+  sendReceiverWithdrawalOtp: (amount: number) =>
+    api.post<SendWithdrawalOtpResponse>('/profile/withdrawals/send-otp', { amount }),
+
+  verifyReceiverWithdrawalOtp: (otp: string) =>
+    api.post<VerifyWithdrawalOtpResponse>('/profile/withdrawals/verify', { otp }),
+
+  receiverCallInsights: (range: 'all' | 'week' | 'month' = 'all') =>
+    api.get<ReceiverCallInsightsResponse>('/profile/receiver-call-insights', {
+      params: { range },
+    }),
+
+  updateReceiverProfile: (payload: UpdateReceiverProfilePayload) =>
+    api.patch<CompleteProfileResponse>('/profile/receiver', payload),
+
+  deleteReceiverAccount: (payload?: DeleteReceiverAccountPayload) =>
+    api.delete<{ message: string }>('/profile/receiver', { data: payload ?? {} }),
+
+  callerCallHistory: (range: 'all' | 'week' | 'month' = 'all') =>
+    api.get<CallerCallHistoryResponse>('/profile/caller-call-history', {
+      params: { range },
+    }),
+
+  callerNotifications: () =>
+    api.get<CallerNotificationsResponse>('/profile/caller-notifications'),
+
+  sendReceiverBankUpdateOtp: (payload: ReceiverBankDetailsPayload) =>
+    api.post<ReceiverBankOtpSendResponse>('/profile/receiver/bank/send-otp', payload),
+
+  verifyReceiverBankUpdateOtp: (otp: string) =>
+    api.post<CompleteProfileResponse>('/profile/receiver/bank/verify', { otp }),
+
+  receiverEarningsBreakdown: (range: 'week' | 'month' | 'all' = 'week') =>
+    api.get<ReceiverEarningsBreakdownResponse>('/profile/receiver-earnings-breakdown', {
+      params: { range },
+    }),
 };
 
 export const discoverApi = {
@@ -271,6 +332,12 @@ export const callApi = {
     api.get<VoiceBootstrapResponse>('/calls/bootstrap', {
       params: { peerId },
     }),
+  sessionStart: (callId: string, peerId: string) =>
+    api.post<{ ok: boolean }>('/calls/session/start', { callId, peerId }),
+  sessionEnd: (callId: string) =>
+    api.post<{ ok: boolean; durationSec: number; estimatedEarning: number }>('/calls/session/end', { callId }),
+  sessionRate: (callId: string, rating: number) =>
+    api.post<{ ok: boolean }>('/calls/session/rate', { callId, rating }),
 };
 
 export default api;

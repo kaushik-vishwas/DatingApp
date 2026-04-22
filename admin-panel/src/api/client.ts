@@ -243,3 +243,57 @@ export async function resolveModerationReport(
   const { data } = await api.patch<{ ok: boolean }>(`/admin/reports/${reportId}`, { action });
   return data;
 }
+
+/** ================= WITHDRAWALS ================= */
+
+export type AdminWithdrawalStatus = 'pending' | 'approved' | 'rejected';
+
+export type AdminWithdrawalRow = {
+  _id: string;
+  withdrawalId: string;
+  receiverName: string;
+  amount: number;
+  bankName: string;
+  accountMasked: string;
+  createdAt: string;
+  status: AdminWithdrawalStatus;
+};
+
+export type AdminWithdrawalStats = {
+  pendingCount: number;
+  pendingAmount: number;
+  approvedTodayCount: number;
+  approvedTodayAmount: number;
+  rejectedTodayCount: number;
+  rejectedTodayAmount: number;
+  processedCount: number;
+  processedTodayAmount: number;
+};
+
+export async function fetchWithdrawals(params?: {
+  q?: string;
+  range?: '7d' | '30d' | 'all';
+  status?: 'all' | 'pending' | 'approved' | 'rejected';
+  page?: number;
+}) {
+  const { data } = await api.get<{
+    stats: AdminWithdrawalStats;
+    rows: AdminWithdrawalRow[];
+    total: number;
+    page: number;
+    limit: number;
+  }>('/admin/withdrawals', {
+    params: {
+      q: params?.q?.trim() || undefined,
+      range: params?.range ?? '7d',
+      status: params?.status ?? 'all',
+      page: params?.page ?? 1,
+    },
+  });
+  return data;
+}
+
+export async function resolveWithdrawal(withdrawalId: string, action: 'approve' | 'reject') {
+  const { data } = await api.patch<{ ok: boolean }>(`/admin/withdrawals/${withdrawalId}`, { action });
+  return data;
+}

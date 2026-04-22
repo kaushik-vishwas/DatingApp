@@ -17,7 +17,9 @@ import {
   approveAppUser,
   rejectAppUser,
   listModerationReports,
+  listWithdrawals,
   resolveModerationReport,
+  resolveWithdrawal,
 } from '../controllers/adminController';
 import { adminProtect } from '../middleware/adminAuth';
 
@@ -44,5 +46,7 @@ router.patch('/receivers/:id/reject', adminProtect, rejectReceiver);
 
 router.get('/reports', adminProtect, listModerationReports);
 router.patch('/reports/:id', adminProtect, resolveModerationReport);
+router.get('/withdrawals', adminProtect, listWithdrawals);
+router.patch('/withdrawals/:id', adminProtect, resolveWithdrawal);
 
 export default router;

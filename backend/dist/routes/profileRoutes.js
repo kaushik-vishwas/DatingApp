@@ -9,4 +9,15 @@ router.patch('/caller-audio', auth_1.protect, profileController_1.saveCallerUser
 router.post('/complete-caller', auth_1.protect, profileController_1.completeCallerProfile);
 router.patch('/caller', auth_1.protect, profileController_1.updateCallerProfile);
 router.get('/receiver-wallet-summary', auth_1.protect, profileController_1.getReceiverWalletSummary);
+router.get('/withdrawals/overview', auth_1.protect, profileController_1.getReceiverWithdrawalOverview);
+router.post('/withdrawals/send-otp', auth_1.protect, profileController_1.sendReceiverWithdrawalOtp);
+router.post('/withdrawals/verify', auth_1.protect, profileController_1.verifyReceiverWithdrawalOtpAndCreate);
+router.get('/receiver-call-insights', auth_1.protect, profileController_1.getReceiverCallInsights);
+router.patch('/receiver', auth_1.protect, profileController_1.updateReceiverProfile);
+router.delete('/receiver', auth_1.protect, profileController_1.deleteReceiverAccount);
+router.get('/caller-call-history', auth_1.protect, profileController_1.getCallerCallHistory);
+router.get('/caller-notifications', auth_1.protect, profileController_1.getCallerNotifications);
+router.post('/receiver/bank/send-otp', auth_1.protect, profileController_1.sendReceiverBankUpdateOtp);
+router.post('/receiver/bank/verify', auth_1.protect, profileController_1.verifyReceiverBankUpdateOtp);
+router.get('/receiver-earnings-breakdown', auth_1.protect, profileController_1.getReceiverEarningsBreakdown);
 exports.default = router;

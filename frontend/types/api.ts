@@ -121,8 +121,43 @@ export interface VoiceBootstrapResponse {
   tokenExpiresAt: string;
   streamUserId: string;
   peerStreamUserId: string;
+  peerAccountId: string;
+  receiverRatePerMinute: number;
   callType: string;
   callId: string;
+}
+
+export type ReceiverCallInsightRow = {
+  id: string;
+  callerId: string;
+  callerName: string;
+  startedAt: string;
+  durationSec: number;
+  earningInr: number;
+  rating: number | null;
+};
+
+export type ReceiverCallerHistoryRow = {
+  callerId: string;
+  callerName: string;
+  callsWeek: number;
+  callsMonth: number;
+  durationWeekSec: number;
+  durationMonthSec: number;
+  avgRating: number | null;
+};
+
+export interface ReceiverCallInsightsResponse {
+  leaderboard: {
+    totalDurationSec: number;
+    totalMinutes: number;
+    thisWeekDurationSec: number;
+    thisWeekMinutes: number;
+    thisMonthDurationSec: number;
+    thisMonthMinutes: number;
+  };
+  recentCalls: ReceiverCallInsightRow[];
+  callerHistory: ReceiverCallerHistoryRow[];
 }
 
 export type ReceiverWalletRecentRow = {
@@ -140,6 +175,101 @@ export interface ReceiverWalletSummaryResponse {
   /** Same, since the first day of this calendar month (server local). */
   chatThisMonth: number;
   recent: ReceiverWalletRecentRow[];
+}
+
+export type ReceiverWithdrawalStatus = 'pending' | 'approved' | 'rejected';
+
+export interface ReceiverWithdrawalRow {
+  id: string;
+  amount: number;
+  status: ReceiverWithdrawalStatus;
+  createdAt: string;
+}
+
+export interface ReceiverWithdrawalOverviewResponse {
+  walletBalance: number;
+  pendingAmount: number;
+  bank: {
+    bankName: string;
+    accountHolderName: string;
+    accountMasked: string;
+  };
+  otpEmail: string;
+  recent: ReceiverWithdrawalRow[];
+}
+
+export interface SendWithdrawalOtpResponse {
+  message: string;
+  email: string;
+  expiresInSec: number;
+}
+
+export interface VerifyWithdrawalOtpResponse {
+  message: string;
+  walletBalance: number;
+  withdrawal: ReceiverWithdrawalRow;
+}
+
+export type CallerCallStatus = 'completed' | 'missed' | 'failed';
+
+export interface CallerCallHistoryRow {
+  id: string;
+  receiverId: string;
+  receiverName: string;
+  receiverImage: string | null;
+  durationSec: number;
+  startedAt: string;
+  status: CallerCallStatus;
+}
+
+export interface CallerCallHistoryResponse {
+  calls: CallerCallHistoryRow[];
+}
+
+export type CallerNotificationType = 'transaction' | 'chat' | 'call';
+
+export interface CallerNotificationRow {
+  id: string;
+  type: CallerNotificationType;
+  title: string;
+  subtitle: string;
+  at: string;
+}
+
+export interface CallerNotificationsResponse {
+  notifications: CallerNotificationRow[];
+}
+
+export type ReceiverEarningEntryType = 'call' | 'chat';
+
+export interface ReceiverEarningEntry {
+  id: string;
+  type: ReceiverEarningEntryType;
+  title: string;
+  createdAt: string;
+  durationMin: number;
+  grossAmount: number;
+  platformFee: number;
+  netEarning: number;
+  status: 'completed' | 'processing';
+}
+
+export interface ReceiverEarningsBreakdownResponse {
+  stats: {
+    totalCalls: number;
+    avgCallMinutes: number;
+    totalMinutes: number;
+    grossEarnings: number;
+    platformFee: number;
+    netEarnings: number;
+    chatEarnings: number;
+  };
+  entries: ReceiverEarningEntry[];
+  analytics: {
+    week: Array<{ label: string; amount: number; sessions: number }>;
+    month: Array<{ label: string; amount: number; sessions: number }>;
+    all: Array<{ label: string; amount: number; sessions: number }>;
+  };
 }
 
 export interface CompleteProfilePayload {
@@ -165,6 +295,33 @@ export interface CompleteProfilePayload {
 export interface CompleteProfileResponse {
   message: string;
   user: UserProfile;
+}
+
+export interface UpdateReceiverProfilePayload {
+  name?: string;
+  profileImage?: string;
+  languages?: string[];
+  interests?: string[];
+  state?: string;
+  audioCallRate?: number;
+}
+
+export interface DeleteReceiverAccountPayload {
+  reason?: string;
+}
+
+export interface ReceiverBankDetailsPayload {
+  bankAccountHolderName: string;
+  bankAccountType: 'savings' | 'current';
+  bankAccountNumber: string;
+  bankIfsc: string;
+  bankName: string;
+}
+
+export interface ReceiverBankOtpSendResponse {
+  message: string;
+  emailMasked: string;
+  expiresInSec: number;
 }
 
 export interface CompleteCallerPayload {

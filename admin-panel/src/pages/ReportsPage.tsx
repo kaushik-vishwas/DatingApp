@@ -158,46 +158,45 @@ export function ReportsPage() {
                     </span>
                   </td>
                   <td className="px-3 py-2.5">
-                    {row.status === 'pending' ? (
-                      <div className="flex flex-wrap items-center gap-1.5">
-                        <button
-                          type="button"
-                          title="View"
-                          onClick={() => setDetail(row)}
-                          className="rounded p-1 text-neutral-500 hover:bg-neutral-100"
-                        >
-                          <Eye className="h-3.5 w-3.5" />
-                        </button>
-                        <button
-                          type="button"
-                          disabled={busyId === row._id}
-                          onClick={() => void onAction(row._id, 'warn')}
-                          className="rounded bg-orange-50 px-1.5 py-1 text-[10px] font-semibold text-orange-700 disabled:opacity-50"
-                        >
-                          Warn
-                        </button>
-                        <button
-                          type="button"
-                          disabled={busyId === row._id}
-                          onClick={() => void onAction(row._id, 'suspend')}
-                          className="rounded bg-red-50 px-1.5 py-1 text-[10px] font-semibold text-red-700 disabled:opacity-50"
-                        >
-                          Suspend
-                        </button>
-                        <button
-                          type="button"
-                          disabled={busyId === row._id}
-                          onClick={() => void onAction(row._id, 'ignore')}
-                          className="rounded bg-neutral-100 px-1.5 py-1 text-[10px] font-semibold text-neutral-600 disabled:opacity-50"
-                        >
-                          Ignore
-                        </button>
-                      </div>
-                    ) : (
-                      <span className="text-[11px] text-neutral-400">
-                        {row.resolution ? `Resolved (${row.resolution})` : 'Resolved'}
-                      </span>
-                    )}
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <button
+                        type="button"
+                        title="View"
+                        onClick={() => setDetail(row)}
+                        className="rounded p-1 text-neutral-500 hover:bg-neutral-100"
+                      >
+                        <Eye className="h-3.5 w-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        disabled={busyId === row._id}
+                        onClick={() => void onAction(row._id, 'warn')}
+                        className="rounded bg-orange-50 px-1.5 py-1 text-[10px] font-semibold text-orange-700 disabled:opacity-50"
+                      >
+                        Warn
+                      </button>
+                      <button
+                        type="button"
+                        disabled={busyId === row._id}
+                        onClick={() => void onAction(row._id, 'suspend')}
+                        className="rounded bg-red-50 px-1.5 py-1 text-[10px] font-semibold text-red-700 disabled:opacity-50"
+                      >
+                        Suspend
+                      </button>
+                      <button
+                        type="button"
+                        disabled={busyId === row._id}
+                        onClick={() => void onAction(row._id, 'ignore')}
+                        className="rounded bg-neutral-100 px-1.5 py-1 text-[10px] font-semibold text-neutral-600 disabled:opacity-50"
+                      >
+                        Ignore
+                      </button>
+                      {row.status === 'resolved' ? (
+                        <span className="text-[10px] font-medium text-neutral-400">
+                          {row.resolution ? `Current: ${row.resolution}` : 'Current: resolved'}
+                        </span>
+                      ) : null}
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -234,30 +233,33 @@ export function ReportsPage() {
               <span className="font-semibold">Preview:</span> {detail.preview}
             </p>
             <p className="mt-1 text-xs text-neutral-500">{formatDate(detail.createdAt)}</p>
-            {detail.status === 'pending' ? (
-              <div className="mt-4 flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  className="rounded-lg bg-orange-50 px-3 py-2 text-sm font-semibold text-orange-800"
-                  onClick={() => void onAction(detail._id, 'warn')}
-                >
-                  Warn
-                </button>
-                <button
-                  type="button"
-                  className="rounded-lg bg-red-50 px-3 py-2 text-sm font-semibold text-red-800"
-                  onClick={() => void onAction(detail._id, 'suspend')}
-                >
-                  Suspend
-                </button>
-                <button
-                  type="button"
-                  className="rounded-lg bg-neutral-100 px-3 py-2 text-sm font-semibold text-neutral-700"
-                  onClick={() => void onAction(detail._id, 'ignore')}
-                >
-                  Ignore
-                </button>
-              </div>
+            <div className="mt-4 flex flex-wrap gap-2">
+              <button
+                type="button"
+                className="rounded-lg bg-orange-50 px-3 py-2 text-sm font-semibold text-orange-800"
+                onClick={() => void onAction(detail._id, 'warn')}
+              >
+                Warn
+              </button>
+              <button
+                type="button"
+                className="rounded-lg bg-red-50 px-3 py-2 text-sm font-semibold text-red-800"
+                onClick={() => void onAction(detail._id, 'suspend')}
+              >
+                Suspend
+              </button>
+              <button
+                type="button"
+                className="rounded-lg bg-neutral-100 px-3 py-2 text-sm font-semibold text-neutral-700"
+                onClick={() => void onAction(detail._id, 'ignore')}
+              >
+                Ignore
+              </button>
+            </div>
+            {detail.status === 'resolved' ? (
+              <p className="mt-2 text-xs text-neutral-500">
+                {detail.resolution ? `Current resolution: ${detail.resolution}` : 'Current resolution: resolved'}
+              </p>
             ) : null}
             <button
               type="button"

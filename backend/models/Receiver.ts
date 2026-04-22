@@ -40,6 +40,11 @@ export interface IReceiver {
   suspended: boolean;
   /** Set when an admin applies a warning from a moderation report. */
   moderationWarningAt: Date | null;
+  pendingBankAccountHolderName: string | null;
+  pendingBankAccountType: BankAccountType | null;
+  pendingBankAccountNumber: string | null;
+  pendingBankIfsc: string | null;
+  pendingBankName: string | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -79,6 +84,11 @@ const receiverSchema = new Schema<IReceiver>(
     walletBalance: { type: Number, default: 0 },
     suspended: { type: Boolean, default: false },
     moderationWarningAt: { type: Date, default: null },
+    pendingBankAccountHolderName: { type: String, default: null },
+    pendingBankAccountType: { type: String, enum: ['savings', 'current'], default: null },
+    pendingBankAccountNumber: { type: String, default: null },
+    pendingBankIfsc: { type: String, default: null },
+    pendingBankName: { type: String, default: null },
   },
   { timestamps: true }
 );

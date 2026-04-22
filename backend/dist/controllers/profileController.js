@@ -3,15 +3,22 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getReceiverWalletSummary = exports.updateCallerProfile = exports.completeCallerProfile = exports.saveCallerUserAudio = exports.completeProfile = void 0;
+exports.getCallerNotifications = exports.getCallerCallHistory = exports.getReceiverEarningsBreakdown = exports.verifyReceiverBankUpdateOtp = exports.sendReceiverBankUpdateOtp = exports.deleteReceiverAccount = exports.updateReceiverProfile = exports.getReceiverCallInsights = exports.verifyReceiverWithdrawalOtpAndCreate = exports.sendReceiverWithdrawalOtp = exports.getReceiverWithdrawalOverview = exports.getReceiverWalletSummary = exports.updateCallerProfile = exports.completeCallerProfile = exports.saveCallerUserAudio = exports.completeProfile = void 0;
+const crypto_1 = __importDefault(require("crypto"));
 const mongoose_1 = __importDefault(require("mongoose"));
 const User_1 = __importDefault(require("../models/User"));
 const Receiver_1 = __importDefault(require("../models/Receiver"));
 const ChatMessage_1 = __importDefault(require("../models/ChatMessage"));
+const WithdrawalRequest_1 = __importDefault(require("../models/WithdrawalRequest"));
+const CallSession_1 = __importDefault(require("../models/CallSession"));
+const ChatBlock_1 = __importDefault(require("../models/ChatBlock"));
+const UserReport_1 = __importDefault(require("../models/UserReport"));
+const WalletTopup_1 = __importDefault(require("../models/WalletTopup"));
 const callerProfileAllowlist_1 = require("../constants/callerProfileAllowlist");
 const authController_1 = require("./authController");
 const accountAccess_1 = require("../utils/accountAccess");
 const chatPricing_1 = require("../constants/chatPricing");
+const email_1 = require("../config/email");
 const birthDate_1 = require("../utils/birthDate");
 function parseCallerAudioHttpsUrl(body) {
     const raw = typeof body.userAudio === 'string'
@@ -383,6 +390,35 @@ exports.updateCallerProfile = updateCallerProfile;
 function roundInr(n) {
     return Math.round(n * 100) / 100;
 }
+function toInrAmount(raw) {
+    const n = Number(raw);
+    if (!Number.isFinite(n))
+        return null;
+    const rounded = roundInr(n);
+    if (rounded < 1)
+        return null;
+    return rounded;
+}
+function maskAccountNumber(accountNumber) {
+    const trimmed = accountNumber.trim();
+    const last4 = trimmed.slice(-4).padStart(4, '0');
+    return `****${last4}`;
+}
+function otpHash(code) {
+    return crypto_1.default.createHash('sha256').update(code).digest('hex');
+}
+function generateOtpCode() {
+    const n = Math.floor(100000 + Math.random() * 900000);
+    return String(n);
+}
+function maskEmail(email) {
+    const [local, domain] = email.split('@');
+    if (!local || !domain)
+        return email;
+    if (local.length <= 2)
+        return `${local[0] ?? '*'}***@${domain}`;
+    return `${local.slice(0, 2)}***@${domain}`;
+}
 function msgTime(m) {
     return m.createdAt instanceof Date ? m.createdAt : new Date(m.createdAt);
 }
@@ -508,3 +544,805 @@ const getReceiverWalletSummary = async (req, res) => {
     }
 };
 exports.getReceiverWalletSummary = getReceiverWalletSummary;
+/**
+ * GET /profile/withdrawals/overview — receiver withdrawal card + history.
+ */
+const getReceiverWithdrawalOverview = async (req, res) => {
+    try {
+        if (req.accountKind !== 'receiver') {
+            res.status(403).json({ message: 'Only receivers can view withdrawals' });
+            return;
+        }
+        if ((0, accountAccess_1.blockReceiverUntilApproved)(req, res))
+            return;
+        const rid = String(req.receiver._id);
+        const receiver = await Receiver_1.default.findById(rid).select('walletBalance email bankName bankAccountHolderName bankAccountNumber');
+        if (!receiver) {
+            res.status(404).json({ message: 'Receiver not found' });
+            return;
+        }
+        if (!receiver.bankName ||
+            !receiver.bankAccountHolderName ||
+            !receiver.bankAccountNumber) {
+            res.status(400).json({ message: 'Please complete bank details before requesting a withdrawal' });
+            return;
+        }
+        const [pendingSumRows, recentRows] = await Promise.all([
+            WithdrawalRequest_1.default.find({ receiverId: rid, status: 'pending' }).select('amount').lean(),
+            WithdrawalRequest_1.default.find({ receiverId: rid, status: { $in: ['pending', 'approved', 'rejected'] } })
+                .sort({ createdAt: -1 })
+                .limit(20)
+                .select('amount status createdAt')
+                .lean(),
+        ]);
+        const pendingAmount = roundInr(pendingSumRows.reduce((sum, row) => sum + Number(row.amount || 0), 0));
+        res.status(200).json({
+            walletBalance: typeof receiver.walletBalance === 'number' && Number.isFinite(receiver.walletBalance)
+                ? roundInr(receiver.walletBalance)
+                : 0,
+            pendingAmount,
+            bank: {
+                bankName: receiver.bankName,
+                accountHolderName: receiver.bankAccountHolderName,
+                accountMasked: maskAccountNumber(receiver.bankAccountNumber),
+            },
+            otpEmail: receiver.email,
+            recent: recentRows.map((row) => ({
+                id: String(row._id),
+                amount: roundInr(row.amount),
+                status: row.status,
+                createdAt: row.createdAt.toISOString(),
+            })),
+        });
+    }
+    catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error('getReceiverWithdrawalOverview error:', msg);
+        res.status(500).json({ message: msg || 'Server error' });
+    }
+};
+exports.getReceiverWithdrawalOverview = getReceiverWithdrawalOverview;
+/**
+ * POST /profile/withdrawals/send-otp — body `{ amount }`.
+ */
+const sendReceiverWithdrawalOtp = async (req, res) => {
+    try {
+        if (req.accountKind !== 'receiver') {
+            res.status(403).json({ message: 'Only receivers can request withdrawals' });
+            return;
+        }
+        if ((0, accountAccess_1.blockReceiverUntilApproved)(req, res))
+            return;
+        const amount = toInrAmount(req.body.amount);
+        if (amount === null) {
+            res.status(400).json({ message: 'amount must be at least 1 INR' });
+            return;
+        }
+        const rid = String(req.receiver._id);
+        const receiver = await Receiver_1.default.findById(rid).select('email walletBalance bankName bankAccountHolderName bankAccountNumber');
+        if (!receiver) {
+            res.status(404).json({ message: 'Receiver not found' });
+            return;
+        }
+        if (amount > receiver.walletBalance) {
+            res.status(400).json({ message: 'Insufficient wallet balance' });
+            return;
+        }
+        if (!receiver.bankName ||
+            !receiver.bankAccountHolderName ||
+            !receiver.bankAccountNumber) {
+            res.status(400).json({ message: 'Please complete bank details before requesting a withdrawal' });
+            return;
+        }
+        const code = generateOtpCode();
+        const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
+        await WithdrawalRequest_1.default.findOneAndUpdate({ receiverId: rid, status: 'verification_pending' }, {
+            $set: {
+                amount,
+                status: 'verification_pending',
+                verificationCodeHash: otpHash(code),
+                verificationExpiresAt: expiresAt,
+                verifiedAt: null,
+                reviewedAt: null,
+                reviewedByAdminId: null,
+                adminNote: null,
+                bankName: receiver.bankName,
+                accountHolderName: receiver.bankAccountHolderName,
+                accountMasked: maskAccountNumber(receiver.bankAccountNumber),
+            },
+        }, { upsert: true, new: true, setDefaultsOnInsert: true });
+        await (0, email_1.sendOtpEmail)(receiver.email, code, 'verification');
+        res.status(200).json({
+            message: 'OTP sent to your Gmail',
+            email: receiver.email,
+            expiresInSec: 300,
+        });
+    }
+    catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error('sendReceiverWithdrawalOtp error:', msg);
+        res.status(500).json({ message: msg || 'Server error' });
+    }
+};
+exports.sendReceiverWithdrawalOtp = sendReceiverWithdrawalOtp;
+/**
+ * POST /profile/withdrawals/verify — body `{ otp }`.
+ */
+const verifyReceiverWithdrawalOtpAndCreate = async (req, res) => {
+    try {
+        if (req.accountKind !== 'receiver') {
+            res.status(403).json({ message: 'Only receivers can request withdrawals' });
+            return;
+        }
+        if ((0, accountAccess_1.blockReceiverUntilApproved)(req, res))
+            return;
+        const otp = String(req.body.otp ?? '').trim();
+        if (!/^\d{6}$/.test(otp)) {
+            res.status(400).json({ message: 'Enter a valid 6-digit OTP' });
+            return;
+        }
+        const rid = String(req.receiver._id);
+        const [receiver, pendingVerification] = await Promise.all([
+            Receiver_1.default.findById(rid).select('walletBalance'),
+            WithdrawalRequest_1.default.findOne({ receiverId: rid, status: 'verification_pending' }),
+        ]);
+        if (!receiver) {
+            res.status(404).json({ message: 'Receiver not found' });
+            return;
+        }
+        if (!pendingVerification) {
+            res.status(400).json({ message: 'Please request OTP again' });
+            return;
+        }
+        if (!pendingVerification.verificationCodeHash ||
+            !pendingVerification.verificationExpiresAt ||
+            pendingVerification.verificationExpiresAt.getTime() < Date.now()) {
+            await WithdrawalRequest_1.default.deleteOne({ _id: pendingVerification._id });
+            res.status(400).json({ message: 'OTP expired. Please request again' });
+            return;
+        }
+        if (otpHash(otp) !== pendingVerification.verificationCodeHash) {
+            res.status(400).json({ message: 'Incorrect OTP' });
+            return;
+        }
+        if (pendingVerification.amount > receiver.walletBalance) {
+            res.status(400).json({ message: 'Insufficient wallet balance. Please reduce amount and retry' });
+            return;
+        }
+        receiver.walletBalance = roundInr(receiver.walletBalance - pendingVerification.amount);
+        await receiver.save();
+        pendingVerification.status = 'pending';
+        pendingVerification.verifiedAt = new Date();
+        pendingVerification.verificationCodeHash = null;
+        pendingVerification.verificationExpiresAt = null;
+        await pendingVerification.save();
+        res.status(200).json({
+            message: 'Withdrawal requested successfully',
+            withdrawal: {
+                id: String(pendingVerification._id),
+                amount: roundInr(pendingVerification.amount),
+                status: pendingVerification.status,
+                createdAt: pendingVerification.createdAt.toISOString(),
+            },
+            walletBalance: roundInr(receiver.walletBalance),
+        });
+    }
+    catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error('verifyReceiverWithdrawalOtpAndCreate error:', msg);
+        res.status(500).json({ message: msg || 'Server error' });
+    }
+};
+exports.verifyReceiverWithdrawalOtpAndCreate = verifyReceiverWithdrawalOtpAndCreate;
+/**
+ * GET /profile/receiver-call-insights — receiver dashboard call stats, recent calls, caller-wise history.
+ */
+const getReceiverCallInsights = async (req, res) => {
+    try {
+        if (req.accountKind !== 'receiver') {
+            res.status(403).json({ message: 'Only receivers can access call insights' });
+            return;
+        }
+        if ((0, accountAccess_1.blockReceiverUntilApproved)(req, res))
+            return;
+        const rid = new mongoose_1.default.Types.ObjectId(String(req.receiver._id));
+        const range = String(req.query.range ?? 'all').toLowerCase();
+        const now = new Date();
+        const weekStart = new Date(now);
+        weekStart.setDate(now.getDate() - 7);
+        const monthStart = new Date(now);
+        monthStart.setDate(1);
+        monthStart.setHours(0, 0, 0, 0);
+        const completed = await CallSession_1.default.find({
+            receiverId: rid,
+            status: 'completed',
+            durationSec: { $gt: 0 },
+        })
+            .sort({ startedAt: -1 })
+            .lean();
+        const callerIds = [...new Set(completed.map((c) => String(c.callerId)))];
+        const callers = callerIds.length === 0
+            ? []
+            : await User_1.default.find({ _id: { $in: callerIds.map((id) => new mongoose_1.default.Types.ObjectId(id)) } })
+                .select('_id name')
+                .lean();
+        const callerNameById = new Map(callers.map((c) => [String(c._id), c.name]));
+        const totalDurationSec = completed.reduce((sum, row) => sum + row.durationSec, 0);
+        const weekDurationSec = completed
+            .filter((row) => row.startedAt >= weekStart)
+            .reduce((sum, row) => sum + row.durationSec, 0);
+        const monthDurationSec = completed
+            .filter((row) => row.startedAt >= monthStart)
+            .reduce((sum, row) => sum + row.durationSec, 0);
+        const filtered = completed.filter((row) => {
+            if (range === 'week')
+                return row.startedAt >= weekStart;
+            if (range === 'month')
+                return row.startedAt >= monthStart;
+            return true;
+        });
+        const recentCalls = filtered.slice(0, 20).map((row) => ({
+            id: String(row._id),
+            callerId: String(row.callerId),
+            callerName: callerNameById.get(String(row.callerId)) ?? 'Caller',
+            startedAt: row.startedAt.toISOString(),
+            durationSec: row.durationSec,
+            earningInr: roundInr((row.durationSec / 60) * row.ratePerMinute),
+            rating: typeof row.callerRating === 'number' ? row.callerRating : null,
+        }));
+        const byCaller = new Map();
+        for (const row of completed) {
+            const callerId = String(row.callerId);
+            if (!byCaller.has(callerId)) {
+                byCaller.set(callerId, {
+                    callerId,
+                    callerName: callerNameById.get(callerId) ?? 'Caller',
+                    callsWeek: 0,
+                    callsMonth: 0,
+                    durationWeekSec: 0,
+                    durationMonthSec: 0,
+                    ratingSum: 0,
+                    ratingCount: 0,
+                });
+            }
+            const agg = byCaller.get(callerId);
+            if (row.startedAt >= weekStart) {
+                agg.callsWeek += 1;
+                agg.durationWeekSec += row.durationSec;
+            }
+            if (row.startedAt >= monthStart) {
+                agg.callsMonth += 1;
+                agg.durationMonthSec += row.durationSec;
+            }
+            if (typeof row.callerRating === 'number') {
+                agg.ratingSum += row.callerRating;
+                agg.ratingCount += 1;
+            }
+        }
+        const callerHistory = [...byCaller.values()]
+            .sort((a, b) => b.durationMonthSec - a.durationMonthSec)
+            .map((row) => ({
+            callerId: row.callerId,
+            callerName: row.callerName,
+            callsWeek: row.callsWeek,
+            callsMonth: row.callsMonth,
+            durationWeekSec: row.durationWeekSec,
+            durationMonthSec: row.durationMonthSec,
+            avgRating: row.ratingCount > 0 ? roundInr(row.ratingSum / row.ratingCount) : null,
+        }));
+        res.status(200).json({
+            leaderboard: {
+                totalDurationSec,
+                totalMinutes: roundInr(totalDurationSec / 60),
+                thisWeekDurationSec: weekDurationSec,
+                thisWeekMinutes: roundInr(weekDurationSec / 60),
+                thisMonthDurationSec: monthDurationSec,
+                thisMonthMinutes: roundInr(monthDurationSec / 60),
+            },
+            recentCalls,
+            callerHistory,
+        });
+    }
+    catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error('getReceiverCallInsights error:', msg);
+        res.status(500).json({ message: msg || 'Server error' });
+    }
+};
+exports.getReceiverCallInsights = getReceiverCallInsights;
+/**
+ * PATCH /profile/receiver — approved receivers can update editable profile fields.
+ */
+const updateReceiverProfile = async (req, res) => {
+    try {
+        if (req.accountKind !== 'receiver') {
+            res.status(403).json({ message: 'This endpoint is only for receiver accounts' });
+            return;
+        }
+        if ((0, accountAccess_1.blockReceiverUntilApproved)(req, res))
+            return;
+        const receiverId = String(req.receiver._id);
+        const receiver = await Receiver_1.default.findById(receiverId);
+        if (!receiver) {
+            res.status(404).json({ message: 'Receiver not found' });
+            return;
+        }
+        if (typeof req.body.name === 'string' && req.body.name.trim()) {
+            receiver.name = req.body.name.trim();
+        }
+        if (typeof req.body.profileImage === 'string' && req.body.profileImage.trim()) {
+            receiver.profileImage = req.body.profileImage.trim();
+        }
+        if (typeof req.body.state === 'string' && req.body.state.trim()) {
+            receiver.state = req.body.state.trim();
+        }
+        if (Array.isArray(req.body.languages)) {
+            receiver.languages = req.body.languages.map((x) => String(x).trim()).filter(Boolean);
+        }
+        if (Array.isArray(req.body.interests)) {
+            receiver.interests = req.body.interests.map((x) => String(x).trim()).filter(Boolean);
+        }
+        if (typeof req.body.audioCallRate === 'number' && Number.isFinite(req.body.audioCallRate)) {
+            const n = Math.round(req.body.audioCallRate * 100) / 100;
+            if (n < 1 || n > 99_999) {
+                res.status(400).json({ message: 'audioCallRate must be between 1 and 99999 INR/min' });
+                return;
+            }
+            receiver.audioCallRate = n;
+        }
+        await receiver.save();
+        res.status(200).json({
+            message: 'Profile updated',
+            user: (0, authController_1.toApiReceiver)(receiver),
+        });
+    }
+    catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error('updateReceiverProfile error:', msg);
+        res.status(500).json({ message: msg || 'Server error' });
+    }
+};
+exports.updateReceiverProfile = updateReceiverProfile;
+/**
+ * DELETE /profile/receiver — deletes receiver account and related receiver-side data.
+ */
+const deleteReceiverAccount = async (req, res) => {
+    try {
+        if (req.accountKind !== 'receiver') {
+            res.status(403).json({ message: 'This endpoint is only for receiver accounts' });
+            return;
+        }
+        const receiverId = String(req.receiver._id);
+        if (!mongoose_1.default.Types.ObjectId.isValid(receiverId)) {
+            res.status(400).json({ message: 'Invalid receiver id' });
+            return;
+        }
+        const rid = new mongoose_1.default.Types.ObjectId(receiverId);
+        // Soft logging for ops visibility.
+        const reason = String(req.body.reason ?? '').trim();
+        if (reason) {
+            console.log(`[receiver-delete] receiver=${receiverId} reason="${reason}"`);
+        }
+        await Promise.all([
+            ChatMessage_1.default.deleteMany({ receiverId: rid }),
+            ChatBlock_1.default.deleteMany({ receiverId: rid }),
+            WithdrawalRequest_1.default.deleteMany({ receiverId: rid }),
+            CallSession_1.default.deleteMany({ receiverId: rid }),
+            UserReport_1.default.deleteMany({
+                $or: [
+                    { reporterKind: 'receiver', reporterId: rid },
+                    { reportedKind: 'receiver', reportedId: rid },
+                ],
+            }),
+            Receiver_1.default.deleteOne({ _id: rid }),
+        ]);
+        res.status(200).json({ message: 'Account deleted' });
+    }
+    catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error('deleteReceiverAccount error:', msg);
+        res.status(500).json({ message: msg || 'Server error' });
+    }
+};
+exports.deleteReceiverAccount = deleteReceiverAccount;
+/**
+ * POST /profile/receiver/bank/send-otp — stage bank details and send OTP.
+ */
+const sendReceiverBankUpdateOtp = async (req, res) => {
+    try {
+        if (req.accountKind !== 'receiver') {
+            res.status(403).json({ message: 'Only receivers can update bank details' });
+            return;
+        }
+        if ((0, accountAccess_1.blockReceiverUntilApproved)(req, res))
+            return;
+        const { bankAccountHolderName, bankAccountType, bankAccountNumber, bankIfsc, bankName, } = req.body;
+        if (!bankAccountHolderName || !String(bankAccountHolderName).trim()) {
+            res.status(400).json({ message: 'bankAccountHolderName is required' });
+            return;
+        }
+        if (bankAccountType !== 'savings' && bankAccountType !== 'current') {
+            res.status(400).json({ message: 'bankAccountType must be savings or current' });
+            return;
+        }
+        if (!bankAccountNumber || !String(bankAccountNumber).trim()) {
+            res.status(400).json({ message: 'bankAccountNumber is required' });
+            return;
+        }
+        if (!bankIfsc || !String(bankIfsc).trim()) {
+            res.status(400).json({ message: 'bankIfsc is required' });
+            return;
+        }
+        if (!bankName || !String(bankName).trim()) {
+            res.status(400).json({ message: 'bankName is required' });
+            return;
+        }
+        const receiver = await Receiver_1.default.findById(String(req.receiver._id)).select('email');
+        if (!receiver) {
+            res.status(404).json({ message: 'Receiver not found' });
+            return;
+        }
+        const otpCode = generateOtpCode();
+        receiver.otp = otpHash(otpCode);
+        receiver.otpExpiry = new Date(Date.now() + 5 * 60 * 1000);
+        receiver.pendingBankAccountHolderName = String(bankAccountHolderName).trim();
+        receiver.pendingBankAccountType = bankAccountType;
+        receiver.pendingBankAccountNumber = String(bankAccountNumber).trim();
+        receiver.pendingBankIfsc = String(bankIfsc).trim().toUpperCase();
+        receiver.pendingBankName = String(bankName).trim();
+        await receiver.save();
+        await (0, email_1.sendOtpEmail)(receiver.email, otpCode, 'verification');
+        res.status(200).json({
+            message: 'OTP sent to your Gmail',
+            emailMasked: maskEmail(receiver.email),
+            expiresInSec: 300,
+        });
+    }
+    catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error('sendReceiverBankUpdateOtp error:', msg);
+        res.status(500).json({ message: msg || 'Server error' });
+    }
+};
+exports.sendReceiverBankUpdateOtp = sendReceiverBankUpdateOtp;
+/**
+ * POST /profile/receiver/bank/verify — verify OTP and commit bank details.
+ */
+const verifyReceiverBankUpdateOtp = async (req, res) => {
+    try {
+        if (req.accountKind !== 'receiver') {
+            res.status(403).json({ message: 'Only receivers can update bank details' });
+            return;
+        }
+        if ((0, accountAccess_1.blockReceiverUntilApproved)(req, res))
+            return;
+        const otp = String(req.body.otp ?? '').trim();
+        if (!/^\d{6}$/.test(otp)) {
+            res.status(400).json({ message: 'Enter a valid 6-digit OTP' });
+            return;
+        }
+        const receiver = await Receiver_1.default.findById(String(req.receiver._id));
+        if (!receiver) {
+            res.status(404).json({ message: 'Receiver not found' });
+            return;
+        }
+        if (!receiver.otp || !receiver.otpExpiry || receiver.otpExpiry.getTime() < Date.now()) {
+            res.status(400).json({ message: 'OTP expired. Request a new code' });
+            return;
+        }
+        if (otpHash(otp) !== receiver.otp) {
+            res.status(400).json({ message: 'Incorrect OTP' });
+            return;
+        }
+        if (!receiver.pendingBankAccountHolderName ||
+            !receiver.pendingBankAccountType ||
+            !receiver.pendingBankAccountNumber ||
+            !receiver.pendingBankIfsc ||
+            !receiver.pendingBankName) {
+            res.status(400).json({ message: 'No pending bank details found. Start again' });
+            return;
+        }
+        receiver.bankAccountHolderName = receiver.pendingBankAccountHolderName;
+        receiver.bankAccountType = receiver.pendingBankAccountType;
+        receiver.bankAccountNumber = receiver.pendingBankAccountNumber;
+        receiver.bankIfsc = receiver.pendingBankIfsc;
+        receiver.bankName = receiver.pendingBankName;
+        receiver.pendingBankAccountHolderName = null;
+        receiver.pendingBankAccountType = null;
+        receiver.pendingBankAccountNumber = null;
+        receiver.pendingBankIfsc = null;
+        receiver.pendingBankName = null;
+        receiver.otp = null;
+        receiver.otpExpiry = null;
+        await receiver.save();
+        res.status(200).json({
+            message: 'Bank details updated',
+            user: (0, authController_1.toApiReceiver)(receiver),
+        });
+    }
+    catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error('verifyReceiverBankUpdateOtp error:', msg);
+        res.status(500).json({ message: msg || 'Server error' });
+    }
+};
+exports.verifyReceiverBankUpdateOtp = verifyReceiverBankUpdateOtp;
+/**
+ * GET /profile/receiver-earnings-breakdown — earnings cards, list, analytics (calls + chat).
+ */
+const getReceiverEarningsBreakdown = async (req, res) => {
+    try {
+        if (req.accountKind !== 'receiver') {
+            res.status(403).json({ message: 'Only receivers can view earnings' });
+            return;
+        }
+        if ((0, accountAccess_1.blockReceiverUntilApproved)(req, res))
+            return;
+        const rid = new mongoose_1.default.Types.ObjectId(String(req.receiver._id));
+        const range = String(req.query.range ?? 'week').toLowerCase();
+        const now = new Date();
+        const weekStart = new Date(now);
+        weekStart.setDate(now.getDate() - 7);
+        weekStart.setHours(0, 0, 0, 0);
+        const monthStart = new Date(now);
+        monthStart.setDate(1);
+        monthStart.setHours(0, 0, 0, 0);
+        const minDate = range === 'all' ? null : range === 'month' ? monthStart : weekStart;
+        const [calls, chats] = await Promise.all([
+            CallSession_1.default.find({
+                receiverId: rid,
+                status: 'completed',
+                durationSec: { $gt: 0 },
+                ...(minDate ? { startedAt: { $gte: minDate } } : {}),
+            })
+                .sort({ startedAt: -1 })
+                .lean(),
+            ChatMessage_1.default.find({
+                receiverId: rid,
+                senderType: 'u',
+                feeInr: { $gt: 0 },
+                ...(minDate ? { createdAt: { $gte: minDate } } : {}),
+            })
+                .sort({ createdAt: -1 })
+                .lean(),
+        ]);
+        const callRows = calls.map((c) => {
+            const gross = roundInr((c.durationSec / 60) * c.ratePerMinute);
+            const fee = roundInr(gross * 0.2);
+            const net = roundInr(gross - fee);
+            return {
+                id: `call-${String(c._id)}`,
+                type: 'call',
+                title: 'Voice Call',
+                createdAt: c.startedAt.toISOString(),
+                durationMin: roundInr(c.durationSec / 60),
+                grossAmount: gross,
+                platformFee: fee,
+                netEarning: net,
+                status: 'completed',
+            };
+        });
+        const chatRows = chats.map((m) => {
+            const gross = roundInr(m.feeInr);
+            const fee = roundInr(gross * 0.2);
+            const net = roundInr(gross - fee);
+            return {
+                id: `chat-${String(m._id)}`,
+                type: 'chat',
+                title: 'Chat Message',
+                createdAt: m.createdAt.toISOString(),
+                durationMin: 0,
+                grossAmount: gross,
+                platformFee: fee,
+                netEarning: net,
+                status: 'completed',
+            };
+        });
+        const entries = [...callRows, ...chatRows].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+        const totalMinutes = roundInr(callRows.reduce((sum, r) => sum + r.durationMin, 0));
+        const grossEarnings = roundInr(entries.reduce((sum, r) => sum + r.grossAmount, 0));
+        const platformFee = roundInr(entries.reduce((sum, r) => sum + r.platformFee, 0));
+        const netEarnings = roundInr(entries.reduce((sum, r) => sum + r.netEarning, 0));
+        const chatEarnings = roundInr(chatRows.reduce((sum, r) => sum + r.netEarning, 0));
+        const totalCalls = callRows.length;
+        const avgCallMinutes = totalCalls > 0 ? roundInr(totalMinutes / totalCalls) : 0;
+        function analyticsFor(mode) {
+            const baseDate = mode === 'all' ? null : mode === 'month' ? monthStart : weekStart;
+            const labels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+            const dayBuckets = new Map();
+            for (let i = 0; i < 7; i += 1)
+                dayBuckets.set(i, { amount: 0, sessions: 0 });
+            for (const r of entries) {
+                const d = new Date(r.createdAt);
+                if (baseDate && d < baseDate)
+                    continue;
+                const idx = (d.getDay() + 6) % 7; // Monday=0
+                const b = dayBuckets.get(idx);
+                b.amount += r.netEarning;
+                b.sessions += 1;
+            }
+            return labels.map((label, idx) => ({
+                label,
+                amount: roundInr(dayBuckets.get(idx).amount),
+                sessions: dayBuckets.get(idx).sessions,
+            }));
+        }
+        res.status(200).json({
+            stats: {
+                totalCalls,
+                avgCallMinutes,
+                totalMinutes,
+                grossEarnings,
+                platformFee,
+                netEarnings,
+                chatEarnings,
+            },
+            entries: entries.slice(0, 80),
+            analytics: {
+                week: analyticsFor('week'),
+                month: analyticsFor('month'),
+                all: analyticsFor('all'),
+            },
+        });
+    }
+    catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error('getReceiverEarningsBreakdown error:', msg);
+        res.status(500).json({ message: msg || 'Server error' });
+    }
+};
+exports.getReceiverEarningsBreakdown = getReceiverEarningsBreakdown;
+/**
+ * GET /profile/caller-call-history — caller call tab list.
+ */
+const getCallerCallHistory = async (req, res) => {
+    try {
+        if (req.accountKind !== 'user') {
+            res.status(403).json({ message: 'Only callers can view call history' });
+            return;
+        }
+        const authUser = req.user;
+        if (!authUser?._id) {
+            res.status(401).json({ message: 'Not authorized' });
+            return;
+        }
+        const range = String(req.query.range ?? 'all').toLowerCase();
+        const uid = new mongoose_1.default.Types.ObjectId(String(authUser._id));
+        const now = new Date();
+        const start = new Date(now);
+        if (range === 'week')
+            start.setDate(now.getDate() - 7);
+        else if (range === 'month') {
+            start.setDate(1);
+            start.setHours(0, 0, 0, 0);
+        }
+        const filter = { callerId: uid, status: 'completed' };
+        if (range !== 'all')
+            filter.startedAt = { $gte: start };
+        const rows = await CallSession_1.default.find(filter)
+            .sort({ startedAt: -1 })
+            .limit(100)
+            .lean();
+        const receiverIds = [...new Set(rows.map((r) => String(r.receiverId)))];
+        const receivers = receiverIds.length === 0
+            ? []
+            : await Receiver_1.default.find({ _id: { $in: receiverIds.map((id) => new mongoose_1.default.Types.ObjectId(id)) } })
+                .select('_id name profileImage')
+                .lean();
+        const byReceiver = new Map(receivers.map((r) => [String(r._id), r]));
+        const statusFor = (durationSec) => {
+            if (durationSec <= 0)
+                return 'missed';
+            if (durationSec < 15)
+                return 'failed';
+            return 'completed';
+        };
+        res.status(200).json({
+            calls: rows.map((r) => ({
+                id: String(r._id),
+                receiverId: String(r.receiverId),
+                receiverName: byReceiver.get(String(r.receiverId))?.name ?? 'Receiver',
+                receiverImage: byReceiver.get(String(r.receiverId))?.profileImage ?? null,
+                durationSec: r.durationSec,
+                startedAt: r.startedAt.toISOString(),
+                status: statusFor(r.durationSec),
+            })),
+        });
+    }
+    catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error('getCallerCallHistory error:', msg);
+        res.status(500).json({ message: msg || 'Server error' });
+    }
+};
+exports.getCallerCallHistory = getCallerCallHistory;
+/**
+ * GET /profile/caller-notifications — caller notifications (transaction/chat/call).
+ */
+const getCallerNotifications = async (req, res) => {
+    try {
+        if (req.accountKind !== 'user') {
+            res.status(403).json({ message: 'Only callers can view notifications' });
+            return;
+        }
+        const authUser = req.user;
+        if (!authUser?._id) {
+            res.status(401).json({ message: 'Not authorized' });
+            return;
+        }
+        const uid = new mongoose_1.default.Types.ObjectId(String(authUser._id));
+        const [topups, callRows, convoRows] = await Promise.all([
+            WalletTopup_1.default.find({ userId: uid })
+                .sort({ createdAt: -1 })
+                .limit(20)
+                .select('payAmount creditAdded createdAt')
+                .lean(),
+            CallSession_1.default.find({ callerId: uid, status: 'completed' })
+                .sort({ startedAt: -1 })
+                .limit(20)
+                .select('receiverId durationSec startedAt')
+                .lean(),
+            ChatMessage_1.default.aggregate([
+                { $match: { userId: uid } },
+                { $sort: { createdAt: -1 } },
+                {
+                    $group: {
+                        _id: '$receiverId',
+                        lastText: { $first: '$text' },
+                        lastAt: { $first: '$createdAt' },
+                    },
+                },
+                {
+                    $project: {
+                        _id: 0,
+                        receiverId: { $toString: '$_id' },
+                        lastText: 1,
+                        lastAt: 1,
+                    },
+                },
+            ]),
+        ]);
+        const receiverIds = [
+            ...new Set([
+                ...callRows.map((r) => String(r.receiverId)),
+                ...convoRows.map((r) => r.receiverId),
+            ]),
+        ];
+        const receivers = receiverIds.length === 0
+            ? []
+            : await Receiver_1.default.find({ _id: { $in: receiverIds.map((id) => new mongoose_1.default.Types.ObjectId(id)) } })
+                .select('_id name')
+                .lean();
+        const receiverNameById = new Map(receivers.map((r) => [String(r._id), r.name]));
+        const notifications = [
+            ...topups.map((row) => ({
+                id: `txn-${String(row._id)}`,
+                type: 'transaction',
+                title: 'Wallet Recharge Successful',
+                subtitle: `₹${roundInr(row.payAmount)} credited ₹${roundInr(row.creditAdded)}`,
+                at: row.createdAt.toISOString(),
+            })),
+            ...callRows.map((row) => ({
+                id: `call-${String(row._id)}`,
+                type: 'call',
+                title: `Call with ${receiverNameById.get(String(row.receiverId)) ?? 'Receiver'}`,
+                subtitle: `Duration ${Math.max(1, Math.round(row.durationSec / 60))} min`,
+                at: row.startedAt.toISOString(),
+            })),
+            ...convoRows.map((row) => ({
+                id: `chat-${row.receiverId}`,
+                type: 'chat',
+                title: `Message from ${receiverNameById.get(row.receiverId) ?? 'Receiver'}`,
+                subtitle: row.lastText || 'New chat message',
+                at: row.lastAt.toISOString(),
+            })),
+        ].sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime());
+        res.status(200).json({ notifications: notifications.slice(0, 50) });
+    }
+    catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error('getCallerNotifications error:', msg);
+        res.status(500).json({ message: msg || 'Server error' });
+    }
+};
+exports.getCallerNotifications = getCallerNotifications;

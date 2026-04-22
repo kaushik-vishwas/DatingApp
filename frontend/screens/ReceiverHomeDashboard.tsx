@@ -12,16 +12,16 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useAuth } from '../context/AuthContext';
 import type { ReceiverStackParamList } from '../navigation/ReceiverStackParamList';
 import { getErrorMessage, profileApi } from '../services/api';
-import type { ReceiverWalletSummaryResponse } from '../types/api';
+import type { ReceiverCallInsightsResponse, ReceiverWalletSummaryResponse } from '../types/api';
 
 function formatInr(n: number): string {
   const v = Math.round(n * 100) / 100;
-  if (Number.isInteger(v)) return `₹${v}`;
-  return `₹${v.toFixed(2)}`;
+  return `₹${v.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`;
 }
 
 /** Receiver (call earner) home — availability, earnings demo, etc. */
@@ -33,6 +33,7 @@ export default function ReceiverHomeDashboard(): React.JSX.Element {
   const [refreshing, setRefreshing] = useState<boolean>(false);
   const [available, setAvailable] = useState<boolean>(true);
   const [walletSummary, setWalletSummary] = useState<ReceiverWalletSummaryResponse | null>(null);
+  const [callInsights, setCallInsights] = useState<ReceiverCallInsightsResponse | null>(null);
   const [summaryError, setSummaryError] = useState<string | null>(null);
 
   /** Use stable `user._id` only — `refreshUser()` replaces `user` with a new object each time and would
@@ -50,25 +51,29 @@ export default function ReceiverHomeDashboard(): React.JSX.Element {
     }
   }, [receiverId]);
 
+  const loadCallInsights = useCallback(async () => {
+    if (!receiverId) return;
+    try {
+      const { data } = await profileApi.receiverCallInsights('all');
+      setCallInsights(data);
+    } catch (e) {
+      setSummaryError((prev) => prev ?? getErrorMessage(e));
+    }
+  }, [receiverId]);
+
   useFocusEffect(
     useCallback(() => {
       if (!receiverId) return;
       void loadWalletSummary();
+      void loadCallInsights();
       void refreshUser();
-    }, [receiverId, loadWalletSummary, refreshUser])
+    }, [receiverId, loadWalletSummary, loadCallInsights, refreshUser])
   );
 
   const onRefresh = async () => {
     setRefreshing(true);
-    await Promise.all([refreshUser(), loadWalletSummary()]);
+    await Promise.all([refreshUser(), loadWalletSummary(), loadCallInsights()]);
     setRefreshing(false);
-  };
-
-  const handleLogout = () => {
-    Alert.alert('Log out', 'Are you sure?', [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Log out', style: 'destructive', onPress: () => signOut() },
-    ]);
   };
 
   if (!user) {
@@ -80,75 +85,62 @@ export default function ReceiverHomeDashboard(): React.JSX.Element {
   }
 
   return (
-    <ScrollView
-      style={styles.scroll}
-      contentContainerStyle={styles.content}
-      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
-    >
-      <Text style={styles.pageTitle}>Dashboard</Text>
+    <SafeAreaView style={styles.safe} edges={['top', 'left', 'right']}>
+      <ScrollView
+        style={styles.scroll}
+        contentContainerStyle={styles.content}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+      >
+      <View style={styles.headerRow}>
+        <Text style={styles.pageTitle}>Dashboard</Text>
+        <View style={styles.headerIcons}>
+          <TouchableOpacity
+            style={styles.iconBtn}
+            onPress={() => navigation.navigate('ReceiverNotifications')}
+          >
+            <Text style={styles.iconText}>🔔</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.iconBtn}
+            onPress={() => navigation.navigate('ReceiverSettings')}
+          >
+            <Text style={styles.iconText}>⚙️</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
 
       {user ? (
         <>
-          <View style={styles.row}>
-            <View style={[styles.card, styles.cardWide]}>
-              <Text style={styles.sectionTitle}>Availability Status</Text>
-              <View style={styles.toggleRow}>
-                <View style={styles.toggleLeft}>
-                  <View
-                    style={[
-                      styles.dot,
-                      {
-                        backgroundColor: available
-                          ? 'rgba(123,44,255,0.9)'
-                          : '#bdbdbd',
-                      },
-                    ]}
-                  />
-                  <Text style={styles.toggleText}>
-                    {available ? 'Available' : 'Unavailable'}
-                  </Text>
-                </View>
-                <Switch
-                  value={available}
-                  onValueChange={setAvailable}
-                  trackColor={{ false: '#e5e5e5', true: 'rgba(123,44,255,0.35)' }}
-                  thumbColor={available ? '#7b2cff' : '#bdbdbd'}
-                />
+          <View style={styles.availabilityCard}>
+            <View style={styles.availabilityLeft}>
+              <View style={styles.availabilityIcon} />
+              <View>
+                <Text style={styles.availabilityTitle}>Availability Status</Text>
+                <Text style={styles.availabilitySub}>{available ? 'You are Online' : 'You are Offline'}</Text>
               </View>
             </View>
-
-            {user.isVerified ? (
-              <View style={[styles.card, styles.cardNarrow]}>
-                <View style={styles.verifiedCardHeader}>
-                  <Text style={styles.verifiedHeaderText}>Congratulations!</Text>
-                </View>
-                <View style={styles.badgeWrap}>
-                  <View style={styles.badgeCircle}>
-                    <Text style={styles.checkMark}>✓</Text>
-                  </View>
-                </View>
-                <Text style={styles.verifiedTitle}>You are a Verified User now</Text>
-                <TouchableOpacity style={styles.purpleBtn} onPress={() => Alert.alert('Success', 'Verified flow (demo)')}>
-                  <Text style={styles.purpleBtnText}>View Profile</Text>
-                </TouchableOpacity>
-              </View>
-            ) : null}
+            <Switch
+              value={available}
+              onValueChange={setAvailable}
+              trackColor={{ false: '#e5e5e5', true: 'rgba(123,44,255,0.35)' }}
+              thumbColor={available ? '#7b2cff' : '#bdbdbd'}
+            />
           </View>
 
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Earnings Summary</Text>
             {summaryError ? <Text style={styles.summaryErr}>{summaryError}</Text> : null}
 
-            <View style={[styles.card, styles.earningsMainCard]}>
-              <View style={styles.earningsMainTop}>
-                <View style={styles.earningsIcon} />
-                <Text style={styles.earningsSubtitle}>Total wallet</Text>
+            <View style={styles.earningsMainCard}>
+              <View style={styles.earningsHeader}>
+                <Text style={styles.earningsSubtitle}>Total Earnings</Text>
+                <View style={styles.earningsTrend} />
               </View>
               <Text style={styles.earningsAmount}>
                 {walletSummary ? formatInr(walletSummary.walletBalance) : '…'}
               </Text>
               <Text style={styles.earningsPeriod}>
-                Includes paid chat credits and other earnings. Pull to refresh after chatting.
+                Lifetime earnings from all calls
               </Text>
             </View>
 
@@ -156,13 +148,13 @@ export default function ReceiverHomeDashboard(): React.JSX.Element {
               <View style={styles.smallEarningsCard}>
                 <Text style={styles.smallEarningsLabel}>Today</Text>
                 <Text style={styles.smallEarningsText}>
-                  {walletSummary ? formatInr(walletSummary.chatToday) : '…'}
+                  {walletSummary ? formatInr(walletSummary.chatToday) : '₹0'}
                 </Text>
               </View>
               <View style={styles.smallEarningsCard}>
-                <Text style={styles.smallEarningsLabel}>This month</Text>
-                <Text style={styles.smallEarningsText}>
-                  {walletSummary ? formatInr(walletSummary.chatThisMonth) : '…'}
+                <Text style={styles.smallEarningsLabel}>This Week</Text>
+                <Text style={[styles.smallEarningsText, { color: '#2563eb' }]}>
+                  {walletSummary ? formatInr(walletSummary.chatThisMonth) : '₹0'}
                 </Text>
               </View>
             </View>
@@ -170,32 +162,48 @@ export default function ReceiverHomeDashboard(): React.JSX.Element {
 
           <View style={styles.section}>
             <View style={styles.sectionHeaderRow}>
-              <Text style={styles.sectionTitle}>Recent activity</Text>
-              <TouchableOpacity onPress={() => Alert.alert('Activity', 'Shows paid chat messages.')}>
+              <Text style={styles.sectionTitle}>Recent Calls</Text>
+              <TouchableOpacity onPress={() => navigation.navigate('ReceiverCallHistory')}>
                 <Text style={styles.viewAll}>View all</Text>
               </TouchableOpacity>
             </View>
 
-            {walletSummary && walletSummary.recent.length === 0 ? (
-              <Text style={styles.emptyRecent}>No paid chat messages yet.</Text>
+            {callInsights && callInsights.recentCalls.length === 0 ? (
+              <Text style={styles.emptyRecent}>No voice calls yet.</Text>
             ) : null}
-            {(walletSummary?.recent ?? []).map((row) => (
+            {(callInsights?.recentCalls ?? []).slice(0, 4).map((row) => (
               <CallRow
                 key={row.id}
-                title={row.title}
-                subtitle={row.subtitle}
-                amount={formatInr(row.amountInr)}
+                title={row.callerName}
+                subtitle={`${Math.max(1, Math.round(row.durationSec / 60))} min`}
+                amount=""
               />
             ))}
           </View>
 
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Quick Actions</Text>
-            <View style={styles.quickActionsRow}>
-              <QuickAction label="Messages" onPress={() => navigation.navigate('ReceiverChats')} />
-              <QuickAction label="View Profile" onPress={() => Alert.alert('Demo', 'View Profile')} />
-              <QuickAction label="Withdraw Earnings" onPress={() => Alert.alert('Demo', 'Withdraw')} />
-              <QuickAction label="View Call History" onPress={() => Alert.alert('Demo', 'Call History')} />
+            <View style={styles.quickActionsCol}>
+              <QuickAction
+                label="View Profile"
+                sublabel="Click to see your Profile"
+                onPress={() => navigation.navigate('ReceiverProfilePreview')}
+              />
+              <QuickAction
+                label="Withdraw Earnings"
+                sublabel="Transfer money to your bank account"
+                onPress={() => navigation.navigate('WithdrawEarnings')}
+              />
+              <QuickAction
+                label="View Call History"
+                sublabel="See all your past calls and earnings"
+                onPress={() => navigation.navigate('ReceiverCallHistory')}
+              />
+              <QuickAction
+                label="Messages"
+                sublabel="Open your chats"
+                onPress={() => navigation.navigate('ReceiverChats')}
+              />
             </View>
           </View>
 
@@ -204,10 +212,19 @@ export default function ReceiverHomeDashboard(): React.JSX.Element {
               <Text style={styles.sectionTitle}>Leader Board</Text>
             </View>
             <View style={styles.leaderBoardCard}>
-              <Text style={styles.leaderMinutes}>1000 Minutes</Text>
+              <Text style={styles.leaderMinutesBig}>
+                {callInsights ? Math.round(callInsights.leaderboard.totalMinutes) : 0}
+                <Text style={styles.leaderMinutesUnit}> Minutes</Text>
+              </Text>
             </View>
             <View style={styles.leaderBoardCardPurple}>
-              <Text style={styles.leaderMinutesPurple}>5000 Minutes</Text>
+              <Text style={styles.leaderMinutesBig}>
+                {callInsights ? Math.round(callInsights.leaderboard.thisMonthMinutes) : 0}
+                <Text style={styles.leaderMinutesUnit}> Minutes</Text>
+              </Text>
+              <View style={styles.progressTrack}>
+                <View style={styles.progressFill} />
+              </View>
             </View>
           </View>
         </>
@@ -215,34 +232,69 @@ export default function ReceiverHomeDashboard(): React.JSX.Element {
         <Text style={styles.muted}>Could not load profile.</Text>
       )}
 
-      <TouchableOpacity style={styles.logout} onPress={handleLogout}>
-        <Text style={styles.logoutText}>Log out</Text>
-      </TouchableOpacity>
-    </ScrollView>
+      </ScrollView>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
+  safe: { flex: 1, backgroundColor: '#f8f8f8' },
   scroll: {
     flex: 1,
     backgroundColor: '#f8f8f8',
   },
   content: {
-    paddingHorizontal: 16,
-    paddingTop: 16,
+    paddingHorizontal: 14,
+    paddingTop: 14,
     paddingBottom: 48,
   },
   centered: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   pageTitle: {
-    fontSize: 20,
+    fontSize: 18,
     fontWeight: '900',
     color: '#111',
-    marginBottom: 12,
-    textAlign: 'center',
+    marginBottom: 8,
   },
-  section: { marginTop: 14 },
+  headerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+  headerIcons: { flexDirection: 'row', gap: 8 },
+  iconBtn: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: '#fff',
+    borderWidth: 1,
+    borderColor: '#ececec',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  iconText: { fontSize: 16 },
+  availabilityCard: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#ececec',
+    padding: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  availabilityLeft: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  availabilityIcon: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: 'rgba(123,44,255,0.12)',
+  },
+  availabilityTitle: { fontSize: 14, color: '#111', fontWeight: '800' },
+  availabilitySub: { fontSize: 12, color: '#16a34a', fontWeight: '700', marginTop: 2 },
+  section: { marginTop: 16 },
   sectionTitle: {
-    fontSize: 13,
+    fontSize: 18,
     fontWeight: '900',
     color: '#111',
     marginBottom: 10,
@@ -258,98 +310,34 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '800',
   },
-  row: { flexDirection: 'row', gap: 12 },
-  card: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 14,
-    borderWidth: 1,
-    borderColor: '#eee',
-  },
-  cardWide: { flex: 1 },
-  cardNarrow: { width: 150 },
-  toggleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  toggleLeft: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  dot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    backgroundColor: '#bdbdbd',
-  },
-  toggleText: { fontSize: 12, fontWeight: '800', color: '#111' },
-  verifiedCardHeader: {
-    alignItems: 'center',
-    marginBottom: 8,
-  },
-  verifiedHeaderText: {
-    fontSize: 12,
-    fontWeight: '900',
-    color: '#111',
-  },
-  badgeWrap: { alignItems: 'center', marginBottom: 8 },
-  badgeCircle: {
-    width: 60,
-    height: 60,
-    borderRadius: 30,
-    backgroundColor: 'rgba(123,44,255,0.12)',
-    borderWidth: 1,
-    borderColor: 'rgba(123,44,255,0.35)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  checkMark: {
-    color: '#7b2cff',
-    fontSize: 28,
-    fontWeight: '900',
-  },
-  verifiedTitle: {
-    textAlign: 'center',
-    fontSize: 10,
-    fontWeight: '800',
-    color: '#333',
-    marginBottom: 10,
-    lineHeight: 14,
-  },
-  purpleBtn: {
-    backgroundColor: '#7b2cff',
-    paddingVertical: 8,
-    borderRadius: 10,
-    alignItems: 'center',
-  },
-  purpleBtnText: {
-    color: '#fff',
-    fontSize: 11,
-    fontWeight: '900',
-  },
   earningsMainCard: {
-    backgroundColor: 'rgba(123,44,255,0.10)',
-    borderColor: 'rgba(123,44,255,0.18)',
-  },
-  earningsMainTop: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 6 },
-  earningsIcon: {
-    width: 28,
-    height: 28,
+    backgroundColor: '#e97cdd',
+    borderColor: '#dd67cf',
+    borderWidth: 1,
     borderRadius: 14,
-    backgroundColor: 'rgba(123,44,255,0.14)',
+    padding: 14,
   },
-  earningsSubtitle: { fontSize: 11, fontWeight: '900', color: '#7b2cff' },
-  earningsAmount: { fontSize: 22, fontWeight: '900', color: '#e6007a', marginTop: 2 },
-  earningsPeriod: { fontSize: 11, fontWeight: '700', color: '#666', marginTop: 4 },
+  earningsHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  earningsTrend: {
+    width: 32,
+    height: 32,
+    borderRadius: 10,
+    backgroundColor: 'rgba(255,255,255,0.35)',
+  },
+  earningsSubtitle: { fontSize: 12, fontWeight: '700', color: '#492245' },
+  earningsAmount: { fontSize: 36, fontWeight: '900', color: '#111', marginTop: 4 },
+  earningsPeriod: { fontSize: 12, fontWeight: '600', color: '#5f3b5d', marginTop: 2 },
   smallEarningsRow: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 12, gap: 10 },
   smallEarningsCard: {
     flex: 1,
     backgroundColor: '#fff',
     borderRadius: 12,
-    padding: 10,
+    padding: 12,
     borderWidth: 1,
-    borderColor: 'rgba(123,44,255,0.15)',
+    borderColor: '#ececec',
   },
-  smallEarningsLabel: { fontSize: 10, fontWeight: '800', color: '#666', marginBottom: 4 },
-  smallEarningsText: { color: '#7b2cff', fontSize: 18, fontWeight: '900' },
+  smallEarningsLabel: { fontSize: 12, fontWeight: '700', color: '#666', marginBottom: 4 },
+  smallEarningsText: { color: '#16a34a', fontSize: 36, fontWeight: '900' },
   summaryErr: {
     color: '#b91c1c',
     fontSize: 12,
@@ -357,7 +345,7 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   emptyRecent: { color: '#666', fontSize: 13, paddingVertical: 8, textAlign: 'center' },
-  quickActionsRow: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', gap: 10 },
+  quickActionsCol: { gap: 10 },
   leaderBoardCard: {
     backgroundColor: '#7b2cff',
     borderRadius: 12,
@@ -371,21 +359,20 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(123,44,255,0.24)',
     marginTop: 12,
   },
-  leaderMinutes: { color: '#fff', fontWeight: '900', fontSize: 14, textAlign: 'center' },
-  leaderMinutesPurple: { color: '#5b21b6', fontWeight: '900', fontSize: 14, textAlign: 'center' },
-  muted: { color: '#888', textAlign: 'center' },
-  logout: {
-    marginTop: 32,
-    paddingVertical: 14,
-    alignItems: 'center',
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#e91e8c',
+  leaderMinutesBig: { color: '#fff', fontWeight: '900', fontSize: 36 },
+  leaderMinutesUnit: { fontSize: 15, fontWeight: '700' },
+  progressTrack: {
+    marginTop: 10,
+    height: 7,
+    borderRadius: 4,
+    backgroundColor: 'rgba(255,255,255,0.55)',
+    overflow: 'hidden',
   },
-  logoutText: { color: '#e91e8c', fontSize: 16, fontWeight: '600' },
+  progressFill: { width: '58%', height: 7, backgroundColor: '#f4b900' },
+  muted: { color: '#888', textAlign: 'center' },
 });
 
-function CallRow({ title, subtitle, amount }: { title: string; subtitle: string; amount: string }) {
+function CallRow({ title, subtitle }: { title: string; subtitle: string; amount: string }) {
   return (
     <View style={callRowStyles.row}>
       <View style={callRowStyles.icon} />
@@ -393,16 +380,21 @@ function CallRow({ title, subtitle, amount }: { title: string; subtitle: string;
         <Text style={callRowStyles.title}>{title}</Text>
         <Text style={callRowStyles.subtitle}>{subtitle}</Text>
       </View>
-      <Text style={callRowStyles.amount}>{amount}</Text>
     </View>
   );
 }
 
-function QuickAction({ label, onPress }: { label: string; onPress: () => void }) {
+function QuickAction({ label, sublabel, onPress }: { label: string; sublabel: string; onPress: () => void }) {
   return (
     <TouchableOpacity style={quickActionStyles.btn} onPress={onPress}>
-      <View style={quickActionStyles.icon} />
-      <Text style={quickActionStyles.text}>{label}</Text>
+      <View style={quickActionStyles.iconBox}>
+        <View style={quickActionStyles.icon} />
+      </View>
+      <View style={{ flex: 1 }}>
+        <Text style={quickActionStyles.text}>{label}</Text>
+        <Text style={quickActionStyles.sub}>{sublabel}</Text>
+      </View>
+      <Text style={quickActionStyles.chev}>{'>'}</Text>
     </TouchableOpacity>
   );
 }
@@ -412,11 +404,11 @@ const callRowStyles = StyleSheet.create({
     backgroundColor: '#fff',
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: 'rgba(123,44,255,0.15)',
-    padding: 12,
+    borderColor: '#ececec',
+    padding: 10,
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 10,
+    marginBottom: 8,
   },
   icon: {
     width: 30,
@@ -426,25 +418,35 @@ const callRowStyles = StyleSheet.create({
     marginRight: 10,
   },
   title: { fontSize: 12, fontWeight: '900', color: '#111' },
-  subtitle: { fontSize: 11, color: '#666', fontWeight: '700', marginTop: 4 },
-  amount: { fontSize: 12, color: '#7b2cff', fontWeight: '900' },
+  subtitle: { fontSize: 11, color: '#666', fontWeight: '700', marginTop: 2 },
 });
 
 const quickActionStyles = StyleSheet.create({
   btn: {
-    width: '48%',
     backgroundColor: '#fff',
     borderRadius: 12,
     padding: 12,
     borderWidth: 1,
-    borderColor: 'rgba(123,44,255,0.15)',
+    borderColor: '#ececec',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  iconBox: {
+    width: 34,
+    height: 34,
+    borderRadius: 10,
+    backgroundColor: '#f5ecff',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   icon: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: 'rgba(123,44,255,0.12)',
-    marginBottom: 8,
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    backgroundColor: '#7b2cff',
   },
-  text: { fontSize: 11, fontWeight: '900', color: '#111', textAlign: 'center' },
+  text: { fontSize: 15, fontWeight: '800', color: '#111' },
+  sub: { fontSize: 11, color: '#777', marginTop: 2, fontWeight: '600' },
+  chev: { fontSize: 16, color: '#aaa', fontWeight: '700' },
 });

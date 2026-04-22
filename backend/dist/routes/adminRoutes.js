@@ -22,4 +22,6 @@ router.patch('/receivers/:id/approve', adminAuth_1.adminProtect, adminController
 router.patch('/receivers/:id/reject', adminAuth_1.adminProtect, adminController_1.rejectReceiver);
 router.get('/reports', adminAuth_1.adminProtect, adminController_1.listModerationReports);
 router.patch('/reports/:id', adminAuth_1.adminProtect, adminController_1.resolveModerationReport);
+router.get('/withdrawals', adminAuth_1.adminProtect, adminController_1.listWithdrawals);
+router.patch('/withdrawals/:id', adminAuth_1.adminProtect, adminController_1.resolveWithdrawal);
 exports.default = router;
