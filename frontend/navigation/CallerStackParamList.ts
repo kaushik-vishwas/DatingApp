@@ -1,4 +1,5 @@
 import type { DiscoverReceiverSummary } from '../types/api';
+import type { VoiceBootstrapResponse } from '../types/api';
 
 export type CallerStackParamList = {
   CallerDiscover: undefined;
@@ -15,6 +16,7 @@ export type CallerStackParamList = {
     receiverName: string;
     receiverImage?: string | null;
   };
+  VoiceCall: VoiceBootstrapResponse & { peerName: string };
   ReceiverProfile: { receiver: DiscoverReceiverSummary };
   Wallet: undefined;
   PaymentMethod: { payAmount: number; bonusPercent: number; creditAmount: number };

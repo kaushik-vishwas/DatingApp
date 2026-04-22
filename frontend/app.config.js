@@ -28,7 +28,11 @@ const apiBaseUrl =
 module.exports = {
   expo: {
     ...appJson.expo,
-    plugins: [...(appJson.expo.plugins || []), '@react-native-community/datetimepicker'],
+    plugins: [
+      ...(appJson.expo.plugins || []),
+      '@react-native-community/datetimepicker',
+      '@stream-io/video-react-native-sdk',
+    ],
     extra: {
       ...(appJson.expo.extra || {}),
       eas: {

@@ -11,6 +11,7 @@ import adminRoutes from './routes/adminRoutes';
 import discoverRoutes from './routes/discoverRoutes';
 import walletRoutes from './routes/walletRoutes';
 import chatRoutes from './routes/chatRoutes';
+import callRoutes from './routes/callRoutes';
 import { attachChatSocket } from './socket/chatSocket';
 
 const app = express();
@@ -56,6 +57,7 @@ app.use('/discover', discoverRoutes);
 app.use('/wallet', walletRoutes);
 app.use('/admin', adminRoutes);
 app.use('/chat', chatRoutes);
+app.use('/calls', callRoutes);
 
 const httpServer = http.createServer(app);
 void attachChatSocket(httpServer);

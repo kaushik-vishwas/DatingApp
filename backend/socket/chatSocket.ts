@@ -9,6 +9,9 @@ import Receiver from '../models/Receiver';
 import { CHAT_TEXT_FEE_INR } from '../constants/chatPricing';
 
 type JwtPayload = { id: string; typ: 'u' | 'r' };
+type CallInvitePayload = { callId?: unknown };
+type CallResponsePayload = { callId?: unknown; accepted?: unknown };
+type CallEndPayload = { callId?: unknown };
 
 export function roomKey(userId: string, receiverId: string): string {
   return `chat:${userId}:${receiverId}`;
@@ -306,6 +309,86 @@ export function attachChatSocket(httpServer: HTTPServer): Server {
           ack?.({ ok: false, error: 'Failed to send' });
         }
       })();
+    });
+
+    socket.on('call:invite', (payload: CallInvitePayload, ack?: (r: unknown) => void) => {
+      void (async () => {
+        const room = socket.data.chatRoom as string | undefined;
+        if (!room) {
+          ack?.({ ok: false, error: 'Join a chat first' });
+          return;
+        }
+        const parsed = parseRoom(room);
+        if (!parsed) {
+          ack?.({ ok: false, error: 'Bad room' });
+          return;
+        }
+        const typ = socket.data.typ as 'u' | 'r';
+        const myId = String(socket.data.accountId);
+        if (typ === 'u' && myId !== parsed.userId) {
+          ack?.({ ok: false, error: 'Forbidden' });
+          return;
+        }
+        if (typ === 'r' && myId !== parsed.receiverId) {
+          ack?.({ ok: false, error: 'Forbidden' });
+          return;
+        }
+        if (await ChatBlock.exists({ userId: parsed.userId, receiverId: parsed.receiverId })) {
+          ack?.({ ok: false, error: 'This chat is blocked.' });
+          return;
+        }
+        const callId = typeof payload?.callId === 'string' ? payload.callId.trim() : '';
+        if (!callId) {
+          ack?.({ ok: false, error: 'callId is required' });
+          return;
+        }
+        io.to(room).emit('call:incoming', {
+          callId,
+          fromType: typ,
+          fromId: myId,
+        });
+        ack?.({ ok: true });
+      })();
+    });
+
+    socket.on('call:response', (payload: CallResponsePayload, ack?: (r: unknown) => void) => {
+      const room = socket.data.chatRoom as string | undefined;
+      if (!room) {
+        ack?.({ ok: false, error: 'Join a chat first' });
+        return;
+      }
+      const callId = typeof payload?.callId === 'string' ? payload.callId.trim() : '';
+      const accepted = typeof payload?.accepted === 'boolean' ? payload.accepted : null;
+      if (!callId || accepted === null) {
+        ack?.({ ok: false, error: 'callId and accepted are required' });
+        return;
+      }
+      io.to(room).emit('call:response', {
+        callId,
+        accepted,
+        fromType: socket.data.typ as 'u' | 'r',
+        fromId: String(socket.data.accountId),
+      });
+      ack?.({ ok: true });
+    });
+
+    socket.on('call:end', (payload: CallEndPayload, ack?: (r: unknown) => void) => {
+      const room = socket.data.chatRoom as string | undefined;
+      if (!room) {
+        ack?.({ ok: false, error: 'Join a chat first' });
+        return;
+      }
+      const callId = typeof payload?.callId === 'string' ? payload.callId.trim() : '';
+      if (!callId) {
+        ack?.({ ok: false, error: 'callId is required' });
+        return;
+      }
+      io.to(room).emit('call:ended', {
+        callId,
+        fromType: socket.data.typ as 'u' | 'r',
+        fromId: String(socket.data.accountId),
+      });
+      ack?.({ ok: true });
     });
   });
 

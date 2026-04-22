@@ -13,6 +13,7 @@ import CallerTermsScreen from '../screens/caller/CallerTermsScreen';
 import PaymentMethodScreen from '../screens/caller/PaymentMethodScreen';
 import ReceiverProfileScreen from '../screens/caller/ReceiverProfileScreen';
 import ChatConversationScreen from '../screens/chat/ChatConversationScreen';
+import VoiceCallScreen from '../screens/call/VoiceCallScreen';
 import WalletScreen from '../screens/caller/WalletScreen';
 import WalletSuccessScreen from '../screens/caller/WalletSuccessScreen';
 import type { CallerStackParamList } from './CallerStackParamList';
@@ -35,6 +36,7 @@ export default function CallerAppNavigator(): React.JSX.Element {
       <Stack.Screen name="CallerHelp" component={CallerHelpScreen} />
       <Stack.Screen name="CallerChats" component={CallerChatsScreen} />
       <Stack.Screen name="CallerChat" component={ChatConversationScreen} />
+      <Stack.Screen name="VoiceCall" component={VoiceCallScreen} />
       <Stack.Screen name="ReceiverProfile" component={ReceiverProfileScreen} />
       <Stack.Screen name="Wallet" component={WalletScreen} />
       <Stack.Screen name="PaymentMethod" component={PaymentMethodScreen} />

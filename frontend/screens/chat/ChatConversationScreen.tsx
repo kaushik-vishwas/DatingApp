@@ -25,12 +25,13 @@ import type { CallerStackParamList } from '../../navigation/CallerStackParamList
 import type { ReceiverStackParamList } from '../../navigation/ReceiverStackParamList';
 import {
   chatApi,
+  callApi,
   CHAT_REPORT_REASONS,
   type ChatReportReason,
   getJwt,
   getResolvedApiBaseUrl,
 } from '../../services/api';
-import type { ChatMessageDto } from '../../types/api';
+import type { ChatMessageDto, VoiceBootstrapResponse } from '../../types/api';
 import { useAuth } from '../../context/AuthContext';
 
 const PURPLE = '#7b2cff';
@@ -53,6 +54,18 @@ type ChatSendAck = {
   requiredInr?: number;
 };
 
+type CallIncomingPayload = {
+  callId: string;
+  fromType: 'u' | 'r';
+  fromId: string;
+};
+
+type CallResponsePayload = {
+  callId: string;
+  accepted: boolean;
+  fromType: 'u' | 'r';
+};
+
 export default function ChatConversationScreen({ navigation, route }: Props): React.JSX.Element {
   const { user, refreshUser } = useAuth();
   const callerNav = useNavigation<NativeStackNavigationProp<CallerStackParamList>>();
@@ -71,6 +84,7 @@ export default function ChatConversationScreen({ navigation, route }: Props): Re
   const [loadError, setLoadError] = useState<string | null>(null);
   const [socketError, setSocketError] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
+  const [calling, setCalling] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [reportOpen, setReportOpen] = useState(false);
   const [thanksOpen, setThanksOpen] = useState(false);
@@ -78,6 +92,7 @@ export default function ChatConversationScreen({ navigation, route }: Props): Re
   const [reportReason, setReportReason] = useState<ChatReportReason>('Spam');
   const socketRef = useRef<Socket | null>(null);
   const listRef = useRef<FlatList<ChatMessageDto>>(null);
+  const pendingVoiceBootstrapRef = useRef<VoiceBootstrapResponse | null>(null);
 
   const appendMessage = useCallback((m: ChatMessageDto) => {
     setMessages((prev) => {
@@ -85,6 +100,25 @@ export default function ChatConversationScreen({ navigation, route }: Props): Re
       return [...prev, m];
     });
   }, []);
+
+  const openVoiceCallScreen = useCallback(
+    (bootstrap: VoiceBootstrapResponse): void => {
+      if (isCaller) {
+        callerNav.navigate('VoiceCall', {
+          ...bootstrap,
+          peerName,
+        });
+        return;
+      }
+      (
+        navigation as NativeStackNavigationProp<ReceiverStackParamList, 'ReceiverChat'>
+      ).navigate('VoiceCall', {
+        ...bootstrap,
+        peerName,
+      });
+    },
+    [callerNav, isCaller, navigation, peerName]
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -170,6 +204,63 @@ export default function ChatConversationScreen({ navigation, route }: Props): Re
       socket.on('chat:newMessage', (msg: ChatMessageDto) => {
         appendMessage(msg);
       });
+
+      socket.on('call:incoming', (payload: CallIncomingPayload) => {
+        if (payload.fromType === mySenderType) return;
+        Alert.alert(`${peerName} is calling`, 'Accept this voice call request?', [
+          {
+            text: 'Reject',
+            style: 'destructive',
+            onPress: () => {
+              socket.emit('call:response', { callId: payload.callId, accepted: false });
+            },
+          },
+          {
+            text: 'Accept',
+            onPress: () => {
+              void (async () => {
+                try {
+                  const { data } = await callApi.bootstrap(peerId);
+                  socket.emit('call:response', { callId: payload.callId, accepted: true });
+                  openVoiceCallScreen(data);
+                } catch (e: unknown) {
+                  const msg = (e as { response?: { data?: { message?: string } } })?.response?.data?.message;
+                  Alert.alert('Call failed', msg || 'Unable to join call.');
+                }
+              })();
+            },
+          },
+        ]);
+      });
+
+      socket.on('call:response', (payload: CallResponsePayload) => {
+        if (payload.fromType === mySenderType) return;
+        if (payload.accepted) {
+          const pending = pendingVoiceBootstrapRef.current;
+          if (pending && pending.callId === payload.callId) {
+            openVoiceCallScreen(pending);
+          } else {
+            void (async () => {
+              try {
+                const { data } = await callApi.bootstrap(peerId);
+                openVoiceCallScreen(data);
+              } catch {
+                Alert.alert('Call accepted', `${peerName} accepted, but joining failed. Try again.`);
+              }
+            })();
+          }
+        } else {
+          Alert.alert('Call declined', `${peerName} declined your call.`);
+        }
+        setCalling(false);
+        pendingVoiceBootstrapRef.current = null;
+      });
+
+      socket.on('call:ended', (payload: { callId: string; fromType: 'u' | 'r' }) => {
+        if (payload.fromType === mySenderType) return;
+        Alert.alert('Call ended', `${peerName} ended the call.`);
+        setCalling(false);
+      });
     })();
 
     return () => {
@@ -182,7 +273,7 @@ export default function ChatConversationScreen({ navigation, route }: Props): Re
         socketRef.current = null;
       }
     };
-  }, [appendMessage, isCaller, peerId, refreshUser]);
+  }, [appendMessage, isCaller, mySenderType, openVoiceCallScreen, peerId, peerName, refreshUser]);
 
   const closeMenu = (): void => setMenuOpen(false);
 
@@ -280,6 +371,35 @@ export default function ChatConversationScreen({ navigation, route }: Props): Re
     }
   };
 
+  const onStartVoiceCall = (): void => {
+    const s = socketRef.current;
+    if (!s?.connected || calling) {
+      setSocketError('Not connected. Check your network.');
+      return;
+    }
+    setCalling(true);
+    void (async () => {
+      try {
+        const { data } = await callApi.bootstrap(peerId);
+        pendingVoiceBootstrapRef.current = data;
+        s.emit('call:invite', { callId: data.callId }, (res: { ok?: boolean; error?: string }) => {
+          if (res?.ok === false) {
+            setCalling(false);
+            pendingVoiceBootstrapRef.current = null;
+            Alert.alert('Call failed', res.error || 'Could not ring receiver.');
+            return;
+          }
+          Alert.alert('Calling…', `Ringing ${peerName}`);
+        });
+      } catch (e: unknown) {
+        setCalling(false);
+        pendingVoiceBootstrapRef.current = null;
+        const msg = (e as { response?: { data?: { message?: string } } })?.response?.data?.message;
+        Alert.alert('Call failed', msg || 'Could not start call right now.');
+      }
+    })();
+  };
+
   const renderItem = ({ item }: { item: ChatMessageDto }) => {
     const mine = item.senderType === mySenderType;
     return (
@@ -314,6 +434,13 @@ export default function ChatConversationScreen({ navigation, route }: Props): Re
           <Text style={styles.title} numberOfLines={1}>
             {peerName}
           </Text>
+          <TouchableOpacity
+            onPress={onStartVoiceCall}
+            style={[styles.callBtnTop, calling && styles.callBtnTopOff]}
+            disabled={calling}
+          >
+            <Text style={styles.callBtnTopTxt}>{calling ? 'Calling…' : 'Call'}</Text>
+          </TouchableOpacity>
           <TouchableOpacity
             onPress={() => setMenuOpen((v) => !v)}
             style={styles.moreBtn}
@@ -482,6 +609,14 @@ const styles = StyleSheet.create({
   peerAvPh: { backgroundColor: '#e8dff9', alignItems: 'center', justifyContent: 'center' },
   peerAvTxt: { fontWeight: '900', color: PURPLE, fontSize: 14 },
   title: { flex: 1, fontSize: 17, fontWeight: '900', color: '#111' },
+  callBtnTop: {
+    backgroundColor: PURPLE,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 14,
+  },
+  callBtnTopOff: { opacity: 0.7 },
+  callBtnTopTxt: { color: '#fff', fontWeight: '800', fontSize: 12 },
   moreBtn: { paddingHorizontal: 10, paddingVertical: 6 },
   moreDots: { fontSize: 22, color: '#333', fontWeight: '900' },
   menuBackdrop: {

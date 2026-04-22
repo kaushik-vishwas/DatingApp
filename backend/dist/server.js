@@ -16,6 +16,7 @@ const adminRoutes_1 = __importDefault(require("./routes/adminRoutes"));
 const discoverRoutes_1 = __importDefault(require("./routes/discoverRoutes"));
 const walletRoutes_1 = __importDefault(require("./routes/walletRoutes"));
 const chatRoutes_1 = __importDefault(require("./routes/chatRoutes"));
+const callRoutes_1 = __importDefault(require("./routes/callRoutes"));
 const chatSocket_1 = require("./socket/chatSocket");
 const app = (0, express_1.default)();
 const PORT = process.env.PORT ? Number(process.env.PORT) : 5000;
@@ -54,6 +55,7 @@ app.use('/discover', discoverRoutes_1.default);
 app.use('/wallet', walletRoutes_1.default);
 app.use('/admin', adminRoutes_1.default);
 app.use('/chat', chatRoutes_1.default);
+app.use('/calls', callRoutes_1.default);
 const httpServer = http_1.default.createServer(app);
 void (0, chatSocket_1.attachChatSocket)(httpServer);
 // 404

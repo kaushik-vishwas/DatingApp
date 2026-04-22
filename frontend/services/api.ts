@@ -23,6 +23,7 @@ import type {
   ChatMessagesResponse,
   ChatConversationsResponse,
   ReceiverWalletSummaryResponse,
+  VoiceBootstrapResponse,
 } from '../types/api';
 
 const JWT_KEY = 'jwt';
@@ -263,6 +264,13 @@ export const chatApi = {
 
   clear: (body: { receiverId?: string; userId?: string }) =>
     api.post<{ ok: boolean; deletedCount: number }>('/chat/clear', body),
+};
+
+export const callApi = {
+  bootstrap: (peerId: string) =>
+    api.get<VoiceBootstrapResponse>('/calls/bootstrap', {
+      params: { peerId },
+    }),
 };
 
 export default api;

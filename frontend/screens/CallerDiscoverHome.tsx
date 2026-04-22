@@ -120,7 +120,11 @@ export default function CallerDiscoverHome(): React.JSX.Element {
       navigation.navigate('Wallet');
       return;
     }
-    Alert.alert('Voice call', 'Calling will be available in a future update.');
+    navigation.navigate('CallerChat', {
+      receiverId: item._id,
+      receiverName: item.name,
+      receiverImage: item.profileImage,
+    });
   };
 
   const langChip = (label: string, value: string | null) => {

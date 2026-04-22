@@ -4,6 +4,7 @@ import React from 'react';
 import ReceiverHomeDashboard from '../screens/ReceiverHomeDashboard';
 import ReceiverChatsScreen from '../screens/receiver/ReceiverChatsScreen';
 import ChatConversationScreen from '../screens/chat/ChatConversationScreen';
+import VoiceCallScreen from '../screens/call/VoiceCallScreen';
 import type { ReceiverStackParamList } from './ReceiverStackParamList';
 
 const Stack = createNativeStackNavigator<ReceiverStackParamList>();
@@ -17,6 +18,7 @@ export default function ReceiverAppNavigator(): React.JSX.Element {
       <Stack.Screen name="ReceiverHome" component={ReceiverHomeDashboard} />
       <Stack.Screen name="ReceiverChats" component={ReceiverChatsScreen} />
       <Stack.Screen name="ReceiverChat" component={ChatConversationScreen} />
+      <Stack.Screen name="VoiceCall" component={VoiceCallScreen} />
     </Stack.Navigator>
   );
 }

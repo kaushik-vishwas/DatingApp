@@ -115,6 +115,16 @@ export interface ChatConversationsResponse {
   conversations: ChatPeerSummary[];
 }
 
+export interface VoiceBootstrapResponse {
+  apiKey: string;
+  token: string;
+  tokenExpiresAt: string;
+  streamUserId: string;
+  peerStreamUserId: string;
+  callType: string;
+  callId: string;
+}
+
 export type ReceiverWalletRecentRow = {
   id: string;
   title: string;

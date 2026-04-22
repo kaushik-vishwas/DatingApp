@@ -62,7 +62,11 @@ export default function ReceiverProfileScreen({ navigation, route }: Props): Rea
       setRechargeModal('low');
       return;
     }
-    Alert.alert('Voice call', 'Calling will be available in a future update.');
+    navigation.navigate('CallerChat', {
+      receiverId: receiver._id,
+      receiverName: receiver.name,
+      receiverImage: receiver.profileImage,
+    });
   };
 
   return (
