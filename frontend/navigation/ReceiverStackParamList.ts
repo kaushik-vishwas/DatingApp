@@ -1,0 +1,5 @@
+export type ReceiverStackParamList = {
+  ReceiverHome: undefined;
+  ReceiverChats: undefined;
+  ReceiverChat: { userId: string; userName: string; userImage?: string | null };
+};

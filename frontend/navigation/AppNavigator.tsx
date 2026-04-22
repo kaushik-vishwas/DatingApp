@@ -1,0 +1,154 @@
+import React, { useEffect, useState } from 'react';
+import { ActivityIndicator, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { NavigationContainer } from '@react-navigation/native';
+import { createNativeStackNavigator } from '@react-navigation/native-stack';
+import { useAuth } from '../context/AuthContext';
+import { hasSeenAuthWelcome } from '../services/authWelcomeStorage';
+import type { RootStackParamList } from './RootStackParamList';
+
+import ReceiverEducationScreen from '../screens/onboarding/ReceiverEducationScreen';
+import RoleGateScreen from '../screens/onboarding/RoleGateScreen';
+import SplashScreen from '../screens/onboarding/SplashScreen';
+import ReceiverLoginScreen from '../screens/ReceiverLoginScreen';
+import UserLoginScreen from '../screens/UserLoginScreen';
+import ForgotPasswordScreen from '../screens/ForgotPasswordScreen';
+import OtpScreen from '../screens/OtpScreen';
+import RegisterScreen from '../screens/RegisterScreen';
+import UserRegisterScreen from '../screens/UserRegisterScreen';
+import ReceiverAppNavigator from './ReceiverAppNavigator';
+import UnderReviewScreen from '../screens/UnderReviewScreen';
+import CallerAppNavigator from './CallerAppNavigator';
+import CompleteProfileFlow from './CompleteProfileFlow';
+import UserOnboardingFlow from './UserOnboardingFlow';
+
+const Stack = createNativeStackNavigator<RootStackParamList>();
+
+/** Signed-out tree: load welcome flag so logout skips Splash and opens RoleGate. */
+function SignedOutNavigator(): React.JSX.Element {
+  const [ready, setReady] = useState(false);
+  const [initialRoute, setInitialRoute] = useState<'Splash' | 'RoleGate'>('Splash');
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const seen = await hasSeenAuthWelcome();
+      if (!cancelled) {
+        setInitialRoute(seen ? 'RoleGate' : 'Splash');
+        setReady(true);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  if (!ready) {
+    return (
+      <View style={styles.centered}>
+        <ActivityIndicator size="large" />
+      </View>
+    );
+  }
+
+  return (
+    <NavigationContainer>
+      <Stack.Navigator
+        initialRouteName={initialRoute}
+        screenOptions={{ headerShown: false }}
+      >
+        <Stack.Screen name="Splash" component={SplashScreen} />
+        <Stack.Screen name="RoleGate" component={RoleGateScreen} />
+        <Stack.Screen name="ReceiverEducation" component={ReceiverEducationScreen} />
+        <Stack.Screen name="ReceiverLogin" component={ReceiverLoginScreen} />
+        <Stack.Screen name="UserLogin" component={UserLoginScreen} />
+        <Stack.Screen name="ForgotPassword" component={ForgotPasswordScreen} />
+        <Stack.Screen name="Register" component={RegisterScreen} />
+        <Stack.Screen name="UserRegister" component={UserRegisterScreen} />
+        <Stack.Screen name="Otp" component={OtpScreen} />
+      </Stack.Navigator>
+    </NavigationContainer>
+  );
+}
+
+export default function AppNavigator(): React.JSX.Element {
+  const { bootstrapping, isSignedIn, user, loadingUser, signOut } = useAuth();
+
+  if (bootstrapping) {
+    return (
+      <View style={styles.centered}>
+        <ActivityIndicator size="large" />
+      </View>
+    );
+  }
+
+  if (!isSignedIn) {
+    return <SignedOutNavigator />;
+  }
+
+  if (loadingUser && !user) {
+    return (
+      <View style={styles.centered}>
+        <ActivityIndicator size="large" />
+      </View>
+    );
+  }
+
+  if (!user) {
+    return (
+      <View style={styles.centered}>
+        <Text style={styles.err}>Could not load your session.</Text>
+        <TouchableOpacity onPress={() => void signOut()}>
+          <Text style={styles.link}>Back to login</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
+  const { accountStatus, suspended } = user;
+
+  return (
+    <NavigationContainer>
+      <Stack.Navigator screenOptions={{ headerShown: false }}>
+        {user.role === 'caller' ? (
+          accountStatus === 'pending_profile' ? (
+            <Stack.Screen name="UserOnboardingFlow" component={UserOnboardingFlow} />
+          ) : suspended ? (
+            <Stack.Screen name="UnderReview" component={UnderReviewScreen} />
+          ) : accountStatus === 'approved' ? (
+            <Stack.Screen name="CallerApp" component={CallerAppNavigator} />
+          ) : (
+            <Stack.Screen name="UnderReview" component={UnderReviewScreen} />
+          )
+        ) : accountStatus === 'pending_profile' ? (
+          <Stack.Screen name="CompleteProfileFlow" component={CompleteProfileFlow} />
+        ) : accountStatus === 'pending_review' || accountStatus === 'rejected' ? (
+          <Stack.Screen name="UnderReview" component={UnderReviewScreen} />
+        ) : accountStatus === 'approved' ? (
+          <Stack.Screen name="Home" component={ReceiverAppNavigator} />
+        ) : (
+          <Stack.Screen name="UnderReview" component={UnderReviewScreen} />
+        )}
+      </Stack.Navigator>
+    </NavigationContainer>
+  );
+}
+
+const styles = StyleSheet.create({
+  centered: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+  },
+  err: {
+    fontSize: 16,
+    color: '#333',
+    marginBottom: 16,
+    textAlign: 'center',
+  },
+  link: {
+    color: '#7b2cff',
+    fontWeight: '700',
+    fontSize: 16,
+  },
+});

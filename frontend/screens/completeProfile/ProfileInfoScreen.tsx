@@ -1,0 +1,309 @@
+import * as ImagePicker from 'expo-image-picker';
+import React, { useState } from 'react';
+import {
+  Alert,
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from 'react-native';
+import type { NativeStackScreenProps } from '@react-navigation/native-stack';
+
+import { Button } from '../../components/ui/Button';
+import { Input } from '../../components/ui/Input';
+import { ScreenHeader } from '../../components/ui/ScreenHeader';
+import { ToggleGroup } from '../../components/ui/ToggleGroup';
+import { UploadField } from '../../components/ui/UploadField';
+import { useCompleteProfile } from '../../context/CompleteProfileContext';
+import { INTEREST_OPTIONS, LANGUAGE_OPTIONS } from '../../constants/profileOptions';
+import { INDIAN_STATES } from '../../constants/userOnboarding';
+import type { CompleteProfileStackParamList } from '../../navigation/CompleteProfileStackParamList';
+import type { Gender } from '../../types/user';
+import { validateProfileInfo } from '../../utils/completeProfileSteps';
+
+type Props = NativeStackScreenProps<CompleteProfileStackParamList, 'ProfileInfo'>;
+
+const GENDERS: { value: Gender; label: string }[] = [
+  { value: 'male', label: 'Male' },
+  { value: 'female', label: 'Female' },
+  { value: 'other', label: 'Other' },
+];
+
+export default function ProfileInfoScreen({ navigation }: Props): React.JSX.Element {
+  const { state, update } = useCompleteProfile();
+  const [stateModal, setStateModal] = useState(false);
+
+  const pickProfileImage = async () => {
+    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!perm.granted) {
+      Alert.alert('Permission', 'Photo library access is required for your profile picture.');
+      return;
+    }
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      quality: 0.85,
+    });
+    if (result.canceled || !result.assets[0]) return;
+    const a = result.assets[0];
+    update({
+      profileImageUri: a.uri,
+      profileImageMime: a.mimeType ?? 'image/jpeg',
+    });
+  };
+
+  const onNext = () => {
+    const err = validateProfileInfo(state);
+    if (err) {
+      Alert.alert('Validation', err);
+      return;
+    }
+    navigation.navigate('DocumentUpload');
+  };
+
+  return (
+    <View style={styles.bg}>
+      <KeyboardAvoidingView
+        style={styles.card}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      >
+        <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+          <ScreenHeader
+            title="Complete Your Profile"
+            subtitle="Step 1 of 3"
+            navigation={navigation}
+            showBack
+          />
+          <Text style={styles.lead}>All fields are required to continue</Text>
+
+          <UploadField
+            label="Profile picture *"
+            uri={state.profileImageUri}
+            mimeType={state.profileImageMime}
+            onPick={pickProfileImage}
+            onClear={() => update({ profileImageUri: null, profileImageMime: null })}
+            hint="Upload a clear photo of yourself. JPG or PNG"
+          />
+
+          <Input
+            label="Display name *"
+            value={state.displayName}
+            onChangeText={(t) => update({ displayName: t })}
+            placeholder="How should users call you?"
+            autoCapitalize="words"
+          />
+
+          <Text style={styles.fieldLabel}>Gender *</Text>
+          <View style={styles.segmentWrap}>
+            {GENDERS.map(({ value, label }) => (
+              <TouchableOpacity
+                key={value}
+                style={[styles.segment, state.gender === value && styles.segmentActive]}
+                onPress={() => update({ gender: value })}
+                activeOpacity={0.85}
+              >
+                <Text
+                  style={[styles.segmentText, state.gender === value && styles.segmentTextActive]}
+                >
+                  {label}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+
+          <Text style={styles.fieldLabel}>State *</Text>
+          <TouchableOpacity style={styles.stateSelect} onPress={() => setStateModal(true)} activeOpacity={0.85}>
+            <Text style={state.state.trim() ? styles.stateSelectText : styles.stateSelectPh}>
+              {state.state.trim() || 'Tap to select state'}
+            </Text>
+            <Text style={styles.stateChev}>▼</Text>
+          </TouchableOpacity>
+
+          <ToggleGroup
+            label="Languages *"
+            options={LANGUAGE_OPTIONS}
+            selected={state.languages}
+            onChange={(languages) => update({ languages })}
+          />
+
+          <ToggleGroup
+            label="Interests *"
+            options={INTEREST_OPTIONS}
+            selected={state.interests}
+            onChange={(interests) => update({ interests })}
+          />
+
+          <View style={styles.ratesBox}>
+            <Text style={styles.ratesTitle}>Set Your Call Rates</Text>
+            <Input
+              label="Audio Call Rate *"
+              value={state.audioCallRate}
+              onChangeText={(t) => update({ audioCallRate: t })}
+              placeholder="e.g., 3"
+              keyboardType="decimal-pad"
+            />
+            <Text style={styles.ratesHint}>Amount in ₹ per minute for audio calls.</Text>
+          </View>
+
+          <Button title="Continue" onPress={onNext} />
+        </ScrollView>
+      </KeyboardAvoidingView>
+
+      <Modal visible={stateModal} transparent animationType="fade">
+        <View style={styles.modalOverlay}>
+          <Pressable style={styles.modalDismiss} onPress={() => setStateModal(false)} />
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>Select State</Text>
+            <ScrollView style={styles.modalList} keyboardShouldPersistTaps="handled">
+              {INDIAN_STATES.map((s) => (
+                <TouchableOpacity
+                  key={s}
+                  style={[styles.stateRow, s === state.state && styles.stateRowActive]}
+                  onPress={() => {
+                    update({ state: s });
+                    setStateModal(false);
+                  }}
+                >
+                  <Text style={[styles.stateRowText, s === state.state && styles.stateRowTextActive]}>{s}</Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+    </View>
+  );
+}
+
+const PURPLE = '#7b2cff';
+
+const styles = StyleSheet.create({
+  bg: {
+    flex: 1,
+    backgroundColor: '#262626',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 18,
+    paddingVertical: 24,
+  },
+  card: {
+    width: '100%',
+    maxWidth: 400,
+    flex: 1,
+    backgroundColor: '#fff',
+    borderRadius: 12,
+  },
+  content: {
+    padding: 20,
+    paddingBottom: 40,
+  },
+  lead: {
+    fontSize: 13,
+    color: '#666',
+    marginBottom: 16,
+  },
+  fieldLabel: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#333',
+    marginBottom: 8,
+  },
+  segmentWrap: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 16,
+  },
+  segment: {
+    flex: 1,
+    paddingVertical: 10,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#e5e5e5',
+    alignItems: 'center',
+    backgroundColor: '#fafafa',
+  },
+  segmentActive: {
+    borderColor: PURPLE,
+    backgroundColor: 'rgba(123,44,255,0.08)',
+  },
+  segmentText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#555',
+  },
+  segmentTextActive: {
+    color: PURPLE,
+  },
+  stateSelect: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    borderWidth: 1,
+    borderColor: '#e5e5e5',
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+    backgroundColor: '#fff',
+    marginBottom: 18,
+  },
+  stateSelectText: { fontSize: 15, fontWeight: '600', color: '#111' },
+  stateSelectPh: { fontSize: 15, color: '#999' },
+  stateChev: { fontSize: 12, color: '#888' },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    justifyContent: 'center',
+    padding: 24,
+  },
+  modalDismiss: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  modalCard: {
+    backgroundColor: '#fff',
+    borderRadius: 14,
+    maxHeight: '70%',
+    paddingVertical: 12,
+    zIndex: 1,
+  },
+  modalTitle: {
+    fontSize: 17,
+    fontWeight: '800',
+    paddingHorizontal: 18,
+    paddingBottom: 10,
+    color: '#111',
+  },
+  modalList: { paddingHorizontal: 8 },
+  stateRow: {
+    paddingVertical: 14,
+    paddingHorizontal: 14,
+    borderRadius: 10,
+  },
+  stateRowActive: { backgroundColor: 'rgba(123,44,255,0.12)' },
+  stateRowText: { fontSize: 15, color: '#222' },
+  stateRowTextActive: { fontWeight: '700', color: PURPLE },
+  ratesBox: {
+    marginTop: 8,
+    marginBottom: 8,
+    padding: 16,
+    borderRadius: 14,
+    backgroundColor: 'rgba(123, 44, 255, 0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(123, 44, 255, 0.22)',
+  },
+  ratesTitle: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: '#111',
+    marginBottom: 12,
+  },
+  ratesHint: {
+    marginTop: 6,
+    fontSize: 12,
+    color: '#666',
+    lineHeight: 17,
+  },
+});
