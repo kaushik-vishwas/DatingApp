@@ -7,6 +7,8 @@ export interface IChatMessage {
   receiverId: mongoose.Types.ObjectId;
   senderType: ChatSenderType;
   text: string;
+  /** INR credited to receiver when caller paid for this message (else 0). */
+  feeInr: number;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -19,6 +21,7 @@ const chatMessageSchema = new Schema<IChatMessage>(
     receiverId: { type: Schema.Types.ObjectId, ref: 'Receiver', required: true, index: true },
     senderType: { type: String, enum: ['u', 'r'], required: true },
     text: { type: String, required: true, trim: true, maxlength: 2000 },
+    feeInr: { type: Number, default: 0, min: 0 },
   },
   { timestamps: true }
 );

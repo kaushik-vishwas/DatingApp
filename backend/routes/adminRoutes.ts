@@ -12,7 +12,12 @@ import {
   approveReceiver,
   rejectReceiver,
   listAppUsers,
+  listPendingAppUsers,
   updateAppUser,
+  approveAppUser,
+  rejectAppUser,
+  listModerationReports,
+  resolveModerationReport,
 } from '../controllers/adminController';
 import { adminProtect } from '../middleware/adminAuth';
 
@@ -26,6 +31,9 @@ router.post('/auth/request-email-change', adminProtect, adminRequestEmailChange)
 router.post('/auth/confirm-email-change', adminProtect, adminConfirmEmailChange);
 
 router.get('/users', adminProtect, listAppUsers);
+router.get('/users/pending', adminProtect, listPendingAppUsers);
+router.patch('/users/:id/approve', adminProtect, approveAppUser);
+router.patch('/users/:id/reject', adminProtect, rejectAppUser);
 router.patch('/users/:id', adminProtect, updateAppUser);
 
 router.get('/receivers', adminProtect, listAllReceivers);
@@ -33,5 +41,8 @@ router.get('/receivers/pending', adminProtect, listPendingReceivers);
 router.get('/kyc/stats', adminProtect, getKycStats);
 router.patch('/receivers/:id/approve', adminProtect, approveReceiver);
 router.patch('/receivers/:id/reject', adminProtect, rejectReceiver);
+
+router.get('/reports', adminProtect, listModerationReports);
+router.patch('/reports/:id', adminProtect, resolveModerationReport);
 
 export default router;

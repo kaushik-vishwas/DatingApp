@@ -58,9 +58,12 @@ export function KycApprovalsPage() {
   const [range, setRange] = useState<Range>('7d');
   const [busyId, setBusyId] = useState<string | null>(null);
   const [detail, setDetail] = useState<ReceiverRecord | null>(null);
-  const [stats, setStats] = useState<{ pendingApprovals: number; approvedToday: number; rejectedToday: number } | null>(
-    null
-  );
+  const [stats, setStats] = useState<{
+    pendingApprovals: number;
+    pendingCallerApprovals: number;
+    approvedToday: number;
+    rejectedToday: number;
+  } | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -154,7 +157,10 @@ export function KycApprovalsPage() {
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-neutral-900">KYC Approvals</h1>
-          <p className="mt-1 text-sm text-neutral-500">Review documents and approve or reject receiver profiles.</p>
+          <p className="mt-1 text-sm text-neutral-500">
+            Review receiver KYC here. Pending app users with voice verification are approved under{' '}
+            <strong className="font-semibold text-neutral-700">User management</strong>.
+          </p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
           <select
@@ -183,10 +189,14 @@ export function KycApprovalsPage() {
         </div>
       ) : null}
 
-      <div className="mt-8 grid gap-4 sm:grid-cols-3">
+      <div className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <div className="rounded-2xl border border-neutral-200 bg-white p-5 shadow-sm">
-          <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">Pending Approvals</p>
+          <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">Pending (receivers)</p>
           <p className="mt-2 text-3xl font-bold text-amber-600">{stats?.pendingApprovals ?? '—'}</p>
+        </div>
+        <div className="rounded-2xl border border-neutral-200 bg-white p-5 shadow-sm">
+          <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">Pending (app users)</p>
+          <p className="mt-2 text-3xl font-bold text-amber-700">{stats?.pendingCallerApprovals ?? '—'}</p>
         </div>
         <div className="rounded-2xl border border-neutral-200 bg-white p-5 shadow-sm">
           <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">Approved Today</p>

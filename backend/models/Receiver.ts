@@ -34,6 +34,12 @@ export interface IReceiver {
   passwordHash: string | null;
   /** Audio call rate in INR per minute (set during profile setup). */
   audioCallRate: number | null;
+  /** Earnings wallet in INR (e.g. per-message chat credits). */
+  walletBalance: number;
+  /** Admin moderation: blocks receiver app access when true (like caller `suspended`). */
+  suspended: boolean;
+  /** Set when an admin applies a warning from a moderation report. */
+  moderationWarningAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -70,6 +76,9 @@ const receiverSchema = new Schema<IReceiver>(
     state: { type: String, default: null, trim: true },
     passwordHash: { type: String, default: null, select: false },
     audioCallRate: { type: Number, default: null },
+    walletBalance: { type: Number, default: 0 },
+    suspended: { type: Boolean, default: false },
+    moderationWarningAt: { type: Date, default: null },
   },
   { timestamps: true }
 );

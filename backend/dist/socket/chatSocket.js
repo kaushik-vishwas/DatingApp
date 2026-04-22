@@ -9,6 +9,10 @@ const socket_io_1 = require("socket.io");
 const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
 const mongoose_1 = __importDefault(require("mongoose"));
 const ChatMessage_1 = __importDefault(require("../models/ChatMessage"));
+const ChatBlock_1 = __importDefault(require("../models/ChatBlock"));
+const User_1 = __importDefault(require("../models/User"));
+const Receiver_1 = __importDefault(require("../models/Receiver"));
+const chatPricing_1 = require("../constants/chatPricing");
 function roomKey(userId, receiverId) {
     return `chat:${userId}:${receiverId}`;
 }
@@ -76,6 +80,16 @@ function attachChatSocket(httpServer) {
                         }
                         userHex = myId;
                         receiverHex = rid;
+                        const u = await User_1.default.findById(myId).select('accountStatus suspended');
+                        if (!u || u.suspended || u.accountStatus !== 'approved') {
+                            ack?.({ ok: false, error: 'Account not allowed' });
+                            return;
+                        }
+                        const recv = await Receiver_1.default.findById(rid).select('accountStatus suspended');
+                        if (!recv || recv.accountStatus !== 'approved' || recv.suspended) {
+                            ack?.({ ok: false, error: 'Cannot join this chat' });
+                            return;
+                        }
                     }
                     else {
                         const uid = typeof payload?.userId === 'string' ? payload.userId.trim() : '';
@@ -85,10 +99,24 @@ function attachChatSocket(httpServer) {
                         }
                         userHex = uid;
                         receiverHex = myId;
+                        const recv = await Receiver_1.default.findById(myId).select('accountStatus suspended');
+                        if (!recv || recv.accountStatus !== 'approved' || recv.suspended) {
+                            ack?.({ ok: false, error: 'Account not allowed' });
+                            return;
+                        }
+                        const u = await User_1.default.findById(uid).select('accountStatus suspended');
+                        if (!u || u.suspended || u.accountStatus !== 'approved') {
+                            ack?.({ ok: false, error: 'Cannot join this chat' });
+                            return;
+                        }
                     }
                     const prevRoom = socket.data.chatRoom;
                     if (prevRoom) {
                         await socket.leave(prevRoom);
+                    }
+                    if (await ChatBlock_1.default.exists({ userId: userHex, receiverId: receiverHex })) {
+                        ack?.({ ok: false, error: 'This chat is blocked.' });
+                        return;
                     }
                     const room = roomKey(userHex, receiverHex);
                     await socket.join(room);
@@ -142,12 +170,115 @@ function attachChatSocket(httpServer) {
                         ack?.({ ok: false, error: 'Forbidden' });
                         return;
                     }
-                    const doc = await ChatMessage_1.default.create({
-                        userId: parsed.userId,
-                        receiverId: parsed.receiverId,
-                        senderType: typ,
-                        text,
-                    });
+                    if (typ === 'u') {
+                        const u = await User_1.default.findById(myId).select('accountStatus suspended');
+                        if (!u || u.suspended || u.accountStatus !== 'approved') {
+                            ack?.({ ok: false, error: 'Account not allowed' });
+                            return;
+                        }
+                    }
+                    else {
+                        const recv = await Receiver_1.default.findById(myId).select('accountStatus suspended');
+                        if (!recv || recv.accountStatus !== 'approved' || recv.suspended) {
+                            ack?.({ ok: false, error: 'Account not allowed' });
+                            return;
+                        }
+                    }
+                    if (await ChatBlock_1.default.exists({ userId: parsed.userId, receiverId: parsed.receiverId })) {
+                        ack?.({ ok: false, error: 'This chat is blocked.' });
+                        return;
+                    }
+                    let doc;
+                    const uidObj = new mongoose_1.default.Types.ObjectId(parsed.userId);
+                    const ridObj = new mongoose_1.default.Types.ObjectId(parsed.receiverId);
+                    if (typ === 'u') {
+                        const hasReceiverReply = await ChatMessage_1.default.exists({
+                            userId: uidObj,
+                            receiverId: ridObj,
+                            senderType: 'r',
+                        });
+                        const needCharge = Boolean(hasReceiverReply);
+                        if (needCharge) {
+                            const session = await mongoose_1.default.startSession();
+                            try {
+                                await session.withTransaction(async () => {
+                                    const usrUpd = await User_1.default.updateOne({ _id: uidObj, walletBalance: { $gte: chatPricing_1.CHAT_TEXT_FEE_INR } }, { $inc: { walletBalance: -chatPricing_1.CHAT_TEXT_FEE_INR } }, { session });
+                                    if (usrUpd.modifiedCount === 0) {
+                                        throw new Error('INSUFFICIENT_WALLET');
+                                    }
+                                    const recvUpd = await Receiver_1.default.updateOne({ _id: ridObj }, { $inc: { walletBalance: chatPricing_1.CHAT_TEXT_FEE_INR } }, { session });
+                                    if (recvUpd.modifiedCount !== 1) {
+                                        throw new Error('RECEIVER_CREDIT_FAILED');
+                                    }
+                                    const created = await ChatMessage_1.default.create([
+                                        {
+                                            userId: uidObj,
+                                            receiverId: ridObj,
+                                            senderType: typ,
+                                            text,
+                                            feeInr: chatPricing_1.CHAT_TEXT_FEE_INR,
+                                        },
+                                    ], { session });
+                                    doc = created[0];
+                                });
+                            }
+                            catch (e) {
+                                if (e instanceof Error && e.message === 'INSUFFICIENT_WALLET') {
+                                    const uDoc = await User_1.default.findById(uidObj).select('walletBalance');
+                                    ack?.({
+                                        ok: false,
+                                        code: 'INSUFFICIENT_WALLET',
+                                        error: 'Wallet balance is too low to send this message.',
+                                        walletBalance: typeof uDoc?.walletBalance === 'number' && Number.isFinite(uDoc.walletBalance)
+                                            ? uDoc.walletBalance
+                                            : 0,
+                                        requiredInr: chatPricing_1.CHAT_TEXT_FEE_INR,
+                                    });
+                                    return;
+                                }
+                                if (e instanceof Error && e.message === 'RECEIVER_CREDIT_FAILED') {
+                                    console.error('Receiver wallet credit failed', { userId: parsed.userId, receiverId: parsed.receiverId });
+                                    ack?.({ ok: false, error: 'Could not update receiver wallet. Try again.' });
+                                    return;
+                                }
+                                throw e;
+                            }
+                            finally {
+                                await session.endSession();
+                            }
+                            const [freshCaller, freshRecv] = await Promise.all([
+                                User_1.default.findById(uidObj).select('walletBalance'),
+                                Receiver_1.default.findById(ridObj).select('walletBalance'),
+                            ]);
+                            io.to(room).emit('chat:wallet', {
+                                callerWallet: typeof freshCaller?.walletBalance === 'number' &&
+                                    Number.isFinite(freshCaller.walletBalance)
+                                    ? freshCaller.walletBalance
+                                    : 0,
+                                receiverWallet: typeof freshRecv?.walletBalance === 'number' && Number.isFinite(freshRecv.walletBalance)
+                                    ? freshRecv.walletBalance
+                                    : 0,
+                            });
+                        }
+                        else {
+                            doc = await ChatMessage_1.default.create({
+                                userId: uidObj,
+                                receiverId: ridObj,
+                                senderType: typ,
+                                text,
+                                feeInr: 0,
+                            });
+                        }
+                    }
+                    else {
+                        doc = await ChatMessage_1.default.create({
+                            userId: uidObj,
+                            receiverId: ridObj,
+                            senderType: typ,
+                            text,
+                            feeInr: 0,
+                        });
+                    }
                     const out = {
                         id: String(doc._id),
                         senderType: typ,

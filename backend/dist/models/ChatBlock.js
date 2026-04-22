@@ -34,30 +34,10 @@ var __importStar = (this && this.__importStar) || (function () {
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
 const mongoose_1 = __importStar(require("mongoose"));
-const userSchema = new mongoose_1.Schema({
-    name: { type: String, required: true, trim: true },
-    email: { type: String, required: true, unique: true, lowercase: true, trim: true },
-    phone: { type: String, required: true, trim: true },
-    isVerified: { type: Boolean, default: false },
-    otp: { type: String, default: null },
-    otpExpiry: { type: Date, default: null },
-    accountStatus: {
-        type: String,
-        enum: ['pending_profile', 'pending_review', 'approved', 'rejected'],
-        default: 'pending_profile',
-    },
-    profileImage: { type: String, default: null },
-    languages: { type: [String], default: [] },
-    interests: { type: [String], default: [] },
-    gender: { type: String, enum: ['male', 'female', 'other'], default: null },
-    dateOfBirth: { type: Date, default: null },
-    age: { type: Number, default: null },
-    state: { type: String, default: null, trim: true },
-    passwordHash: { type: String, default: null, select: false },
-    suspended: { type: Boolean, default: false },
-    walletBalance: { type: Number, default: 0 },
-    moderationWarningAt: { type: Date, default: null },
-    userAudio: { type: String, default: null },
+const chatBlockSchema = new mongoose_1.Schema({
+    userId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
+    receiverId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Receiver', required: true, index: true },
 }, { timestamps: true });
-const User = mongoose_1.default.model('User', userSchema);
-exports.default = User;
+chatBlockSchema.index({ userId: 1, receiverId: 1 }, { unique: true });
+const ChatBlock = mongoose_1.default.model('ChatBlock', chatBlockSchema);
+exports.default = ChatBlock;

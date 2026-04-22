@@ -1,15 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Check, ChevronLeft, ChevronRight, Download, RefreshCw, Search, X } from 'lucide-react';
 import {
-  Ban,
-  ChevronLeft,
-  ChevronRight,
-  Download,
-  Eye,
-  RefreshCw,
-  Search,
-  UserCheck,
-} from 'lucide-react';
-import {
+  approveAppUser,
   fetchAppUsers,
   updateAppUserSuspension,
   type AppUserRange,
@@ -110,17 +102,19 @@ export function AppUsersPage() {
         p += 1;
       } while (collected.length < lastTotal && p <= 60);
 
-      const header = ['User ID', 'Name', 'Email', 'Phone', 'Wallet (INR)', 'Status', 'Joined'];
+      const header = ['User ID', 'Name', 'Email', 'Phone', 'Wallet (INR)', 'Voice URL', 'Access', 'Profile status', 'Joined'];
       const rows: string[][] = [header];
       collected.forEach((u, i) => {
-        const status = u.suspended ? 'Suspended' : 'Active';
+        const access = u.suspended ? 'Suspended' : 'Active';
         rows.push([
           `U${String(i + 1).padStart(4, '0')}`,
           u.name,
           u.email,
           formatPhoneIN(u.phone),
           String(u.walletBalance),
-          status,
+          u.userAudio ?? '',
+          access,
+          u.accountStatus,
           formatJoinedDate(u.createdAt),
         ]);
       });
@@ -136,21 +130,38 @@ export function AppUsersPage() {
     }
   };
 
-  const onToggleSuspend = async (u: AppUserRecord) => {
-    const next = !u.suspended;
-    const label = next ? 'suspend' : 'restore';
-    if (!window.confirm(`${next ? 'Suspend' : 'Restore'} access for ${u.name}?`)) return;
+  const onApproveUser = async (u: AppUserRecord) => {
     setBusyId(u._id);
     setError(null);
     try {
-      await updateAppUserSuspension(u._id, next);
+      await approveAppUser(u._id);
       await load();
     } catch (err: unknown) {
       const msg =
         err && typeof err === 'object' && 'response' in err
           ? String((err as { response?: { data?: { message?: string } } }).response?.data?.message)
-          : `Failed to ${label}`;
-      setError(msg || `Failed to ${label}`);
+          : 'Approve failed';
+      setError(msg || 'Approve failed');
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const onSetSuspended = async (u: AppUserRecord, suspended: boolean) => {
+    if (suspended && !window.confirm(`Suspend ${u.name}? They will lose app access until you restore them.`)) return;
+    setBusyId(u._id);
+    setError(null);
+    try {
+      await updateAppUserSuspension(u._id, suspended);
+      await load();
+    } catch (err: unknown) {
+      const msg =
+        err && typeof err === 'object' && 'response' in err
+          ? String((err as { response?: { data?: { message?: string } } }).response?.data?.message)
+          : suspended
+            ? 'Suspend failed'
+            : 'Restore failed';
+      setError(msg || 'Request failed');
     } finally {
       setBusyId(null);
     }
@@ -174,7 +185,10 @@ export function AppUsersPage() {
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-neutral-900">User Management</h1>
-          <p className="mt-1 text-sm text-neutral-500">Nesthama app users — search, filter, suspend, and export.</p>
+          <p className="mt-1 text-sm text-neutral-500">
+            Nesthama app users — search, filter, export. Status matches access: Active (not suspended) or Inactive
+            (suspended). ✓ approve or restore; ✕ suspend.
+          </p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
           <select
@@ -252,7 +266,7 @@ export function AppUsersPage() {
           <p className="p-12 text-center text-sm text-neutral-500">No users in this view.</p>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[960px] text-left text-sm">
+            <table className="w-full min-w-[1180px] text-left text-sm">
               <thead>
                 <tr className="border-b border-neutral-100 bg-neutral-50/80">
                   <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-neutral-500">User ID</th>
@@ -260,15 +274,38 @@ export function AppUsersPage() {
                   <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-neutral-500">Email</th>
                   <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-neutral-500">Phone</th>
                   <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-neutral-500">Wallet</th>
+                  <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-neutral-500">Audio</th>
                   <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-neutral-500">Status</th>
                   <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-neutral-500">Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {users.map((u, i) => {
-                  const active = !u.suspended;
+                  const pending = u.accountStatus === 'pending_review';
+                  const rejected = u.accountStatus === 'rejected';
+                  const legacyNeedVoice = pending || rejected;
+                  /** Active / Inactive = suspension only (✓ enable vs ✕ pause). */
+                  const statusBadge = u.suspended
+                    ? { label: 'Inactive', className: 'bg-neutral-300 text-neutral-900' }
+                    : { label: 'Active', className: 'bg-emerald-100 text-emerald-800' };
+
+                  const canTickEnable =
+                    (u.suspended || legacyNeedVoice) && (!legacyNeedVoice || Boolean(u.userAudio));
+                  const tickTitle = canTickEnable
+                    ? 'Enable access'
+                    : legacyNeedVoice && !u.userAudio
+                      ? 'Cannot enable without voice sample'
+                      : 'No action';
+
+                  const canCrossSuspend = !u.suspended && u.accountStatus !== 'pending_profile';
+                  const crossTitle = canCrossSuspend ? 'Suspend access' : 'Already suspended';
+
                   return (
-                    <tr key={u._id} className="border-b border-neutral-100 last:border-0">
+                    <tr
+                      key={u._id}
+                      className="cursor-pointer border-b border-neutral-100 last:border-0 hover:bg-neutral-50/80"
+                      onClick={() => setDetail(u)}
+                    >
                       <td className="px-4 py-3 font-mono text-xs font-medium text-neutral-800">
                         {appUserRowCode(page, limit, i)}
                       </td>
@@ -281,35 +318,48 @@ export function AppUsersPage() {
                       <td className="px-4 py-3 font-medium text-neutral-900">
                         ₹{u.walletBalance.toLocaleString('en-IN')}
                       </td>
-                      <td className="px-4 py-3">
+                      <td className="px-4 py-3 align-middle" onClick={(e) => e.stopPropagation()}>
+                        {u.userAudio ? (
+                          <audio
+                            className="h-9 w-full max-w-[240px] min-w-[180px]"
+                            controls
+                            preload="metadata"
+                            src={u.userAudio}
+                          >
+                            <track kind="captions" />
+                          </audio>
+                        ) : (
+                          <span className="text-neutral-400">—</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
                         <span
-                          className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-semibold ${
-                            active ? 'bg-emerald-100 text-emerald-800' : 'bg-red-100 text-red-800'
-                          }`}
+                          className={`inline-flex w-fit rounded-full px-2.5 py-0.5 text-xs font-semibold ${statusBadge.className}`}
                         >
-                          {active ? 'Active' : 'Suspended'}
+                          {statusBadge.label}
                         </span>
                       </td>
-                      <td className="px-4 py-3">
-                        <div className="flex items-center gap-1">
+                      <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
+                        <div className="flex flex-wrap items-center gap-2">
                           <button
                             type="button"
-                            onClick={() => setDetail(u)}
-                            className="rounded-lg p-2 text-blue-600 hover:bg-blue-50"
-                            title="View"
+                            disabled={busyId === u._id || !canTickEnable}
+                            onClick={() => {
+                              if (canTickEnable) void onApproveUser(u);
+                            }}
+                            className="inline-flex h-10 w-10 items-center justify-center rounded-full border-2 border-emerald-200 bg-emerald-50 text-emerald-700 shadow-sm hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-40"
+                            title={tickTitle}
                           >
-                            <Eye className="h-5 w-5" />
+                            <Check className="h-5 w-5 stroke-[2.5]" />
                           </button>
                           <button
                             type="button"
-                            disabled={busyId === u._id}
-                            onClick={() => void onToggleSuspend(u)}
-                            className={`rounded-lg p-2 disabled:opacity-50 ${
-                              active ? 'text-amber-700 hover:bg-amber-50' : 'text-emerald-700 hover:bg-emerald-50'
-                            }`}
-                            title={active ? 'Suspend' : 'Restore'}
+                            disabled={busyId === u._id || !canCrossSuspend}
+                            onClick={() => void onSetSuspended(u, true)}
+                            className="inline-flex h-10 w-10 items-center justify-center rounded-full border-2 border-red-200 bg-red-50 text-red-700 shadow-sm hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-40"
+                            title={crossTitle}
                           >
-                            {active ? <Ban className="h-5 w-5" /> : <UserCheck className="h-5 w-5" />}
+                            <X className="h-5 w-5 stroke-[2.5]" />
                           </button>
                         </div>
                       </td>
@@ -358,7 +408,7 @@ export function AppUsersPage() {
         </div>
       </div>
 
-      <AppUserDetailModal user={detail} onClose={() => setDetail(null)} />
+      <AppUserDetailModal user={detail} onClose={() => setDetail(null)} onChanged={() => void load()} />
     </div>
   );
 }

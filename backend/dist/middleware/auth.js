@@ -36,10 +36,6 @@ const protect = async (req, res, next) => {
                 res.status(401).json({ message: 'User not found' });
                 return;
             }
-            if (user.suspended) {
-                res.status(403).json({ message: 'Your account has been suspended. Contact support.' });
-                return;
-            }
             req.user = user;
             req.receiver = undefined;
             req.accountKind = 'user';

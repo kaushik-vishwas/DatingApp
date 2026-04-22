@@ -26,6 +26,10 @@ export interface IUser {
   suspended: boolean;
   /** Wallet balance in INR (whole rupees); reserved for future wallet features */
   walletBalance: number;
+  /** Set when an admin applies a warning from a moderation report. */
+  moderationWarningAt: Date | null;
+  /** HTTPS URL of voice sample (callers only); stored as `userAudio` in MongoDB. */
+  userAudio: string | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -55,6 +59,8 @@ const userSchema = new Schema<IUser>(
     passwordHash: { type: String, default: null, select: false },
     suspended: { type: Boolean, default: false },
     walletBalance: { type: Number, default: 0 },
+    moderationWarningAt: { type: Date, default: null },
+    userAudio: { type: String, default: null },
   },
   { timestamps: true }
 );

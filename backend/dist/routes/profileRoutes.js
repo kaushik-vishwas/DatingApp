@@ -5,6 +5,8 @@ const profileController_1 = require("../controllers/profileController");
 const auth_1 = require("../middleware/auth");
 const router = (0, express_1.Router)();
 router.post('/complete', auth_1.protect, profileController_1.completeProfile);
+router.patch('/caller-audio', auth_1.protect, profileController_1.saveCallerUserAudio);
 router.post('/complete-caller', auth_1.protect, profileController_1.completeCallerProfile);
 router.patch('/caller', auth_1.protect, profileController_1.updateCallerProfile);
+router.get('/receiver-wallet-summary', auth_1.protect, profileController_1.getReceiverWalletSummary);
 exports.default = router;

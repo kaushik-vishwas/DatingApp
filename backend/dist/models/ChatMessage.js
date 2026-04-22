@@ -39,6 +39,7 @@ const chatMessageSchema = new mongoose_1.Schema({
     receiverId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Receiver', required: true, index: true },
     senderType: { type: String, enum: ['u', 'r'], required: true },
     text: { type: String, required: true, trim: true, maxlength: 2000 },
+    feeInr: { type: Number, default: 0, min: 0 },
 }, { timestamps: true });
 chatMessageSchema.index({ userId: 1, receiverId: 1, createdAt: 1 });
 const ChatMessage = mongoose_1.default.model('ChatMessage', chatMessageSchema);

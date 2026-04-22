@@ -33,31 +33,29 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.REPORT_REASONS = void 0;
 const mongoose_1 = __importStar(require("mongoose"));
-const userSchema = new mongoose_1.Schema({
-    name: { type: String, required: true, trim: true },
-    email: { type: String, required: true, unique: true, lowercase: true, trim: true },
-    phone: { type: String, required: true, trim: true },
-    isVerified: { type: Boolean, default: false },
-    otp: { type: String, default: null },
-    otpExpiry: { type: Date, default: null },
-    accountStatus: {
+exports.REPORT_REASONS = [
+    'Spam',
+    'Harassment',
+    'Inappropriate content',
+    'Fake profile',
+    'Other',
+];
+const userReportSchema = new mongoose_1.Schema({
+    reporterKind: { type: String, enum: ['user', 'receiver'], required: true },
+    reporterId: { type: mongoose_1.Schema.Types.ObjectId, required: true, index: true },
+    reportedKind: { type: String, enum: ['user', 'receiver'], required: true },
+    reportedId: { type: mongoose_1.Schema.Types.ObjectId, required: true, index: true },
+    reason: { type: String, enum: [...exports.REPORT_REASONS], required: true },
+    preview: { type: String, default: '', trim: true, maxlength: 500 },
+    status: { type: String, enum: ['pending', 'resolved'], default: 'pending', index: true },
+    resolution: {
         type: String,
-        enum: ['pending_profile', 'pending_review', 'approved', 'rejected'],
-        default: 'pending_profile',
+        enum: ['ignored', 'warned', 'suspended', null],
+        default: null,
     },
-    profileImage: { type: String, default: null },
-    languages: { type: [String], default: [] },
-    interests: { type: [String], default: [] },
-    gender: { type: String, enum: ['male', 'female', 'other'], default: null },
-    dateOfBirth: { type: Date, default: null },
-    age: { type: Number, default: null },
-    state: { type: String, default: null, trim: true },
-    passwordHash: { type: String, default: null, select: false },
-    suspended: { type: Boolean, default: false },
-    walletBalance: { type: Number, default: 0 },
-    moderationWarningAt: { type: Date, default: null },
-    userAudio: { type: String, default: null },
 }, { timestamps: true });
-const User = mongoose_1.default.model('User', userSchema);
-exports.default = User;
+userReportSchema.index({ status: 1, createdAt: -1 });
+const UserReport = mongoose_1.default.model('UserReport', userReportSchema);
+exports.default = UserReport;

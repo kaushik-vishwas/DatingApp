@@ -3,12 +3,14 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.rejectReceiver = exports.approveReceiver = exports.listPendingReceivers = exports.getKycStats = exports.listAllReceivers = exports.updateAppUser = exports.listAppUsers = exports.adminConfirmEmailChange = exports.adminRequestEmailChange = exports.adminResetPassword = exports.adminForgotPassword = exports.adminMe = exports.adminLogin = void 0;
+exports.resolveModerationReport = exports.listModerationReports = exports.rejectAppUser = exports.approveAppUser = exports.listPendingAppUsers = exports.rejectReceiver = exports.approveReceiver = exports.listPendingReceivers = exports.getKycStats = exports.listAllReceivers = exports.updateAppUser = exports.listAppUsers = exports.adminConfirmEmailChange = exports.adminRequestEmailChange = exports.adminResetPassword = exports.adminForgotPassword = exports.adminMe = exports.adminLogin = void 0;
 const bcryptjs_1 = __importDefault(require("bcryptjs"));
 const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
+const mongoose_1 = __importDefault(require("mongoose"));
 const Admin_1 = __importDefault(require("../models/Admin"));
 const Receiver_1 = __importDefault(require("../models/Receiver"));
 const User_1 = __importDefault(require("../models/User"));
+const UserReport_1 = __importDefault(require("../models/UserReport"));
 const authController_1 = require("./authController");
 const email_1 = require("../config/email");
 const superAdminSync_1 = require("../services/superAdminSync");
@@ -477,8 +479,16 @@ const getKycStats = async (_req, res) => {
     try {
         const start = new Date();
         start.setHours(0, 0, 0, 0);
-        const [pendingApprovals, approvedToday, rejectedToday] = await Promise.all([
+        const callerAwaitingAccess = {
+            $or: [
+                { suspended: true, accountStatus: 'approved' },
+                { accountStatus: 'pending_review' },
+                { accountStatus: 'rejected', suspended: false },
+            ],
+        };
+        const [pendingApprovals, pendingCallerApprovals, approvedToday, rejectedToday] = await Promise.all([
             Receiver_1.default.countDocuments({ accountStatus: 'pending_review' }),
+            User_1.default.countDocuments(callerAwaitingAccess),
             Receiver_1.default.countDocuments({
                 accountStatus: 'approved',
                 updatedAt: { $gte: start },
@@ -488,7 +498,12 @@ const getKycStats = async (_req, res) => {
                 updatedAt: { $gte: start },
             }),
         ]);
-        res.status(200).json({ pendingApprovals, approvedToday, rejectedToday });
+        res.status(200).json({
+            pendingApprovals,
+            pendingCallerApprovals,
+            approvedToday,
+            rejectedToday,
+        });
     }
     catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
@@ -575,3 +590,266 @@ const rejectReceiver = async (req, res) => {
     }
 };
 exports.rejectReceiver = rejectReceiver;
+/**
+ * GET /admin/users/pending — app users (callers) awaiting approval after voice + profile submit.
+ */
+const listPendingAppUsers = async (_req, res) => {
+    try {
+        const users = await User_1.default.find({
+            $or: [
+                { suspended: true, accountStatus: 'approved' },
+                { accountStatus: 'pending_review' },
+                { accountStatus: 'rejected', suspended: false },
+            ],
+        })
+            .select('-otp -otpExpiry -passwordHash')
+            .sort({ updatedAt: -1 });
+        res.status(200).json({ users: users.map((u) => (0, authController_1.toApiUser)(u)) });
+    }
+    catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error('listPendingAppUsers error:', msg);
+        res.status(500).json({ message: msg || 'Server error' });
+    }
+};
+exports.listPendingAppUsers = listPendingAppUsers;
+/**
+ * PATCH /admin/users/:id/approve — clears caller suspension (access on). Legacy: pending_review/rejected + voice.
+ */
+const approveAppUser = async (req, res) => {
+    try {
+        const id = req.params.id;
+        const user = await User_1.default.findById(id);
+        if (!user) {
+            res.status(404).json({ message: 'User not found' });
+            return;
+        }
+        if (user.accountStatus === 'pending_profile') {
+            res.status(400).json({ message: 'User has not finished onboarding yet' });
+            return;
+        }
+        const legacyNeedVoice = user.accountStatus === 'pending_review' || user.accountStatus === 'rejected';
+        const voice = String(user.userAudio ?? '').trim();
+        if (legacyNeedVoice && !voice) {
+            res.status(400).json({ message: 'Cannot approve: no voice verification audio on file' });
+            return;
+        }
+        const needsRelease = user.suspended ||
+            user.accountStatus === 'pending_review' ||
+            user.accountStatus === 'rejected';
+        if (!needsRelease) {
+            res.status(400).json({ message: 'User access is already active' });
+            return;
+        }
+        user.suspended = false;
+        user.accountStatus = 'approved';
+        await user.save();
+        res.status(200).json({
+            message: 'Access enabled',
+            user: (0, authController_1.toApiUser)(user),
+        });
+    }
+    catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error('approveAppUser error:', msg);
+        res.status(500).json({ message: msg || 'Server error' });
+    }
+};
+exports.approveAppUser = approveAppUser;
+/**
+ * PATCH /admin/users/:id/reject — pauses caller access (`suspended: true`); does not use `rejected` status.
+ */
+const rejectAppUser = async (req, res) => {
+    try {
+        const id = req.params.id;
+        const user = await User_1.default.findById(id);
+        if (!user) {
+            res.status(404).json({ message: 'User not found' });
+            return;
+        }
+        if (user.accountStatus === 'pending_profile') {
+            res.status(400).json({ message: 'User has not finished onboarding yet' });
+            return;
+        }
+        if (user.suspended) {
+            res.status(400).json({ message: 'User access is already paused' });
+            return;
+        }
+        user.suspended = true;
+        user.accountStatus = 'approved';
+        await user.save();
+        res.status(200).json({
+            message: 'Access paused',
+            user: (0, authController_1.toApiUser)(user),
+        });
+    }
+    catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error('rejectAppUser error:', msg);
+        res.status(500).json({ message: msg || 'Server error' });
+    }
+};
+exports.rejectAppUser = rejectAppUser;
+/**
+ * GET /admin/reports — moderation queue + summary cards.
+ */
+const listModerationReports = async (req, res) => {
+    try {
+        const q = String(req.query.q ?? '').trim();
+        const status = String(req.query.status ?? 'all').toLowerCase();
+        const page = Math.max(1, parseInt(String(req.query.page ?? '1'), 10) || 1);
+        const limit = Math.min(100, Math.max(1, parseInt(String(req.query.limit ?? '50'), 10) || 50));
+        const filter = {};
+        if (status === 'pending')
+            filter.status = 'pending';
+        else if (status === 'resolved')
+            filter.status = 'resolved';
+        if (q) {
+            const rx = new RegExp(escapeRegex(q), 'i');
+            filter.$or = [{ preview: rx }, { reason: rx }];
+        }
+        const start = new Date();
+        start.setHours(0, 0, 0, 0);
+        const [pendingCount, resolvedToday, warnedActions, suspendActions, total, rows] = await Promise.all([
+            UserReport_1.default.countDocuments({ status: 'pending' }),
+            UserReport_1.default.countDocuments({ status: 'resolved', updatedAt: { $gte: start } }),
+            UserReport_1.default.countDocuments({ resolution: 'warned' }),
+            UserReport_1.default.countDocuments({ resolution: 'suspended' }),
+            UserReport_1.default.countDocuments(filter),
+            UserReport_1.default.find(filter)
+                .sort({ createdAt: -1 })
+                .skip((page - 1) * limit)
+                .limit(limit)
+                .lean(),
+        ]);
+        const userIds = new Set();
+        const recvIds = new Set();
+        for (const r of rows) {
+            if (r.reporterKind === 'user')
+                userIds.add(String(r.reporterId));
+            else
+                recvIds.add(String(r.reporterId));
+            if (r.reportedKind === 'user')
+                userIds.add(String(r.reportedId));
+            else
+                recvIds.add(String(r.reportedId));
+        }
+        const [users, receivers] = await Promise.all([
+            userIds.size
+                ? User_1.default.find({ _id: { $in: [...userIds] } })
+                    .select('name')
+                    .lean()
+                : [],
+            recvIds.size
+                ? Receiver_1.default.find({ _id: { $in: [...recvIds] } })
+                    .select('name')
+                    .lean()
+                : [],
+        ]);
+        const uMap = new Map(users.map((u) => [String(u._id), String(u.name ?? '')]));
+        const rMap = new Map(receivers.map((r) => [String(r._id), String(r.name ?? '')]));
+        const nameFor = (kind, id) => {
+            const s = String(id);
+            if (kind === 'user')
+                return uMap.get(s) || 'Unknown';
+            return rMap.get(s) || 'Unknown';
+        };
+        res.status(200).json({
+            stats: {
+                pendingReports: pendingCount,
+                resolvedToday,
+                usersWarned: warnedActions,
+                usersSuspended: suspendActions,
+            },
+            reports: rows.map((r) => ({
+                _id: String(r._id),
+                reportId: `R-${String(r._id).slice(-6).toUpperCase()}`,
+                reporterName: nameFor(r.reporterKind, r.reporterId),
+                reportedName: nameFor(r.reportedKind, r.reportedId),
+                reason: r.reason,
+                preview: r.preview?.trim() ? r.preview : '—',
+                createdAt: r.createdAt.toISOString(),
+                status: r.status,
+                resolution: r.resolution,
+            })),
+            total,
+            page,
+            limit,
+        });
+    }
+    catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error('listModerationReports error:', msg);
+        res.status(500).json({ message: msg || 'Server error' });
+    }
+};
+exports.listModerationReports = listModerationReports;
+/**
+ * PATCH /admin/reports/:id — body `{ action: 'ignore' | 'warn' | 'suspend' }`
+ */
+const resolveModerationReport = async (req, res) => {
+    try {
+        const action = String(req.body.action ?? '').toLowerCase();
+        if (action !== 'ignore' && action !== 'warn' && action !== 'suspend') {
+            res.status(400).json({ message: 'action must be ignore, warn, or suspend' });
+            return;
+        }
+        if (!mongoose_1.default.Types.ObjectId.isValid(req.params.id)) {
+            res.status(400).json({ message: 'Invalid report id' });
+            return;
+        }
+        const report = await UserReport_1.default.findById(req.params.id);
+        if (!report || report.status !== 'pending') {
+            res.status(404).json({ message: 'Report not found or already resolved' });
+            return;
+        }
+        const resolution = action === 'ignore' ? 'ignored' : action === 'warn' ? 'warned' : 'suspended';
+        if (resolution !== 'ignored') {
+            if (report.reportedKind === 'user') {
+                const u = await User_1.default.findById(report.reportedId);
+                if (!u) {
+                    res.status(404).json({ message: 'Reported user missing' });
+                    return;
+                }
+                if (resolution === 'warned') {
+                    u.moderationWarningAt = new Date();
+                }
+                else {
+                    u.suspended = true;
+                }
+                await u.save();
+            }
+            else {
+                const recv = await Receiver_1.default.findById(report.reportedId);
+                if (!recv) {
+                    res.status(404).json({ message: 'Reported receiver missing' });
+                    return;
+                }
+                if (resolution === 'warned') {
+                    recv.moderationWarningAt = new Date();
+                }
+                else {
+                    recv.suspended = true;
+                }
+                await recv.save();
+            }
+        }
+        report.status = 'resolved';
+        report.resolution = resolution;
+        await report.save();
+        res.status(200).json({
+            ok: true,
+            report: {
+                _id: String(report._id),
+                status: report.status,
+                resolution: report.resolution,
+            },
+        });
+    }
+    catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error('resolveModerationReport error:', msg);
+        res.status(500).json({ message: msg || 'Server error' });
+    }
+};
+exports.resolveModerationReport = resolveModerationReport;

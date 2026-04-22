@@ -2,7 +2,11 @@ import type { Server as HTTPServer } from 'http';
 import { Server } from 'socket.io';
 import jwt from 'jsonwebtoken';
 import mongoose from 'mongoose';
-import ChatMessage from '../models/ChatMessage';
+import ChatMessage, { type ChatMessageDocument } from '../models/ChatMessage';
+import ChatBlock from '../models/ChatBlock';
+import User from '../models/User';
+import Receiver from '../models/Receiver';
+import { CHAT_TEXT_FEE_INR } from '../constants/chatPricing';
 
 type JwtPayload = { id: string; typ: 'u' | 'r' };
 
@@ -73,6 +77,16 @@ export function attachChatSocket(httpServer: HTTPServer): Server {
             }
             userHex = myId;
             receiverHex = rid;
+            const u = await User.findById(myId).select('accountStatus suspended');
+            if (!u || u.suspended || u.accountStatus !== 'approved') {
+              ack?.({ ok: false, error: 'Account not allowed' });
+              return;
+            }
+            const recv = await Receiver.findById(rid).select('accountStatus suspended');
+            if (!recv || recv.accountStatus !== 'approved' || recv.suspended) {
+              ack?.({ ok: false, error: 'Cannot join this chat' });
+              return;
+            }
           } else {
             const uid = typeof payload?.userId === 'string' ? payload.userId.trim() : '';
             if (!mongoose.Types.ObjectId.isValid(uid)) {
@@ -81,11 +95,26 @@ export function attachChatSocket(httpServer: HTTPServer): Server {
             }
             userHex = uid;
             receiverHex = myId;
+            const recv = await Receiver.findById(myId).select('accountStatus suspended');
+            if (!recv || recv.accountStatus !== 'approved' || recv.suspended) {
+              ack?.({ ok: false, error: 'Account not allowed' });
+              return;
+            }
+            const u = await User.findById(uid).select('accountStatus suspended');
+            if (!u || u.suspended || u.accountStatus !== 'approved') {
+              ack?.({ ok: false, error: 'Cannot join this chat' });
+              return;
+            }
           }
           const prevRoom = socket.data.chatRoom as string | undefined;
           if (prevRoom) {
             await socket.leave(prevRoom);
           }
+          if (await ChatBlock.exists({ userId: userHex, receiverId: receiverHex })) {
+            ack?.({ ok: false, error: 'This chat is blocked.' });
+            return;
+          }
+
           const room = roomKey(userHex, receiverHex);
           await socket.join(room);
           socket.data.chatRoom = room;
@@ -139,12 +168,131 @@ export function attachChatSocket(httpServer: HTTPServer): Server {
             ack?.({ ok: false, error: 'Forbidden' });
             return;
           }
-          const doc = await ChatMessage.create({
-            userId: parsed.userId,
-            receiverId: parsed.receiverId,
-            senderType: typ,
-            text,
-          });
+          if (typ === 'u') {
+            const u = await User.findById(myId).select('accountStatus suspended');
+            if (!u || u.suspended || u.accountStatus !== 'approved') {
+              ack?.({ ok: false, error: 'Account not allowed' });
+              return;
+            }
+          } else {
+            const recv = await Receiver.findById(myId).select('accountStatus suspended');
+            if (!recv || recv.accountStatus !== 'approved' || recv.suspended) {
+              ack?.({ ok: false, error: 'Account not allowed' });
+              return;
+            }
+          }
+
+          if (await ChatBlock.exists({ userId: parsed.userId, receiverId: parsed.receiverId })) {
+            ack?.({ ok: false, error: 'This chat is blocked.' });
+            return;
+          }
+
+          let doc!: ChatMessageDocument;
+
+          const uidObj = new mongoose.Types.ObjectId(parsed.userId);
+          const ridObj = new mongoose.Types.ObjectId(parsed.receiverId);
+
+          if (typ === 'u') {
+            const hasReceiverReply = await ChatMessage.exists({
+              userId: uidObj,
+              receiverId: ridObj,
+              senderType: 'r',
+            });
+            const needCharge = Boolean(hasReceiverReply);
+
+            if (needCharge) {
+              const session = await mongoose.startSession();
+              try {
+                await session.withTransaction(async () => {
+                  const usrUpd = await User.updateOne(
+                    { _id: uidObj, walletBalance: { $gte: CHAT_TEXT_FEE_INR } },
+                    { $inc: { walletBalance: -CHAT_TEXT_FEE_INR } },
+                    { session }
+                  );
+                  if (usrUpd.modifiedCount === 0) {
+                    throw new Error('INSUFFICIENT_WALLET');
+                  }
+                  const recvUpd = await Receiver.updateOne(
+                    { _id: ridObj },
+                    { $inc: { walletBalance: CHAT_TEXT_FEE_INR } },
+                    { session }
+                  );
+                  if (recvUpd.modifiedCount !== 1) {
+                    throw new Error('RECEIVER_CREDIT_FAILED');
+                  }
+                  const created = await ChatMessage.create(
+                    [
+                      {
+                        userId: uidObj,
+                        receiverId: ridObj,
+                        senderType: typ,
+                        text,
+                        feeInr: CHAT_TEXT_FEE_INR,
+                      },
+                    ],
+                    { session }
+                  );
+                  doc = created[0]!;
+                });
+              } catch (e) {
+                if (e instanceof Error && e.message === 'INSUFFICIENT_WALLET') {
+                  const uDoc = await User.findById(uidObj).select('walletBalance');
+                  ack?.({
+                    ok: false,
+                    code: 'INSUFFICIENT_WALLET',
+                    error: 'Wallet balance is too low to send this message.',
+                    walletBalance:
+                      typeof uDoc?.walletBalance === 'number' && Number.isFinite(uDoc.walletBalance)
+                        ? uDoc.walletBalance
+                        : 0,
+                    requiredInr: CHAT_TEXT_FEE_INR,
+                  });
+                  return;
+                }
+                if (e instanceof Error && e.message === 'RECEIVER_CREDIT_FAILED') {
+                  console.error('Receiver wallet credit failed', { userId: parsed.userId, receiverId: parsed.receiverId });
+                  ack?.({ ok: false, error: 'Could not update receiver wallet. Try again.' });
+                  return;
+                }
+                throw e;
+              } finally {
+                await session.endSession();
+              }
+
+              const [freshCaller, freshRecv] = await Promise.all([
+                User.findById(uidObj).select('walletBalance'),
+                Receiver.findById(ridObj).select('walletBalance'),
+              ]);
+              io.to(room).emit('chat:wallet', {
+                callerWallet:
+                  typeof freshCaller?.walletBalance === 'number' &&
+                  Number.isFinite(freshCaller.walletBalance)
+                    ? freshCaller.walletBalance
+                    : 0,
+                receiverWallet:
+                  typeof freshRecv?.walletBalance === 'number' && Number.isFinite(freshRecv.walletBalance)
+                    ? freshRecv.walletBalance
+                    : 0,
+              });
+            } else {
+              doc = await ChatMessage.create({
+                userId: uidObj,
+                receiverId: ridObj,
+                senderType: typ,
+                text,
+                feeInr: 0,
+              });
+            }
+          } else {
+            doc = await ChatMessage.create({
+              userId: uidObj,
+              receiverId: ridObj,
+              senderType: typ,
+              text,
+              feeInr: 0,
+            });
+          }
+
           const out = {
             id: String(doc._id),
             senderType: typ,

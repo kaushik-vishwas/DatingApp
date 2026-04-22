@@ -4,8 +4,11 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.listReceiversForCaller = void 0;
+const mongoose_1 = __importDefault(require("mongoose"));
 const discoverReceiverFilter_1 = require("../services/discoverReceiverFilter");
 const Receiver_1 = __importDefault(require("../models/Receiver"));
+const ChatBlock_1 = __importDefault(require("../models/ChatBlock"));
+const accountAccess_1 = require("../utils/accountAccess");
 function iso(d) {
     return d.toISOString();
 }
@@ -49,6 +52,8 @@ const listReceiversForCaller = async (req, res) => {
             res.status(403).json({ message: 'Only app users can browse receivers' });
             return;
         }
+        if ((0, accountAccess_1.blockCallerUntilApproved)(req, res))
+            return;
         const minAgeRaw = parseIntQuery(req.query.minAge);
         const maxAgeRaw = parseIntQuery(req.query.maxAge);
         const limitRaw = parseIntQuery(req.query.limit);
@@ -61,7 +66,12 @@ const listReceiversForCaller = async (req, res) => {
             minAge: minAgeRaw,
             maxAge: maxAgeRaw,
         });
-        const receivers = await Receiver_1.default.find(filter)
+        const uid = new mongoose_1.default.Types.ObjectId(String(req.user._id));
+        const blockedReceiverIds = await ChatBlock_1.default.distinct('receiverId', { userId: uid });
+        const blockClause = blockedReceiverIds.length > 0
+            ? { _id: { $nin: blockedReceiverIds } }
+            : {};
+        const receivers = await Receiver_1.default.find({ ...filter, ...blockClause })
             .select('name age state interests languages profileImage audioCallRate updatedAt gender')
             .sort({ updatedAt: -1 })
             .limit(limit)

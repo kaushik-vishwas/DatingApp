@@ -1,28 +1,22 @@
 import axios, { AxiosHeaders } from 'axios';
 
-/** 🔥 PRODUCTION SERVER (EC2 + NGINX) */
+/** Production API (Vite production build). */
 const PROD_API = 'https://backend.nesthamapp.com';
 
-/** Normalize URL */
-function normalizeUrl(url: string) {
-  return url.trim().replace(/\/+$/, '');
+function normalizeApiOrigin(raw: string): string {
+  let u = raw.trim().replace(/\/+$/, '');
+  if (u.endsWith('/auth')) {
+    u = u.slice(0, -5).replace(/\/+$/, '');
+  }
+  return u;
 }
 
-/** Detect base URL */
+/** Local in dev (`npm run dev`); live URL only when built for production. */
 function getBaseURL(): string {
-  // 1️⃣ ENV (highest priority - Vite)
-  const fromEnv = import.meta.env.VITE_API_URL;
-  if (fromEnv && typeof fromEnv === 'string') {
-    return normalizeUrl(fromEnv);
-  }
-
-  // 2️⃣ Production (when built)
   if (import.meta.env.PROD) {
-    return PROD_API;
+    return normalizeApiOrigin(PROD_API);
   }
-
-  // 3️⃣ Local dev
-  return 'http://localhost:5000';
+  return normalizeApiOrigin('http://localhost:5000');
 }
 
 /** Axios instance */
@@ -81,6 +75,7 @@ export type AppUserRecord = {
   walletBalance: number;
   createdAt: string;
   updatedAt: string;
+  userAudio?: string | null;
 };
 
 /** ================= AUTH ================= */
@@ -132,6 +127,7 @@ export async function fetchAllReceivers() {
 export async function fetchKycStats() {
   const { data } = await api.get<{
     pendingApprovals: number;
+    pendingCallerApprovals: number;
     approvedToday: number;
     rejectedToday: number;
   }>('/admin/kyc/stats');
@@ -189,5 +185,61 @@ export async function updateAppUserSuspension(
     `/admin/users/${userId}`,
     { suspended }
   );
+  return data;
+}
+
+export async function approveAppUser(userId: string) {
+  const { data } = await api.patch<{ user: AppUserRecord }>(`/admin/users/${userId}/approve`);
+  return data;
+}
+
+export async function rejectAppUser(userId: string) {
+  const { data } = await api.patch<{ user: AppUserRecord }>(`/admin/users/${userId}/reject`);
+  return data;
+}
+
+/** ================= REPORTS ================= */
+
+export type ModerationReportRow = {
+  _id: string;
+  reportId: string;
+  reporterName: string;
+  reportedName: string;
+  reason: string;
+  preview: string;
+  createdAt: string;
+  status: string;
+  resolution: string | null;
+};
+
+export type ModerationReportStats = {
+  pendingReports: number;
+  resolvedToday: number;
+  usersWarned: number;
+  usersSuspended: number;
+};
+
+export async function fetchModerationReports(params?: { q?: string; status?: string; page?: number }) {
+  const { data } = await api.get<{
+    stats: ModerationReportStats;
+    reports: ModerationReportRow[];
+    total: number;
+    page: number;
+    limit: number;
+  }>('/admin/reports', {
+    params: {
+      q: params?.q?.trim() || undefined,
+      status: params?.status && params.status !== 'all' ? params.status : undefined,
+      page: params?.page ?? 1,
+    },
+  });
+  return data;
+}
+
+export async function resolveModerationReport(
+  reportId: string,
+  action: 'ignore' | 'warn' | 'suspend'
+) {
+  const { data } = await api.patch<{ ok: boolean }>(`/admin/reports/${reportId}`, { action });
   return data;
 }

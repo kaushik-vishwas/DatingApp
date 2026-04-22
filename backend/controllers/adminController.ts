@@ -1,9 +1,11 @@
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import type { Request, Response } from 'express';
+import mongoose from 'mongoose';
 import Admin from '../models/Admin';
 import Receiver, { type ReceiverDocument } from '../models/Receiver';
 import User, { type UserDocument } from '../models/User';
+import UserReport, { type ReportResolution } from '../models/UserReport';
 import { toApiReceiver, toApiUser } from './authController';
 import { sendOtpEmail } from '../config/email';
 import { getConfiguredAdminEmail } from '../services/superAdminSync';
@@ -532,8 +534,17 @@ export const getKycStats = async (_req: Request, res: Response): Promise<void> =
     const start = new Date();
     start.setHours(0, 0, 0, 0);
 
-    const [pendingApprovals, approvedToday, rejectedToday] = await Promise.all([
+    const callerAwaitingAccess = {
+      $or: [
+        { suspended: true, accountStatus: 'approved' },
+        { accountStatus: 'pending_review' },
+        { accountStatus: 'rejected', suspended: false },
+      ],
+    };
+
+    const [pendingApprovals, pendingCallerApprovals, approvedToday, rejectedToday] = await Promise.all([
       Receiver.countDocuments({ accountStatus: 'pending_review' }),
+      User.countDocuments(callerAwaitingAccess),
       Receiver.countDocuments({
         accountStatus: 'approved',
         updatedAt: { $gte: start },
@@ -544,7 +555,12 @@ export const getKycStats = async (_req: Request, res: Response): Promise<void> =
       }),
     ]);
 
-    res.status(200).json({ pendingApprovals, approvedToday, rejectedToday });
+    res.status(200).json({
+      pendingApprovals,
+      pendingCallerApprovals,
+      approvedToday,
+      rejectedToday,
+    });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error('getKycStats error:', msg);
@@ -629,6 +645,297 @@ export const rejectReceiver = async (req: Request<{ id: string }>, res: Response
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error('rejectReceiver error:', msg);
+    res.status(500).json({ message: msg || 'Server error' });
+  }
+};
+
+/**
+ * GET /admin/users/pending — app users (callers) awaiting approval after voice + profile submit.
+ */
+export const listPendingAppUsers = async (_req: Request, res: Response): Promise<void> => {
+  try {
+    const users = await User.find({
+      $or: [
+        { suspended: true, accountStatus: 'approved' },
+        { accountStatus: 'pending_review' },
+        { accountStatus: 'rejected', suspended: false },
+      ],
+    })
+      .select('-otp -otpExpiry -passwordHash')
+      .sort({ updatedAt: -1 });
+
+    res.status(200).json({ users: users.map((u) => toApiUser(u as UserDocument)) });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error('listPendingAppUsers error:', msg);
+    res.status(500).json({ message: msg || 'Server error' });
+  }
+};
+
+/**
+ * PATCH /admin/users/:id/approve — clears caller suspension (access on). Legacy: pending_review/rejected + voice.
+ */
+export const approveAppUser = async (req: Request<{ id: string }>, res: Response): Promise<void> => {
+  try {
+    const id = req.params.id;
+    const user = await User.findById(id);
+    if (!user) {
+      res.status(404).json({ message: 'User not found' });
+      return;
+    }
+    if (user.accountStatus === 'pending_profile') {
+      res.status(400).json({ message: 'User has not finished onboarding yet' });
+      return;
+    }
+
+    const legacyNeedVoice =
+      user.accountStatus === 'pending_review' || user.accountStatus === 'rejected';
+    const voice = String(user.userAudio ?? '').trim();
+    if (legacyNeedVoice && !voice) {
+      res.status(400).json({ message: 'Cannot approve: no voice verification audio on file' });
+      return;
+    }
+
+    const needsRelease =
+      user.suspended ||
+      user.accountStatus === 'pending_review' ||
+      user.accountStatus === 'rejected';
+    if (!needsRelease) {
+      res.status(400).json({ message: 'User access is already active' });
+      return;
+    }
+
+    user.suspended = false;
+    user.accountStatus = 'approved';
+    await user.save();
+
+    res.status(200).json({
+      message: 'Access enabled',
+      user: toApiUser(user),
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error('approveAppUser error:', msg);
+    res.status(500).json({ message: msg || 'Server error' });
+  }
+};
+
+/**
+ * PATCH /admin/users/:id/reject — pauses caller access (`suspended: true`); does not use `rejected` status.
+ */
+export const rejectAppUser = async (req: Request<{ id: string }>, res: Response): Promise<void> => {
+  try {
+    const id = req.params.id;
+    const user = await User.findById(id);
+    if (!user) {
+      res.status(404).json({ message: 'User not found' });
+      return;
+    }
+    if (user.accountStatus === 'pending_profile') {
+      res.status(400).json({ message: 'User has not finished onboarding yet' });
+      return;
+    }
+    if (user.suspended) {
+      res.status(400).json({ message: 'User access is already paused' });
+      return;
+    }
+
+    user.suspended = true;
+    user.accountStatus = 'approved';
+    await user.save();
+
+    res.status(200).json({
+      message: 'Access paused',
+      user: toApiUser(user),
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error('rejectAppUser error:', msg);
+    res.status(500).json({ message: msg || 'Server error' });
+  }
+};
+
+type ReportRowLean = {
+  _id: mongoose.Types.ObjectId;
+  reporterKind: 'user' | 'receiver';
+  reporterId: mongoose.Types.ObjectId;
+  reportedKind: 'user' | 'receiver';
+  reportedId: mongoose.Types.ObjectId;
+  reason: string;
+  preview: string;
+  status: string;
+  resolution: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+/**
+ * GET /admin/reports — moderation queue + summary cards.
+ */
+export const listModerationReports = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const q = String(req.query.q ?? '').trim();
+    const status = String(req.query.status ?? 'all').toLowerCase();
+    const page = Math.max(1, parseInt(String(req.query.page ?? '1'), 10) || 1);
+    const limit = Math.min(100, Math.max(1, parseInt(String(req.query.limit ?? '50'), 10) || 50));
+
+    const filter: Record<string, unknown> = {};
+    if (status === 'pending') filter.status = 'pending';
+    else if (status === 'resolved') filter.status = 'resolved';
+
+    if (q) {
+      const rx = new RegExp(escapeRegex(q), 'i');
+      filter.$or = [{ preview: rx }, { reason: rx }];
+    }
+
+    const start = new Date();
+    start.setHours(0, 0, 0, 0);
+
+    const [pendingCount, resolvedToday, warnedActions, suspendActions, total, rows] =
+      await Promise.all([
+        UserReport.countDocuments({ status: 'pending' }),
+        UserReport.countDocuments({ status: 'resolved', updatedAt: { $gte: start } }),
+        UserReport.countDocuments({ resolution: 'warned' }),
+        UserReport.countDocuments({ resolution: 'suspended' }),
+        UserReport.countDocuments(filter),
+        UserReport.find(filter)
+          .sort({ createdAt: -1 })
+          .skip((page - 1) * limit)
+          .limit(limit)
+          .lean(),
+      ]);
+
+    const userIds = new Set<string>();
+    const recvIds = new Set<string>();
+    for (const r of rows as ReportRowLean[]) {
+      if (r.reporterKind === 'user') userIds.add(String(r.reporterId));
+      else recvIds.add(String(r.reporterId));
+      if (r.reportedKind === 'user') userIds.add(String(r.reportedId));
+      else recvIds.add(String(r.reportedId));
+    }
+
+    const [users, receivers] = await Promise.all([
+      userIds.size
+        ? User.find({ _id: { $in: [...userIds] } })
+            .select('name')
+            .lean()
+        : [],
+      recvIds.size
+        ? Receiver.find({ _id: { $in: [...recvIds] } })
+            .select('name')
+            .lean()
+        : [],
+    ]);
+
+    const uMap = new Map(users.map((u) => [String(u._id), String(u.name ?? '')]));
+    const rMap = new Map(receivers.map((r) => [String(r._id), String(r.name ?? '')]));
+
+    const nameFor = (kind: 'user' | 'receiver', id: mongoose.Types.ObjectId): string => {
+      const s = String(id);
+      if (kind === 'user') return uMap.get(s) || 'Unknown';
+      return rMap.get(s) || 'Unknown';
+    };
+
+    res.status(200).json({
+      stats: {
+        pendingReports: pendingCount,
+        resolvedToday,
+        usersWarned: warnedActions,
+        usersSuspended: suspendActions,
+      },
+      reports: (rows as ReportRowLean[]).map((r) => ({
+        _id: String(r._id),
+        reportId: `R-${String(r._id).slice(-6).toUpperCase()}`,
+        reporterName: nameFor(r.reporterKind, r.reporterId),
+        reportedName: nameFor(r.reportedKind, r.reportedId),
+        reason: r.reason,
+        preview: r.preview?.trim() ? r.preview : '—',
+        createdAt: r.createdAt.toISOString(),
+        status: r.status,
+        resolution: r.resolution,
+      })),
+      total,
+      page,
+      limit,
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error('listModerationReports error:', msg);
+    res.status(500).json({ message: msg || 'Server error' });
+  }
+};
+
+/**
+ * PATCH /admin/reports/:id — body `{ action: 'ignore' | 'warn' | 'suspend' }`
+ */
+export const resolveModerationReport = async (
+  req: Request<{ id: string }, {}, { action?: string }>,
+  res: Response
+): Promise<void> => {
+  try {
+    const action = String(req.body.action ?? '').toLowerCase();
+    if (action !== 'ignore' && action !== 'warn' && action !== 'suspend') {
+      res.status(400).json({ message: 'action must be ignore, warn, or suspend' });
+      return;
+    }
+
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+      res.status(400).json({ message: 'Invalid report id' });
+      return;
+    }
+
+    const report = await UserReport.findById(req.params.id);
+    if (!report || report.status !== 'pending') {
+      res.status(404).json({ message: 'Report not found or already resolved' });
+      return;
+    }
+
+    const resolution: ReportResolution =
+      action === 'ignore' ? 'ignored' : action === 'warn' ? 'warned' : 'suspended';
+
+    if (resolution !== 'ignored') {
+      if (report.reportedKind === 'user') {
+        const u = await User.findById(report.reportedId);
+        if (!u) {
+          res.status(404).json({ message: 'Reported user missing' });
+          return;
+        }
+        if (resolution === 'warned') {
+          u.moderationWarningAt = new Date();
+        } else {
+          u.suspended = true;
+        }
+        await u.save();
+      } else {
+        const recv = await Receiver.findById(report.reportedId);
+        if (!recv) {
+          res.status(404).json({ message: 'Reported receiver missing' });
+          return;
+        }
+        if (resolution === 'warned') {
+          recv.moderationWarningAt = new Date();
+        } else {
+          recv.suspended = true;
+        }
+        await recv.save();
+      }
+    }
+
+    report.status = 'resolved';
+    report.resolution = resolution;
+    await report.save();
+
+    res.status(200).json({
+      ok: true,
+      report: {
+        _id: String(report._id),
+        status: report.status,
+        resolution: report.resolution,
+      },
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error('resolveModerationReport error:', msg);
     res.status(500).json({ message: msg || 'Server error' });
   }
 };

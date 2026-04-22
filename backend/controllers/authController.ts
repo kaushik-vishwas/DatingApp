@@ -10,6 +10,7 @@ import {
   parseDateOnlyToUtcMidnight,
   validateBirthDateForAccount,
 } from '../utils/birthDate';
+import { PAUSED_MSG } from '../utils/accountAccess';
 
 const OTP_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
@@ -49,6 +50,8 @@ export interface SafeUser {
   walletBalance: number;
   /** Receivers: INR per minute; callers: null */
   audioCallRate: number | null;
+  /** Callers: voice sample URL for admin review; receivers: always null */
+  userAudio: string | null;
 }
 
 type LegacyRegisterRole = 'caller' | 'receiver' | 'both';
@@ -119,6 +122,7 @@ export function toApiUser(user: UserDocument): SafeUser {
     suspended: Boolean(u.suspended),
     walletBalance: typeof u.walletBalance === 'number' && Number.isFinite(u.walletBalance) ? u.walletBalance : 0,
     audioCallRate: null,
+    userAudio: u.userAudio ?? null,
   };
 }
 
@@ -149,10 +153,12 @@ export function toApiReceiver(receiver: ReceiverDocument): SafeUser {
     state: r.state ?? null,
     createdAt: iso(r.createdAt),
     updatedAt: iso(r.updatedAt),
-    suspended: false,
-    walletBalance: 0,
+    suspended: Boolean(r.suspended),
+    walletBalance:
+      typeof r.walletBalance === 'number' && Number.isFinite(r.walletBalance) ? r.walletBalance : 0,
     audioCallRate:
       typeof r.audioCallRate === 'number' && Number.isFinite(r.audioCallRate) ? r.audioCallRate : null,
+    userAudio: null,
   };
 }
 
@@ -282,10 +288,6 @@ export const login = async (req: Request<{}, {}, LoginBody>, res: Response): Pro
         res.status(401).json({ message: 'Invalid email or password' });
         return;
       }
-      if (user.suspended) {
-        res.status(403).json({ message: 'Your account has been suspended. Contact support.' });
-        return;
-      }
       const token = signToken(String(user._id), 'u');
       res.json({ message: 'Login successful', token, user: toApiUser(user) });
       return;
@@ -299,6 +301,10 @@ export const login = async (req: Request<{}, {}, LoginBody>, res: Response): Pro
     const match = await bcrypt.compare(String(password), receiver.passwordHash);
     if (!match) {
       res.status(401).json({ message: 'Invalid email or password' });
+      return;
+    }
+    if (receiver.suspended) {
+      res.status(403).json({ message: PAUSED_MSG });
       return;
     }
     const token = signToken(String(receiver._id), 'r');
@@ -495,10 +501,6 @@ export const resetPassword = async (
         res.status(400).json({ message: 'Invalid or expired code' });
         return;
       }
-      if (doc.suspended) {
-        res.status(403).json({ message: 'Your account has been suspended. Contact support.' });
-        return;
-      }
 
       if (otpBypass) {
         const { token, userJson } = await finishReset(doc);
@@ -597,6 +599,14 @@ export const verifyOtp = async (
     };
 
     const verifyDoc = async (doc: UserDocument | ReceiverDocument): Promise<void> => {
+      if (accountType === 'user' && (doc as UserDocument).suspended) {
+        res.status(403).json({ message: PAUSED_MSG });
+        return;
+      }
+      if (accountType === 'receiver' && (doc as ReceiverDocument).suspended) {
+        res.status(403).json({ message: PAUSED_MSG });
+        return;
+      }
       if (otpBypass) {
         doc.isVerified = true;
         doc.otp = null;
@@ -632,10 +642,6 @@ export const verifyOtp = async (
       const doc = await User.findOne({ email: normalizedEmail });
       if (!doc) {
         res.status(404).json({ message: 'User not found' });
-        return;
-      }
-      if (doc.suspended) {
-        res.status(403).json({ message: 'Your account has been suspended. Contact support.' });
         return;
       }
       await verifyDoc(doc);

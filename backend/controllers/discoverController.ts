@@ -1,6 +1,9 @@
 import type { Request, Response } from 'express';
+import mongoose from 'mongoose';
 import { buildDiscoverReceiverFilter } from '../services/discoverReceiverFilter';
 import Receiver, { type ReceiverDocument } from '../models/Receiver';
+import ChatBlock from '../models/ChatBlock';
+import { blockCallerUntilApproved } from '../utils/accountAccess';
 
 function iso(d: Date): string {
   return d.toISOString();
@@ -61,6 +64,7 @@ export const listReceiversForCaller = async (req: Request, res: Response): Promi
       res.status(403).json({ message: 'Only app users can browse receivers' });
       return;
     }
+    if (blockCallerUntilApproved(req, res)) return;
 
     const minAgeRaw = parseIntQuery(req.query.minAge);
     const maxAgeRaw = parseIntQuery(req.query.maxAge);
@@ -77,7 +81,14 @@ export const listReceiversForCaller = async (req: Request, res: Response): Promi
       maxAge: maxAgeRaw,
     });
 
-    const receivers = await Receiver.find(filter)
+    const uid = new mongoose.Types.ObjectId(String(req.user!._id));
+    const blockedReceiverIds = await ChatBlock.distinct('receiverId', { userId: uid });
+    const blockClause =
+      blockedReceiverIds.length > 0
+        ? { _id: { $nin: blockedReceiverIds as mongoose.Types.ObjectId[] } }
+        : {};
+
+    const receivers = await Receiver.find({ ...filter, ...blockClause })
       .select('name age state interests languages profileImage audioCallRate updatedAt gender')
       .sort({ updatedAt: -1 })
       .limit(limit)

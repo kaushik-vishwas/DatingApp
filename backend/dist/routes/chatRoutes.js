@@ -6,4 +6,7 @@ const auth_1 = require("../middleware/auth");
 const router = (0, express_1.Router)();
 router.get('/messages', auth_1.protect, chatController_1.getMessages);
 router.get('/conversations', auth_1.protect, chatController_1.listConversations);
+router.post('/block', auth_1.protect, chatController_1.blockChatPeer);
+router.post('/report', auth_1.protect, chatController_1.reportChatPeer);
+router.post('/clear', auth_1.protect, chatController_1.clearChatHistory);
 exports.default = router;
