@@ -64,6 +64,7 @@ type UpdateReceiverBody = {
   interests?: string[];
   state?: string;
   audioCallRate?: number;
+  isAvailable?: boolean;
 };
 type ReceiverBankUpdateBody = {
   bankAccountHolderName?: string;
@@ -944,6 +945,7 @@ export const getReceiverCallInsights = async (
           startedAt: Date;
           durationSec: number;
           ratePerMinute: number;
+          settledAmountInr?: number;
           callerRating?: number | null;
         }[]
       >();
@@ -977,7 +979,11 @@ export const getReceiverCallInsights = async (
       callerName: callerNameById.get(String(row.callerId)) ?? 'Caller',
       startedAt: row.startedAt.toISOString(),
       durationSec: row.durationSec,
-      earningInr: roundInr((row.durationSec / 60) * row.ratePerMinute),
+      earningInr: roundInr(
+        typeof row.settledAmountInr === 'number' && Number.isFinite(row.settledAmountInr)
+          ? row.settledAmountInr
+          : (row.durationSec / 60) * row.ratePerMinute
+      ),
       rating: typeof row.callerRating === 'number' ? row.callerRating : null,
     }));
 
@@ -1095,6 +1101,9 @@ export const updateReceiverProfile = async (
         return;
       }
       receiver.audioCallRate = n;
+    }
+    if (typeof req.body.isAvailable === 'boolean') {
+      receiver.isAvailable = req.body.isAvailable;
     }
 
     await receiver.save();
@@ -1338,6 +1347,7 @@ export const getReceiverEarningsBreakdown = async (
             startedAt: Date;
             durationSec: number;
             ratePerMinute: number;
+            settledAmountInr?: number;
           }[]
         >(),
       ChatMessage.find({
@@ -1357,7 +1367,11 @@ export const getReceiverEarningsBreakdown = async (
     ]);
 
     const callRows = calls.map((c) => {
-      const gross = roundInr((c.durationSec / 60) * c.ratePerMinute);
+      const gross = roundInr(
+        typeof c.settledAmountInr === 'number' && Number.isFinite(c.settledAmountInr)
+          ? c.settledAmountInr
+          : (c.durationSec / 60) * c.ratePerMinute
+      );
       const fee = roundInr(gross * 0.2);
       const net = roundInr(gross - fee);
       return {

@@ -28,7 +28,7 @@ Wallet balances are used according to in-app pricing. Recharges are subject to t
 Harassment, illegal activity, or sharing of prohibited content is not allowed.
 
 10. Contact Information
-Customer Support: support@nesthama.com
+Customer Support: support@selecto.com
 We aim to respond within 2 business days.`;
 
 export default function CallerTermsScreen({ navigation }: Props): React.JSX.Element {

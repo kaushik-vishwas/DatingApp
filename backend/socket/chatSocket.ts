@@ -9,9 +9,19 @@ import Receiver from '../models/Receiver';
 import { CHAT_TEXT_FEE_INR } from '../constants/chatPricing';
 
 type JwtPayload = { id: string; typ: 'u' | 'r' };
-type CallInvitePayload = { callId?: unknown };
+type CallInvitePayload = { callId?: unknown; targetId?: unknown };
 type CallResponsePayload = { callId?: unknown; accepted?: unknown };
 type CallEndPayload = { callId?: unknown };
+type ChatTypingPayload = { typing?: unknown };
+type AccountType = 'u' | 'r';
+
+type ActiveCallInvite = {
+  callId: string;
+  inviterId: string;
+  inviterType: AccountType;
+  targetId: string;
+  targetType: AccountType;
+};
 
 export function roomKey(userId: string, receiverId: string): string {
   return `chat:${userId}:${receiverId}`;
@@ -29,11 +39,16 @@ function parseRoom(room: string): { userId: string; receiverId: string } | null 
   return { userId, receiverId };
 }
 
+function accountRoom(typ: AccountType, accountId: string): string {
+  return `account:${typ}:${accountId}`;
+}
+
 /**
  * Real-time 1:1 chat between an app user (`users`) and a receiver (`receivers`).
  * Client authenticates with the same JWT as REST (`handshake.auth.token`).
  */
 export function attachChatSocket(httpServer: HTTPServer): Server {
+  const activeCallInvites = new Map<string, ActiveCallInvite>();
   const io = new Server(httpServer, {
     cors: { origin: '*', methods: ['GET', 'POST'] },
   });
@@ -65,6 +80,37 @@ export function attachChatSocket(httpServer: HTTPServer): Server {
   });
 
   io.on('connection', (socket) => {
+    const socketType = socket.data.typ as AccountType;
+    const socketAccountId = String(socket.data.accountId);
+    const selfRoom = accountRoom(socketType, socketAccountId);
+    void socket.join(selfRoom);
+    if (socketType === 'r') {
+      void Receiver.updateOne({ _id: socketAccountId }, { $set: { isOnline: true } }).exec();
+    }
+
+    socket.on('disconnect', () => {
+      const leavingId = String(socket.data.accountId);
+      const leavingType = socket.data.typ as AccountType;
+      for (const [callId, invite] of activeCallInvites) {
+        if (
+          (invite.inviterId === leavingId && invite.inviterType === leavingType) ||
+          (invite.targetId === leavingId && invite.targetType === leavingType)
+        ) {
+          activeCallInvites.delete(callId);
+        }
+      }
+      if (leavingType === 'r') {
+        // Keep online=true while any receiver socket remains connected for this account.
+        setTimeout(() => {
+          const room = accountRoom('r', leavingId);
+          const stillConnected = (io.sockets.adapter.rooms.get(room)?.size ?? 0) > 0;
+          if (!stillConnected) {
+            void Receiver.updateOne({ _id: leavingId }, { $set: { isOnline: false } }).exec();
+          }
+        }, 300);
+      }
+    });
+
     socket.on('chat:join', (payload: { receiverId?: unknown; userId?: unknown }, ack?: (r: unknown) => void) => {
       void (async () => {
         try {
@@ -303,6 +349,18 @@ export function attachChatSocket(httpServer: HTTPServer): Server {
             createdAt: doc.createdAt.toISOString(),
           };
           io.to(room).emit('chat:newMessage', out);
+          io.to(accountRoom('u', parsed.userId)).emit('chat:inbox', {
+            peerId: parsed.receiverId,
+            lastText: doc.text,
+            lastAt: doc.createdAt.toISOString(),
+            fromType: typ,
+          });
+          io.to(accountRoom('r', parsed.receiverId)).emit('chat:inbox', {
+            peerId: parsed.userId,
+            lastText: doc.text,
+            lastAt: doc.createdAt.toISOString(),
+            fromType: typ,
+          });
           ack?.({ ok: true, message: out });
         } catch (err) {
           console.error(err);
@@ -311,38 +369,107 @@ export function attachChatSocket(httpServer: HTTPServer): Server {
       })();
     });
 
+    socket.on('chat:typing', (payload: ChatTypingPayload, ack?: (r: unknown) => void) => {
+      const room = socket.data.chatRoom as string | undefined;
+      if (!room) {
+        ack?.({ ok: false, error: 'Join a chat first' });
+        return;
+      }
+      const parsed = parseRoom(room);
+      if (!parsed) {
+        ack?.({ ok: false, error: 'Bad room' });
+        return;
+      }
+      const typ = socket.data.typ as AccountType;
+      const typing = Boolean(payload?.typing);
+      const fromId = String(socket.data.accountId);
+
+      io.to(room).emit('chat:typing', {
+        peerId: typ === 'u' ? parsed.userId : parsed.receiverId,
+        fromType: typ,
+        fromId,
+        typing,
+      });
+      if (typ === 'u') {
+        io.to(accountRoom('r', parsed.receiverId)).emit('chat:typing', {
+          peerId: parsed.userId,
+          fromType: typ,
+          fromId,
+          typing,
+        });
+      } else {
+        io.to(accountRoom('u', parsed.userId)).emit('chat:typing', {
+          peerId: parsed.receiverId,
+          fromType: typ,
+          fromId,
+          typing,
+        });
+      }
+      ack?.({ ok: true });
+    });
+
     socket.on('call:invite', (payload: CallInvitePayload, ack?: (r: unknown) => void) => {
       void (async () => {
-        const room = socket.data.chatRoom as string | undefined;
-        if (!room) {
-          ack?.({ ok: false, error: 'Join a chat first' });
-          return;
-        }
-        const parsed = parseRoom(room);
-        if (!parsed) {
-          ack?.({ ok: false, error: 'Bad room' });
-          return;
-        }
-        const typ = socket.data.typ as 'u' | 'r';
+        const typ = socket.data.typ as AccountType;
         const myId = String(socket.data.accountId);
-        if (typ === 'u' && myId !== parsed.userId) {
-          ack?.({ ok: false, error: 'Forbidden' });
-          return;
-        }
-        if (typ === 'r' && myId !== parsed.receiverId) {
-          ack?.({ ok: false, error: 'Forbidden' });
-          return;
-        }
-        if (await ChatBlock.exists({ userId: parsed.userId, receiverId: parsed.receiverId })) {
-          ack?.({ ok: false, error: 'This chat is blocked.' });
-          return;
-        }
         const callId = typeof payload?.callId === 'string' ? payload.callId.trim() : '';
+        const targetId = typeof payload?.targetId === 'string' ? payload.targetId.trim() : '';
         if (!callId) {
           ack?.({ ok: false, error: 'callId is required' });
           return;
         }
-        io.to(room).emit('call:incoming', {
+
+        if (!mongoose.Types.ObjectId.isValid(targetId)) {
+          ack?.({ ok: false, error: 'targetId is required' });
+          return;
+        }
+
+        const targetType: AccountType = typ === 'u' ? 'r' : 'u';
+
+        let userId: string;
+        let receiverId: string;
+        if (typ === 'u') {
+          userId = myId;
+          receiverId = targetId;
+        } else {
+          userId = targetId;
+          receiverId = myId;
+        }
+
+        if (await ChatBlock.exists({ userId, receiverId })) {
+          ack?.({ ok: false, error: 'This chat is blocked.' });
+          return;
+        }
+
+        if (typ === 'u') {
+          const recv = await Receiver.findById(targetId).select('accountStatus suspended isAvailable isOnline');
+          if (
+            !recv ||
+            recv.accountStatus !== 'approved' ||
+            recv.suspended ||
+            !recv.isAvailable ||
+            !recv.isOnline
+          ) {
+            ack?.({ ok: false, error: 'Cannot call this receiver right now.' });
+            return;
+          }
+        } else {
+          const usr = await User.findById(targetId).select('accountStatus suspended');
+          if (!usr || usr.suspended || usr.accountStatus !== 'approved') {
+            ack?.({ ok: false, error: 'Cannot call this user right now.' });
+            return;
+          }
+        }
+
+        activeCallInvites.set(callId, {
+          callId,
+          inviterId: myId,
+          inviterType: typ,
+          targetId,
+          targetType,
+        });
+
+        io.to(accountRoom(targetType, targetId)).emit('call:incoming', {
           callId,
           fromType: typ,
           fromId: myId,
@@ -352,42 +479,64 @@ export function attachChatSocket(httpServer: HTTPServer): Server {
     });
 
     socket.on('call:response', (payload: CallResponsePayload, ack?: (r: unknown) => void) => {
-      const room = socket.data.chatRoom as string | undefined;
-      if (!room) {
-        ack?.({ ok: false, error: 'Join a chat first' });
-        return;
-      }
       const callId = typeof payload?.callId === 'string' ? payload.callId.trim() : '';
       const accepted = typeof payload?.accepted === 'boolean' ? payload.accepted : null;
       if (!callId || accepted === null) {
         ack?.({ ok: false, error: 'callId and accepted are required' });
         return;
       }
-      io.to(room).emit('call:response', {
+      const invite = activeCallInvites.get(callId);
+      if (!invite) {
+        ack?.({ ok: false, error: 'Unknown call invite' });
+        return;
+      }
+      const responderId = String(socket.data.accountId);
+      const responderType = socket.data.typ as AccountType;
+      const isExpectedResponder =
+        responderId === invite.targetId && responderType === invite.targetType;
+      if (!isExpectedResponder) {
+        ack?.({ ok: false, error: 'Forbidden' });
+        return;
+      }
+
+      io.to(accountRoom(invite.inviterType, invite.inviterId)).emit('call:response', {
         callId,
         accepted,
-        fromType: socket.data.typ as 'u' | 'r',
-        fromId: String(socket.data.accountId),
+        fromType: responderType,
+        fromId: responderId,
       });
+      io.to(accountRoom(invite.targetType, invite.targetId)).emit('call:response', {
+        callId,
+        accepted,
+        fromType: responderType,
+        fromId: responderId,
+      });
+      if (!accepted) activeCallInvites.delete(callId);
       ack?.({ ok: true });
     });
 
     socket.on('call:end', (payload: CallEndPayload, ack?: (r: unknown) => void) => {
-      const room = socket.data.chatRoom as string | undefined;
-      if (!room) {
-        ack?.({ ok: false, error: 'Join a chat first' });
-        return;
-      }
       const callId = typeof payload?.callId === 'string' ? payload.callId.trim() : '';
       if (!callId) {
         ack?.({ ok: false, error: 'callId is required' });
         return;
       }
-      io.to(room).emit('call:ended', {
-        callId,
-        fromType: socket.data.typ as 'u' | 'r',
-        fromId: String(socket.data.accountId),
-      });
+      const endedByType = socket.data.typ as AccountType;
+      const endedById = String(socket.data.accountId);
+      const invite = activeCallInvites.get(callId);
+      if (invite) {
+        io.to(accountRoom(invite.inviterType, invite.inviterId)).emit('call:ended', {
+          callId,
+          fromType: endedByType,
+          fromId: endedById,
+        });
+        io.to(accountRoom(invite.targetType, invite.targetId)).emit('call:ended', {
+          callId,
+          fromType: endedByType,
+          fromId: endedById,
+        });
+        activeCallInvites.delete(callId);
+      }
       ack?.({ ok: true });
     });
   });

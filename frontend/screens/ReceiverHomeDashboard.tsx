@@ -15,6 +15,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useAuth } from '../context/AuthContext';
+import { useChatInbox } from '../context/ChatInboxContext';
 import type { ReceiverStackParamList } from '../navigation/ReceiverStackParamList';
 import { getErrorMessage, profileApi } from '../services/api';
 import type { ReceiverCallInsightsResponse, ReceiverWalletSummaryResponse } from '../types/api';
@@ -30,8 +31,9 @@ type ReceiverHomeNav = NativeStackNavigationProp<ReceiverStackParamList, 'Receiv
 export default function ReceiverHomeDashboard(): React.JSX.Element {
   const navigation = useNavigation<ReceiverHomeNav>();
   const { signOut, user, refreshUser } = useAuth();
+  const { totalUnread, refreshUnreadFromServer } = useChatInbox();
   const [refreshing, setRefreshing] = useState<boolean>(false);
-  const [available, setAvailable] = useState<boolean>(true);
+  const [available, setAvailable] = useState<boolean>(Boolean(user?.isAvailable ?? true));
   const [walletSummary, setWalletSummary] = useState<ReceiverWalletSummaryResponse | null>(null);
   const [callInsights, setCallInsights] = useState<ReceiverCallInsightsResponse | null>(null);
   const [summaryError, setSummaryError] = useState<string | null>(null);
@@ -39,6 +41,12 @@ export default function ReceiverHomeDashboard(): React.JSX.Element {
   /** Use stable `user._id` only — `refreshUser()` replaces `user` with a new object each time and would
    *  recreate this callback forever when combined with `useFocusEffect`. */
   const receiverId = user?.role === 'receiver' ? user._id : undefined;
+
+  const availabilityFromServer = user?.role === 'receiver' ? Boolean(user.isAvailable ?? true) : true;
+
+  React.useEffect(() => {
+    setAvailable(availabilityFromServer);
+  }, [availabilityFromServer]);
 
   const loadWalletSummary = useCallback(async () => {
     if (!receiverId) return;
@@ -67,6 +75,7 @@ export default function ReceiverHomeDashboard(): React.JSX.Element {
       void loadWalletSummary();
       void loadCallInsights();
       void refreshUser();
+      void refreshUnreadFromServer();
     }, [receiverId, loadWalletSummary, loadCallInsights, refreshUser])
   );
 
@@ -74,6 +83,18 @@ export default function ReceiverHomeDashboard(): React.JSX.Element {
     setRefreshing(true);
     await Promise.all([refreshUser(), loadWalletSummary(), loadCallInsights()]);
     setRefreshing(false);
+  };
+
+  const onToggleAvailability = async (next: boolean) => {
+    const prev = available;
+    setAvailable(next);
+    try {
+      await profileApi.updateReceiverProfile({ isAvailable: next });
+      await refreshUser();
+    } catch (e) {
+      setAvailable(prev);
+      Alert.alert('Update failed', getErrorMessage(e));
+    }
   };
 
   if (!user) {
@@ -121,7 +142,7 @@ export default function ReceiverHomeDashboard(): React.JSX.Element {
             </View>
             <Switch
               value={available}
-              onValueChange={setAvailable}
+              onValueChange={(next) => void onToggleAvailability(next)}
               trackColor={{ false: '#e5e5e5', true: 'rgba(123,44,255,0.35)' }}
               thumbColor={available ? '#7b2cff' : '#bdbdbd'}
             />
@@ -202,6 +223,7 @@ export default function ReceiverHomeDashboard(): React.JSX.Element {
               <QuickAction
                 label="Messages"
                 sublabel="Open your chats"
+                badgeCount={totalUnread}
                 onPress={() => navigation.navigate('ReceiverChats')}
               />
             </View>
@@ -384,7 +406,17 @@ function CallRow({ title, subtitle }: { title: string; subtitle: string; amount:
   );
 }
 
-function QuickAction({ label, sublabel, onPress }: { label: string; sublabel: string; onPress: () => void }) {
+function QuickAction({
+  label,
+  sublabel,
+  onPress,
+  badgeCount = 0,
+}: {
+  label: string;
+  sublabel: string;
+  onPress: () => void;
+  badgeCount?: number;
+}) {
   return (
     <TouchableOpacity style={quickActionStyles.btn} onPress={onPress}>
       <View style={quickActionStyles.iconBox}>
@@ -394,6 +426,13 @@ function QuickAction({ label, sublabel, onPress }: { label: string; sublabel: st
         <Text style={quickActionStyles.text}>{label}</Text>
         <Text style={quickActionStyles.sub}>{sublabel}</Text>
       </View>
+      {badgeCount > 0 ? (
+        <View style={quickActionStyles.badge}>
+          <Text style={quickActionStyles.badgeText}>
+            {badgeCount > 99 ? '99+' : String(badgeCount)}
+          </Text>
+        </View>
+      ) : null}
       <Text style={quickActionStyles.chev}>{'>'}</Text>
     </TouchableOpacity>
   );
@@ -449,4 +488,14 @@ const quickActionStyles = StyleSheet.create({
   text: { fontSize: 15, fontWeight: '800', color: '#111' },
   sub: { fontSize: 11, color: '#777', marginTop: 2, fontWeight: '600' },
   chev: { fontSize: 16, color: '#aaa', fontWeight: '700' },
+  badge: {
+    minWidth: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: '#ef4444',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 4,
+  },
+  badgeText: { color: '#fff', fontSize: 10, fontWeight: '900' },
 });

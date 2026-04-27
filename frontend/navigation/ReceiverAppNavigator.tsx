@@ -1,5 +1,6 @@
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import React from 'react';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import ReceiverHomeDashboard from '../screens/ReceiverHomeDashboard';
 import ReceiverChatsScreen from '../screens/receiver/ReceiverChatsScreen';
@@ -20,10 +21,16 @@ import type { ReceiverStackParamList } from './ReceiverStackParamList';
 const Stack = createNativeStackNavigator<ReceiverStackParamList>();
 
 export default function ReceiverAppNavigator(): React.JSX.Element {
+  const insets = useSafeAreaInsets();
+  const bottomGap = Math.max(10, insets.bottom);
   return (
     <Stack.Navigator
       initialRouteName="ReceiverHome"
-      screenOptions={{ headerShown: false, animation: 'slide_from_right' }}
+      screenOptions={{
+        headerShown: false,
+        animation: 'slide_from_right',
+        contentStyle: { paddingBottom: bottomGap },
+      }}
     >
       <Stack.Screen name="ReceiverHome" component={ReceiverHomeDashboard} />
       <Stack.Screen name="ReceiverSettings" component={ReceiverSettingsScreen} />
@@ -38,7 +45,11 @@ export default function ReceiverAppNavigator(): React.JSX.Element {
       <Stack.Screen name="ReceiverCallHistory" component={ReceiverCallHistoryScreen} />
       <Stack.Screen name="ReceiverChats" component={ReceiverChatsScreen} />
       <Stack.Screen name="ReceiverChat" component={ChatConversationScreen} />
-      <Stack.Screen name="VoiceCall" component={VoiceCallScreen} />
+      <Stack.Screen
+        name="VoiceCall"
+        component={VoiceCallScreen}
+        options={{ contentStyle: { paddingBottom: 0 } }}
+      />
     </Stack.Navigator>
   );
 }

@@ -40,4 +40,8 @@ export interface UserProfile {
   audioCallRate?: number | null;
   /** App users (callers): voice sample HTTPS URL (MongoDB: `userAudio`). */
   userAudio?: string | null;
+  /** Receiver-controlled availability for discover/calls. */
+  isAvailable?: boolean;
+  /** Runtime online presence (receiver only). */
+  isOnline?: boolean;
 }

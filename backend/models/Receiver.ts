@@ -38,6 +38,10 @@ export interface IReceiver {
   walletBalance: number;
   /** Admin moderation: blocks receiver app access when true (like caller `suspended`). */
   suspended: boolean;
+  /** Receiver-controlled discover/call availability switch. */
+  isAvailable: boolean;
+  /** Runtime presence from active socket session(s). */
+  isOnline: boolean;
   /** Set when an admin applies a warning from a moderation report. */
   moderationWarningAt: Date | null;
   pendingBankAccountHolderName: string | null;
@@ -83,6 +87,8 @@ const receiverSchema = new Schema<IReceiver>(
     audioCallRate: { type: Number, default: null },
     walletBalance: { type: Number, default: 0 },
     suspended: { type: Boolean, default: false },
+    isAvailable: { type: Boolean, default: true },
+    isOnline: { type: Boolean, default: false },
     moderationWarningAt: { type: Date, default: null },
     pendingBankAccountHolderName: { type: String, default: null },
     pendingBankAccountType: { type: String, enum: ['savings', 'current'], default: null },

@@ -21,12 +21,12 @@ export default function SplashScreen({ navigation }: Props): React.JSX.Element {
   return (
     <View style={styles.root}>
       <View style={styles.logoRing}>
-        <Text style={styles.logoGlyph} accessibilityLabel="Nesthama logo">
+        <Text style={styles.logoGlyph} accessibilityLabel="Selecto logo">
           🤝
         </Text>
       </View>
 
-      <Text style={styles.brand}>Nesthama !</Text>
+      <Text style={styles.brand}>Selecto !</Text>
       <Text style={styles.tagline}>A online Friendship app 👋</Text>
 
       <TouchableOpacity style={styles.cta} onPress={onGetStarted} activeOpacity={0.9}>

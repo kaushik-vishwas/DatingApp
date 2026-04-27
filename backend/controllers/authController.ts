@@ -52,6 +52,10 @@ export interface SafeUser {
   audioCallRate: number | null;
   /** Callers: voice sample URL for admin review; receivers: always null */
   userAudio: string | null;
+  /** Receiver availability toggle (callers always `false`). */
+  isAvailable: boolean;
+  /** Runtime online presence from socket connection(s). */
+  isOnline: boolean;
 }
 
 type LegacyRegisterRole = 'caller' | 'receiver' | 'both';
@@ -123,6 +127,8 @@ export function toApiUser(user: UserDocument): SafeUser {
     walletBalance: typeof u.walletBalance === 'number' && Number.isFinite(u.walletBalance) ? u.walletBalance : 0,
     audioCallRate: null,
     userAudio: u.userAudio ?? null,
+    isAvailable: false,
+    isOnline: false,
   };
 }
 
@@ -159,6 +165,8 @@ export function toApiReceiver(receiver: ReceiverDocument): SafeUser {
     audioCallRate:
       typeof r.audioCallRate === 'number' && Number.isFinite(r.audioCallRate) ? r.audioCallRate : null,
     userAudio: null,
+    isAvailable: Boolean(r.isAvailable),
+    isOnline: Boolean(r.isOnline),
   };
 }
 

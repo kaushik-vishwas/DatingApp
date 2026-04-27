@@ -5,6 +5,7 @@
  */
 const path = require('path');
 const fs = require('fs');
+const PROD_API = 'https://backend.nesthamapp.com';
 
 require('dotenv').config({ path: path.join(__dirname, '.env') });
 
@@ -12,6 +13,10 @@ const appJson = JSON.parse(fs.readFileSync(path.join(__dirname, 'app.json'), 'ut
 
 const fromEnv = process.env.EXPO_PUBLIC_API_BASE_URL?.trim();
 const fromAppJson = appJson.expo?.extra?.apiBaseUrl?.trim();
+const cloudNameFromEnv = process.env.EXPO_PUBLIC_CLOUDINARY_CLOUD_NAME?.trim();
+const uploadPresetFromEnv = process.env.EXPO_PUBLIC_CLOUDINARY_UPLOAD_PRESET?.trim();
+const cloudNameFromAppJson = appJson.expo?.extra?.cloudinaryCloudName?.trim();
+const uploadPresetFromAppJson = appJson.expo?.extra?.cloudinaryUploadPreset?.trim();
 
 function normalizeOrigin(url) {
   if (!url) return url;
@@ -23,7 +28,9 @@ function normalizeOrigin(url) {
 const apiBaseUrl =
   normalizeOrigin(fromEnv) ||
   normalizeOrigin(fromAppJson) ||
-  'http://localhost:5000';
+  PROD_API;
+const cloudinaryCloudName = cloudNameFromEnv || cloudNameFromAppJson || '';
+const cloudinaryUploadPreset = uploadPresetFromEnv || uploadPresetFromAppJson || '';
 
 module.exports = {
   expo: {
@@ -40,6 +47,8 @@ module.exports = {
         projectId: '0ca964b8-cc50-4b02-b4f1-63e66b6b10c0',
       },
       apiBaseUrl,
+      cloudinaryCloudName,
+      cloudinaryUploadPreset,
     },
   },
 };

@@ -5,6 +5,7 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { useAuth } from '../context/AuthContext';
 import { hasSeenAuthWelcome } from '../services/authWelcomeStorage';
 import type { RootStackParamList } from './RootStackParamList';
+import { navigationRef } from './navigationRef';
 
 import ReceiverEducationScreen from '../screens/onboarding/ReceiverEducationScreen';
 import RoleGateScreen from '../screens/onboarding/RoleGateScreen';
@@ -51,7 +52,7 @@ function SignedOutNavigator(): React.JSX.Element {
   }
 
   return (
-    <NavigationContainer>
+    <NavigationContainer<RootStackParamList> ref={navigationRef}>
       <Stack.Navigator
         initialRouteName={initialRoute}
         screenOptions={{ headerShown: false }}
@@ -107,7 +108,7 @@ export default function AppNavigator(): React.JSX.Element {
   const { accountStatus, suspended } = user;
 
   return (
-    <NavigationContainer>
+    <NavigationContainer<RootStackParamList> ref={navigationRef}>
       <Stack.Navigator screenOptions={{ headerShown: false }}>
         {user.role === 'caller' ? (
           accountStatus === 'pending_profile' ? (

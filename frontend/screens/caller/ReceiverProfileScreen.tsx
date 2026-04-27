@@ -43,6 +43,7 @@ export default function ReceiverProfileScreen({ navigation, route }: Props): Rea
   const wallet = typeof user?.walletBalance === 'number' && Number.isFinite(user.walletBalance) ? user.walletBalance : 0;
   const m = receiverCardMetrics(receiver._id);
   const rate = receiver.audioCallRate;
+  const onlineLabel = receiver.isOnline ? 'Online' : 'Offline';
 
   const openWallet = () => {
     setRechargeModal('none');
@@ -75,7 +76,7 @@ export default function ReceiverProfileScreen({ navigation, route }: Props): Rea
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
           <Text style={styles.backTxt}>←</Text>
         </TouchableOpacity>
-        <Text style={styles.brand}>Nesthama</Text>
+        <Text style={styles.brand}>Selecto</Text>
         <TouchableOpacity style={styles.topRight} onPress={() => navigation.navigate('Wallet')}>
           <Text style={styles.walletIco}>👛</Text>
           <Text style={styles.walletAmt}>₹{wallet.toLocaleString('en-IN')}</Text>
@@ -117,7 +118,11 @@ export default function ReceiverProfileScreen({ navigation, route }: Props): Rea
               {m.rating} ({m.reviews})
             </Text>
           </View>
-          <Text style={styles.lastSeen}>Last seen — {formatLastSeen(receiver.updatedAt)}</Text>
+          <Text style={styles.lastSeen}>
+            {onlineLabel === 'Online'
+              ? 'Online now'
+              : `Last seen — ${formatLastSeen(receiver.updatedAt)}`}
+          </Text>
         </View>
 
         <Text style={styles.secTitle}>Languages spoken</Text>

@@ -1,3 +1,5 @@
+import Constants from 'expo-constants';
+
 export type CloudinaryResourceType = 'image' | 'raw' | 'video' | 'auto';
 
 export type UploadToCloudinaryOptions = {
@@ -12,11 +14,16 @@ export type CloudinaryUploadResult = {
 };
 
 function getCloudinaryConfig(): { cloudName: string; uploadPreset: string } {
-  const cloudName = String(process.env.EXPO_PUBLIC_CLOUDINARY_CLOUD_NAME ?? '').trim();
-  const uploadPreset = String(process.env.EXPO_PUBLIC_CLOUDINARY_UPLOAD_PRESET ?? '').trim();
+  const extra = (Constants as any)?.expoConfig?.extra ?? (Constants as any)?.manifest?.extra ?? {};
+  const cloudName = String(
+    process.env.EXPO_PUBLIC_CLOUDINARY_CLOUD_NAME ?? extra.cloudinaryCloudName ?? ''
+  ).trim();
+  const uploadPreset = String(
+    process.env.EXPO_PUBLIC_CLOUDINARY_UPLOAD_PRESET ?? extra.cloudinaryUploadPreset ?? ''
+  ).trim();
   if (!cloudName || !uploadPreset) {
     throw new Error(
-      'Cloudinary is not configured. Add EXPO_PUBLIC_CLOUDINARY_CLOUD_NAME and EXPO_PUBLIC_CLOUDINARY_UPLOAD_PRESET to frontend/.env (see commented keys in backend/.env). Restart Expo after editing .env.'
+      'Cloudinary is not configured. Add EXPO_PUBLIC_CLOUDINARY_CLOUD_NAME and EXPO_PUBLIC_CLOUDINARY_UPLOAD_PRESET to frontend/.env, then restart Expo.'
     );
   }
   return { cloudName, uploadPreset };

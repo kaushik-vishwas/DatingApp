@@ -64,6 +64,7 @@ export interface DiscoverReceiverSummary {
   /** ISO timestamp for "last seen" on caller profile */
   updatedAt: string;
   gender: Gender | null;
+  isOnline: boolean;
 }
 
 export interface WalletCreditResponse {
@@ -105,6 +106,7 @@ export interface ChatPeerSummary {
   peerImage: string | null;
   lastText: string;
   lastAt: string;
+  unreadCount?: number;
 }
 
 export interface ChatMessagesResponse {
@@ -304,6 +306,7 @@ export interface UpdateReceiverProfilePayload {
   interests?: string[];
   state?: string;
   audioCallRate?: number;
+  isAvailable?: boolean;
 }
 
 export interface DeleteReceiverAccountPayload {

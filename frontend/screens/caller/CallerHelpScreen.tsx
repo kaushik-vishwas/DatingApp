@@ -6,7 +6,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import type { CallerStackParamList } from '../../navigation/CallerStackParamList';
 
 const PURPLE = '#7b2cff';
-const SUPPORT_EMAIL = 'support@nesthama.com';
+const SUPPORT_EMAIL = 'support@selecto.com';
 
 type Props = NativeStackScreenProps<CallerStackParamList, 'CallerHelp'>;
 

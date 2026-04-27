@@ -1,4 +1,7 @@
 import type { AuthAccountType } from '../types/api';
+import type { NavigatorScreenParams } from '@react-navigation/native';
+import type { CallerStackParamList } from './CallerStackParamList';
+import type { ReceiverStackParamList } from './ReceiverStackParamList';
 
 export type RootStackParamList = {
   Splash: undefined;
@@ -13,6 +16,6 @@ export type RootStackParamList = {
   CompleteProfileFlow: undefined;
   UserOnboardingFlow: undefined;
   UnderReview: undefined;
-  Home: undefined;
-  CallerApp: undefined;
+  Home: NavigatorScreenParams<ReceiverStackParamList> | undefined;
+  CallerApp: NavigatorScreenParams<CallerStackParamList> | undefined;
 };

@@ -31,7 +31,7 @@ We do not sell your personal data. We may share information with service provide
 You can update profile information in the app. You may contact support to request account deletion or data questions.
 
 6. Contact
-support@nesthama.com`;
+support@selecto.com`;
 
 export default function CallerPrivacyPolicyScreen({ navigation }: Props): React.JSX.Element {
   return (

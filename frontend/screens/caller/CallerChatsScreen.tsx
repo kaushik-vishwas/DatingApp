@@ -1,4 +1,5 @@
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
+import { useFocusEffect } from '@react-navigation/native';
 import React, { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
@@ -15,12 +16,14 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import type { CallerStackParamList } from '../../navigation/CallerStackParamList';
 import { chatApi, getErrorMessage } from '../../services/api';
 import type { ChatPeerSummary } from '../../types/api';
+import { useChatInbox } from '../../context/ChatInboxContext';
 
 type Props = NativeStackScreenProps<CallerStackParamList, 'CallerChats'>;
 
 const PURPLE = '#7b2cff';
 
 export default function CallerChatsScreen({ navigation }: Props): React.JSX.Element {
+  const { getTyping, refreshUnreadFromServer } = useChatInbox();
   const [rows, setRows] = useState<ChatPeerSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -42,6 +45,12 @@ export default function CallerChatsScreen({ navigation }: Props): React.JSX.Elem
   useEffect(() => {
     void load();
   }, [load]);
+
+  useFocusEffect(
+    useCallback(() => {
+      void refreshUnreadFromServer();
+    }, [refreshUnreadFromServer])
+  );
 
   const onRefresh = (): void => {
     setRefreshing(true);
@@ -90,8 +99,8 @@ export default function CallerChatsScreen({ navigation }: Props): React.JSX.Elem
                 <Text style={styles.name} numberOfLines={1}>
                   {item.peerName}
                 </Text>
-                <Text style={styles.preview} numberOfLines={1}>
-                  {item.lastText}
+                <Text style={[styles.preview, getTyping(item.peerId) && styles.typing]} numberOfLines={1}>
+                  {getTyping(item.peerId) ? 'typing...' : item.lastText}
                 </Text>
               </View>
             </TouchableOpacity>
@@ -153,4 +162,5 @@ const styles = StyleSheet.create({
   rowBody: { flex: 1, minWidth: 0 },
   name: { fontSize: 16, fontWeight: '800', color: '#111' },
   preview: { fontSize: 13, color: '#666', marginTop: 4 },
+  typing: { color: PURPLE, fontWeight: '700' },
 });

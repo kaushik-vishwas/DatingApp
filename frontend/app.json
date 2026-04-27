@@ -33,7 +33,9 @@
       "favicon": "./assets/favicon.png"
     },
     "extra": {
-      "apiBaseUrl": "http://192.168.0.102:5000"
+      "apiBaseUrl": "https://backend.nesthamapp.com",
+      "cloudinaryCloudName": "dfeeqvx3v",
+      "cloudinaryUploadPreset": "dating_app_upload"
     }
   }
 }

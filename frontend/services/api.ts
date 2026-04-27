@@ -41,6 +41,7 @@ const JWT_KEY = 'jwt';
 
 /** Production API (release builds and dev fallback when Metro tunnel cannot reach your PC). */
 const PROD_API = 'https://backend.nesthamapp.com';
+const PROD_ORIGIN = normalizeApiOrigin(PROD_API);
 
 /** Normalize URL */
 function normalizeApiOrigin(raw: string): string {
@@ -93,26 +94,23 @@ function getDevApiBase(): string | undefined {
 
 const getBaseURL = (): string => {
   const configured = getConfiguredApiBase();
-  if (configured) {
+  if (!__DEV__) return configured || PROD_ORIGIN;
+
+  // In dev, honor explicit non-prod override first (e.g. custom staging/local URL in .env).
+  if (configured && configured !== PROD_ORIGIN) {
     return configured;
   }
 
-  if (!__DEV__) {
-    return normalizeApiOrigin(PROD_API);
-  }
-
+  // Prefer local backend automatically on LAN/emulator when reachable by host metadata.
   const devUrl = getDevApiBase();
-  if (devUrl) {
-    return normalizeApiOrigin(devUrl);
-  }
+  if (devUrl) return normalizeApiOrigin(devUrl);
 
   const c = Constants as any;
   const hostUri: string | undefined = c.expoConfig?.hostUri || c.manifest?.debuggerHost;
   const onTunnel = Boolean(hostUri?.includes('exp.direct'));
-  if (onTunnel) {
-    return normalizeApiOrigin(PROD_API);
-  }
+  if (onTunnel) return PROD_ORIGIN;
 
+  // Last-resort local fallback for simulators/emulators.
   return normalizeApiOrigin(
     Platform.OS === 'android' ? 'http://10.0.2.2:5000' : 'http://127.0.0.1:5000'
   );
@@ -325,6 +323,9 @@ export const chatApi = {
 
   clear: (body: { receiverId?: string; userId?: string }) =>
     api.post<{ ok: boolean; deletedCount: number }>('/chat/clear', body),
+
+  markRead: (body: { receiverId?: string; userId?: string }) =>
+    api.post<{ ok: boolean }>('/chat/mark-read', body),
 };
 
 export const callApi = {

@@ -34,6 +34,7 @@ export type DiscoverReceiverCard = {
   audioCallRate: number | null;
   updatedAt: string;
   gender: 'male' | 'female' | 'other' | null;
+  isOnline: boolean;
 };
 
 function toCard(r: ReceiverDocument): DiscoverReceiverCard {
@@ -51,6 +52,7 @@ function toCard(r: ReceiverDocument): DiscoverReceiverCard {
     updatedAt: iso(o.updatedAt),
     gender:
       o.gender === 'male' || o.gender === 'female' || o.gender === 'other' ? o.gender : null,
+    isOnline: Boolean(o.isAvailable) && Boolean(o.isOnline),
   };
 }
 
@@ -89,7 +91,7 @@ export const listReceiversForCaller = async (req: Request, res: Response): Promi
         : {};
 
     const receivers = await Receiver.find({ ...filter, ...blockClause })
-      .select('name age state interests languages profileImage audioCallRate updatedAt gender')
+      .select('name age state interests languages profileImage audioCallRate updatedAt gender isAvailable isOnline')
       .sort({ updatedAt: -1 })
       .limit(limit)
       .exec();

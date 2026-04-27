@@ -41,7 +41,7 @@ export default function WelcomeOnboardScreen({ route }: Props): React.JSX.Elemen
       <View style={styles.nameLine}>
         <Text style={styles.namePurple}>{greetingName}</Text>
       </View>
-      <Text style={styles.sub}>You are all set to explore Nesthama.</Text>
+      <Text style={styles.sub}>You are all set to explore Selecto.</Text>
 
       <TouchableOpacity
         style={[styles.cta, busy && styles.ctaDisabled]}

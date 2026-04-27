@@ -25,14 +25,15 @@ import type { CallerStackParamList } from '../../navigation/CallerStackParamList
 import type { ReceiverStackParamList } from '../../navigation/ReceiverStackParamList';
 import {
   chatApi,
-  callApi,
   CHAT_REPORT_REASONS,
   type ChatReportReason,
   getJwt,
   getResolvedApiBaseUrl,
 } from '../../services/api';
-import type { ChatMessageDto, VoiceBootstrapResponse } from '../../types/api';
+import type { ChatMessageDto } from '../../types/api';
 import { useAuth } from '../../context/AuthContext';
+import { useCallSignals } from '../../context/CallSignalContext';
+import { useChatInbox } from '../../context/ChatInboxContext';
 
 const PURPLE = '#7b2cff';
 const CHAT_FEE_LABEL = '₹0.50';
@@ -54,20 +55,17 @@ type ChatSendAck = {
   requiredInr?: number;
 };
 
-type CallIncomingPayload = {
-  callId: string;
+type ChatTypingEvent = {
+  peerId: string;
   fromType: 'u' | 'r';
   fromId: string;
-};
-
-type CallResponsePayload = {
-  callId: string;
-  accepted: boolean;
-  fromType: 'u' | 'r';
+  typing: boolean;
 };
 
 export default function ChatConversationScreen({ navigation, route }: Props): React.JSX.Element {
   const { user, refreshUser } = useAuth();
+  const { registerPeer, startCallInvite } = useCallSignals();
+  const { markPeerReadLocal, setActivePeer } = useChatInbox();
   const callerNav = useNavigation<NativeStackNavigationProp<CallerStackParamList>>();
   const isCaller = route.name === 'CallerChat';
   const peerId = isCaller ? route.params.receiverId : route.params.userId;
@@ -89,10 +87,32 @@ export default function ChatConversationScreen({ navigation, route }: Props): Re
   const [reportOpen, setReportOpen] = useState(false);
   const [thanksOpen, setThanksOpen] = useState(false);
   const [continueOpen, setContinueOpen] = useState(false);
+  const [peerTyping, setPeerTyping] = useState(false);
   const [reportReason, setReportReason] = useState<ChatReportReason>('Spam');
   const socketRef = useRef<Socket | null>(null);
   const listRef = useRef<FlatList<ChatMessageDto>>(null);
-  const pendingVoiceBootstrapRef = useRef<VoiceBootstrapResponse | null>(null);
+  const typingStatusRef = useRef(false);
+  const typingStopTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const markReadOnServer = useCallback(async () => {
+    try {
+      if (isCaller) {
+        await chatApi.markRead({ receiverId: peerId });
+      } else {
+        await chatApi.markRead({ userId: peerId });
+      }
+    } catch {
+      // Ignore transient read-sync failures.
+    }
+  }, [isCaller, peerId]);
+
+  const emitTyping = useCallback((typing: boolean) => {
+    const s = socketRef.current;
+    if (!s?.connected) return;
+    if (typingStatusRef.current === typing) return;
+    typingStatusRef.current = typing;
+    s.emit('chat:typing', { typing });
+  }, []);
 
   const appendMessage = useCallback((m: ChatMessageDto) => {
     setMessages((prev) => {
@@ -101,24 +121,18 @@ export default function ChatConversationScreen({ navigation, route }: Props): Re
     });
   }, []);
 
-  const openVoiceCallScreen = useCallback(
-    (bootstrap: VoiceBootstrapResponse): void => {
-      if (isCaller) {
-        callerNav.navigate('VoiceCall', {
-          ...bootstrap,
-          peerName,
-        });
-        return;
-      }
-      (
-        navigation as NativeStackNavigationProp<ReceiverStackParamList, 'ReceiverChat'>
-      ).navigate('VoiceCall', {
-        ...bootstrap,
-        peerName,
-      });
-    },
-    [callerNav, isCaller, navigation, peerName]
-  );
+  useEffect(() => {
+    registerPeer(peerId, peerName);
+  }, [peerId, peerName, registerPeer]);
+
+  useEffect(() => {
+    setActivePeer(peerId);
+    markPeerReadLocal(peerId);
+    void markReadOnServer();
+    return () => {
+      setActivePeer(null);
+    };
+  }, [markPeerReadLocal, markReadOnServer, peerId, setActivePeer]);
 
   useEffect(() => {
     let cancelled = false;
@@ -203,64 +217,19 @@ export default function ChatConversationScreen({ navigation, route }: Props): Re
 
       socket.on('chat:newMessage', (msg: ChatMessageDto) => {
         appendMessage(msg);
-      });
-
-      socket.on('call:incoming', (payload: CallIncomingPayload) => {
-        if (payload.fromType === mySenderType) return;
-        Alert.alert(`${peerName} is calling`, 'Accept this voice call request?', [
-          {
-            text: 'Reject',
-            style: 'destructive',
-            onPress: () => {
-              socket.emit('call:response', { callId: payload.callId, accepted: false });
-            },
-          },
-          {
-            text: 'Accept',
-            onPress: () => {
-              void (async () => {
-                try {
-                  const { data } = await callApi.bootstrap(peerId);
-                  socket.emit('call:response', { callId: payload.callId, accepted: true });
-                  openVoiceCallScreen(data);
-                } catch (e: unknown) {
-                  const msg = (e as { response?: { data?: { message?: string } } })?.response?.data?.message;
-                  Alert.alert('Call failed', msg || 'Unable to join call.');
-                }
-              })();
-            },
-          },
-        ]);
-      });
-
-      socket.on('call:response', (payload: CallResponsePayload) => {
-        if (payload.fromType === mySenderType) return;
-        if (payload.accepted) {
-          const pending = pendingVoiceBootstrapRef.current;
-          if (pending && pending.callId === payload.callId) {
-            openVoiceCallScreen(pending);
-          } else {
-            void (async () => {
-              try {
-                const { data } = await callApi.bootstrap(peerId);
-                openVoiceCallScreen(data);
-              } catch {
-                Alert.alert('Call accepted', `${peerName} accepted, but joining failed. Try again.`);
-              }
-            })();
-          }
-        } else {
-          Alert.alert('Call declined', `${peerName} declined your call.`);
+        if (msg.senderType !== mySenderType) {
+          markPeerReadLocal(peerId);
+          void markReadOnServer();
         }
-        setCalling(false);
-        pendingVoiceBootstrapRef.current = null;
       });
 
-      socket.on('call:ended', (payload: { callId: string; fromType: 'u' | 'r' }) => {
+      socket.on('chat:typing', (payload: ChatTypingEvent) => {
         if (payload.fromType === mySenderType) return;
-        Alert.alert('Call ended', `${peerName} ended the call.`);
-        setCalling(false);
+        setPeerTyping(Boolean(payload.typing));
       });
+
+      socket.on('call:response', () => setCalling(false));
+      socket.on('call:ended', () => setCalling(false));
     })();
 
     return () => {
@@ -273,7 +242,7 @@ export default function ChatConversationScreen({ navigation, route }: Props): Re
         socketRef.current = null;
       }
     };
-  }, [appendMessage, isCaller, mySenderType, openVoiceCallScreen, peerId, peerName, refreshUser]);
+  }, [appendMessage, isCaller, markPeerReadLocal, markReadOnServer, mySenderType, peerId, refreshUser]);
 
   const closeMenu = (): void => setMenuOpen(false);
 
@@ -349,6 +318,11 @@ export default function ChatConversationScreen({ navigation, route }: Props): Re
       return;
     }
     setSending(true);
+    emitTyping(false);
+    if (typingStopTimerRef.current) {
+      clearTimeout(typingStopTimerRef.current);
+      typingStopTimerRef.current = null;
+    }
     s.emit('chat:message', { text }, (res: ChatSendAck) => {
       setSending(false);
       if (res && res.ok === false) {
@@ -364,6 +338,25 @@ export default function ChatConversationScreen({ navigation, route }: Props): Re
     });
   };
 
+  const onChangeInput = (value: string): void => {
+    setInput(value);
+    const typing = value.trim().length > 0;
+    emitTyping(typing);
+    if (typingStopTimerRef.current) clearTimeout(typingStopTimerRef.current);
+    if (typing) {
+      typingStopTimerRef.current = setTimeout(() => {
+        emitTyping(false);
+      }, 1200);
+    }
+  };
+
+  useEffect(() => {
+    return () => {
+      if (typingStopTimerRef.current) clearTimeout(typingStopTimerRef.current);
+      emitTyping(false);
+    };
+  }, [emitTyping]);
+
   const goWallet = (): void => {
     setContinueOpen(false);
     if (isCaller) {
@@ -372,30 +365,19 @@ export default function ChatConversationScreen({ navigation, route }: Props): Re
   };
 
   const onStartVoiceCall = (): void => {
-    const s = socketRef.current;
-    if (!s?.connected || calling) {
-      setSocketError('Not connected. Check your network.');
+    if (calling) return;
+    if (!socketRef.current?.connected) {
+      setSocketError('Chat is reconnecting. Please try again in a moment.');
       return;
     }
     setCalling(true);
     void (async () => {
       try {
-        const { data } = await callApi.bootstrap(peerId);
-        pendingVoiceBootstrapRef.current = data;
-        s.emit('call:invite', { callId: data.callId }, (res: { ok?: boolean; error?: string }) => {
-          if (res?.ok === false) {
-            setCalling(false);
-            pendingVoiceBootstrapRef.current = null;
-            Alert.alert('Call failed', res.error || 'Could not ring receiver.');
-            return;
-          }
-          Alert.alert('Calling…', `Ringing ${peerName}`);
-        });
+        await startCallInvite(peerId, peerName);
       } catch (e: unknown) {
         setCalling(false);
-        pendingVoiceBootstrapRef.current = null;
-        const msg = (e as { response?: { data?: { message?: string } } })?.response?.data?.message;
-        Alert.alert('Call failed', msg || 'Could not start call right now.');
+        const msg = e instanceof Error ? e.message : 'Could not start call right now.';
+        Alert.alert('Call failed', msg);
       }
     })();
   };
@@ -434,6 +416,7 @@ export default function ChatConversationScreen({ navigation, route }: Props): Re
           <Text style={styles.title} numberOfLines={1}>
             {peerName}
           </Text>
+          {peerTyping ? <Text style={styles.typingText}>typing...</Text> : null}
           <TouchableOpacity
             onPress={onStartVoiceCall}
             style={[styles.callBtnTop, calling && styles.callBtnTopOff]}
@@ -494,7 +477,7 @@ export default function ChatConversationScreen({ navigation, route }: Props): Re
           <TextInput
             style={styles.input}
             value={input}
-            onChangeText={setInput}
+            onChangeText={onChangeInput}
             placeholder="Type a message…"
             placeholderTextColor="#999"
             multiline
@@ -609,6 +592,7 @@ const styles = StyleSheet.create({
   peerAvPh: { backgroundColor: '#e8dff9', alignItems: 'center', justifyContent: 'center' },
   peerAvTxt: { fontWeight: '900', color: PURPLE, fontSize: 14 },
   title: { flex: 1, fontSize: 17, fontWeight: '900', color: '#111' },
+  typingText: { fontSize: 11, color: PURPLE, fontWeight: '700' },
   callBtnTop: {
     backgroundColor: PURPLE,
     paddingHorizontal: 12,

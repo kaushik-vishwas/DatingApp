@@ -67,7 +67,7 @@ export default function CallerDiscoverHome(): React.JSX.Element {
       rows = rows.filter((r) => receiverCardMetrics(r._id).rating >= 4);
     }
     if (appliedFilters.onlineOnly) {
-      rows = rows.filter((r) => !receiverCardMetrics(r._id).busy);
+      rows = rows.filter((r) => r.isOnline);
     }
     return rows;
   }, [language, debounced, appliedFilters]);
@@ -143,8 +143,8 @@ export default function CallerDiscoverHome(): React.JSX.Element {
 
   const renderItem = ({ item }: { item: DiscoverReceiverSummary }) => {
     const m = receiverCardMetrics(item._id);
-    const statusColor = m.busy ? AMBER : GREEN;
-    const statusLabel = m.busy ? 'Busy' : 'Online';
+    const statusColor = item.isOnline ? GREEN : AMBER;
+    const statusLabel = item.isOnline ? 'Online' : 'Offline';
     const interestStr =
       item.interests.length > 0 ? item.interests.slice(0, 4).join(' | ') : '—';
     const rateLabel =
@@ -213,7 +213,7 @@ export default function CallerDiscoverHome(): React.JSX.Element {
   const listHeader = (
     <View style={styles.headerBlock}>
       <View style={styles.topBar}>
-        <Text style={styles.brand}>Nesthama</Text>
+        <Text style={styles.brand}>Selecto</Text>
         <View style={styles.topRight}>
           <TouchableOpacity
             style={styles.walletTap}

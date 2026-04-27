@@ -1,5 +1,6 @@
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import React from 'react';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import CallerDiscoverHome from '../screens/CallerDiscoverHome';
 import CallerAlertsTabScreen from '../screens/caller/CallerAlertsTabScreen';
@@ -21,10 +22,16 @@ import type { CallerStackParamList } from './CallerStackParamList';
 const Stack = createNativeStackNavigator<CallerStackParamList>();
 
 export default function CallerAppNavigator(): React.JSX.Element {
+  const insets = useSafeAreaInsets();
+  const bottomGap = Math.max(10, insets.bottom);
   return (
     <Stack.Navigator
       initialRouteName="CallerDiscover"
-      screenOptions={{ headerShown: false, animation: 'slide_from_right' }}
+      screenOptions={{
+        headerShown: false,
+        animation: 'slide_from_right',
+        contentStyle: { paddingBottom: bottomGap },
+      }}
     >
       <Stack.Screen name="CallerDiscover" component={CallerDiscoverHome} />
       <Stack.Screen name="CallerCalls" component={CallerCallsTabScreen} />
@@ -36,7 +43,11 @@ export default function CallerAppNavigator(): React.JSX.Element {
       <Stack.Screen name="CallerHelp" component={CallerHelpScreen} />
       <Stack.Screen name="CallerChats" component={CallerChatsScreen} />
       <Stack.Screen name="CallerChat" component={ChatConversationScreen} />
-      <Stack.Screen name="VoiceCall" component={VoiceCallScreen} />
+      <Stack.Screen
+        name="VoiceCall"
+        component={VoiceCallScreen}
+        options={{ contentStyle: { paddingBottom: 0 } }}
+      />
       <Stack.Screen name="ReceiverProfile" component={ReceiverProfileScreen} />
       <Stack.Screen name="Wallet" component={WalletScreen} />
       <Stack.Screen name="PaymentMethod" component={PaymentMethodScreen} />
