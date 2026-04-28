@@ -787,7 +787,9 @@ const getReceiverCallInsights = async (req, res) => {
             callerName: callerNameById.get(String(row.callerId)) ?? 'Caller',
             startedAt: row.startedAt.toISOString(),
             durationSec: row.durationSec,
-            earningInr: roundInr((row.durationSec / 60) * row.ratePerMinute),
+            earningInr: roundInr(typeof row.settledAmountInr === 'number' && Number.isFinite(row.settledAmountInr)
+                ? row.settledAmountInr
+                : (row.durationSec / 60) * row.ratePerMinute),
             rating: typeof row.callerRating === 'number' ? row.callerRating : null,
         }));
         const byCaller = new Map();
@@ -889,6 +891,9 @@ const updateReceiverProfile = async (req, res) => {
                 return;
             }
             receiver.audioCallRate = n;
+        }
+        if (typeof req.body.isAvailable === 'boolean') {
+            receiver.isAvailable = req.body.isAvailable;
         }
         await receiver.save();
         res.status(200).json({
@@ -1107,7 +1112,9 @@ const getReceiverEarningsBreakdown = async (req, res) => {
                 .lean(),
         ]);
         const callRows = calls.map((c) => {
-            const gross = roundInr((c.durationSec / 60) * c.ratePerMinute);
+            const gross = roundInr(typeof c.settledAmountInr === 'number' && Number.isFinite(c.settledAmountInr)
+                ? c.settledAmountInr
+                : (c.durationSec / 60) * c.ratePerMinute);
             const fee = roundInr(gross * 0.2);
             const net = roundInr(gross - fee);
             return {

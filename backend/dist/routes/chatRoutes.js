@@ -9,4 +9,5 @@ router.get('/conversations', auth_1.protect, chatController_1.listConversations)
 router.post('/block', auth_1.protect, chatController_1.blockChatPeer);
 router.post('/report', auth_1.protect, chatController_1.reportChatPeer);
 router.post('/clear', auth_1.protect, chatController_1.clearChatHistory);
+router.post('/mark-read', auth_1.protect, chatController_1.markConversationRead);
 exports.default = router;

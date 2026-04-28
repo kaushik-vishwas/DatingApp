@@ -10,6 +10,9 @@ const User_1 = __importDefault(require("../models/User"));
 const Receiver_1 = __importDefault(require("../models/Receiver"));
 const CallSession_1 = __importDefault(require("../models/CallSession"));
 const streamVoice_1 = require("../utils/streamVoice");
+function roundInr(n) {
+    return Math.round(n * 100) / 100;
+}
 const getVoiceBootstrap = async (req, res) => {
     const accountKind = req.accountKind;
     const meId = accountKind === 'user' ? String(req.user?._id ?? '') : String(req.receiver?._id ?? '');
@@ -26,7 +29,7 @@ const getVoiceBootstrap = async (req, res) => {
     const receiverId = accountKind === 'receiver' ? meId : peerId;
     const [callerDoc, receiverDoc] = await Promise.all([
         User_1.default.findById(callerUserId).select('accountStatus suspended'),
-        Receiver_1.default.findById(receiverId).select('accountStatus suspended audioCallRate'),
+        Receiver_1.default.findById(receiverId).select('accountStatus suspended audioCallRate isAvailable isOnline'),
     ]);
     if (!callerDoc || callerDoc.accountStatus !== 'approved' || callerDoc.suspended) {
         res.status(403).json({ message: 'Caller account is not allowed for calling' });
@@ -34,6 +37,10 @@ const getVoiceBootstrap = async (req, res) => {
     }
     if (!receiverDoc || receiverDoc.accountStatus !== 'approved' || receiverDoc.suspended) {
         res.status(403).json({ message: 'Receiver account is not allowed for calling' });
+        return;
+    }
+    if (!receiverDoc.isAvailable || !receiverDoc.isOnline) {
+        res.status(409).json({ message: 'Receiver is currently offline' });
         return;
     }
     if (await ChatBlock_1.default.exists({ userId: callerUserId, receiverId })) {
@@ -119,28 +126,67 @@ const endVoiceSession = async (req, res) => {
             res.status(400).json({ message: 'callId is required' });
             return;
         }
-        const session = await CallSession_1.default.findOne({ callId });
-        if (!session) {
+        const current = await CallSession_1.default.findOne({ callId });
+        if (!current) {
             res.status(404).json({ message: 'Call session not found' });
             return;
         }
-        const isParticipant = String(session.callerId) === meId || String(session.receiverId) === meId;
+        const isParticipant = String(current.callerId) === meId || String(current.receiverId) === meId;
         if (!isParticipant) {
             res.status(403).json({ message: 'Not allowed for this call' });
             return;
         }
-        if (session.status !== 'completed') {
-            const endedAt = new Date();
-            const durationSec = Math.max(0, Math.round((endedAt.getTime() - session.startedAt.getTime()) / 1000));
-            session.endedAt = endedAt;
-            session.durationSec = durationSec;
-            session.status = 'completed';
-            await session.save();
+        const dbSession = await mongoose_1.default.startSession();
+        let finalDurationSec = current.durationSec;
+        let settledAmountInr = roundInr(current.settledAmountInr || 0);
+        try {
+            await dbSession.withTransaction(async () => {
+                const session = await CallSession_1.default.findOne({ callId }).session(dbSession);
+                if (!session)
+                    throw new Error('Call session not found');
+                if (session.status === 'completed') {
+                    finalDurationSec = session.durationSec;
+                    settledAmountInr = roundInr(session.settledAmountInr || 0);
+                    return;
+                }
+                const endedAt = new Date();
+                const durationSec = Math.max(0, Math.round((endedAt.getTime() - session.startedAt.getTime()) / 1000));
+                const grossAmountInr = roundInr((durationSec / 60) * Math.max(0, session.ratePerMinute));
+                const [callerDoc, receiverDoc] = await Promise.all([
+                    User_1.default.findById(session.callerId).select('walletBalance').session(dbSession),
+                    Receiver_1.default.findById(session.receiverId).select('walletBalance').session(dbSession),
+                ]);
+                if (!callerDoc || !receiverDoc) {
+                    throw new Error('Call participant account not found');
+                }
+                const callerBalance = typeof callerDoc.walletBalance === 'number' && Number.isFinite(callerDoc.walletBalance)
+                    ? Math.max(0, callerDoc.walletBalance)
+                    : 0;
+                const transferAmount = roundInr(Math.min(grossAmountInr, callerBalance));
+                if (transferAmount > 0) {
+                    callerDoc.walletBalance = roundInr(callerBalance - transferAmount);
+                    receiverDoc.walletBalance = roundInr((typeof receiverDoc.walletBalance === 'number' && Number.isFinite(receiverDoc.walletBalance)
+                        ? receiverDoc.walletBalance
+                        : 0) + transferAmount);
+                    await Promise.all([callerDoc.save({ session: dbSession }), receiverDoc.save({ session: dbSession })]);
+                }
+                session.endedAt = endedAt;
+                session.durationSec = durationSec;
+                session.status = 'completed';
+                session.settledAmountInr = transferAmount;
+                await session.save({ session: dbSession });
+                finalDurationSec = durationSec;
+                settledAmountInr = transferAmount;
+            });
+        }
+        finally {
+            await dbSession.endSession();
         }
         res.status(200).json({
             ok: true,
-            durationSec: session.durationSec,
-            estimatedEarning: Math.round(((session.durationSec / 60) * session.ratePerMinute) * 100) / 100,
+            durationSec: finalDurationSec,
+            estimatedEarning: settledAmountInr,
+            settledAmountInr,
         });
     }
     catch (err) {

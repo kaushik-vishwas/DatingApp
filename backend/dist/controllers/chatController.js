@@ -38,12 +38,14 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.getMessages = getMessages;
 exports.listConversations = listConversations;
+exports.markConversationRead = markConversationRead;
 exports.blockChatPeer = blockChatPeer;
 exports.reportChatPeer = reportChatPeer;
 exports.clearChatHistory = clearChatHistory;
 const mongoose_1 = __importDefault(require("mongoose"));
 const ChatMessage_1 = __importDefault(require("../models/ChatMessage"));
 const ChatBlock_1 = __importDefault(require("../models/ChatBlock"));
+const ChatReadState_1 = __importDefault(require("../models/ChatReadState"));
 const UserReport_1 = __importStar(require("../models/UserReport"));
 const accountAccess_1 = require("../utils/accountAccess");
 const HISTORY_LIMIT = 200;
@@ -150,13 +152,38 @@ async function listConversations(req, res) {
                 },
                 { $sort: { lastAt: -1 } },
             ]);
+            const userIdObj = new mongoose_1.default.Types.ObjectId(String(req.user._id));
+            const peerReceiverIds = rows
+                .map((r) => r.peerId)
+                .filter((id) => mongoose_1.default.Types.ObjectId.isValid(id))
+                .map((id) => new mongoose_1.default.Types.ObjectId(id));
+            const readStates = await ChatReadState_1.default.find({
+                userId: userIdObj,
+                receiverId: { $in: peerReceiverIds },
+            })
+                .select('receiverId userLastReadAt')
+                .lean();
+            const readAtByReceiver = new Map(readStates.map((s) => [String(s.receiverId), s.userLastReadAt ?? null]));
+            const unreadCounts = await Promise.all(rows.map(async (r) => {
+                const receiverObj = new mongoose_1.default.Types.ObjectId(r.peerId);
+                const lastRead = readAtByReceiver.get(r.peerId) ?? null;
+                const filter = {
+                    userId: userIdObj,
+                    receiverId: receiverObj,
+                    senderType: 'r',
+                };
+                if (lastRead)
+                    filter.createdAt = { $gt: lastRead };
+                return ChatMessage_1.default.countDocuments(filter);
+            }));
             res.json({
-                conversations: rows.map((r) => ({
+                conversations: rows.map((r, i) => ({
                     peerId: r.peerId,
                     peerName: r.peerName,
                     peerImage: r.peerImage ?? null,
                     lastText: r.lastText,
                     lastAt: iso(r.lastAt),
+                    unreadCount: unreadCounts[i] ?? 0,
                 })),
             });
             return;
@@ -197,19 +224,82 @@ async function listConversations(req, res) {
             },
             { $sort: { lastAt: -1 } },
         ]);
+        const receiverIdObj = new mongoose_1.default.Types.ObjectId(String(req.receiver._id));
+        const peerUserIds = rows
+            .map((r) => r.peerId)
+            .filter((id) => mongoose_1.default.Types.ObjectId.isValid(id))
+            .map((id) => new mongoose_1.default.Types.ObjectId(id));
+        const readStates = await ChatReadState_1.default.find({
+            receiverId: receiverIdObj,
+            userId: { $in: peerUserIds },
+        })
+            .select('userId receiverLastReadAt')
+            .lean();
+        const readAtByUser = new Map(readStates.map((s) => [String(s.userId), s.receiverLastReadAt ?? null]));
+        const unreadCounts = await Promise.all(rows.map(async (r) => {
+            const userObj = new mongoose_1.default.Types.ObjectId(r.peerId);
+            const lastRead = readAtByUser.get(r.peerId) ?? null;
+            const filter = {
+                userId: userObj,
+                receiverId: receiverIdObj,
+                senderType: 'u',
+            };
+            if (lastRead)
+                filter.createdAt = { $gt: lastRead };
+            return ChatMessage_1.default.countDocuments(filter);
+        }));
         res.json({
-            conversations: rows.map((r) => ({
+            conversations: rows.map((r, i) => ({
                 peerId: r.peerId,
                 peerName: r.peerName,
                 peerImage: r.peerImage ?? null,
                 lastText: r.lastText,
                 lastAt: iso(r.lastAt),
+                unreadCount: unreadCounts[i] ?? 0,
             })),
         });
     }
     catch (err) {
         console.error(err);
         res.status(500).json({ message: 'Failed to load conversations' });
+    }
+}
+/**
+ * POST /chat/mark-read — marks a conversation read for the current account.
+ * Caller body: `{ receiverId }`; receiver body: `{ userId }`.
+ */
+async function markConversationRead(req, res) {
+    try {
+        const kind = req.accountKind;
+        if (kind === 'user') {
+            if ((0, accountAccess_1.blockCallerUntilApproved)(req, res))
+                return;
+            const receiverId = typeof req.body.receiverId === 'string' ? req.body.receiverId.trim() : '';
+            if (!receiverId || !mongoose_1.default.Types.ObjectId.isValid(receiverId)) {
+                res.status(400).json({ message: 'receiverId is required' });
+                return;
+            }
+            await ChatReadState_1.default.findOneAndUpdate({ userId: req.user._id, receiverId: new mongoose_1.default.Types.ObjectId(receiverId) }, { $set: { userLastReadAt: new Date() } }, { upsert: true, new: true });
+            res.status(200).json({ ok: true });
+            return;
+        }
+        if (kind === 'receiver') {
+            if ((0, accountAccess_1.blockReceiverUntilApproved)(req, res))
+                return;
+            const userId = typeof req.body.userId === 'string' ? req.body.userId.trim() : '';
+            if (!userId || !mongoose_1.default.Types.ObjectId.isValid(userId)) {
+                res.status(400).json({ message: 'userId is required' });
+                return;
+            }
+            await ChatReadState_1.default.findOneAndUpdate({ userId: new mongoose_1.default.Types.ObjectId(userId), receiverId: req.receiver._id }, { $set: { receiverLastReadAt: new Date() } }, { upsert: true, new: true });
+            res.status(200).json({ ok: true });
+            return;
+        }
+        res.status(401).json({ message: 'Unauthorized' });
+    }
+    catch (err) {
+        console.error(err);
+        res.status(500).json({ message: 'Failed to mark conversation as read' });
     }
 }
 function isReportReason(s) {

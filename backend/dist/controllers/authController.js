@@ -59,6 +59,8 @@ function toApiUser(user) {
         walletBalance: typeof u.walletBalance === 'number' && Number.isFinite(u.walletBalance) ? u.walletBalance : 0,
         audioCallRate: null,
         userAudio: u.userAudio ?? null,
+        isAvailable: false,
+        isOnline: false,
     };
 }
 function toApiReceiver(receiver) {
@@ -92,6 +94,8 @@ function toApiReceiver(receiver) {
         walletBalance: typeof r.walletBalance === 'number' && Number.isFinite(r.walletBalance) ? r.walletBalance : 0,
         audioCallRate: typeof r.audioCallRate === 'number' && Number.isFinite(r.audioCallRate) ? r.audioCallRate : null,
         userAudio: null,
+        isAvailable: Boolean(r.isAvailable),
+        isOnline: Boolean(r.isOnline),
     };
 }
 /** Prefer toApiUser / toApiReceiver — resolves by Mongoose modelName */

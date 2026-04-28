@@ -65,6 +65,8 @@ const receiverSchema = new mongoose_1.Schema({
     audioCallRate: { type: Number, default: null },
     walletBalance: { type: Number, default: 0 },
     suspended: { type: Boolean, default: false },
+    isAvailable: { type: Boolean, default: true },
+    isOnline: { type: Boolean, default: false },
     moderationWarningAt: { type: Date, default: null },
     pendingBankAccountHolderName: { type: String, default: null },
     pendingBankAccountType: { type: String, enum: ['savings', 'current'], default: null },

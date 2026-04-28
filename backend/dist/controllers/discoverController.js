@@ -40,6 +40,7 @@ function toCard(r) {
         audioCallRate: typeof o.audioCallRate === 'number' && Number.isFinite(o.audioCallRate) ? o.audioCallRate : null,
         updatedAt: iso(o.updatedAt),
         gender: o.gender === 'male' || o.gender === 'female' || o.gender === 'other' ? o.gender : null,
+        isOnline: Boolean(o.isAvailable) && Boolean(o.isOnline),
     };
 }
 /**
@@ -72,7 +73,7 @@ const listReceiversForCaller = async (req, res) => {
             ? { _id: { $nin: blockedReceiverIds } }
             : {};
         const receivers = await Receiver_1.default.find({ ...filter, ...blockClause })
-            .select('name age state interests languages profileImage audioCallRate updatedAt gender')
+            .select('name age state interests languages profileImage audioCallRate updatedAt gender isAvailable isOnline')
             .sort({ updatedAt: -1 })
             .limit(limit)
             .exec();
