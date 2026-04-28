@@ -83,34 +83,6 @@ Object.defineProperty(exports, "__esModule", { value: true });
 //   });
 // };
 // void start();
-// ===== DNS FIX FOR WINDOWS (IPv4 ONLY - NO SRV OVERRIDE) =====
-const dns_1 = __importDefault(require("dns"));
-const dns_2 = require("dns");
-// Force IPv4 for all DNS lookups
-(0, dns_2.setDefaultResultOrder)('ipv4first');
-// Set explicit DNS servers (Google DNS)
-(0, dns_2.setServers)(['8.8.8.8', '8.8.4.4', '1.1.1.1']);
-// Override lookup to force IPv4
-const originalLookup = dns_1.default.lookup;
-dns_1.default.lookup = (hostname, options, callback) => {
-    // Handle different parameter combinations
-    if (typeof options === 'function') {
-        callback = options;
-        options = { family: 4, hints: dns_1.default.ADDRCONFIG };
-    }
-    else if (typeof options === 'number') {
-        options = { family: options, hints: dns_1.default.ADDRCONFIG };
-    }
-    else {
-        options = options || {};
-        options.family = 4; // Force IPv4
-        options.hints = dns_1.default.ADDRCONFIG;
-    }
-    return originalLookup(hostname, options, callback);
-};
-// DO NOT override resolveSrv - let it resolve normally!
-// The original dns.resolveSrv will work correctly
-// ===== END DNS FIX =====
 // LOAD ENV
 const dotenv_1 = __importDefault(require("dotenv"));
 const path_1 = __importDefault(require("path"));

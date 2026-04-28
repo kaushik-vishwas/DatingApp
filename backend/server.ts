@@ -93,37 +93,6 @@
 
 // void start();
 
-// ===== DNS FIX FOR WINDOWS (IPv4 ONLY - NO SRV OVERRIDE) =====
-import dns from 'dns';
-import { setDefaultResultOrder, setServers } from 'dns';
-
-// Force IPv4 for all DNS lookups
-setDefaultResultOrder('ipv4first');
-
-// Set explicit DNS servers (Google DNS)
-setServers(['8.8.8.8', '8.8.4.4', '1.1.1.1']);
-
-// Override lookup to force IPv4
-const originalLookup = dns.lookup;
-(dns as any).lookup = (hostname: string, options: any, callback?: any) => {
-  // Handle different parameter combinations
-  if (typeof options === 'function') {
-    callback = options;
-    options = { family: 4, hints: dns.ADDRCONFIG };
-  } else if (typeof options === 'number') {
-    options = { family: options, hints: dns.ADDRCONFIG };
-  } else {
-    options = options || {};
-    options.family = 4; // Force IPv4
-    options.hints = dns.ADDRCONFIG;
-  }
-  return originalLookup(hostname, options, callback);
-};
-
-// DO NOT override resolveSrv - let it resolve normally!
-// The original dns.resolveSrv will work correctly
-// ===== END DNS FIX =====
-
 // LOAD ENV
 import dotenv from 'dotenv';
 import path from 'path';
