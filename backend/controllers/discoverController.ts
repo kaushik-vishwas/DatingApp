@@ -34,6 +34,7 @@ export type DiscoverReceiverCard = {
   audioCallRate: number | null;
   updatedAt: string;
   gender: 'male' | 'female' | 'other' | null;
+  isAvailable: boolean;
   isOnline: boolean;
 };
 
@@ -52,7 +53,8 @@ function toCard(r: ReceiverDocument): DiscoverReceiverCard {
     updatedAt: iso(o.updatedAt),
     gender:
       o.gender === 'male' || o.gender === 'female' || o.gender === 'other' ? o.gender : null,
-    isOnline: Boolean(o.isAvailable) && Boolean(o.isOnline),
+    isAvailable: Boolean(o.isAvailable),
+    isOnline: Boolean(o.isOnline),
   };
 }
 

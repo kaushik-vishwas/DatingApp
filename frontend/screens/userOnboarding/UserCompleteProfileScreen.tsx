@@ -1,4 +1,3 @@
-import * as ImagePicker from 'expo-image-picker';
 import { useFocusEffect } from '@react-navigation/native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import React, { useCallback, useState } from 'react';
@@ -21,10 +20,10 @@ import {
   CALLER_INTEREST_OPTIONS,
   CALLER_LANGUAGE_OPTIONS,
   INDIAN_STATES,
+  getCallerAvatarPresetsByGender,
 } from '../../constants/userOnboarding';
 import { useAuth } from '../../context/AuthContext';
 import { useUserOnboarding } from '../../context/UserOnboardingContext';
-import { uploadToCloudinary } from '../../lib/cloudinary';
 import type { UserOnboardingStackParamList } from '../../navigation/UserOnboardingStackParamList';
 import { getErrorMessage, profileApi } from '../../services/api';
 
@@ -40,6 +39,7 @@ function toggleInList(list: string[], item: string): string[] {
 export default function UserCompleteProfileScreen({ navigation }: Props): React.JSX.Element {
   const { gender, callerAvatarPresetUrl, userAudio, setUserAudio } = useUserOnboarding();
   const { user, refreshUser, applyServerUser } = useAuth();
+  const allowedAvatarPresets = getCallerAvatarPresetsByGender(gender);
 
   const [fullName, setFullName] = useState('');
   const [state, setState] = useState('Karnataka');
@@ -47,7 +47,6 @@ export default function UserCompleteProfileScreen({ navigation }: Props): React.
   const [interests, setInterests] = useState<string[]>([]);
   const [languages, setLanguages] = useState<string[]>([]);
   const [imageUri, setImageUri] = useState<string | null>(null);
-  const [imageMime, setImageMime] = useState<string>('image/jpeg');
   const [submitting, setSubmitting] = useState(false);
 
   React.useEffect(() => {
@@ -71,22 +70,6 @@ export default function UserCompleteProfileScreen({ navigation }: Props): React.
       }
     }, [callerAvatarPresetUrl])
   );
-
-  const pickImage = async () => {
-    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!perm.granted) {
-      Alert.alert('Permission', 'Photo library access is required for your profile picture.');
-      return;
-    }
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      quality: 0.85,
-    });
-    if (result.canceled || !result.assets[0]) return;
-    const a = result.assets[0];
-    setImageUri(a.uri);
-    setImageMime(a.mimeType ?? 'image/jpeg');
-  };
 
   const onSubmit = useCallback(async () => {
     if (!gender) return;
@@ -117,34 +100,29 @@ export default function UserCompleteProfileScreen({ navigation }: Props): React.
       return;
     }
     if (!imageUri) {
-      Alert.alert('Validation', 'Please add a profile photo or choose an avatar.');
+      Alert.alert('Validation', 'Please choose an avatar.');
       return;
     }
-    if (!userAudio?.trim()) {
+    if (!allowedAvatarPresets.includes(imageUri)) {
+      Alert.alert('Validation', 'Please choose a valid avatar for the selected gender.');
+      return;
+    }
+    if (gender === 'female' && !userAudio?.trim()) {
       Alert.alert('Voice verification required', 'Go back and complete the audio verification step.');
       return;
     }
 
     setSubmitting(true);
     try {
-      let profileImage: string;
-      if (/^https?:\/\//i.test(imageUri)) {
-        profileImage = imageUri.trim();
-      } else {
-        const { secure_url } = await uploadToCloudinary(imageUri, {
-          mimeType: imageMime,
-        });
-        profileImage = secure_url;
-      }
       const { data } = await profileApi.completeCaller({
         name,
-        profileImage,
+        profileImage: imageUri.trim(),
         languages,
         interests,
         gender,
         dateOfBirth: dobStr,
         state: state.trim(),
-        userAudio: userAudio.trim(),
+        ...(gender === 'female' ? { userAudio: userAudio!.trim() } : {}),
       });
       applyServerUser(data.user);
       await refreshUser();
@@ -161,7 +139,7 @@ export default function UserCompleteProfileScreen({ navigation }: Props): React.
     interests,
     languages,
     imageUri,
-    imageMime,
+    allowedAvatarPresets,
     userAudio,
     refreshUser,
     applyServerUser,
@@ -192,7 +170,11 @@ export default function UserCompleteProfileScreen({ navigation }: Props): React.
           <Text style={styles.title}>Complete Your Profile</Text>
           <Text style={styles.subtitle}>Tell us a bit about yourself</Text>
 
-          <TouchableOpacity style={styles.avatarWrap} onPress={() => void pickImage()} activeOpacity={0.9}>
+          <TouchableOpacity
+            style={styles.avatarWrap}
+            onPress={() => navigation.navigate('ChooseAvatar')}
+            activeOpacity={0.9}
+          >
             {imageUri ? (
               <Image source={{ uri: imageUri }} style={styles.avatarImg} />
             ) : (
@@ -204,8 +186,8 @@ export default function UserCompleteProfileScreen({ navigation }: Props): React.
               <Text style={styles.cameraSmall}>＋</Text>
             </View>
           </TouchableOpacity>
-          <TouchableOpacity onPress={() => void pickImage()}>
-            <Text style={styles.changePhoto}>Change photo</Text>
+          <TouchableOpacity onPress={() => navigation.navigate('ChooseAvatar')}>
+            <Text style={styles.changePhoto}>Change avatar</Text>
           </TouchableOpacity>
 
           <Text style={styles.label}>Full Name</Text>

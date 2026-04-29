@@ -30,11 +30,14 @@ import type {
   ReceiverWithdrawalOverviewResponse,
   ReceiverCallInsightsResponse,
   VoiceBootstrapResponse,
+  RandomReceiverMatchResponse,
   SendWithdrawalOtpResponse,
   VerifyWithdrawalOtpResponse,
   CallerCallHistoryResponse,
   CallerNotificationsResponse,
   ReceiverEarningsBreakdownResponse,
+  ReceiverNotifyCandidatesResponse,
+  ReceiverNotifyUserResponse,
 } from '../types/api';
 
 const JWT_KEY = 'jwt';
@@ -264,6 +267,12 @@ export const profileApi = {
     api.get<ReceiverEarningsBreakdownResponse>('/profile/receiver-earnings-breakdown', {
       params: { range },
     }),
+
+  receiverNotifyCandidates: () =>
+    api.get<ReceiverNotifyCandidatesResponse>('/profile/receiver-notify-candidates'),
+
+  notifyReceiverUser: (userId: string) =>
+    api.post<ReceiverNotifyUserResponse>('/profile/receiver-notify-user', { userId }),
 };
 
 export const discoverApi = {
@@ -333,6 +342,7 @@ export const callApi = {
     api.get<VoiceBootstrapResponse>('/calls/bootstrap', {
       params: { peerId },
     }),
+  randomReceiver: () => api.get<RandomReceiverMatchResponse>('/calls/random-receiver'),
   sessionStart: (callId: string, peerId: string) =>
     api.post<{ ok: boolean }>('/calls/session/start', { callId, peerId }),
   sessionEnd: (callId: string) =>

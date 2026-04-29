@@ -56,11 +56,15 @@ export default function BankDetailsScreen({ navigation }: Props): React.JSX.Elem
       const rateParsed = Number(state.audioCallRate.trim().replace(',', '.'));
       const audioCallRate = Math.round(rateParsed * 100) / 100;
 
-      const profileRes = await uploadToCloudinary(state.profileImageUri, {
-        mimeType: state.profileImageMime ?? 'image/jpeg',
-        resourceType: 'image',
-        fileName: 'profile.jpg',
-      });
+      const profileImageUrl = /^https?:\/\//i.test(state.profileImageUri)
+        ? state.profileImageUri.trim()
+        : (
+            await uploadToCloudinary(state.profileImageUri, {
+              mimeType: state.profileImageMime ?? 'image/jpeg',
+              resourceType: 'image',
+              fileName: 'profile.jpg',
+            })
+          ).secure_url;
 
       const frontRes = await uploadToCloudinary(state.aadhaarFront.uri, {
         mimeType: state.aadhaarFront.mimeType,
@@ -76,7 +80,7 @@ export default function BankDetailsScreen({ navigation }: Props): React.JSX.Elem
 
       const { data } = await profileApi.complete({
         name: state.displayName.trim(),
-        profileImage: profileRes.secure_url,
+        profileImage: profileImageUrl,
         aadhaarFront: frontRes.secure_url,
         aadhaarBack: backRes.secure_url,
         languages: state.languages,

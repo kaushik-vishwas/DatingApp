@@ -1,3 +1,5 @@
+import type { Gender } from '../types/user';
+
 /** Indian states / UTs for caller profile (subset; extend as needed) */
 export const INDIAN_STATES: string[] = [
   'Andhra Pradesh',
@@ -64,21 +66,83 @@ export const CALLER_LANGUAGE_OPTIONS: string[] = [
   'Marathi',
 ];
 
-/** Preset profile photos for caller onboarding (public portraits). */
-export const CALLER_AVATAR_PRESETS: string[] = [
-  'https://randomuser.me/api/portraits/women/65.jpg',
-  'https://randomuser.me/api/portraits/men/32.jpg',
-  'https://randomuser.me/api/portraits/women/44.jpg',
-  'https://randomuser.me/api/portraits/men/85.jpg',
-  'https://randomuser.me/api/portraits/women/68.jpg',
-  'https://randomuser.me/api/portraits/men/45.jpg',
-  'https://randomuser.me/api/portraits/women/33.jpg',
-  'https://randomuser.me/api/portraits/men/52.jpg',
-  'https://randomuser.me/api/portraits/women/50.jpg',
-  'https://randomuser.me/api/portraits/men/76.jpg',
-  'https://randomuser.me/api/portraits/women/17.jpg',
+/** Preset profile photos for caller onboarding/edit profile. */
+export const CALLER_MALE_AVATAR_PRESETS: string[] = [
+  'https://randomuser.me/api/portraits/men/1.jpg',
+  'https://randomuser.me/api/portraits/men/2.jpg',
+  'https://randomuser.me/api/portraits/men/3.jpg',
+  'https://randomuser.me/api/portraits/men/4.jpg',
+  'https://randomuser.me/api/portraits/men/5.jpg',
+  'https://randomuser.me/api/portraits/men/6.jpg',
+  'https://randomuser.me/api/portraits/men/7.jpg',
+  'https://randomuser.me/api/portraits/men/8.jpg',
+  'https://randomuser.me/api/portraits/men/9.jpg',
+  'https://randomuser.me/api/portraits/men/10.jpg',
+  'https://randomuser.me/api/portraits/men/11.jpg',
+  'https://randomuser.me/api/portraits/men/12.jpg',
+  'https://randomuser.me/api/portraits/men/13.jpg',
+  'https://randomuser.me/api/portraits/men/14.jpg',
+  'https://randomuser.me/api/portraits/men/15.jpg',
+  'https://randomuser.me/api/portraits/men/16.jpg',
+  'https://randomuser.me/api/portraits/men/17.jpg',
+  'https://randomuser.me/api/portraits/men/18.jpg',
+  'https://randomuser.me/api/portraits/men/19.jpg',
+  'https://randomuser.me/api/portraits/men/20.jpg',
+  'https://randomuser.me/api/portraits/men/21.jpg',
   'https://randomuser.me/api/portraits/men/22.jpg',
+  'https://randomuser.me/api/portraits/men/23.jpg',
+  'https://randomuser.me/api/portraits/men/24.jpg',
+  'https://randomuser.me/api/portraits/men/25.jpg',
+  'https://randomuser.me/api/portraits/men/26.jpg',
+  'https://randomuser.me/api/portraits/men/27.jpg',
+  'https://randomuser.me/api/portraits/men/28.jpg',
+  'https://randomuser.me/api/portraits/men/29.jpg',
+  'https://randomuser.me/api/portraits/men/30.jpg',
 ];
+
+export const CALLER_FEMALE_AVATAR_PRESETS: string[] = [
+  'https://randomuser.me/api/portraits/women/1.jpg',
+  'https://randomuser.me/api/portraits/women/2.jpg',
+  'https://randomuser.me/api/portraits/women/3.jpg',
+  'https://randomuser.me/api/portraits/women/4.jpg',
+  'https://randomuser.me/api/portraits/women/5.jpg',
+  'https://randomuser.me/api/portraits/women/6.jpg',
+  'https://randomuser.me/api/portraits/women/7.jpg',
+  'https://randomuser.me/api/portraits/women/8.jpg',
+  'https://randomuser.me/api/portraits/women/9.jpg',
+  'https://randomuser.me/api/portraits/women/10.jpg',
+  'https://randomuser.me/api/portraits/women/11.jpg',
+  'https://randomuser.me/api/portraits/women/12.jpg',
+  'https://randomuser.me/api/portraits/women/13.jpg',
+  'https://randomuser.me/api/portraits/women/14.jpg',
+  'https://randomuser.me/api/portraits/women/15.jpg',
+  'https://randomuser.me/api/portraits/women/16.jpg',
+  'https://randomuser.me/api/portraits/women/17.jpg',
+  'https://randomuser.me/api/portraits/women/18.jpg',
+  'https://randomuser.me/api/portraits/women/19.jpg',
+  'https://randomuser.me/api/portraits/women/20.jpg',
+  'https://randomuser.me/api/portraits/women/21.jpg',
+  'https://randomuser.me/api/portraits/women/22.jpg',
+  'https://randomuser.me/api/portraits/women/23.jpg',
+  'https://randomuser.me/api/portraits/women/24.jpg',
+  'https://randomuser.me/api/portraits/women/25.jpg',
+  'https://randomuser.me/api/portraits/women/26.jpg',
+  'https://randomuser.me/api/portraits/women/27.jpg',
+  'https://randomuser.me/api/portraits/women/28.jpg',
+  'https://randomuser.me/api/portraits/women/29.jpg',
+  'https://randomuser.me/api/portraits/women/30.jpg',
+];
+
+export const CALLER_AVATAR_PRESETS: string[] = [
+  ...CALLER_MALE_AVATAR_PRESETS,
+  ...CALLER_FEMALE_AVATAR_PRESETS,
+];
+
+export function getCallerAvatarPresetsByGender(gender: Gender | null | undefined): string[] {
+  if (gender === 'male') return CALLER_MALE_AVATAR_PRESETS;
+  if (gender === 'female') return CALLER_FEMALE_AVATAR_PRESETS;
+  return CALLER_AVATAR_PRESETS;
+}
 
 export const CALLER_AUDIO_VERIFICATION_SCRIPT =
   'Hello! Friendship is very special because good friends are always by our side; they increase our happiness, decrease our sadness, and without them, everything feels incomplete—so, thank you, friends!';

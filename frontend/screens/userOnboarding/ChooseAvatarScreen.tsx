@@ -9,7 +9,7 @@ import {
   View,
 } from 'react-native';
 
-import { CALLER_AVATAR_PRESETS } from '../../constants/userOnboarding';
+import { getCallerAvatarPresetsByGender } from '../../constants/userOnboarding';
 import { useAuth } from '../../context/AuthContext';
 import { useUserOnboarding } from '../../context/UserOnboardingContext';
 import type { UserOnboardingStackParamList } from '../../navigation/UserOnboardingStackParamList';
@@ -20,8 +20,15 @@ type Props = NativeStackScreenProps<UserOnboardingStackParamList, 'ChooseAvatar'
 
 export default function ChooseAvatarScreen({ navigation }: Props): React.JSX.Element {
   const { user } = useAuth();
-  const { setCallerAvatarPresetUrl } = useUserOnboarding();
-  const [selected, setSelected] = useState<string>(CALLER_AVATAR_PRESETS[0]!);
+  const { gender, setCallerAvatarPresetUrl } = useUserOnboarding();
+  const avatarPresets = getCallerAvatarPresetsByGender(gender);
+  const [selected, setSelected] = useState<string>(avatarPresets[0]!);
+
+  React.useEffect(() => {
+    if (!avatarPresets.includes(selected)) {
+      setSelected(avatarPresets[0]!);
+    }
+  }, [avatarPresets, selected]);
 
   const displayLabel = user?.name?.trim() || 'You';
 
@@ -46,7 +53,7 @@ export default function ChooseAvatarScreen({ navigation }: Props): React.JSX.Ele
 
       <View style={styles.listWrap}>
         <FlatList
-          data={CALLER_AVATAR_PRESETS}
+          data={avatarPresets}
           keyExtractor={(item) => item}
           numColumns={3}
           columnWrapperStyle={styles.row}

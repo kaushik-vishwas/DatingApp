@@ -64,9 +64,10 @@ type ChatTypingEvent = {
 
 export default function ChatConversationScreen({ navigation, route }: Props): React.JSX.Element {
   const { user, refreshUser } = useAuth();
-  const { registerPeer, startCallInvite } = useCallSignals();
+  const { registerPeer } = useCallSignals();
   const { markPeerReadLocal, setActivePeer } = useChatInbox();
   const callerNav = useNavigation<NativeStackNavigationProp<CallerStackParamList>>();
+  const receiverNav = useNavigation<NativeStackNavigationProp<ReceiverStackParamList>>();
   const isCaller = route.name === 'CallerChat';
   const peerId = isCaller ? route.params.receiverId : route.params.userId;
   const peerName = isCaller ? route.params.receiverName : route.params.userName;
@@ -122,8 +123,8 @@ export default function ChatConversationScreen({ navigation, route }: Props): Re
   }, []);
 
   useEffect(() => {
-    registerPeer(peerId, peerName);
-  }, [peerId, peerName, registerPeer]);
+    registerPeer(peerId, peerName, peerImage);
+  }, [peerId, peerName, peerImage, registerPeer]);
 
   useEffect(() => {
     setActivePeer(peerId);
@@ -371,15 +372,12 @@ export default function ChatConversationScreen({ navigation, route }: Props): Re
       return;
     }
     setCalling(true);
-    void (async () => {
-      try {
-        await startCallInvite(peerId, peerName);
-      } catch (e: unknown) {
-        setCalling(false);
-        const msg = e instanceof Error ? e.message : 'Could not start call right now.';
-        Alert.alert('Call failed', msg);
-      }
-    })();
+    if (isCaller) {
+      callerNav.navigate('CallerQueue', { peerId, peerName, peerImage });
+    } else {
+      receiverNav.navigate('ReceiverQueue', { peerId, peerName, peerImage });
+    }
+    setCalling(false);
   };
 
   const renderItem = ({ item }: { item: ChatMessageDto }) => {

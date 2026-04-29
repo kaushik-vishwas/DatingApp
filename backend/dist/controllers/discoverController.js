@@ -40,7 +40,8 @@ function toCard(r) {
         audioCallRate: typeof o.audioCallRate === 'number' && Number.isFinite(o.audioCallRate) ? o.audioCallRate : null,
         updatedAt: iso(o.updatedAt),
         gender: o.gender === 'male' || o.gender === 'female' || o.gender === 'other' ? o.gender : null,
-        isOnline: Boolean(o.isAvailable) && Boolean(o.isOnline),
+        isAvailable: Boolean(o.isAvailable),
+        isOnline: Boolean(o.isOnline),
     };
 }
 /**

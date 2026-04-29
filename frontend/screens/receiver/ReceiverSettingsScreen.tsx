@@ -19,7 +19,7 @@ export default function ReceiverSettingsScreen(): React.JSX.Element {
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
           <Text style={styles.backText}>←</Text>
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Settings</Text>
+        <Text style={styles.headerTitle}>Profile</Text>
         <View style={styles.backBtn} />
       </View>
 

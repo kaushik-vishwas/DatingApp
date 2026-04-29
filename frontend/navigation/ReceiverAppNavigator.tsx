@@ -16,6 +16,7 @@ import ReceiverProfilePreviewScreen from '../screens/receiver/ReceiverProfilePre
 import ReceiverDeleteAccountScreen from '../screens/receiver/ReceiverDeleteAccountScreen';
 import ReceiverEarningsBreakdownScreen from '../screens/receiver/ReceiverEarningsBreakdownScreen';
 import ReceiverEarningsAnalyticsScreen from '../screens/receiver/ReceiverEarningsAnalyticsScreen';
+import ReceiverQueueScreen from '../screens/receiver/ReceiverQueueScreen';
 import type { ReceiverStackParamList } from './ReceiverStackParamList';
 
 const Stack = createNativeStackNavigator<ReceiverStackParamList>();
@@ -33,6 +34,7 @@ export default function ReceiverAppNavigator(): React.JSX.Element {
       }}
     >
       <Stack.Screen name="ReceiverHome" component={ReceiverHomeDashboard} />
+      <Stack.Screen name="ReceiverQueue" component={ReceiverQueueScreen} />
       <Stack.Screen name="ReceiverSettings" component={ReceiverSettingsScreen} />
       <Stack.Screen name="ReceiverNotifications" component={ReceiverNotificationsScreen} />
       <Stack.Screen name="ReceiverBankDetails" component={ReceiverBankDetailsScreen} />

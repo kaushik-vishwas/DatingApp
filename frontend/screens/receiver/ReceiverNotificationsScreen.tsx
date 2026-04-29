@@ -13,6 +13,9 @@ type NotificationRow = {
   subtitle: string;
   at: string;
   type: NotificationKind;
+  peerId?: string;
+  peerName?: string;
+  peerImage?: string | null;
 };
 
 export default function ReceiverNotificationsScreen(): React.JSX.Element {
@@ -38,13 +41,19 @@ export default function ReceiverNotificationsScreen(): React.JSX.Element {
         subtitle: c.lastText || 'You received a new message',
         at: c.lastAt,
         type: 'message',
+        peerId: c.peerId,
+        peerName: c.peerName,
+        peerImage: c.peerImage ?? null,
       }));
       const callRows: NotificationRow[] = calls.recentCalls.map((c) => ({
         id: `call-${c.id}`,
         title: c.durationSec > 0 ? 'Call Completed' : 'Missed Call',
-        subtitle: `Duration ${Math.max(1, Math.round(c.durationSec / 60))} min`,
+        subtitle: `${c.callerName} • ${Math.max(1, Math.round(c.durationSec / 60))} min`,
         at: c.startedAt,
         type: 'call',
+        peerId: c.callerId,
+        peerName: c.callerName,
+        peerImage: c.callerImage ?? null,
       }));
       const earningRows: NotificationRow[] = calls.recentCalls.map((c) => ({
         id: `earn-${c.id}`,
@@ -83,6 +92,33 @@ export default function ReceiverNotificationsScreen(): React.JSX.Element {
     [rows, tab]
   );
 
+  const openChat = (row: NotificationRow) => {
+    if (!row.peerId || !row.peerName) return;
+    navigation.navigate('ReceiverChat', {
+      userId: row.peerId,
+      userName: row.peerName,
+      userImage: row.peerImage ?? null,
+    });
+  };
+
+  const onOpenRow = (row: NotificationRow) => {
+    if (row.type === 'withdrawal') {
+      navigation.navigate('WithdrawEarnings');
+      return;
+    }
+    if (row.type === 'earning') {
+      navigation.navigate('ReceiverEarningsBreakdown');
+      return;
+    }
+    if (row.type === 'message') {
+      openChat(row);
+      return;
+    }
+    if (row.type === 'call') {
+      openChat(row);
+    }
+  };
+
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'left', 'right']}>
       <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
@@ -97,14 +133,22 @@ export default function ReceiverNotificationsScreen(): React.JSX.Element {
       </View>
 
       <View style={styles.tabs}>
-        {(['all', 'call', 'earning', 'withdrawal'] as const).map((t) => (
+        {(['all', 'message', 'call', 'earning', 'withdrawal'] as const).map((t) => (
           <TouchableOpacity
             key={t}
             style={[styles.tab, tab === t && styles.tabActive]}
             onPress={() => setTab(t)}
           >
             <Text style={[styles.tabText, tab === t && styles.tabTextActive]}>
-              {t === 'all' ? 'All' : t === 'call' ? 'Calls' : t === 'earning' ? 'Earnings' : 'Withdrawals'}
+              {t === 'all'
+                ? 'All'
+                : t === 'message'
+                  ? 'Messages'
+                  : t === 'call'
+                    ? 'Calls'
+                    : t === 'earning'
+                      ? 'Earnings'
+                      : 'Withdrawals'}
             </Text>
           </TouchableOpacity>
         ))}
@@ -129,11 +173,29 @@ export default function ReceiverNotificationsScreen(): React.JSX.Element {
         <Text style={styles.empty}>No notifications.</Text>
       ) : (
         filtered.map((row) => (
-          <View key={row.id} style={styles.row}>
-            <Text style={styles.rowTitle}>{row.title}</Text>
+          <TouchableOpacity key={row.id} style={styles.row} activeOpacity={0.88} onPress={() => onOpenRow(row)}>
+            <View style={styles.rowTop}>
+              <Text style={styles.rowTitle}>{row.title}</Text>
+              {row.type === 'call' ? (
+                <View style={styles.rowActions}>
+                  <TouchableOpacity
+                    style={styles.rowActionBtn}
+                    onPress={(e) => {
+                      e.stopPropagation();
+                      openChat(row);
+                    }}
+                    activeOpacity={0.85}
+                  >
+                    <Text style={styles.rowActionTxt}>💬</Text>
+                  </TouchableOpacity>
+                </View>
+              ) : (
+                <Text style={styles.rowChev}>›</Text>
+              )}
+            </View>
             <Text style={styles.rowSub}>{row.subtitle}</Text>
             <Text style={styles.rowAt}>{new Date(row.at).toLocaleString()}</Text>
-          </View>
+          </TouchableOpacity>
         ))
       )}
       </ScrollView>
@@ -158,9 +220,21 @@ const styles = StyleSheet.create({
   error: { color: '#b91c1c', fontSize: 12, fontWeight: '700' },
   empty: { color: '#666', fontSize: 12, marginTop: 8 },
   row: { backgroundColor: '#fff', borderRadius: 10, borderWidth: 1, borderColor: '#ececec', padding: 10, marginBottom: 8 },
+  rowTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10 },
   rowTitle: { color: '#111', fontSize: 13, fontWeight: '800' },
   rowSub: { color: '#555', fontSize: 12, marginTop: 3, fontWeight: '600' },
   rowAt: { color: '#888', fontSize: 10, marginTop: 5, fontWeight: '600' },
+  rowChev: { fontSize: 20, color: '#bbb', fontWeight: '300' },
+  rowActions: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  rowActionBtn: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: '#f3f4f6',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  rowActionTxt: { fontSize: 14 },
   earningActions: { marginBottom: 10, gap: 8 },
   earningBtn: {
     backgroundColor: '#7b2cff',

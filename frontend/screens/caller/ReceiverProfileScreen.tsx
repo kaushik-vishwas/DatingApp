@@ -16,10 +16,10 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '../../context/AuthContext';
 import type { CallerStackParamList } from '../../navigation/CallerStackParamList';
 import { receiverCardMetrics } from '../../utils/discoverDisplay';
+import { getReceiverPresenceInfo } from '../../utils/receiverStatus';
 
 const PURPLE = '#7b2cff';
 const PINK = '#ff72d2';
-const GREEN = '#22c55e';
 
 type Props = NativeStackScreenProps<CallerStackParamList, 'ReceiverProfile'>;
 
@@ -43,7 +43,7 @@ export default function ReceiverProfileScreen({ navigation, route }: Props): Rea
   const wallet = typeof user?.walletBalance === 'number' && Number.isFinite(user.walletBalance) ? user.walletBalance : 0;
   const m = receiverCardMetrics(receiver._id);
   const rate = receiver.audioCallRate;
-  const onlineLabel = receiver.isOnline ? 'Online' : 'Offline';
+  const presence = getReceiverPresenceInfo(receiver);
 
   const openWallet = () => {
     setRechargeModal('none');
@@ -51,6 +51,14 @@ export default function ReceiverProfileScreen({ navigation, route }: Props): Rea
   };
 
   const onVoiceCall = () => {
+    if (!presence.canCall) {
+      const reason =
+        presence.status === 'offline'
+          ? 'This receiver is currently offline.'
+          : 'This receiver is online but not available right now.';
+      Alert.alert('Unavailable', reason);
+      return;
+    }
     if (rate == null || !Number.isFinite(rate)) {
       Alert.alert('Unavailable', 'This receiver has not set a call rate yet.');
       return;
@@ -63,10 +71,10 @@ export default function ReceiverProfileScreen({ navigation, route }: Props): Rea
       setRechargeModal('low');
       return;
     }
-    navigation.navigate('CallerChat', {
-      receiverId: receiver._id,
-      receiverName: receiver.name,
-      receiverImage: receiver.profileImage,
+    navigation.navigate('CallerQueue', {
+      peerId: receiver._id,
+      peerName: receiver.name,
+      peerImage: receiver.profileImage ?? null,
     });
   };
 
@@ -95,9 +103,9 @@ export default function ReceiverProfileScreen({ navigation, route }: Props): Rea
       <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
         <View style={styles.hero}>
           {receiver.profileImage ? (
-            <Image source={{ uri: receiver.profileImage }} style={styles.heroImg} />
+            <Image source={{ uri: receiver.profileImage }} style={[styles.heroImg, { borderColor: presence.color }]} />
           ) : (
-            <View style={[styles.heroImg, styles.heroPh]}>
+            <View style={[styles.heroImg, styles.heroPh, { borderColor: presence.color }]}>
               <Text style={styles.heroGlyph}>👤</Text>
             </View>
           )}
@@ -119,9 +127,11 @@ export default function ReceiverProfileScreen({ navigation, route }: Props): Rea
             </Text>
           </View>
           <Text style={styles.lastSeen}>
-            {onlineLabel === 'Online'
-              ? 'Online now'
-              : `Last seen — ${formatLastSeen(receiver.updatedAt)}`}
+            {presence.status === 'available'
+              ? 'Online & available'
+              : presence.status === 'busy'
+                ? 'Online but not available'
+                : `Last seen — ${formatLastSeen(receiver.updatedAt)}`}
           </Text>
         </View>
 
@@ -143,7 +153,12 @@ export default function ReceiverProfileScreen({ navigation, route }: Props): Rea
           ))}
         </View>
 
-        <TouchableOpacity style={styles.outlineBtn} onPress={onVoiceCall} activeOpacity={0.9}>
+        <TouchableOpacity
+          style={[styles.outlineBtn, !presence.canCall && styles.outlineBtnDisabled]}
+          onPress={onVoiceCall}
+          activeOpacity={presence.canCall ? 0.9 : 1}
+          disabled={!presence.canCall}
+        >
           <Text style={styles.outlineIcon}>📞</Text>
           <Text style={styles.outlineLbl}>Voice Call</Text>
         </TouchableOpacity>
@@ -219,7 +234,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 20,
   },
-  heroImg: { width: 100, height: 100, borderRadius: 50, borderWidth: 3, borderColor: '#fff' },
+  heroImg: { width: 100, height: 100, borderRadius: 50, borderWidth: 4, borderColor: '#fff' },
   heroPh: { backgroundColor: '#fff6', alignItems: 'center', justifyContent: 'center' },
   heroGlyph: { fontSize: 44 },
   name: { marginTop: 12, fontSize: 20, fontWeight: '900', color: '#111' },
@@ -247,6 +262,9 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     marginBottom: 12,
     backgroundColor: '#fff',
+  },
+  outlineBtnDisabled: {
+    opacity: 0.45,
   },
   outlineBtnLast: { marginBottom: 0 },
   outlineIcon: { fontSize: 18 },

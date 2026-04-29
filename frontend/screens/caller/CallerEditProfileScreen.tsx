@@ -1,4 +1,3 @@
-import * as ImagePicker from 'expo-image-picker';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import React, { useEffect, useState } from 'react';
 import {
@@ -23,9 +22,9 @@ import {
   CALLER_INTEREST_OPTIONS,
   CALLER_LANGUAGE_OPTIONS,
   INDIAN_STATES,
+  getCallerAvatarPresetsByGender,
 } from '../../constants/userOnboarding';
 import { useAuth } from '../../context/AuthContext';
-import { uploadToCloudinary } from '../../lib/cloudinary';
 import type { CallerStackParamList } from '../../navigation/CallerStackParamList';
 import { getErrorMessage, profileApi } from '../../services/api';
 import type { Gender } from '../../types/user';
@@ -65,8 +64,9 @@ export default function CallerEditProfileScreen({ navigation }: Props): React.JS
   const [interests, setInterests] = useState<string[]>([]);
   const [languages, setLanguages] = useState<string[]>([]);
   const [imageUri, setImageUri] = useState<string | null>(null);
-  const [imageMime, setImageMime] = useState('image/jpeg');
+  const [avatarModal, setAvatarModal] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const allowedAvatarPresets = getCallerAvatarPresetsByGender(gender);
 
   useEffect(() => {
     if (!user) return;
@@ -83,21 +83,11 @@ export default function CallerEditProfileScreen({ navigation }: Props): React.JS
     if (user.profileImage) setImageUri(user.profileImage);
   }, [user]);
 
-  const pickImage = async () => {
-    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!perm.granted) {
-      Alert.alert('Permission', 'Photo library access is required to change your profile picture.');
-      return;
+  useEffect(() => {
+    if (imageUri && !allowedAvatarPresets.includes(imageUri)) {
+      setImageUri(allowedAvatarPresets[0] ?? null);
     }
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      quality: 0.85,
-    });
-    if (result.canceled || !result.assets[0]) return;
-    const a = result.assets[0];
-    setImageUri(a.uri);
-    setImageMime(a.mimeType ?? 'image/jpeg');
-  };
+  }, [allowedAvatarPresets, imageUri]);
 
   const chip = (label: string, selected: boolean, onPress: () => void) => (
     <TouchableOpacity
@@ -139,22 +129,19 @@ export default function CallerEditProfileScreen({ navigation }: Props): React.JS
       return;
     }
     if (!imageUri) {
-      Alert.alert('Validation', 'Please add a profile photo.');
+      Alert.alert('Validation', 'Please choose an avatar.');
+      return;
+    }
+    if (!allowedAvatarPresets.includes(imageUri)) {
+      Alert.alert('Validation', 'Please choose a valid avatar for the selected gender.');
       return;
     }
 
     setSubmitting(true);
     try {
-      let profileImage: string;
-      if (/^https?:\/\//i.test(imageUri)) {
-        profileImage = imageUri.trim();
-      } else {
-        const { secure_url } = await uploadToCloudinary(imageUri, { mimeType: imageMime });
-        profileImage = secure_url;
-      }
       await profileApi.updateCaller({
         name,
-        profileImage,
+        profileImage: imageUri.trim(),
         languages,
         interests,
         gender,
@@ -185,7 +172,7 @@ export default function CallerEditProfileScreen({ navigation }: Props): React.JS
         </View>
 
         <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
-          <TouchableOpacity style={styles.avatarWrap} onPress={() => void pickImage()} activeOpacity={0.9}>
+          <TouchableOpacity style={styles.avatarWrap} onPress={() => setAvatarModal(true)} activeOpacity={0.9}>
             {imageUri ? (
               <Image source={{ uri: imageUri }} style={styles.avatarImg} />
             ) : (
@@ -197,8 +184,8 @@ export default function CallerEditProfileScreen({ navigation }: Props): React.JS
               <Text style={styles.cameraSmall}>＋</Text>
             </View>
           </TouchableOpacity>
-          <TouchableOpacity onPress={() => void pickImage()}>
-            <Text style={styles.changePhoto}>Edit photo</Text>
+          <TouchableOpacity onPress={() => setAvatarModal(true)}>
+            <Text style={styles.changePhoto}>Edit avatar</Text>
           </TouchableOpacity>
 
           <Text style={styles.label}>Full Name *</Text>
@@ -292,6 +279,35 @@ export default function CallerEditProfileScreen({ navigation }: Props): React.JS
                   <Text style={[styles.stateRowText, s === state && styles.stateRowTextActive]}>{s}</Text>
                 </TouchableOpacity>
               ))}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal visible={avatarModal} transparent animationType="fade">
+        <View style={styles.modalOverlay}>
+          <Pressable style={styles.modalDismiss} onPress={() => setAvatarModal(false)} />
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>Select Avatar</Text>
+            <ScrollView style={styles.modalList} keyboardShouldPersistTaps="handled">
+              <View style={styles.avatarGrid}>
+                {allowedAvatarPresets.map((avatarUrl) => {
+                  const active = imageUri === avatarUrl;
+                  return (
+                    <TouchableOpacity
+                      key={avatarUrl}
+                      style={[styles.avatarCell, active && styles.avatarCellActive]}
+                      onPress={() => {
+                        setImageUri(avatarUrl);
+                        setAvatarModal(false);
+                      }}
+                      activeOpacity={0.85}
+                    >
+                      <Image source={{ uri: avatarUrl }} style={styles.avatarThumb} />
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
             </ScrollView>
           </View>
         </View>
@@ -431,4 +447,27 @@ const styles = StyleSheet.create({
   stateRowActive: { backgroundColor: 'rgba(123,44,255,0.12)' },
   stateRowText: { fontSize: 15, color: '#222' },
   stateRowTextActive: { fontWeight: '700', color: PURPLE },
+  avatarGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+    gap: 10,
+    paddingBottom: 8,
+  },
+  avatarCell: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    overflow: 'hidden',
+    borderWidth: 2,
+    borderColor: '#e5e5e5',
+  },
+  avatarCellActive: {
+    borderColor: PURPLE,
+    borderWidth: 3,
+  },
+  avatarThumb: {
+    width: '100%',
+    height: '100%',
+  },
 });

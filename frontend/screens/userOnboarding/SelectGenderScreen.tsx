@@ -35,7 +35,11 @@ export default function SelectGenderScreen({ navigation }: Props): React.JSX.Ele
       return;
     }
     setGender(selected);
-    navigation.navigate('AudioVerification');
+    if (selected === 'female') {
+      navigation.navigate('AudioVerification');
+      return;
+    }
+    navigation.navigate('ChooseAvatar');
   };
 
   const row = (value: Gender, label: string, icon?: string) => {

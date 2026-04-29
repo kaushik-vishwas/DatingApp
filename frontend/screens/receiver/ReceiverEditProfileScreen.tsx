@@ -1,11 +1,10 @@
-import * as ImagePicker from 'expo-image-picker';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import React, { useMemo, useState } from 'react';
-import { Alert, Image, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Alert, Image, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { CALLER_FEMALE_AVATAR_PRESETS } from '../../constants/userOnboarding';
 import { useAuth } from '../../context/AuthContext';
-import { uploadToCloudinary } from '../../lib/cloudinary';
 import type { ReceiverStackParamList } from '../../navigation/ReceiverStackParamList';
 import { getErrorMessage, profileApi } from '../../services/api';
 
@@ -25,25 +24,9 @@ export default function ReceiverEditProfileScreen(): React.JSX.Element {
   );
   const [showSuccess, setShowSuccess] = useState(false);
   const [profileImageUri, setProfileImageUri] = useState<string | null>(user?.profileImage ?? null);
-  const [profileImageMime, setProfileImageMime] = useState<string>('image/jpeg');
+  const [avatarModal, setAvatarModal] = useState(false);
 
   const parsedRate = useMemo(() => Number(audioCallRate), [audioCallRate]);
-
-  const pickProfilePhoto = async () => {
-    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!perm.granted) {
-      Alert.alert('Permission', 'Photo library access is required to change profile photo.');
-      return;
-    }
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      quality: 0.85,
-    });
-    if (result.canceled || !result.assets[0]) return;
-    const a = result.assets[0];
-    setProfileImageUri(a.uri);
-    setProfileImageMime(a.mimeType ?? 'image/jpeg');
-  };
 
   const onSave = async () => {
     if (!name.trim()) {
@@ -55,19 +38,18 @@ export default function ReceiverEditProfileScreen(): React.JSX.Element {
       return;
     }
     if (!profileImageUri) {
-      Alert.alert('Validation', 'Please select a profile photo.');
+      Alert.alert('Validation', 'Please select an avatar.');
+      return;
+    }
+    if (!CALLER_FEMALE_AVATAR_PRESETS.includes(profileImageUri)) {
+      Alert.alert('Validation', 'Please select one avatar from the available list.');
       return;
     }
     setSaving(true);
     try {
-      let profileImage = profileImageUri;
-      if (!/^https?:\/\//i.test(profileImageUri)) {
-        const uploaded = await uploadToCloudinary(profileImageUri, { mimeType: profileImageMime });
-        profileImage = uploaded.secure_url;
-      }
       await profileApi.updateReceiverProfile({
         name: name.trim(),
-        profileImage,
+        profileImage: profileImageUri.trim(),
         state: stateValue.trim(),
         languages,
         interests,
@@ -96,17 +78,17 @@ export default function ReceiverEditProfileScreen(): React.JSX.Element {
       <Text style={styles.title}>Edit Your Profile</Text>
       <Text style={styles.subtitle}>This information will be visible to users who want to call.</Text>
 
-      <Text style={styles.fieldLabel}>Profile Photo</Text>
+      <Text style={styles.fieldLabel}>Profile Avatar</Text>
       <View style={styles.photoWrap}>
-        <TouchableOpacity style={styles.photoCircle} onPress={pickProfilePhoto}>
+        <TouchableOpacity style={styles.photoCircle} onPress={() => setAvatarModal(true)}>
           {profileImageUri ? (
             <Image source={{ uri: profileImageUri }} style={styles.photoImage} />
           ) : (
             <Text style={styles.photoPlaceholder}>📷</Text>
           )}
         </TouchableOpacity>
-        <TouchableOpacity onPress={pickProfilePhoto}>
-          <Text style={styles.photoAction}>Upload a clear photo of yourself</Text>
+        <TouchableOpacity onPress={() => setAvatarModal(true)}>
+          <Text style={styles.photoAction}>Choose one of 30 girl avatars</Text>
         </TouchableOpacity>
       </View>
 
@@ -151,6 +133,34 @@ export default function ReceiverEditProfileScreen(): React.JSX.Element {
         </View>
       ) : null}
       </ScrollView>
+      <Modal visible={avatarModal} transparent animationType="fade">
+        <View style={styles.modalOverlay}>
+          <Pressable style={styles.modalDismiss} onPress={() => setAvatarModal(false)} />
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>Select Avatar</Text>
+            <ScrollView style={styles.modalList} keyboardShouldPersistTaps="handled">
+              <View style={styles.avatarGrid}>
+                {CALLER_FEMALE_AVATAR_PRESETS.map((avatarUrl) => {
+                  const active = profileImageUri === avatarUrl;
+                  return (
+                    <TouchableOpacity
+                      key={avatarUrl}
+                      style={[styles.avatarCell, active && styles.avatarCellActive]}
+                      onPress={() => {
+                        setProfileImageUri(avatarUrl);
+                        setAvatarModal(false);
+                      }}
+                      activeOpacity={0.85}
+                    >
+                      <Image source={{ uri: avatarUrl }} style={styles.avatarThumb} />
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -276,6 +286,51 @@ const styles = StyleSheet.create({
   photoImage: { width: '100%', height: '100%' },
   photoPlaceholder: { fontSize: 24, color: '#7b2cff' },
   photoAction: { marginTop: 6, fontSize: 11, color: '#999', fontWeight: '600' },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    justifyContent: 'center',
+    padding: 24,
+  },
+  modalDismiss: { ...StyleSheet.absoluteFillObject },
+  modalCard: {
+    backgroundColor: '#fff',
+    borderRadius: 14,
+    maxHeight: '70%',
+    paddingVertical: 12,
+    zIndex: 1,
+  },
+  modalTitle: {
+    fontSize: 17,
+    fontWeight: '800',
+    paddingHorizontal: 18,
+    paddingBottom: 10,
+    color: '#111',
+  },
+  modalList: { paddingHorizontal: 8 },
+  avatarGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+    gap: 10,
+    paddingBottom: 8,
+  },
+  avatarCell: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    overflow: 'hidden',
+    borderWidth: 2,
+    borderColor: '#e5e5e5',
+  },
+  avatarCellActive: {
+    borderColor: '#7b2cff',
+    borderWidth: 3,
+  },
+  avatarThumb: {
+    width: '100%',
+    height: '100%',
+  },
   successOverlay: {
     position: 'absolute',
     left: 0,

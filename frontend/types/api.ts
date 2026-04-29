@@ -64,6 +64,7 @@ export interface DiscoverReceiverSummary {
   /** ISO timestamp for "last seen" on caller profile */
   updatedAt: string;
   gender: Gender | null;
+  isAvailable: boolean;
   isOnline: boolean;
 }
 
@@ -129,10 +130,17 @@ export interface VoiceBootstrapResponse {
   callId: string;
 }
 
+export interface RandomReceiverMatchResponse {
+  receiverId: string;
+  name: string;
+  profileImage: string | null;
+}
+
 export type ReceiverCallInsightRow = {
   id: string;
   callerId: string;
   callerName: string;
+  callerImage: string | null;
   startedAt: string;
   durationSec: number;
   earningInr: number;
@@ -160,6 +168,21 @@ export interface ReceiverCallInsightsResponse {
   };
   recentCalls: ReceiverCallInsightRow[];
   callerHistory: ReceiverCallerHistoryRow[];
+}
+
+export type ReceiverNotifyCandidateRow = {
+  userId: string;
+  name: string;
+  profileImage: string | null;
+  lastCallAt: string;
+};
+
+export interface ReceiverNotifyCandidatesResponse {
+  users: ReceiverNotifyCandidateRow[];
+}
+
+export interface ReceiverNotifyUserResponse {
+  message: string;
 }
 
 export type ReceiverWalletRecentRow = {
@@ -336,7 +359,7 @@ export interface CompleteCallerPayload {
   /** `YYYY-MM-DD` */
   dateOfBirth: string;
   state: string;
-  userAudio: string;
+  userAudio?: string;
 }
 
 export interface SaveCallerUserAudioPayload {

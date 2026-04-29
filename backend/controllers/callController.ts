@@ -10,10 +10,52 @@ import {
   getStreamApiKey,
   toStreamUserId,
 } from '../utils/streamVoice';
+import { pickRandomQueuedReceiverForCaller } from '../services/callQueue';
+import { isReceiverBusy, releaseReceiverReservation, syncReceiverQueueState } from '../services/callQueue';
+import { isReceiverInQueueScreen } from '../services/callQueue';
 
 function roundInr(n: number): number {
   return Math.round(n * 100) / 100;
 }
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
+export const getRandomQueuedReceiver = async (req: Request, res: Response): Promise<void> => {
+  try {
+    if (req.accountKind !== 'user' || !req.user?._id) {
+      res.status(403).json({ message: 'Only callers can use random call match' });
+      return;
+    }
+    const callerId = String(req.user._id);
+    const caller = await User.findById(callerId).select('accountStatus suspended');
+    if (!caller || caller.accountStatus !== 'approved' || caller.suspended) {
+      res.status(403).json({ message: 'Caller account is not allowed for calling' });
+      return;
+    }
+
+    const timeoutMs = 10_000;
+    const pollEveryMs = 1_000;
+    const started = Date.now();
+    while (Date.now() - started < timeoutMs) {
+      const matched = await pickRandomQueuedReceiverForCaller(callerId);
+      if (matched) {
+        res.status(200).json(matched);
+        return;
+      }
+      await sleep(pollEveryMs);
+    }
+
+    res.status(404).json({ message: 'No available receiver found right now. Please try again shortly.' });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error('getRandomQueuedReceiver error:', msg);
+    res.status(500).json({ message: msg || 'Server error' });
+  }
+};
 
 export const getVoiceBootstrap = async (req: Request, res: Response): Promise<void> => {
   const accountKind = req.accountKind;
@@ -42,6 +84,18 @@ export const getVoiceBootstrap = async (req: Request, res: Response): Promise<vo
   }
   if (!receiverDoc || receiverDoc.accountStatus !== 'approved' || receiverDoc.suspended) {
     res.status(403).json({ message: 'Receiver account is not allowed for calling' });
+    return;
+  }
+  const ongoing = await CallSession.exists({
+    receiverId: new mongoose.Types.ObjectId(receiverId),
+    status: 'ongoing',
+  });
+  if (ongoing || isReceiverBusy(receiverId)) {
+    res.status(409).json({ message: 'Receiver is busy on another call' });
+    return;
+  }
+  if (!isReceiverInQueueScreen(receiverId)) {
+    res.status(409).json({ message: 'Receiver is not in waiting queue right now.' });
     return;
   }
   if (!receiverDoc.isAvailable || !receiverDoc.isOnline) {
@@ -224,6 +278,8 @@ export const endVoiceSession = async (
       estimatedEarning: settledAmountInr,
       settledAmountInr,
     });
+    releaseReceiverReservation(String(current.receiverId));
+    await syncReceiverQueueState(String(current.receiverId));
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error('endVoiceSession error:', msg);

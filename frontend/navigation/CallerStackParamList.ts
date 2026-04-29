@@ -16,7 +16,14 @@ export type CallerStackParamList = {
     receiverName: string;
     receiverImage?: string | null;
   };
-  VoiceCall: VoiceBootstrapResponse & { peerName: string };
+  CallerQueue:
+    | {
+        peerId: string;
+        peerName: string;
+        peerImage?: string | null;
+      }
+    | undefined;
+  VoiceCall: VoiceBootstrapResponse & { peerName: string; peerImage?: string | null };
   ReceiverProfile: { receiver: DiscoverReceiverSummary };
   Wallet: undefined;
   PaymentMethod: { payAmount: number; bonusPercent: number; creditAmount: number };

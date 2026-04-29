@@ -26,10 +26,10 @@ import { useAuth } from '../context/AuthContext';
 import { discoverApi, getErrorMessage } from '../services/api';
 import type { DiscoverReceiverSummary } from '../types/api';
 import { receiverCardMetrics } from '../utils/discoverDisplay';
+import { getReceiverPresenceInfo } from '../utils/receiverStatus';
 
 const PURPLE = '#7b2cff';
 const GREEN = '#22c55e';
-const AMBER = '#f59e0b';
 
 export default function CallerDiscoverHome(): React.JSX.Element {
   const navigation = useNavigation<CallerTabBarNavigation>();
@@ -44,6 +44,7 @@ export default function CallerDiscoverHome(): React.JSX.Element {
   const [filterModalVisible, setFilterModalVisible] = useState(false);
   const [appliedFilters, setAppliedFilters] = useState<DiscoverFiltersState>(DEFAULT_DISCOVER_FILTERS);
   const [modalDraft, setModalDraft] = useState<DiscoverFiltersState>(DEFAULT_DISCOVER_FILTERS);
+  const [randomCalling, setRandomCalling] = useState(false);
 
   useEffect(() => {
     const t = setTimeout(() => setDebounced(search.trim()), 350);
@@ -56,7 +57,6 @@ export default function CallerDiscoverHome(): React.JSX.Element {
     const { data } = await discoverApi.listReceivers({
       language: useModalLangs ? undefined : language ?? undefined,
       q: debounced || undefined,
-      gender: appliedFilters.gender ?? undefined,
       langs: useModalLangs ? appliedFilters.languages.join(',') : undefined,
       minAge: ageFilterActive ? appliedFilters.ageMin : undefined,
       maxAge: ageFilterActive ? appliedFilters.ageMax : undefined,
@@ -120,11 +120,18 @@ export default function CallerDiscoverHome(): React.JSX.Element {
       navigation.navigate('Wallet');
       return;
     }
-    navigation.navigate('CallerChat', {
-      receiverId: item._id,
-      receiverName: item.name,
-      receiverImage: item.profileImage,
+    navigation.navigate('CallerQueue', {
+      peerId: item._id,
+      peerName: item.name,
+      peerImage: item.profileImage ?? null,
     });
+  };
+
+  const onCallRandom = () => {
+    if (randomCalling) return;
+    setRandomCalling(true);
+    navigation.navigate('CallerQueue');
+    setRandomCalling(false);
   };
 
   const langChip = (label: string, value: string | null) => {
@@ -143,8 +150,9 @@ export default function CallerDiscoverHome(): React.JSX.Element {
 
   const renderItem = ({ item }: { item: DiscoverReceiverSummary }) => {
     const m = receiverCardMetrics(item._id);
-    const statusColor = item.isOnline ? GREEN : AMBER;
-    const statusLabel = item.isOnline ? 'Online' : 'Offline';
+    const presence = getReceiverPresenceInfo(item);
+    const statusColor = presence.color;
+    const statusLabel = presence.label;
     const interestStr =
       item.interests.length > 0 ? item.interests.slice(0, 4).join(' | ') : '—';
     const rateLabel =
@@ -159,31 +167,33 @@ export default function CallerDiscoverHome(): React.JSX.Element {
         onPress={() => navigation.navigate('ReceiverProfile', { receiver: item })}
       >
         <View style={styles.cardTop}>
-          <View style={styles.avatarWrap}>
-            {item.profileImage ? (
-              <Image source={{ uri: item.profileImage }} style={styles.avatar} />
-            ) : (
-              <View style={[styles.avatar, styles.avatarPlaceholder]}>
-                <Text style={styles.avatarGlyph}>👤</Text>
-              </View>
-            )}
-            <View style={[styles.statusDot, { backgroundColor: statusColor }]} />
+          <View style={styles.avatarCol}>
+            <View style={[styles.avatarWrap, styles.avatarRing, { borderColor: statusColor }]}>
+              {item.profileImage ? (
+                <Image source={{ uri: item.profileImage }} style={styles.avatar} />
+              ) : (
+                <View style={[styles.avatar, styles.avatarPlaceholder]}>
+                  <Text style={styles.avatarGlyph}>👤</Text>
+                </View>
+              )}
+              <View style={[styles.statusDot, { backgroundColor: statusColor }]} />
+            </View>
+            <View style={styles.ratingRow}>
+              <Text style={styles.star}>★</Text>
+              <Text style={styles.ratingText}>
+                {m.rating} ({m.reviews})
+              </Text>
+            </View>
           </View>
           <View style={styles.cardMain}>
             <Text style={styles.cardName}>
               {item.name}
               {item.age != null ? `, ${item.age} Y` : ''}
             </Text>
-            <Text style={styles.cardLoc}>{item.state?.trim() || '—'}</Text>
             <Text style={styles.cardInterests} numberOfLines={2}>
               {interestStr}
             </Text>
-            <View style={styles.cardMetaRow}>
-              <Text style={styles.star}>★</Text>
-              <Text style={styles.ratingText}>
-                {m.rating} ({m.reviews})
-              </Text>
-            </View>
+            <Text style={styles.cardLoc}>{item.state?.trim() || '—'}</Text>
           </View>
           <View style={styles.langCol}>
             {item.languages.slice(0, 3).map((lang) => (
@@ -236,11 +246,11 @@ export default function CallerDiscoverHome(): React.JSX.Element {
       <TouchableOpacity
         style={styles.promoPink}
         activeOpacity={0.9}
-        onPress={() => Alert.alert('Meet someone new', 'Random match coming soon.')}
+        onPress={onCallRandom}
       >
         <Text style={styles.promoTitle}>Meet Someone New!</Text>
         <View style={styles.promoBtn}>
-          <Text style={styles.promoBtnText}>Call Random</Text>
+          <Text style={styles.promoBtnText}>{randomCalling ? 'Matching…' : 'Call Random'}</Text>
         </View>
       </TouchableOpacity>
 
@@ -417,7 +427,20 @@ const styles = StyleSheet.create({
     borderColor: '#ececec',
   },
   cardTop: { flexDirection: 'row', gap: 12 },
+  avatarCol: {
+    width: 76,
+    alignItems: 'center',
+    paddingTop: 2,
+  },
   avatarWrap: { position: 'relative' },
+  avatarRing: {
+    borderWidth: 3,
+    borderRadius: 35,
+    width: 70,
+    height: 70,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   avatar: { width: 64, height: 64, borderRadius: 32 },
   avatarPlaceholder: { backgroundColor: '#eee', alignItems: 'center', justifyContent: 'center' },
   avatarGlyph: { fontSize: 28 },
@@ -433,9 +456,9 @@ const styles = StyleSheet.create({
   },
   cardMain: { flex: 1, minWidth: 0 },
   cardName: { fontSize: 15, fontWeight: '900', color: '#111' },
-  cardLoc: { fontSize: 12, color: '#666', marginTop: 2 },
+  cardLoc: { fontSize: 12, color: '#666', marginTop: 6 },
   cardInterests: { fontSize: 11, color: '#888', marginTop: 6, lineHeight: 16 },
-  cardMetaRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 6 },
+  ratingRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 8 },
   star: { color: '#fbbf24', fontSize: 14 },
   ratingText: { fontSize: 12, fontWeight: '700', color: '#444' },
   langCol: { alignItems: 'flex-end', gap: 4 },

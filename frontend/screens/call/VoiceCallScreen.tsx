@@ -1,6 +1,6 @@
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, Image, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Audio } from 'expo-av';
 import Constants from 'expo-constants';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -296,7 +296,30 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
             <View style={styles.statusPill}>
               <Text style={styles.statusText}>Call Active</Text>
             </View>
-            <View style={styles.avatar} />
+            <View style={styles.avatarRow}>
+              <View style={styles.avatarWrap}>
+                {route.params.peerImage ? (
+                  <Image source={{ uri: route.params.peerImage }} style={styles.avatar} />
+                ) : (
+                  <View style={[styles.avatar, styles.avatarPlaceholder]}>
+                    <Text style={styles.avatarInitial}>
+                      {(route.params.peerName || 'U').trim().charAt(0).toUpperCase()}
+                    </Text>
+                  </View>
+                )}
+              </View>
+              <View style={styles.avatarWrap}>
+                {user?.profileImage ? (
+                  <Image source={{ uri: user.profileImage }} style={styles.avatar} />
+                ) : (
+                  <View style={[styles.avatar, styles.avatarPlaceholder]}>
+                    <Text style={styles.avatarInitial}>
+                      {(user?.name || 'Y').trim().charAt(0).toUpperCase()}
+                    </Text>
+                  </View>
+                )}
+              </View>
+            </View>
             <Text style={styles.peerName}>{route.params.peerName}</Text>
             <Text style={styles.durationLabel}>Duration</Text>
             <Text style={styles.durationValue}>
@@ -343,6 +366,22 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   statusText: { color: '#fff', fontSize: 12, fontWeight: '800' },
+  avatarRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 22,
+    marginTop: 6,
+  },
+  avatarWrap: {
+    width: 102,
+    height: 102,
+    borderRadius: 51,
+    padding: 5,
+    backgroundColor: 'rgba(255,255,255,0.28)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   avatar: {
     width: 92,
     height: 92,
@@ -350,6 +389,15 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
     borderWidth: 2,
     borderColor: '#fff',
+  },
+  avatarPlaceholder: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  avatarInitial: {
+    color: '#555',
+    fontSize: 30,
+    fontWeight: '900',
   },
   peerName: { marginTop: 14, color: '#222', fontSize: 30, fontWeight: '900' },
   durationLabel: { marginTop: 20, color: '#333', fontSize: 13, fontWeight: '700' },

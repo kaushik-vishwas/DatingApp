@@ -38,6 +38,36 @@ export default function CallerAlertsTabScreen({ navigation }: Props): React.JSX.
 
   const filtered = useMemo(() => (tab === 'all' ? rows : rows.filter((r) => r.type === tab)), [rows, tab]);
 
+  const parseChatNotification = (row: CallerNotificationRow): { receiverId: string; receiverName: string } | null => {
+    if (row.type !== 'chat') return null;
+    if (!row.id.startsWith('chat-')) return null;
+    const receiverId = row.id.slice(5).trim();
+    if (!receiverId) return null;
+    const prefix = 'Message from ';
+    const receiverName = row.title.startsWith(prefix) ? row.title.slice(prefix.length).trim() : 'Receiver';
+    return { receiverId, receiverName: receiverName || 'Receiver' };
+  };
+
+  const onOpenNotification = (row: CallerNotificationRow) => {
+    if (row.type === 'call') {
+      navigation.navigate('CallerCalls');
+      return;
+    }
+    if (row.type === 'chat') {
+      const chatTarget = parseChatNotification(row);
+      if (chatTarget) {
+        navigation.navigate('CallerChat', {
+          receiverId: chatTarget.receiverId,
+          receiverName: chatTarget.receiverName,
+        });
+        return;
+      }
+      navigation.navigate('CallerChats');
+      return;
+    }
+    navigation.navigate('Wallet');
+  };
+
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'left', 'right']}>
       <Text style={styles.title}>Notifications</Text>
@@ -68,11 +98,19 @@ export default function CallerAlertsTabScreen({ navigation }: Props): React.JSX.
           </View>
         ) : (
           filtered.map((row) => (
-            <View key={row.id} style={styles.row}>
-              <Text style={styles.rowTitle}>{row.title}</Text>
+            <TouchableOpacity
+              key={row.id}
+              style={styles.row}
+              activeOpacity={0.85}
+              onPress={() => onOpenNotification(row)}
+            >
+              <View style={styles.rowTop}>
+                <Text style={styles.rowTitle}>{row.title}</Text>
+                <Text style={styles.rowChevron}>›</Text>
+              </View>
               <Text style={styles.rowSub}>{row.subtitle}</Text>
               <Text style={styles.rowAt}>{new Date(row.at).toLocaleString()}</Text>
-            </View>
+            </TouchableOpacity>
           ))
         )}
       </View>
@@ -108,7 +146,9 @@ const styles = StyleSheet.create({
     padding: 11,
     marginBottom: 8,
   },
+  rowTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10 },
   rowTitle: { fontSize: 13, color: '#111', fontWeight: '800' },
+  rowChevron: { fontSize: 20, color: '#bbb', fontWeight: '300' },
   rowSub: { marginTop: 3, fontSize: 12, color: '#666', fontWeight: '600' },
   rowAt: { marginTop: 4, fontSize: 10, color: '#999', fontWeight: '600' },
 });

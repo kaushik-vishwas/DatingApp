@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getCallerNotifications = exports.getCallerCallHistory = exports.getReceiverEarningsBreakdown = exports.verifyReceiverBankUpdateOtp = exports.sendReceiverBankUpdateOtp = exports.deleteReceiverAccount = exports.updateReceiverProfile = exports.getReceiverCallInsights = exports.verifyReceiverWithdrawalOtpAndCreate = exports.sendReceiverWithdrawalOtp = exports.getReceiverWithdrawalOverview = exports.getReceiverWalletSummary = exports.updateCallerProfile = exports.completeCallerProfile = exports.saveCallerUserAudio = exports.completeProfile = void 0;
+exports.getCallerNotifications = exports.getCallerCallHistory = exports.getReceiverEarningsBreakdown = exports.verifyReceiverBankUpdateOtp = exports.sendReceiverBankUpdateOtp = exports.deleteReceiverAccount = exports.updateReceiverProfile = exports.notifyReceiverRecentUser = exports.getReceiverNotifyCandidates = exports.getReceiverCallInsights = exports.verifyReceiverWithdrawalOtpAndCreate = exports.sendReceiverWithdrawalOtp = exports.getReceiverWithdrawalOverview = exports.getReceiverWalletSummary = exports.updateCallerProfile = exports.completeCallerProfile = exports.saveCallerUserAudio = exports.completeProfile = void 0;
 const crypto_1 = __importDefault(require("crypto"));
 const mongoose_1 = __importDefault(require("mongoose"));
 const User_1 = __importDefault(require("../models/User"));
@@ -14,11 +14,15 @@ const CallSession_1 = __importDefault(require("../models/CallSession"));
 const ChatBlock_1 = __importDefault(require("../models/ChatBlock"));
 const UserReport_1 = __importDefault(require("../models/UserReport"));
 const WalletTopup_1 = __importDefault(require("../models/WalletTopup"));
+const ReceiverAvailabilityNotification_1 = __importDefault(require("../models/ReceiverAvailabilityNotification"));
+const ReceiverPriorityNotification_1 = __importDefault(require("../models/ReceiverPriorityNotification"));
 const callerProfileAllowlist_1 = require("../constants/callerProfileAllowlist");
 const authController_1 = require("./authController");
 const accountAccess_1 = require("../utils/accountAccess");
 const chatPricing_1 = require("../constants/chatPricing");
 const email_1 = require("../config/email");
+const receiverAvailabilityNotifier_1 = require("../services/receiverAvailabilityNotifier");
+const callQueue_1 = require("../services/callQueue");
 const birthDate_1 = require("../utils/birthDate");
 function parseCallerAudioHttpsUrl(body) {
     const raw = typeof body.userAudio === 'string'
@@ -268,8 +272,8 @@ const completeCallerProfile = async (req, res) => {
             return;
         }
         const voiceUrl = parseCallerAudioHttpsUrl(req.body);
-        if (!voiceUrl) {
-            res.status(400).json({ message: 'userAudio must be a valid https URL' });
+        if (gender === 'female' && !voiceUrl) {
+            res.status(400).json({ message: 'userAudio must be a valid https URL for female profiles' });
             return;
         }
         const updated = await User_1.default.findOneAndUpdate({ _id: authUser._id, accountStatus: 'pending_profile' }, {
@@ -282,7 +286,7 @@ const completeCallerProfile = async (req, res) => {
                 dateOfBirth: dob,
                 age: computedAge,
                 state: String(state).trim(),
-                userAudio: voiceUrl,
+                userAudio: voiceUrl ?? null,
                 accountStatus: 'approved',
                 suspended: true,
             },
@@ -764,9 +768,9 @@ const getReceiverCallInsights = async (req, res) => {
         const callers = callerIds.length === 0
             ? []
             : await User_1.default.find({ _id: { $in: callerIds.map((id) => new mongoose_1.default.Types.ObjectId(id)) } })
-                .select('_id name')
+                .select('_id name profileImage')
                 .lean();
-        const callerNameById = new Map(callers.map((c) => [String(c._id), c.name]));
+        const callerById = new Map(callers.map((c) => [String(c._id), { name: c.name, profileImage: c.profileImage ?? null }]));
         const totalDurationSec = completed.reduce((sum, row) => sum + row.durationSec, 0);
         const weekDurationSec = completed
             .filter((row) => row.startedAt >= weekStart)
@@ -784,7 +788,8 @@ const getReceiverCallInsights = async (req, res) => {
         const recentCalls = filtered.slice(0, 20).map((row) => ({
             id: String(row._id),
             callerId: String(row.callerId),
-            callerName: callerNameById.get(String(row.callerId)) ?? 'Caller',
+            callerName: callerById.get(String(row.callerId))?.name ?? 'Caller',
+            callerImage: callerById.get(String(row.callerId))?.profileImage ?? null,
             startedAt: row.startedAt.toISOString(),
             durationSec: row.durationSec,
             earningInr: roundInr(typeof row.settledAmountInr === 'number' && Number.isFinite(row.settledAmountInr)
@@ -798,7 +803,7 @@ const getReceiverCallInsights = async (req, res) => {
             if (!byCaller.has(callerId)) {
                 byCaller.set(callerId, {
                     callerId,
-                    callerName: callerNameById.get(callerId) ?? 'Caller',
+                    callerName: callerById.get(callerId)?.name ?? 'Caller',
                     callsWeek: 0,
                     callsMonth: 0,
                     durationWeekSec: 0,
@@ -853,6 +858,148 @@ const getReceiverCallInsights = async (req, res) => {
 };
 exports.getReceiverCallInsights = getReceiverCallInsights;
 /**
+ * GET /profile/receiver-notify-candidates — latest 20 unique recent callers for manual ping.
+ */
+const getReceiverNotifyCandidates = async (req, res) => {
+    try {
+        if (req.accountKind !== 'receiver') {
+            res.status(403).json({ message: 'Only receivers can view notify users list' });
+            return;
+        }
+        if ((0, accountAccess_1.blockReceiverUntilApproved)(req, res))
+            return;
+        const receiverId = new mongoose_1.default.Types.ObjectId(String(req.receiver._id));
+        const rows = await CallSession_1.default.find({
+            receiverId,
+            status: 'completed',
+        })
+            .sort({ startedAt: -1 })
+            .limit(250)
+            .select('callerId startedAt')
+            .lean();
+        const seen = new Set();
+        const orderedCallerIds = [];
+        const lastCallAtByCaller = new Map();
+        for (const row of rows) {
+            const cid = String(row.callerId);
+            if (seen.has(cid))
+                continue;
+            seen.add(cid);
+            orderedCallerIds.push(cid);
+            lastCallAtByCaller.set(cid, row.startedAt);
+            if (orderedCallerIds.length >= 20)
+                break;
+        }
+        if (orderedCallerIds.length === 0) {
+            res.status(200).json({ users: [] });
+            return;
+        }
+        const users = await User_1.default.find({
+            _id: { $in: orderedCallerIds.map((id) => new mongoose_1.default.Types.ObjectId(id)) },
+            accountStatus: 'approved',
+            suspended: { $ne: true },
+        })
+            .select('_id name profileImage')
+            .lean();
+        const byId = new Map(users.map((u) => [String(u._id), u]));
+        const candidates = orderedCallerIds
+            .map((id) => byId.get(id))
+            .filter(Boolean)
+            .map((u) => ({
+            userId: String(u._id),
+            name: u.name || 'User',
+            profileImage: u.profileImage ?? null,
+            lastCallAt: (lastCallAtByCaller.get(String(u._id)) ?? new Date()).toISOString(),
+        }));
+        res.status(200).json({ users: candidates });
+    }
+    catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error('getReceiverNotifyCandidates error:', msg);
+        res.status(500).json({ message: msg || 'Server error' });
+    }
+};
+exports.getReceiverNotifyCandidates = getReceiverNotifyCandidates;
+const RECEIVER_NOTIFY_COOLDOWN_MS = 8 * 60 * 60 * 1000;
+const RECEIVER_NOTIFY_PRIORITY_MS = 12 * 60 * 60 * 1000;
+/**
+ * POST /profile/receiver-notify-user — send manual availability ping to one recent caller.
+ */
+const notifyReceiverRecentUser = async (req, res) => {
+    try {
+        if (req.accountKind !== 'receiver') {
+            res.status(403).json({ message: 'Only receivers can notify users' });
+            return;
+        }
+        if ((0, accountAccess_1.blockReceiverUntilApproved)(req, res))
+            return;
+        const receiverId = String(req.receiver._id);
+        const receiver = await Receiver_1.default.findById(receiverId).select('name accountStatus suspended isOnline isAvailable');
+        if (!receiver || receiver.accountStatus !== 'approved' || receiver.suspended) {
+            res.status(403).json({ message: 'Receiver account is not allowed for this action' });
+            return;
+        }
+        if (!receiver.isOnline || !receiver.isAvailable) {
+            res.status(409).json({ message: 'You can notify users only when online and available.' });
+            return;
+        }
+        const userId = typeof req.body.userId === 'string' ? req.body.userId.trim() : '';
+        if (!mongoose_1.default.Types.ObjectId.isValid(userId)) {
+            res.status(400).json({ message: 'Valid userId is required' });
+            return;
+        }
+        const uid = new mongoose_1.default.Types.ObjectId(userId);
+        const recentLink = await CallSession_1.default.exists({
+            receiverId: new mongoose_1.default.Types.ObjectId(receiverId),
+            callerId: uid,
+            status: 'completed',
+        });
+        if (!recentLink) {
+            res.status(403).json({ message: 'You can notify only users from your recent call history.' });
+            return;
+        }
+        const targetUser = await User_1.default.findById(uid).select('accountStatus suspended');
+        if (!targetUser || targetUser.accountStatus !== 'approved' || targetUser.suspended) {
+            res.status(404).json({ message: 'User not found or unavailable.' });
+            return;
+        }
+        const cooldownSince = new Date(Date.now() - RECEIVER_NOTIFY_COOLDOWN_MS);
+        const recentlyNotified = await ReceiverPriorityNotification_1.default.findOne({
+            receiverId: new mongoose_1.default.Types.ObjectId(receiverId),
+            userId: uid,
+            lastNotifiedAt: { $gte: cooldownSince },
+        }).select('_id');
+        if (recentlyNotified) {
+            res.status(429).json({ message: 'User already notified recently. Please wait before notifying again.' });
+            return;
+        }
+        const now = new Date();
+        await ReceiverPriorityNotification_1.default.findOneAndUpdate({
+            receiverId: new mongoose_1.default.Types.ObjectId(receiverId),
+            userId: uid,
+        }, {
+            $set: {
+                lastNotifiedAt: now,
+                priorityUntil: new Date(now.getTime() + RECEIVER_NOTIFY_PRIORITY_MS),
+            },
+        }, { upsert: true, new: true });
+        const receiverName = receiver.name?.trim() || 'Receiver';
+        await ReceiverAvailabilityNotification_1.default.create({
+            userId: uid,
+            receiverIds: [new mongoose_1.default.Types.ObjectId(receiverId)],
+            title: `${receiverName} is available to talk now.`,
+            subtitle: 'Open app and call now while she is available.',
+        });
+        res.status(200).json({ message: 'Notification sent successfully.' });
+    }
+    catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error('notifyReceiverRecentUser error:', msg);
+        res.status(500).json({ message: msg || 'Server error' });
+    }
+};
+exports.notifyReceiverRecentUser = notifyReceiverRecentUser;
+/**
  * PATCH /profile/receiver — approved receivers can update editable profile fields.
  */
 const updateReceiverProfile = async (req, res) => {
@@ -869,6 +1016,8 @@ const updateReceiverProfile = async (req, res) => {
             res.status(404).json({ message: 'Receiver not found' });
             return;
         }
+        const wasAvailable = Boolean(receiver.isAvailable);
+        const wasOnline = Boolean(receiver.isOnline);
         if (typeof req.body.name === 'string' && req.body.name.trim()) {
             receiver.name = req.body.name.trim();
         }
@@ -896,6 +1045,14 @@ const updateReceiverProfile = async (req, res) => {
             receiver.isAvailable = req.body.isAvailable;
         }
         await receiver.save();
+        await (0, callQueue_1.syncReceiverQueueState)(receiverId);
+        const becameCallAvailable = !wasAvailable && Boolean(receiver.isAvailable) && Boolean(receiver.isOnline) && wasOnline;
+        if (becameCallAvailable) {
+            void (0, receiverAvailabilityNotifier_1.scheduleReceiverAvailabilityNotifications)(receiverId).catch((e) => {
+                const msg = e instanceof Error ? e.message : String(e);
+                console.error('receiver availability notify error:', msg);
+            });
+        }
         res.status(200).json({
             message: 'Profile updated',
             user: (0, authController_1.toApiReceiver)(receiver),
@@ -1278,7 +1435,7 @@ const getCallerNotifications = async (req, res) => {
             return;
         }
         const uid = new mongoose_1.default.Types.ObjectId(String(authUser._id));
-        const [topups, callRows, convoRows] = await Promise.all([
+        const [topups, callRows, convoRows, availabilityRows] = await Promise.all([
             WalletTopup_1.default.find({ userId: uid })
                 .sort({ createdAt: -1 })
                 .limit(20)
@@ -1308,6 +1465,11 @@ const getCallerNotifications = async (req, res) => {
                     },
                 },
             ]),
+            ReceiverAvailabilityNotification_1.default.find({ userId: uid })
+                .sort({ createdAt: -1 })
+                .limit(20)
+                .select('title subtitle createdAt')
+                .lean(),
         ]);
         const receiverIds = [
             ...new Set([
@@ -1342,6 +1504,13 @@ const getCallerNotifications = async (req, res) => {
                 title: `Message from ${receiverNameById.get(row.receiverId) ?? 'Receiver'}`,
                 subtitle: row.lastText || 'New chat message',
                 at: row.lastAt.toISOString(),
+            })),
+            ...availabilityRows.map((row) => ({
+                id: `avail-${String(row._id)}`,
+                type: 'call',
+                title: row.title,
+                subtitle: row.subtitle,
+                at: row.createdAt.toISOString(),
             })),
         ].sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime());
         res.status(200).json({ notifications: notifications.slice(0, 50) });

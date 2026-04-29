@@ -3,16 +3,56 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.rateVoiceSession = exports.endVoiceSession = exports.startVoiceSession = exports.getVoiceBootstrap = void 0;
+exports.rateVoiceSession = exports.endVoiceSession = exports.startVoiceSession = exports.getVoiceBootstrap = exports.getRandomQueuedReceiver = void 0;
 const mongoose_1 = __importDefault(require("mongoose"));
 const ChatBlock_1 = __importDefault(require("../models/ChatBlock"));
 const User_1 = __importDefault(require("../models/User"));
 const Receiver_1 = __importDefault(require("../models/Receiver"));
 const CallSession_1 = __importDefault(require("../models/CallSession"));
 const streamVoice_1 = require("../utils/streamVoice");
+const callQueue_1 = require("../services/callQueue");
+const callQueue_2 = require("../services/callQueue");
+const callQueue_3 = require("../services/callQueue");
 function roundInr(n) {
     return Math.round(n * 100) / 100;
 }
+function sleep(ms) {
+    return new Promise((resolve) => {
+        setTimeout(resolve, ms);
+    });
+}
+const getRandomQueuedReceiver = async (req, res) => {
+    try {
+        if (req.accountKind !== 'user' || !req.user?._id) {
+            res.status(403).json({ message: 'Only callers can use random call match' });
+            return;
+        }
+        const callerId = String(req.user._id);
+        const caller = await User_1.default.findById(callerId).select('accountStatus suspended');
+        if (!caller || caller.accountStatus !== 'approved' || caller.suspended) {
+            res.status(403).json({ message: 'Caller account is not allowed for calling' });
+            return;
+        }
+        const timeoutMs = 10_000;
+        const pollEveryMs = 1_000;
+        const started = Date.now();
+        while (Date.now() - started < timeoutMs) {
+            const matched = await (0, callQueue_1.pickRandomQueuedReceiverForCaller)(callerId);
+            if (matched) {
+                res.status(200).json(matched);
+                return;
+            }
+            await sleep(pollEveryMs);
+        }
+        res.status(404).json({ message: 'No available receiver found right now. Please try again shortly.' });
+    }
+    catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error('getRandomQueuedReceiver error:', msg);
+        res.status(500).json({ message: msg || 'Server error' });
+    }
+};
+exports.getRandomQueuedReceiver = getRandomQueuedReceiver;
 const getVoiceBootstrap = async (req, res) => {
     const accountKind = req.accountKind;
     const meId = accountKind === 'user' ? String(req.user?._id ?? '') : String(req.receiver?._id ?? '');
@@ -37,6 +77,18 @@ const getVoiceBootstrap = async (req, res) => {
     }
     if (!receiverDoc || receiverDoc.accountStatus !== 'approved' || receiverDoc.suspended) {
         res.status(403).json({ message: 'Receiver account is not allowed for calling' });
+        return;
+    }
+    const ongoing = await CallSession_1.default.exists({
+        receiverId: new mongoose_1.default.Types.ObjectId(receiverId),
+        status: 'ongoing',
+    });
+    if (ongoing || (0, callQueue_2.isReceiverBusy)(receiverId)) {
+        res.status(409).json({ message: 'Receiver is busy on another call' });
+        return;
+    }
+    if (!(0, callQueue_3.isReceiverInQueueScreen)(receiverId)) {
+        res.status(409).json({ message: 'Receiver is not in waiting queue right now.' });
         return;
     }
     if (!receiverDoc.isAvailable || !receiverDoc.isOnline) {
@@ -188,6 +240,8 @@ const endVoiceSession = async (req, res) => {
             estimatedEarning: settledAmountInr,
             settledAmountInr,
         });
+        (0, callQueue_2.releaseReceiverReservation)(String(current.receiverId));
+        await (0, callQueue_2.syncReceiverQueueState)(String(current.receiverId));
     }
     catch (err) {
         const msg = err instanceof Error ? err.message : String(err);

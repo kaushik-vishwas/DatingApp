@@ -4,6 +4,7 @@ import React, { useCallback, useState } from 'react';
 import {
   Alert,
   ActivityIndicator,
+  Image,
   RefreshControl,
   ScrollView,
   StyleSheet,
@@ -19,6 +20,7 @@ import { useChatInbox } from '../context/ChatInboxContext';
 import type { ReceiverStackParamList } from '../navigation/ReceiverStackParamList';
 import { getErrorMessage, profileApi } from '../services/api';
 import type { ReceiverCallInsightsResponse, ReceiverWalletSummaryResponse } from '../types/api';
+import { receiverCardMetrics } from '../utils/discoverDisplay';
 
 function formatInr(n: number): string {
   const v = Math.round(n * 100) / 100;
@@ -41,6 +43,7 @@ export default function ReceiverHomeDashboard(): React.JSX.Element {
   /** Use stable `user._id` only — `refreshUser()` replaces `user` with a new object each time and would
    *  recreate this callback forever when combined with `useFocusEffect`. */
   const receiverId = user?.role === 'receiver' ? user._id : undefined;
+  const previewMetrics = user?.role === 'receiver' ? receiverCardMetrics(user._id) : null;
 
   const availabilityFromServer = user?.role === 'receiver' ? Boolean(user.isAvailable ?? true) : true;
 
@@ -97,6 +100,10 @@ export default function ReceiverHomeDashboard(): React.JSX.Element {
     }
   };
 
+  const onMessageCaller = (callerId: string, callerName: string) => {
+    navigation.navigate('ReceiverChat', { userId: callerId, userName: callerName, userImage: null });
+  };
+
   if (!user) {
     return (
       <View style={styles.centered}>
@@ -122,22 +129,111 @@ export default function ReceiverHomeDashboard(): React.JSX.Element {
             <Text style={styles.iconText}>🔔</Text>
           </TouchableOpacity>
           <TouchableOpacity
-            style={styles.iconBtn}
+            style={styles.headerProfileBtn}
             onPress={() => navigation.navigate('ReceiverSettings')}
+            activeOpacity={0.85}
           >
-            <Text style={styles.iconText}>⚙️</Text>
+            {user?.profileImage ? (
+              <Image source={{ uri: user.profileImage }} style={styles.headerProfileImg} />
+            ) : (
+              <View style={styles.headerProfilePh}>
+                <Text style={styles.headerProfileTxt}>{user?.name?.charAt(0) ?? '?'}</Text>
+              </View>
+            )}
           </TouchableOpacity>
         </View>
       </View>
 
       {user ? (
         <>
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Public Preview</Text>
+            <View style={styles.publicCard}>
+              <View style={styles.publicCardTop}>
+                <View style={styles.publicAvatarCol}>
+                  <View
+                    style={[
+                      styles.publicAvatarRing,
+                      {
+                        borderColor: !Boolean(user.isOnline)
+                          ? '#dc2626'
+                          : available
+                            ? '#22c55e'
+                            : '#f59e0b',
+                      },
+                    ]}
+                  >
+                    {user.profileImage ? (
+                      <Image source={{ uri: user.profileImage }} style={styles.publicAvatar} />
+                    ) : (
+                      <View style={[styles.publicAvatar, styles.publicAvatarPlaceholder]}>
+                        <Text style={styles.publicAvatarGlyph}>👤</Text>
+                      </View>
+                    )}
+                  </View>
+                  <View style={styles.publicRatingRow}>
+                    <Text style={styles.publicStar}>★</Text>
+                    <Text style={styles.publicRatingText}>
+                      {previewMetrics?.rating ?? 4.0} ({previewMetrics?.reviews ?? 0})
+                    </Text>
+                  </View>
+                </View>
+                <View style={styles.publicMain}>
+                  <Text style={styles.publicName}>
+                    {user.name}
+                    {user.age != null ? `, ${user.age} Y` : ''}
+                  </Text>
+                  <Text style={styles.publicInterests} numberOfLines={2}>
+                    {(user.interests ?? []).length > 0
+                      ? user.interests.slice(0, 4).join(' | ')
+                      : '—'}
+                  </Text>
+                  <Text style={styles.publicState}>{user.state?.trim() || '—'}</Text>
+                </View>
+                <View style={styles.publicLangCol}>
+                  {(user.languages ?? []).slice(0, 3).map((lang) => (
+                    <View key={lang} style={styles.publicMiniLang}>
+                      <Text style={styles.publicMiniLangText}>{lang}</Text>
+                    </View>
+                  ))}
+                </View>
+              </View>
+              <View style={styles.publicCardBottom}>
+                <Text
+                  style={[
+                    styles.publicStatus,
+                    {
+                      color: !Boolean(user.isOnline)
+                        ? '#dc2626'
+                        : available
+                          ? '#22c55e'
+                          : '#f59e0b',
+                    },
+                  ]}
+                >
+                  {!Boolean(user.isOnline) ? 'Offline' : available ? 'Available' : 'Busy'}
+                </Text>
+                <Text style={styles.publicRate}>
+                  {typeof user.audioCallRate === 'number' && Number.isFinite(user.audioCallRate)
+                    ? `₹${user.audioCallRate} / Min`
+                    : 'Rate TBD'}
+                </Text>
+              </View>
+            </View>
+          </View>
+
           <View style={styles.availabilityCard}>
             <View style={styles.availabilityLeft}>
               <View style={styles.availabilityIcon} />
               <View>
                 <Text style={styles.availabilityTitle}>Availability Status</Text>
-                <Text style={styles.availabilitySub}>{available ? 'You are Online' : 'You are Offline'}</Text>
+                <Text style={styles.availabilitySub}>
+                  {available && Boolean(user.isOnline)
+                    ? "You're online"
+                    : available
+                      ? 'Going online...'
+                      : 'You are Offline'}
+                </Text>
               </View>
             </View>
             <Switch
@@ -147,6 +243,23 @@ export default function ReceiverHomeDashboard(): React.JSX.Element {
               thumbColor={available ? '#7b2cff' : '#bdbdbd'}
             />
           </View>
+
+          <TouchableOpacity
+            style={styles.goOnlineCard}
+            activeOpacity={0.9}
+            onPress={() => navigation.navigate('ReceiverQueue')}
+          >
+            <View style={styles.goOnlineLeft}>
+              <View style={styles.goOnlinePowerWrap}>
+                <Text style={styles.goOnlinePowerIcon}>⏻</Text>
+              </View>
+              <View>
+                <Text style={styles.goOnlineTitle}>Go Online</Text>
+                {/* <Text style={styles.goOnlineSub}>Open waiting queue and receive callers instantly</Text> */}
+              </View>
+            </View>
+            <Text style={styles.goOnlineArrow}>→</Text>
+          </TouchableOpacity>
 
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Earnings Summary</Text>
@@ -195,9 +308,10 @@ export default function ReceiverHomeDashboard(): React.JSX.Element {
             {(callInsights?.recentCalls ?? []).slice(0, 4).map((row) => (
               <CallRow
                 key={row.id}
+                callerId={row.callerId}
                 title={row.callerName}
                 subtitle={`${Math.max(1, Math.round(row.durationSec / 60))} min`}
-                amount=""
+                onMessage={onMessageCaller}
               />
             ))}
           </View>
@@ -295,6 +409,26 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   iconText: { fontSize: 16 },
+  headerProfileBtn: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: '#ececec',
+    backgroundColor: '#fff',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  headerProfileImg: { width: '100%', height: '100%' },
+  headerProfilePh: {
+    width: '100%',
+    height: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#f1e9ff',
+  },
+  headerProfileTxt: { fontSize: 13, fontWeight: '900', color: '#7b2cff' },
   availabilityCard: {
     backgroundColor: '#fff',
     borderRadius: 12,
@@ -314,7 +448,88 @@ const styles = StyleSheet.create({
   },
   availabilityTitle: { fontSize: 14, color: '#111', fontWeight: '800' },
   availabilitySub: { fontSize: 12, color: '#16a34a', fontWeight: '700', marginTop: 2 },
+  goOnlineCard: {
+    marginHorizontal: 16,
+    marginTop: 10,
+    borderRadius: 18,
+    backgroundColor: '#eef2ff',
+    borderWidth: 1,
+    borderColor: '#c7d2fe',
+    paddingHorizontal: 15,
+    paddingVertical: 13,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  goOnlineLeft: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  goOnlinePowerWrap: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#312e81',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  goOnlinePowerIcon: { color: '#fff', fontSize: 18, fontWeight: '900' },
+  goOnlineTitle: { fontSize: 14, color: '#0f172a', fontWeight: '800' },
+  goOnlineSub: { fontSize: 12, color: '#4338ca', fontWeight: '600', marginTop: 2 },
+  goOnlineArrow: { fontSize: 20, color: '#4338ca', fontWeight: '900' },
   section: { marginTop: 16 },
+  publicCard: {
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: '#ececec',
+  },
+  publicCardTop: { flexDirection: 'row', gap: 12 },
+  publicAvatarCol: { width: 76, alignItems: 'center', paddingTop: 2 },
+  publicAvatarRing: {
+    borderWidth: 3,
+    borderRadius: 35,
+    width: 70,
+    height: 70,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  publicAvatar: { width: 64, height: 64, borderRadius: 32 },
+  publicAvatarPlaceholder: { backgroundColor: '#eee', alignItems: 'center', justifyContent: 'center' },
+  publicAvatarGlyph: { fontSize: 28 },
+  publicRatingRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 8 },
+  publicStar: { color: '#fbbf24', fontSize: 14 },
+  publicRatingText: { fontSize: 12, fontWeight: '700', color: '#444' },
+  publicMain: { flex: 1, minWidth: 0 },
+  publicName: { fontSize: 15, fontWeight: '900', color: '#111' },
+  publicInterests: { fontSize: 11, color: '#888', marginTop: 6, lineHeight: 16 },
+  publicState: { fontSize: 12, color: '#666', marginTop: 6 },
+  publicLangCol: { alignItems: 'flex-end', gap: 4 },
+  publicMiniLang: {
+    backgroundColor: 'rgba(123,44,255,0.08)',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
+  },
+  publicMiniLangText: { fontSize: 10, fontWeight: '800', color: '#7b2cff' },
+  publicCardBottom: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 12,
+    paddingTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: '#f0f0f0',
+  },
+  publicStatus: { fontSize: 12, fontWeight: '800' },
+  publicRate: {
+    backgroundColor: '#22c55e',
+    color: '#fff',
+    fontWeight: '900',
+    fontSize: 13,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 12,
+    overflow: 'hidden',
+  },
   sectionTitle: {
     fontSize: 18,
     fontWeight: '900',
@@ -394,13 +609,32 @@ const styles = StyleSheet.create({
   muted: { color: '#888', textAlign: 'center' },
 });
 
-function CallRow({ title, subtitle }: { title: string; subtitle: string; amount: string }) {
+function CallRow({
+  callerId,
+  title,
+  subtitle,
+  onMessage,
+}: {
+  callerId: string;
+  title: string;
+  subtitle: string;
+  onMessage: (callerId: string, callerName: string) => void;
+}) {
   return (
     <View style={callRowStyles.row}>
       <View style={callRowStyles.icon} />
       <View style={{ flex: 1 }}>
         <Text style={callRowStyles.title}>{title}</Text>
         <Text style={callRowStyles.subtitle}>{subtitle}</Text>
+      </View>
+      <View style={callRowStyles.actions}>
+        <TouchableOpacity
+          style={callRowStyles.actionBtn}
+          onPress={() => onMessage(callerId, title)}
+          activeOpacity={0.85}
+        >
+          <Text style={callRowStyles.actionTxt}>💬</Text>
+        </TouchableOpacity>
       </View>
     </View>
   );
@@ -458,6 +692,16 @@ const callRowStyles = StyleSheet.create({
   },
   title: { fontSize: 12, fontWeight: '900', color: '#111' },
   subtitle: { fontSize: 11, color: '#666', fontWeight: '700', marginTop: 2 },
+  actions: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  actionBtn: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: '#f3f4f6',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  actionTxt: { fontSize: 14 },
 });
 
 const quickActionStyles = StyleSheet.create({

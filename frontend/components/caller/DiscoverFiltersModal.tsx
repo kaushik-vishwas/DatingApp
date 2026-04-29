@@ -14,7 +14,6 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { CALLER_LANGUAGE_OPTIONS } from '../../constants/userOnboarding';
-import type { Gender } from '../../types/user';
 
 const PURPLE = '#7b2cff';
 
@@ -28,7 +27,6 @@ const ORDERED_FILTER_LANGUAGES = [
 const MAX_FILTER_LANGS = 5;
 
 export type DiscoverFiltersState = {
-  gender: Gender | null;
   languages: string[];
   ageMin: number;
   ageMax: number;
@@ -37,7 +35,6 @@ export type DiscoverFiltersState = {
 };
 
 export const DEFAULT_DISCOVER_FILTERS: DiscoverFiltersState = {
-  gender: null,
   languages: [],
   ageMin: 18,
   ageMax: 50,
@@ -78,10 +75,6 @@ export default function DiscoverFiltersModal({
   onReset,
   onApply,
 }: Props): React.JSX.Element {
-  const setGender = (g: Gender) => {
-    setDraft((d) => ({ ...d, gender: d.gender === g ? null : g }));
-  };
-
   const toggleLang = (lang: string) => {
     setDraft((d) => {
       if (d.languages.includes(lang)) {
@@ -93,20 +86,6 @@ export default function DiscoverFiltersModal({
       }
       return { ...d, languages: [...d.languages, lang] };
     });
-  };
-
-  const genderPill = (g: Gender, label: string) => {
-    const on = draft.gender === g;
-    return (
-      <TouchableOpacity
-        key={g}
-        style={[styles.pill, on && styles.pillOn]}
-        onPress={() => setGender(g)}
-        activeOpacity={0.85}
-      >
-        <Text style={[styles.pillTxt, on && styles.pillTxtOn]}>{label}</Text>
-      </TouchableOpacity>
-    );
   };
 
   return (
@@ -129,13 +108,6 @@ export default function DiscoverFiltersModal({
               keyboardShouldPersistTaps="handled"
               showsVerticalScrollIndicator={false}
             >
-              <Text style={styles.secLabel}>Gender</Text>
-              <View style={styles.rowWrap}>
-                {genderPill('male', 'Male')}
-                {genderPill('female', 'Female')}
-                {genderPill('other', 'Other')}
-              </View>
-
               <Text style={styles.secLabel}>language selections</Text>
               <View style={styles.rowWrap}>
                 {ORDERED_FILTER_LANGUAGES.map((lang) => {

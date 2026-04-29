@@ -16,6 +16,8 @@ import {
   updateCallerProfile,
   verifyReceiverWithdrawalOtpAndCreate,
   getReceiverWalletSummary,
+  getReceiverNotifyCandidates,
+  notifyReceiverRecentUser,
 } from '../controllers/profileController';
 import { protect } from '../middleware/auth';
 
@@ -30,6 +32,8 @@ router.get('/withdrawals/overview', protect, getReceiverWithdrawalOverview);
 router.post('/withdrawals/send-otp', protect, sendReceiverWithdrawalOtp);
 router.post('/withdrawals/verify', protect, verifyReceiverWithdrawalOtpAndCreate);
 router.get('/receiver-call-insights', protect, getReceiverCallInsights);
+router.get('/receiver-notify-candidates', protect, getReceiverNotifyCandidates);
+router.post('/receiver-notify-user', protect, notifyReceiverRecentUser);
 router.patch('/receiver', protect, updateReceiverProfile);
 router.delete('/receiver', protect, deleteReceiverAccount);
 router.get('/caller-call-history', protect, getCallerCallHistory);

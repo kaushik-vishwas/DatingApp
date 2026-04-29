@@ -13,6 +13,8 @@ const ChatBlock_1 = __importDefault(require("../models/ChatBlock"));
 const User_1 = __importDefault(require("../models/User"));
 const Receiver_1 = __importDefault(require("../models/Receiver"));
 const chatPricing_1 = require("../constants/chatPricing");
+const receiverAvailabilityNotifier_1 = require("../services/receiverAvailabilityNotifier");
+const callQueue_1 = require("../services/callQueue");
 function roomKey(userId, receiverId) {
     return `chat:${userId}:${receiverId}`;
 }
@@ -39,9 +41,33 @@ function accountRoom(typ, accountId) {
  */
 function attachChatSocket(httpServer) {
     const activeCallInvites = new Map();
+    const waitingCallQueueAccounts = new Set();
     const io = new socket_io_1.Server(httpServer, {
         cors: { origin: '*', methods: ['GET', 'POST'] },
     });
+    const queueKey = (typ, accountId) => `${typ}:${String(accountId).trim()}`;
+    const isInQueue = (typ, accountId) => waitingCallQueueAccounts.has(queueKey(typ, accountId));
+    const cancelPendingInvitesFor = (typ, accountId) => {
+        for (const [callId, invite] of activeCallInvites) {
+            const isTarget = invite.targetType === typ && invite.targetId === accountId;
+            const isInviter = invite.inviterType === typ && invite.inviterId === accountId;
+            if (!isTarget && !isInviter)
+                continue;
+            if (invite.timeoutHandle) {
+                clearTimeout(invite.timeoutHandle);
+                invite.timeoutHandle = null;
+            }
+            activeCallInvites.delete(callId);
+            (0, callQueue_1.releaseReceiverReservation)(invite.receiverId);
+            void (0, callQueue_1.syncReceiverQueueState)(invite.receiverId);
+            io.to(accountRoom(invite.inviterType, invite.inviterId)).emit('call:response', {
+                callId,
+                accepted: false,
+                fromType: invite.targetType,
+                fromId: invite.targetId,
+            });
+        }
+    };
     io.use((socket, next) => {
         try {
             const raw = socket.handshake.auth?.token;
@@ -74,15 +100,42 @@ function attachChatSocket(httpServer) {
         const selfRoom = accountRoom(socketType, socketAccountId);
         void socket.join(selfRoom);
         if (socketType === 'r') {
-            void Receiver_1.default.updateOne({ _id: socketAccountId }, { $set: { isOnline: true } }).exec();
+            void (async () => {
+                try {
+                    const prev = await Receiver_1.default.findOneAndUpdate({ _id: socketAccountId }, { $set: { isOnline: true } }, { new: false }).select('isOnline isAvailable accountStatus suspended');
+                    if (prev &&
+                        !prev.isOnline &&
+                        prev.isAvailable &&
+                        prev.accountStatus === 'approved' &&
+                        !prev.suspended) {
+                        await (0, receiverAvailabilityNotifier_1.scheduleReceiverAvailabilityNotifications)(socketAccountId);
+                    }
+                    await (0, callQueue_1.syncReceiverQueueState)(socketAccountId);
+                }
+                catch (e) {
+                    const msg = e instanceof Error ? e.message : String(e);
+                    console.error('receiver online notify error:', msg);
+                }
+            })();
         }
         socket.on('disconnect', () => {
             const leavingId = String(socket.data.accountId);
             const leavingType = socket.data.typ;
+            waitingCallQueueAccounts.delete(queueKey(leavingType, leavingId));
+            if (leavingType === 'r') {
+                (0, callQueue_1.setReceiverQueuePresence)(leavingId, false);
+            }
+            cancelPendingInvitesFor(leavingType, leavingId);
             for (const [callId, invite] of activeCallInvites) {
                 if ((invite.inviterId === leavingId && invite.inviterType === leavingType) ||
                     (invite.targetId === leavingId && invite.targetType === leavingType)) {
+                    if (invite.timeoutHandle) {
+                        clearTimeout(invite.timeoutHandle);
+                        invite.timeoutHandle = null;
+                    }
                     activeCallInvites.delete(callId);
+                    (0, callQueue_1.releaseReceiverReservation)(invite.receiverId);
+                    void (0, callQueue_1.syncReceiverQueueState)(invite.receiverId);
                 }
             }
             if (leavingType === 'r') {
@@ -91,7 +144,11 @@ function attachChatSocket(httpServer) {
                     const room = accountRoom('r', leavingId);
                     const stillConnected = (io.sockets.adapter.rooms.get(room)?.size ?? 0) > 0;
                     if (!stillConnected) {
-                        void Receiver_1.default.updateOne({ _id: leavingId }, { $set: { isOnline: false } }).exec();
+                        void (async () => {
+                            await Receiver_1.default.updateOne({ _id: leavingId }, { $set: { isOnline: false } }).exec();
+                            (0, callQueue_1.releaseReceiverReservation)(leavingId);
+                            await (0, callQueue_1.syncReceiverQueueState)(leavingId);
+                        })();
                     }
                 }, 300);
             }
@@ -375,6 +432,26 @@ function attachChatSocket(httpServer) {
             }
             ack?.({ ok: true });
         });
+        socket.on('call:queue:set', (payload, ack) => {
+            const typ = socket.data.typ;
+            const accountId = String(socket.data.accountId);
+            const active = Boolean(payload?.active);
+            const key = queueKey(typ, accountId);
+            if (active) {
+                waitingCallQueueAccounts.add(key);
+                if (typ === 'r') {
+                    (0, callQueue_1.setReceiverQueuePresence)(accountId, true);
+                }
+            }
+            else {
+                waitingCallQueueAccounts.delete(key);
+                if (typ === 'r') {
+                    (0, callQueue_1.setReceiverQueuePresence)(accountId, false);
+                }
+                cancelPendingInvitesFor(typ, accountId);
+            }
+            ack?.({ ok: true, active });
+        });
         socket.on('call:invite', (payload, ack) => {
             void (async () => {
                 const typ = socket.data.typ;
@@ -390,6 +467,14 @@ function attachChatSocket(httpServer) {
                     return;
                 }
                 const targetType = typ === 'u' ? 'r' : 'u';
+                if (!isInQueue(typ, myId)) {
+                    ack?.({ ok: false, error: 'Open queue screen first to start calls.' });
+                    return;
+                }
+                if (!isInQueue(targetType, targetId)) {
+                    ack?.({ ok: false, error: 'User is not in waiting queue right now.' });
+                    return;
+                }
                 let userId;
                 let receiverId;
                 if (typ === 'u') {
@@ -404,6 +489,7 @@ function attachChatSocket(httpServer) {
                     ack?.({ ok: false, error: 'This chat is blocked.' });
                     return;
                 }
+                let receiverForInviteId = '';
                 if (typ === 'u') {
                     const recv = await Receiver_1.default.findById(targetId).select('accountStatus suspended isAvailable isOnline');
                     if (!recv ||
@@ -414,25 +500,80 @@ function attachChatSocket(httpServer) {
                         ack?.({ ok: false, error: 'Cannot call this receiver right now.' });
                         return;
                     }
+                    receiverForInviteId = targetId;
                 }
                 else {
+                    const recv = await Receiver_1.default.findById(myId).select('accountStatus suspended isAvailable isOnline');
+                    if (!recv ||
+                        recv.accountStatus !== 'approved' ||
+                        recv.suspended ||
+                        !recv.isAvailable ||
+                        !recv.isOnline) {
+                        ack?.({ ok: false, error: 'You are not available for calls right now.' });
+                        return;
+                    }
+                    receiverForInviteId = myId;
+                    if ((0, callQueue_1.isReceiverBusy)(receiverForInviteId)) {
+                        ack?.({ ok: false, error: 'Busy on another call.' });
+                        return;
+                    }
                     const usr = await User_1.default.findById(targetId).select('accountStatus suspended');
                     if (!usr || usr.suspended || usr.accountStatus !== 'approved') {
                         ack?.({ ok: false, error: 'Cannot call this user right now.' });
                         return;
                     }
+                    const targetOnline = (io.sockets.adapter.rooms.get(accountRoom('u', targetId))?.size ?? 0) > 0;
+                    if (!targetOnline) {
+                        ack?.({ ok: false, error: 'User is offline right now.' });
+                        return;
+                    }
                 }
+                if (!(0, callQueue_1.tryReserveReceiver)(receiverForInviteId)) {
+                    ack?.({ ok: false, error: 'Busy on another call.' });
+                    return;
+                }
+                (0, callQueue_1.removeReceiverFromQueue)(receiverForInviteId);
+                const timeoutHandle = setTimeout(() => {
+                    const invite = activeCallInvites.get(callId);
+                    if (!invite)
+                        return;
+                    activeCallInvites.delete(callId);
+                    (0, callQueue_1.releaseReceiverReservation)(invite.receiverId);
+                    void (0, callQueue_1.syncReceiverQueueState)(invite.receiverId);
+                    io.to(accountRoom(invite.inviterType, invite.inviterId)).emit('call:response', {
+                        callId,
+                        accepted: false,
+                        fromType: invite.targetType,
+                        fromId: invite.targetId,
+                    });
+                }, 30000);
                 activeCallInvites.set(callId, {
                     callId,
                     inviterId: myId,
                     inviterType: typ,
                     targetId,
                     targetType,
+                    receiverId: receiverForInviteId,
+                    timeoutHandle,
                 });
+                let fromName = '';
+                let fromImage = null;
+                if (typ === 'u') {
+                    const inviter = await User_1.default.findById(myId).select('name profileImage').lean();
+                    fromName = inviter?.name?.trim() || 'Caller';
+                    fromImage = inviter?.profileImage ?? null;
+                }
+                else {
+                    const inviter = await Receiver_1.default.findById(myId).select('name profileImage').lean();
+                    fromName = inviter?.name?.trim() || 'Receiver';
+                    fromImage = inviter?.profileImage ?? null;
+                }
                 io.to(accountRoom(targetType, targetId)).emit('call:incoming', {
                     callId,
                     fromType: typ,
                     fromId: myId,
+                    fromName,
+                    fromImage,
                 });
                 ack?.({ ok: true });
             })();
@@ -448,6 +589,10 @@ function attachChatSocket(httpServer) {
             if (!invite) {
                 ack?.({ ok: false, error: 'Unknown call invite' });
                 return;
+            }
+            if (invite.timeoutHandle) {
+                clearTimeout(invite.timeoutHandle);
+                invite.timeoutHandle = null;
             }
             const responderId = String(socket.data.accountId);
             const responderType = socket.data.typ;
@@ -468,8 +613,11 @@ function attachChatSocket(httpServer) {
                 fromType: responderType,
                 fromId: responderId,
             });
-            if (!accepted)
+            if (!accepted) {
                 activeCallInvites.delete(callId);
+                (0, callQueue_1.releaseReceiverReservation)(invite.receiverId);
+                void (0, callQueue_1.syncReceiverQueueState)(invite.receiverId);
+            }
             ack?.({ ok: true });
         });
         socket.on('call:end', (payload, ack) => {
@@ -482,6 +630,10 @@ function attachChatSocket(httpServer) {
             const endedById = String(socket.data.accountId);
             const invite = activeCallInvites.get(callId);
             if (invite) {
+                if (invite.timeoutHandle) {
+                    clearTimeout(invite.timeoutHandle);
+                    invite.timeoutHandle = null;
+                }
                 io.to(accountRoom(invite.inviterType, invite.inviterId)).emit('call:ended', {
                     callId,
                     fromType: endedByType,
@@ -493,6 +645,8 @@ function attachChatSocket(httpServer) {
                     fromId: endedById,
                 });
                 activeCallInvites.delete(callId);
+                (0, callQueue_1.releaseReceiverReservation)(invite.receiverId);
+                void (0, callQueue_1.syncReceiverQueueState)(invite.receiverId);
             }
             ack?.({ ok: true });
         });

@@ -10,6 +10,8 @@ type CallIncomingPayload = {
   callId: string;
   fromType: 'u' | 'r';
   fromId: string;
+  fromName?: string;
+  fromImage?: string | null;
 };
 
 type CallResponsePayload = {
@@ -26,17 +28,36 @@ type CallEndedPayload = {
 };
 
 type CallInviteAck = { ok?: boolean; error?: string };
+type CallQueueAck = { ok?: boolean; error?: string; active?: boolean };
 
 type PendingOutgoingCall = {
   callId: string;
   peerId: string;
   peerName: string;
+  peerImage?: string | null;
   bootstrap: VoiceBootstrapResponse;
 };
 
+type InviteOutcomeWaiter = {
+  resolve: (accepted: boolean) => void;
+  timeout: ReturnType<typeof setTimeout>;
+};
+
+export type IncomingCallRequest = {
+  callId: string;
+  fromType: 'u' | 'r';
+  fromId: string;
+  peerName: string;
+  peerImage?: string | null;
+};
+
 type CallSignalContextValue = {
-  registerPeer: (peerId: string, peerName: string) => void;
-  startCallInvite: (peerId: string, peerName: string) => Promise<void>;
+  registerPeer: (peerId: string, peerName: string, peerImage?: string | null) => void;
+  startCallInvite: (peerId: string, peerName: string, peerImage?: string | null) => Promise<void>;
+  setIncomingCallHandler: (handler: ((req: IncomingCallRequest) => void) | null) => void;
+  acceptIncomingCall: (req: IncomingCallRequest) => Promise<void>;
+  rejectIncomingCall: (req: IncomingCallRequest) => void;
+  setQueueMode: (active: boolean) => Promise<void>;
 };
 
 const CallSignalContext = createContext<CallSignalContextValue | null>(null);
@@ -48,30 +69,32 @@ function getFallbackPeerName(fromType: 'u' | 'r'): string {
 export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { isSignedIn, user } = useAuth();
   const socketRef = useRef<Socket | null>(null);
-  const peerNamesRef = useRef<Map<string, string>>(new Map());
+  const peerProfileRef = useRef<Map<string, { name: string; image?: string | null }>>(new Map());
   const pendingOutgoingByCallIdRef = useRef<Map<string, PendingOutgoingCall>>(new Map());
+  const pendingInviteOutcomeRef = useRef<Map<string, InviteOutcomeWaiter>>(new Map());
   const userRoleRef = useRef(user?.role ?? null);
+  const incomingCallHandlerRef = useRef<((req: IncomingCallRequest) => void) | null>(null);
 
   useEffect(() => {
     userRoleRef.current = user?.role ?? null;
   }, [user?.role]);
 
   const openVoiceCall = useCallback(
-    (bootstrap: VoiceBootstrapResponse, peerName: string) => {
+    (bootstrap: VoiceBootstrapResponse, peerName: string, peerImage?: string | null) => {
       const navigate = () => {
         const nav = navigationRef.current;
         if (!nav || !nav.isReady()) return false;
         if (userRoleRef.current === 'caller') {
           nav.navigate('CallerApp', {
             screen: 'VoiceCall',
-            params: { ...bootstrap, peerName },
+            params: { ...bootstrap, peerName, peerImage: peerImage ?? null },
           });
           return true;
         }
         if (userRoleRef.current === 'receiver') {
           nav.navigate('Home', {
             screen: 'VoiceCall',
-            params: { ...bootstrap, peerName },
+            params: { ...bootstrap, peerName, peerImage: peerImage ?? null },
           });
           return true;
         }
@@ -86,21 +109,21 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     []
   );
 
-  const registerPeer = useCallback((peerId: string, peerName: string) => {
+  const registerPeer = useCallback((peerId: string, peerName: string, peerImage?: string | null) => {
     const id = peerId.trim();
     const name = peerName.trim();
     if (!id || !name) return;
-    peerNamesRef.current.set(id, name);
+    peerProfileRef.current.set(id, { name, image: peerImage ?? null });
   }, []);
 
   const startCallInvite = useCallback(
-    async (peerId: string, peerName: string): Promise<void> => {
+    async (peerId: string, peerName: string, peerImage?: string | null): Promise<void> => {
       const id = peerId.trim();
       const name = peerName.trim();
       if (!id || !name) {
         throw new Error('Missing peer information for call invite.');
       }
-      registerPeer(id, name);
+      registerPeer(id, name, peerImage);
 
       const socket = socketRef.current;
       if (!socket?.connected) {
@@ -112,6 +135,7 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         callId: data.callId,
         peerId: id,
         peerName: name,
+        peerImage: peerImage ?? null,
         bootstrap: data,
       });
 
@@ -125,11 +149,55 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         pendingOutgoingByCallIdRef.current.delete(data.callId);
         throw new Error(ack.error || 'Could not ring this user.');
       }
-
-      Alert.alert('Calling…', `Ringing ${name}`);
+      const accepted = await new Promise<boolean>((resolve) => {
+        const timeout = setTimeout(() => {
+          pendingInviteOutcomeRef.current.delete(data.callId);
+          resolve(false);
+        }, 35_000);
+        pendingInviteOutcomeRef.current.set(data.callId, { resolve, timeout });
+      });
+      if (!accepted) {
+        throw new Error('Receiver is not available in queue right now.');
+      }
     },
     [registerPeer]
   );
+
+  const rejectIncomingCall = useCallback((req: IncomingCallRequest) => {
+    socketRef.current?.emit('call:response', { callId: req.callId, accepted: false });
+  }, []);
+
+  const acceptIncomingCall = useCallback(
+    async (req: IncomingCallRequest): Promise<void> => {
+      const socket = socketRef.current;
+      if (!socket?.connected) {
+        throw new Error('Call signaling is not connected.');
+      }
+      const { data } = await callApi.bootstrap(req.fromId);
+      socket.emit('call:response', { callId: req.callId, accepted: true });
+      openVoiceCall(data, req.peerName, req.peerImage ?? null);
+    },
+    [openVoiceCall]
+  );
+
+  const setIncomingCallHandler = useCallback((handler: ((req: IncomingCallRequest) => void) | null) => {
+    incomingCallHandlerRef.current = handler;
+  }, []);
+
+  const setQueueMode = useCallback(async (active: boolean): Promise<void> => {
+    const socket = socketRef.current;
+    if (!socket?.connected) {
+      throw new Error('Call signaling is not connected.');
+    }
+    const ack = await new Promise<CallQueueAck>((resolve) => {
+      socket.emit('call:queue:set', { active }, (res: CallQueueAck) => {
+        resolve(res ?? {});
+      });
+    });
+    if (ack.ok === false) {
+      throw new Error(ack.error || 'Unable to update queue mode.');
+    }
+  }, []);
 
   useEffect(() => {
     if (!isSignedIn || !user) {
@@ -161,55 +229,57 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       socket.on('call:incoming', (payload: CallIncomingPayload) => {
         if (payload.fromType === (userRoleRef.current === 'caller' ? 'u' : 'r')) return;
         const peerName =
-          peerNamesRef.current.get(payload.fromId) ?? getFallbackPeerName(payload.fromType);
+          (typeof payload.fromName === 'string' && payload.fromName.trim()) ||
+          peerProfileRef.current.get(payload.fromId)?.name ||
+          getFallbackPeerName(payload.fromType);
+        const peerImage =
+          payload.fromImage ?? peerProfileRef.current.get(payload.fromId)?.image ?? null;
+        const incoming: IncomingCallRequest = {
+          callId: payload.callId,
+          fromType: payload.fromType,
+          fromId: payload.fromId,
+          peerName,
+          peerImage,
+        };
 
-        Alert.alert(`${peerName} is calling`, 'Accept this voice call request?', [
-          {
-            text: 'Reject',
-            style: 'destructive',
-            onPress: () => {
-              socket.emit('call:response', { callId: payload.callId, accepted: false });
-            },
-          },
-          {
-            text: 'Accept',
-            onPress: () => {
-              void (async () => {
-                try {
-                  const { data } = await callApi.bootstrap(payload.fromId);
-                  socket.emit('call:response', { callId: payload.callId, accepted: true });
-                  openVoiceCall(data, peerName);
-                } catch (e: unknown) {
-                  const msg = e instanceof Error ? e.message : 'Unable to join call.';
-                  Alert.alert('Call failed', msg);
-                }
-              })();
-            },
-          },
-        ]);
+        if (incomingCallHandlerRef.current) {
+          incomingCallHandlerRef.current(incoming);
+          return;
+        }
+
+        // Ringing is allowed only when the app is on a queue screen and has a handler attached.
+        rejectIncomingCall(incoming);
       });
 
       socket.on('call:response', (payload: CallResponsePayload) => {
         if (payload.fromType === (userRoleRef.current === 'caller' ? 'u' : 'r')) return;
         const pending = pendingOutgoingByCallIdRef.current.get(payload.callId);
         pendingOutgoingByCallIdRef.current.delete(payload.callId);
+        const waiter = pendingInviteOutcomeRef.current.get(payload.callId);
+        if (waiter) {
+          clearTimeout(waiter.timeout);
+          pendingInviteOutcomeRef.current.delete(payload.callId);
+          waiter.resolve(payload.accepted);
+        }
 
         if (!payload.accepted) {
-          const name = pending?.peerName ?? peerNamesRef.current.get(payload.fromId) ?? 'User';
-          Alert.alert('Call declined', `${name} declined your call.`);
+          if (!waiter) {
+            Alert.alert('Call unavailable', 'Receiver is not available in queue right now.');
+          }
           return;
         }
 
         if (pending) {
-          openVoiceCall(pending.bootstrap, pending.peerName);
+          openVoiceCall(pending.bootstrap, pending.peerName, pending.peerImage);
           return;
         }
 
         void (async () => {
           try {
             const { data } = await callApi.bootstrap(payload.fromId);
-            const peerName = peerNamesRef.current.get(payload.fromId) ?? 'User';
-            openVoiceCall(data, peerName);
+            const fallback = peerProfileRef.current.get(payload.fromId);
+            const peerName = fallback?.name ?? 'User';
+            openVoiceCall(data, peerName, fallback?.image ?? null);
           } catch {
             Alert.alert('Call accepted', 'The user accepted, but joining failed. Please try again.');
           }
@@ -219,6 +289,12 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       socket.on('call:ended', (payload: CallEndedPayload) => {
         if (payload.fromType === (userRoleRef.current === 'caller' ? 'u' : 'r')) return;
         pendingOutgoingByCallIdRef.current.delete(payload.callId);
+        const waiter = pendingInviteOutcomeRef.current.get(payload.callId);
+        if (waiter) {
+          clearTimeout(waiter.timeout);
+          pendingInviteOutcomeRef.current.delete(payload.callId);
+          waiter.resolve(false);
+        }
       });
     })();
 
@@ -229,6 +305,11 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         s.removeAllListeners();
         s.disconnect();
       }
+      for (const waiter of pendingInviteOutcomeRef.current.values()) {
+        clearTimeout(waiter.timeout);
+        waiter.resolve(false);
+      }
+      pendingInviteOutcomeRef.current.clear();
       socketRef.current = null;
     };
   }, [isSignedIn, openVoiceCall, user]);
@@ -237,8 +318,19 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     () => ({
       registerPeer,
       startCallInvite,
+      setIncomingCallHandler,
+      acceptIncomingCall,
+      rejectIncomingCall,
+      setQueueMode,
     }),
-    [registerPeer, startCallInvite]
+    [
+      registerPeer,
+      startCallInvite,
+      setIncomingCallHandler,
+      acceptIncomingCall,
+      rejectIncomingCall,
+      setQueueMode,
+    ]
   );
 
   return <CallSignalContext.Provider value={value}>{children}</CallSignalContext.Provider>;

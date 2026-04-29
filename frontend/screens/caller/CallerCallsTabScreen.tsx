@@ -1,7 +1,7 @@
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useFocusEffect } from '@react-navigation/native';
 import React, { useCallback, useMemo, useState } from 'react';
-import { ActivityIndicator, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Image, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import CallerBottomTabs from '../../components/caller/CallerBottomTabs';
@@ -45,6 +45,14 @@ export default function CallerCallsTabScreen({ navigation }: Props): React.JSX.E
     []
   );
 
+  const onCallFromHistory = (row: CallerCallHistoryRow) => {
+    navigation.navigate('CallerQueue', {
+      peerId: row.receiverId,
+      peerName: row.receiverName,
+      peerImage: row.receiverImage ?? null,
+    });
+  };
+
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'left', 'right']}>
       <Text style={styles.title}>Calls</Text>
@@ -76,7 +84,13 @@ export default function CallerCallsTabScreen({ navigation }: Props): React.JSX.E
         ) : (
           rows.map((row) => (
             <View key={row.id} style={styles.row}>
-              <View style={styles.avatar} />
+              {row.receiverImage ? (
+                <Image source={{ uri: row.receiverImage }} style={styles.avatar} />
+              ) : (
+                <View style={[styles.avatar, styles.avatarPh]}>
+                  <Text style={styles.avatarTxt}>{row.receiverName.charAt(0) || '?'}</Text>
+                </View>
+              )}
               <View style={{ flex: 1 }}>
                 <Text style={styles.rowName}>{row.receiverName}</Text>
                 <Text style={styles.rowMeta}>
@@ -87,7 +101,28 @@ export default function CallerCallsTabScreen({ navigation }: Props): React.JSX.E
                 </Text>
                 <Text style={styles.rowAt}>{new Date(row.startedAt).toLocaleString()}</Text>
               </View>
-              <Text style={styles.msgIcon}>💬</Text>
+              <View style={styles.actions}>
+                <TouchableOpacity
+                  style={[styles.actionBtn, styles.callBtn]}
+                  onPress={() => onCallFromHistory(row)}
+                  activeOpacity={0.85}
+                >
+                  <Text style={styles.actionTxt}>📞</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.actionBtn}
+                  onPress={() =>
+                    navigation.navigate('CallerChat', {
+                      receiverId: row.receiverId,
+                      receiverName: row.receiverName,
+                      receiverImage: row.receiverImage,
+                    })
+                  }
+                  activeOpacity={0.85}
+                >
+                  <Text style={styles.actionTxt}>💬</Text>
+                </TouchableOpacity>
+              </View>
             </View>
           ))
         )}
@@ -135,8 +170,20 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   avatar: { width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(123,44,255,0.2)' },
+  avatarPh: { alignItems: 'center', justifyContent: 'center' },
+  avatarTxt: { fontSize: 14, fontWeight: '900', color: '#7b2cff' },
   rowName: { fontSize: 14, color: '#111', fontWeight: '800' },
   rowMeta: { marginTop: 2, fontSize: 11, color: '#666', fontWeight: '700' },
   rowAt: { marginTop: 2, fontSize: 10, color: '#999', fontWeight: '600' },
-  msgIcon: { fontSize: 16 },
+  actions: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  actionBtn: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: '#f3f4f6',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  callBtn: { backgroundColor: '#e7f9ee' },
+  actionTxt: { fontSize: 15 },
 });

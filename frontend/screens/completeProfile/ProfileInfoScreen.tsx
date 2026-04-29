@@ -1,7 +1,7 @@
-import * as ImagePicker from 'expo-image-picker';
 import React, { useState } from 'react';
 import {
   Alert,
+  Image,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -21,7 +21,7 @@ import { ToggleGroup } from '../../components/ui/ToggleGroup';
 import { UploadField } from '../../components/ui/UploadField';
 import { useCompleteProfile } from '../../context/CompleteProfileContext';
 import { INTEREST_OPTIONS, LANGUAGE_OPTIONS } from '../../constants/profileOptions';
-import { INDIAN_STATES } from '../../constants/userOnboarding';
+import { CALLER_FEMALE_AVATAR_PRESETS, INDIAN_STATES } from '../../constants/userOnboarding';
 import type { CompleteProfileStackParamList } from '../../navigation/CompleteProfileStackParamList';
 import type { Gender } from '../../types/user';
 import { validateProfileInfo } from '../../utils/completeProfileSteps';
@@ -37,23 +37,10 @@ const GENDERS: { value: Gender; label: string }[] = [
 export default function ProfileInfoScreen({ navigation }: Props): React.JSX.Element {
   const { state, update } = useCompleteProfile();
   const [stateModal, setStateModal] = useState(false);
+  const [avatarModal, setAvatarModal] = useState(false);
 
-  const pickProfileImage = async () => {
-    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!perm.granted) {
-      Alert.alert('Permission', 'Photo library access is required for your profile picture.');
-      return;
-    }
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      quality: 0.85,
-    });
-    if (result.canceled || !result.assets[0]) return;
-    const a = result.assets[0];
-    update({
-      profileImageUri: a.uri,
-      profileImageMime: a.mimeType ?? 'image/jpeg',
-    });
+  const pickProfileImage = () => {
+    setAvatarModal(true);
   };
 
   const onNext = () => {
@@ -81,12 +68,12 @@ export default function ProfileInfoScreen({ navigation }: Props): React.JSX.Elem
           <Text style={styles.lead}>All fields are required to continue</Text>
 
           <UploadField
-            label="Profile picture *"
+            label="Profile avatar *"
             uri={state.profileImageUri}
             mimeType={state.profileImageMime}
             onPick={pickProfileImage}
             onClear={() => update({ profileImageUri: null, profileImageMime: null })}
-            hint="Upload a clear photo of yourself. JPG or PNG"
+            hint="Select one female avatar from the list"
           />
 
           <Input
@@ -171,6 +158,34 @@ export default function ProfileInfoScreen({ navigation }: Props): React.JSX.Elem
                   <Text style={[styles.stateRowText, s === state.state && styles.stateRowTextActive]}>{s}</Text>
                 </TouchableOpacity>
               ))}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+      <Modal visible={avatarModal} transparent animationType="fade">
+        <View style={styles.modalOverlay}>
+          <Pressable style={styles.modalDismiss} onPress={() => setAvatarModal(false)} />
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>Select Avatar</Text>
+            <ScrollView style={styles.modalList} keyboardShouldPersistTaps="handled">
+              <View style={styles.avatarGrid}>
+                {CALLER_FEMALE_AVATAR_PRESETS.map((avatarUrl) => {
+                  const active = state.profileImageUri === avatarUrl;
+                  return (
+                    <TouchableOpacity
+                      key={avatarUrl}
+                      style={[styles.avatarCell, active && styles.avatarCellActive]}
+                      onPress={() => {
+                        update({ profileImageUri: avatarUrl, profileImageMime: null });
+                        setAvatarModal(false);
+                      }}
+                      activeOpacity={0.85}
+                    >
+                      <Image source={{ uri: avatarUrl }} style={styles.avatarThumb} />
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
             </ScrollView>
           </View>
         </View>
@@ -305,5 +320,28 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#666',
     lineHeight: 17,
+  },
+  avatarGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+    gap: 10,
+    paddingBottom: 8,
+  },
+  avatarCell: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    overflow: 'hidden',
+    borderWidth: 2,
+    borderColor: '#e5e5e5',
+  },
+  avatarCellActive: {
+    borderColor: PURPLE,
+    borderWidth: 3,
+  },
+  avatarThumb: {
+    width: '100%',
+    height: '100%',
   },
 });

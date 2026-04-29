@@ -14,8 +14,14 @@ const PURPLE = '#7b2cff';
 type Props = NativeStackScreenProps<UserOnboardingStackParamList, 'AudioVerification'>;
 
 export default function AudioVerificationScreen({ navigation }: Props): React.JSX.Element {
-  const { userAudio, setUserAudio } = useUserOnboarding();
+  const { gender, userAudio, setUserAudio } = useUserOnboarding();
   const { applyServerUser } = useAuth();
+
+  React.useEffect(() => {
+    if (gender && gender !== 'female') {
+      navigation.replace('ChooseAvatar');
+    }
+  }, [gender, navigation]);
 
   const goNext = () => {
     if (!userAudio) return;

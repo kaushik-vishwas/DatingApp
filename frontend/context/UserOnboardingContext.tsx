@@ -23,6 +23,9 @@ export const UserOnboardingProvider: React.FC<{ children: React.ReactNode }> = (
 
   const setGender = useCallback((g: Gender) => {
     setGenderState(g);
+    if (g !== 'female') {
+      setUserAudio(null);
+    }
   }, []);
 
   const reset = useCallback(() => {
