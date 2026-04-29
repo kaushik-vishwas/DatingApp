@@ -174,7 +174,7 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       if (!socket?.connected) {
         throw new Error('Call signaling is not connected.');
       }
-      const { data } = await callApi.bootstrap(req.fromId);
+      const { data } = await callApi.bootstrap(req.fromId, req.callId);
       socket.emit('call:response', { callId: req.callId, accepted: true });
       openVoiceCall(data, req.peerName, req.peerImage ?? null);
     },
@@ -301,7 +301,7 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
         void (async () => {
           try {
-            const { data } = await callApi.bootstrap(payload.fromId);
+            const { data } = await callApi.bootstrap(payload.fromId, payload.callId);
             const fallback = peerProfileRef.current.get(payload.fromId);
             const peerName = fallback?.name ?? 'User';
             openVoiceCall(data, peerName, fallback?.image ?? null);

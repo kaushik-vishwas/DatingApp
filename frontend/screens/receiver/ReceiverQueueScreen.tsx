@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
   ActivityIndicator,
@@ -46,6 +46,7 @@ export default function ReceiverQueueScreen({ navigation, route }: Props): React
   const [notifyError, setNotifyError] = useState<string | null>(null);
   const [notifyRows, setNotifyRows] = useState<ReceiverNotifyCandidateRow[]>([]);
   const [notifyingUserId, setNotifyingUserId] = useState<string | null>(null);
+  const queueStoppedRef = useRef(false);
   const peerId = route.params?.peerId ?? null;
   const peerName = route.params?.peerName ?? DEFAULT_CALLER_NAME;
   const [queuedPeerName, setQueuedPeerName] = useState(peerId ? peerName : DEFAULT_CALLER_NAME);
@@ -63,6 +64,7 @@ export default function ReceiverQueueScreen({ navigation, route }: Props): React
 
   const exitQueue = useCallback(
     (mode: 'back' | 'home') => {
+      queueStoppedRef.current = true;
       setIncoming(null);
       setQueuedPeerName(DEFAULT_CALLER_NAME);
       setQueuedPeerImage(null);
@@ -92,6 +94,7 @@ export default function ReceiverQueueScreen({ navigation, route }: Props): React
 
   useEffect(() => {
     let mounted = true;
+    queueStoppedRef.current = false;
     void setQueueMode(true).catch(() => {});
     setIncomingCallHandler((req) => {
       setIncoming(req);
@@ -111,6 +114,7 @@ export default function ReceiverQueueScreen({ navigation, route }: Props): React
     });
     return () => {
       mounted = false;
+      queueStoppedRef.current = true;
       setIncomingCallHandler(null);
       void setQueueMode(false).catch(() => {});
     };
@@ -121,19 +125,22 @@ export default function ReceiverQueueScreen({ navigation, route }: Props): React
     setCalling(true);
     void (async () => {
       const startedAt = Date.now();
-      while (Date.now() - startedAt < QUEUE_WAIT_MS) {
+      while (!queueStoppedRef.current && Date.now() - startedAt < QUEUE_WAIT_MS) {
         try {
           setQueuedPeerName(peerName);
           setQueuedPeerImage(route.params?.peerImage ?? null);
           await startCallInvite(peerId, peerName, route.params?.peerImage ?? null);
+          if (queueStoppedRef.current) return;
           return;
         } catch (e: unknown) {
+          if (queueStoppedRef.current) return;
           const msg = getErrorMessage(e).toLowerCase();
           const retriable =
             msg.includes('waiting queue') ||
             msg.includes('not available in queue right now') ||
             msg.includes('not available right now');
           if (!retriable) {
+            if (queueStoppedRef.current) return;
             Alert.alert('Call failed', getErrorMessage(e));
             navigation.goBack();
             return;
@@ -147,6 +154,7 @@ export default function ReceiverQueueScreen({ navigation, route }: Props): React
           await sleep(RETRY_DELAY_MS);
         }
       }
+      if (queueStoppedRef.current) return;
       Alert.alert('Call unavailable', 'No caller found. Try again after some time.');
       navigation.goBack();
     })()
@@ -159,6 +167,7 @@ export default function ReceiverQueueScreen({ navigation, route }: Props): React
     if (peerId) return;
     setCalling(true);
     const timeout = setTimeout(() => {
+      if (queueStoppedRef.current) return;
       Alert.alert('Call unavailable', 'No caller found. Try again after some time.');
       navigation.goBack();
     }, QUEUE_WAIT_MS);

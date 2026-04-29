@@ -338,9 +338,9 @@ export const chatApi = {
 };
 
 export const callApi = {
-  bootstrap: (peerId: string) =>
+  bootstrap: (peerId: string, callId?: string) =>
     api.get<VoiceBootstrapResponse>('/calls/bootstrap', {
-      params: { peerId },
+      params: { peerId, ...(callId ? { callId } : {}) },
     }),
   randomReceiver: () => api.get<RandomReceiverMatchResponse>('/calls/random-receiver'),
   sessionStart: (callId: string, peerId: string) =>

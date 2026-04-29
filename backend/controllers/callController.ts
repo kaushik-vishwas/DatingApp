@@ -61,12 +61,17 @@ export const getVoiceBootstrap = async (req: Request, res: Response): Promise<vo
   const accountKind = req.accountKind;
   const meId = accountKind === 'user' ? String(req.user?._id ?? '') : String(req.receiver?._id ?? '');
   const peerId = typeof req.query.peerId === 'string' ? req.query.peerId.trim() : '';
+  const requestedCallId = typeof req.query.callId === 'string' ? req.query.callId.trim() : '';
   if (!accountKind || !meId) {
     res.status(401).json({ message: 'Not authorized' });
     return;
   }
   if (!mongoose.Types.ObjectId.isValid(peerId)) {
     res.status(400).json({ message: 'Valid peerId is required' });
+    return;
+  }
+  if (requestedCallId && requestedCallId.length > 200) {
+    res.status(400).json({ message: 'Invalid callId' });
     return;
   }
 
@@ -108,7 +113,7 @@ export const getVoiceBootstrap = async (req: Request, res: Response): Promise<vo
   const meStreamUserId = toStreamUserId(accountKind, meId);
   const peerStreamUserId = toStreamUserId(accountKind === 'user' ? 'receiver' : 'user', peerId);
   const { token, expiresAt } = createStreamUserToken(meStreamUserId);
-  const callId = buildVoiceCallId(meStreamUserId, peerStreamUserId);
+  const callId = requestedCallId || buildVoiceCallId(meStreamUserId, peerStreamUserId);
 
   res.json({
     apiKey: getStreamApiKey(),

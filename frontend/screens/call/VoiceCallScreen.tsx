@@ -90,13 +90,26 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
 
   const showRatingPrompt = () => {
     Alert.alert('Rate this call', 'How was the call quality?', [
-      { text: 'Skip', onPress: () => navigation.goBack() },
-      { text: '1', onPress: async () => { try { await callApi.sessionRate(callIdRef.current, 1); } catch { /* ignore */ } navigation.goBack(); } },
-      { text: '2', onPress: async () => { try { await callApi.sessionRate(callIdRef.current, 2); } catch { /* ignore */ } navigation.goBack(); } },
-      { text: '3', onPress: async () => { try { await callApi.sessionRate(callIdRef.current, 3); } catch { /* ignore */ } navigation.goBack(); } },
-      { text: '4', onPress: async () => { try { await callApi.sessionRate(callIdRef.current, 4); } catch { /* ignore */ } navigation.goBack(); } },
-      { text: '5', onPress: async () => { try { await callApi.sessionRate(callIdRef.current, 5); } catch { /* ignore */ } navigation.goBack(); } },
+      { text: 'Skip', onPress: stopQueueAndExit },
+      { text: '1', onPress: async () => { try { await callApi.sessionRate(callIdRef.current, 1); } catch { /* ignore */ } stopQueueAndExit(); } },
+      { text: '2', onPress: async () => { try { await callApi.sessionRate(callIdRef.current, 2); } catch { /* ignore */ } stopQueueAndExit(); } },
+      { text: '3', onPress: async () => { try { await callApi.sessionRate(callIdRef.current, 3); } catch { /* ignore */ } stopQueueAndExit(); } },
+      { text: '4', onPress: async () => { try { await callApi.sessionRate(callIdRef.current, 4); } catch { /* ignore */ } stopQueueAndExit(); } },
+      { text: '5', onPress: async () => { try { await callApi.sessionRate(callIdRef.current, 5); } catch { /* ignore */ } stopQueueAndExit(); } },
     ]);
+  };
+
+  const stopQueueAndExit = () => {
+    try {
+      signalSocketRef.current?.emit('call:queue:set', { active: false });
+    } catch {
+      // ignore signaling failures
+    }
+    if (user?.role === 'caller') {
+      (navigation as any).navigate('CallerDiscover');
+      return;
+    }
+    (navigation as any).navigate('ReceiverHome');
   };
 
   const leaveMedia = async () => {
@@ -230,7 +243,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
             return;
           }
           Alert.alert('Call ended', `${route.params.peerName} ended the call.`, [
-            { text: 'OK', onPress: () => navigation.goBack() },
+            { text: 'OK', onPress: stopQueueAndExit },
           ]);
         })();
       });
@@ -269,7 +282,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
       showRatingPrompt();
       return;
     }
-    navigation.goBack();
+    stopQueueAndExit();
   };
 
   const toggleMute = async () => {

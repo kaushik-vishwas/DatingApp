@@ -39,5 +39,6 @@ export function getStreamApiKey(): string {
 
 export function buildVoiceCallId(a: string, b: string): string {
   const [left, right] = [a, b].sort();
-  return `voice_${left}_${right}`;
+  const nonce = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  return `voice_${left}_${right}_${nonce}`;
 }
