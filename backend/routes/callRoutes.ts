@@ -6,6 +6,7 @@ import {
   getVoiceBootstrap,
   rateVoiceSession,
   startVoiceSession,
+  syncVoiceSession,
 } from '../controllers/callController';
 
 const router = Router();
@@ -13,6 +14,7 @@ const router = Router();
 router.get('/bootstrap', protect, getVoiceBootstrap);
 router.get('/random-receiver', protect, getRandomQueuedReceiver);
 router.post('/session/start', protect, startVoiceSession);
+router.post('/session/sync', protect, syncVoiceSession);
 router.post('/session/end', protect, endVoiceSession);
 router.post('/session/rate', protect, rateVoiceSession);
 

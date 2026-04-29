@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useIsFocused } from '@react-navigation/native';
 import {
   Alert,
   ActivityIndicator,
@@ -33,6 +34,7 @@ function sleep(ms: number): Promise<void> {
 export default function ReceiverQueueScreen({ navigation, route }: Props): React.JSX.Element {
   const { user } = useAuth();
   const { setIncomingCallHandler, acceptIncomingCall, setQueueMode, startCallInvite } = useCallSignals();
+  const isFocused = useIsFocused();
   const [incoming, setIncoming] = useState<IncomingCallRequest | null>(null);
   const [joining, setJoining] = useState(false);
   const [calling, setCalling] = useState(false);
@@ -93,6 +95,7 @@ export default function ReceiverQueueScreen({ navigation, route }: Props): React
   }, []);
 
   useEffect(() => {
+    if (!isFocused) return;
     let mounted = true;
     queueStoppedRef.current = false;
     void setQueueMode(true).catch(() => {});
@@ -118,10 +121,10 @@ export default function ReceiverQueueScreen({ navigation, route }: Props): React
       setIncomingCallHandler(null);
       void setQueueMode(false).catch(() => {});
     };
-  }, [acceptIncomingCall, setIncomingCallHandler, setQueueMode]);
+  }, [acceptIncomingCall, isFocused, setIncomingCallHandler, setQueueMode]);
 
   useEffect(() => {
-    if (!peerId) return;
+    if (!isFocused || !peerId) return;
     setCalling(true);
     void (async () => {
       const startedAt = Date.now();
@@ -161,10 +164,10 @@ export default function ReceiverQueueScreen({ navigation, route }: Props): React
       .finally(() => {
         setCalling(false);
       });
-  }, [navigation, peerId, peerName, route.params?.peerImage, startCallInvite]);
+  }, [isFocused, navigation, peerId, peerName, route.params?.peerImage, startCallInvite]);
 
   useEffect(() => {
-    if (peerId) return;
+    if (!isFocused || peerId) return;
     setCalling(true);
     const timeout = setTimeout(() => {
       if (queueStoppedRef.current) return;
@@ -178,7 +181,7 @@ export default function ReceiverQueueScreen({ navigation, route }: Props): React
       clearTimeout(timeout);
       clearInterval(tick);
     };
-  }, [navigation, peerId]);
+  }, [isFocused, navigation, peerId]);
 
   const goOffline = () => {
     setMenuOpen(false);

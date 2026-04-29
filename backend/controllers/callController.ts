@@ -24,6 +24,91 @@ function sleep(ms: number): Promise<void> {
   });
 }
 
+type SettledCallSnapshot = {
+  durationSec: number;
+  settledAmountInr: number;
+  status: 'ongoing' | 'completed';
+  receiverId: string;
+};
+
+async function settleCallSession(
+  callId: string,
+  complete: boolean
+): Promise<SettledCallSnapshot> {
+  const dbSession = await mongoose.startSession();
+  let snapshot: SettledCallSnapshot | null = null;
+  try {
+    await dbSession.withTransaction(async () => {
+      const call = await CallSession.findOne({ callId }).session(dbSession);
+      if (!call) throw new Error('Call session not found');
+
+      if (call.status === 'completed') {
+        snapshot = {
+          durationSec: call.durationSec,
+          settledAmountInr: roundInr(call.settledAmountInr || 0),
+          status: 'completed',
+          receiverId: String(call.receiverId),
+        };
+        return;
+      }
+
+      const now = new Date();
+      const durationSec = Math.max(0, Math.round((now.getTime() - call.startedAt.getTime()) / 1000));
+      const grossAmountInr = roundInr((durationSec / 60) * Math.max(0, call.ratePerMinute));
+      const alreadySettled = roundInr(call.settledAmountInr || 0);
+      const dueAmount = roundInr(Math.max(0, grossAmountInr - alreadySettled));
+
+      let settledNow = 0;
+      if (dueAmount > 0) {
+        const [callerDoc, receiverDoc] = await Promise.all([
+          User.findById(call.callerId).select('walletBalance').session(dbSession),
+          Receiver.findById(call.receiverId).select('walletBalance').session(dbSession),
+        ]);
+        if (!callerDoc || !receiverDoc) {
+          throw new Error('Call participant account not found');
+        }
+
+        const callerBalance =
+          typeof callerDoc.walletBalance === 'number' && Number.isFinite(callerDoc.walletBalance)
+            ? Math.max(0, callerDoc.walletBalance)
+            : 0;
+        settledNow = roundInr(Math.min(dueAmount, callerBalance));
+        if (settledNow > 0) {
+          callerDoc.walletBalance = roundInr(callerBalance - settledNow);
+          receiverDoc.walletBalance = roundInr(
+            (typeof receiverDoc.walletBalance === 'number' && Number.isFinite(receiverDoc.walletBalance)
+              ? receiverDoc.walletBalance
+              : 0) + settledNow
+          );
+          await Promise.all([callerDoc.save({ session: dbSession }), receiverDoc.save({ session: dbSession })]);
+        }
+      }
+
+      const nextSettled = roundInr(alreadySettled + settledNow);
+      call.durationSec = durationSec;
+      call.settledAmountInr = nextSettled;
+      if (complete) {
+        call.status = 'completed';
+        call.endedAt = now;
+      }
+      await call.save({ session: dbSession });
+
+      snapshot = {
+        durationSec,
+        settledAmountInr: nextSettled,
+        status: complete ? 'completed' : 'ongoing',
+        receiverId: String(call.receiverId),
+      };
+    });
+  } finally {
+    await dbSession.endSession();
+  }
+  if (!snapshot) {
+    throw new Error('Call settlement failed');
+  }
+  return snapshot;
+}
+
 export const getRandomQueuedReceiver = async (req: Request, res: Response): Promise<void> => {
   try {
     if (req.accountKind !== 'user' || !req.user?._id) {
@@ -220,73 +305,64 @@ export const endVoiceSession = async (
       return;
     }
 
-    const dbSession = await mongoose.startSession();
-    let finalDurationSec = current.durationSec;
-    let settledAmountInr = roundInr(current.settledAmountInr || 0);
-    try {
-      await dbSession.withTransaction(async () => {
-        const session = await CallSession.findOne({ callId }).session(dbSession);
-        if (!session) throw new Error('Call session not found');
-
-        if (session.status === 'completed') {
-          finalDurationSec = session.durationSec;
-          settledAmountInr = roundInr(session.settledAmountInr || 0);
-          return;
-        }
-
-        const endedAt = new Date();
-        const durationSec = Math.max(0, Math.round((endedAt.getTime() - session.startedAt.getTime()) / 1000));
-        const grossAmountInr = roundInr((durationSec / 60) * Math.max(0, session.ratePerMinute));
-
-        const [callerDoc, receiverDoc] = await Promise.all([
-          User.findById(session.callerId).select('walletBalance').session(dbSession),
-          Receiver.findById(session.receiverId).select('walletBalance').session(dbSession),
-        ]);
-        if (!callerDoc || !receiverDoc) {
-          throw new Error('Call participant account not found');
-        }
-
-        const callerBalance =
-          typeof callerDoc.walletBalance === 'number' && Number.isFinite(callerDoc.walletBalance)
-            ? Math.max(0, callerDoc.walletBalance)
-            : 0;
-        const transferAmount = roundInr(Math.min(grossAmountInr, callerBalance));
-
-        if (transferAmount > 0) {
-          callerDoc.walletBalance = roundInr(callerBalance - transferAmount);
-          receiverDoc.walletBalance = roundInr(
-            (typeof receiverDoc.walletBalance === 'number' && Number.isFinite(receiverDoc.walletBalance)
-              ? receiverDoc.walletBalance
-              : 0) + transferAmount
-          );
-          await Promise.all([callerDoc.save({ session: dbSession }), receiverDoc.save({ session: dbSession })]);
-        }
-
-        session.endedAt = endedAt;
-        session.durationSec = durationSec;
-        session.status = 'completed';
-        session.settledAmountInr = transferAmount;
-        await session.save({ session: dbSession });
-
-        finalDurationSec = durationSec;
-        settledAmountInr = transferAmount;
-      });
-    } finally {
-      await dbSession.endSession();
-    }
+    const settled = await settleCallSession(callId, true);
 
     res.status(200).json({
       ok: true,
-      durationSec: finalDurationSec,
-      estimatedEarning: settledAmountInr,
-      settledAmountInr,
-      canRate: finalDurationSec >= 30,
+      durationSec: settled.durationSec,
+      estimatedEarning: settled.settledAmountInr,
+      settledAmountInr: settled.settledAmountInr,
+      canRate: settled.durationSec >= 30,
     });
-    releaseReceiverReservation(String(current.receiverId));
-    await syncReceiverQueueState(String(current.receiverId));
+    releaseReceiverReservation(settled.receiverId);
+    await syncReceiverQueueState(settled.receiverId);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error('endVoiceSession error:', msg);
+    res.status(500).json({ message: msg || 'Server error' });
+  }
+};
+
+export const syncVoiceSession = async (
+  req: Request<{}, {}, { callId?: string }>,
+  res: Response
+): Promise<void> => {
+  try {
+    const accountKind = req.accountKind;
+    const meId = accountKind === 'user' ? String(req.user?._id ?? '') : String(req.receiver?._id ?? '');
+    const callId = String(req.body.callId ?? '').trim();
+    if (!accountKind || !meId) {
+      res.status(401).json({ message: 'Not authorized' });
+      return;
+    }
+    if (!callId) {
+      res.status(400).json({ message: 'callId is required' });
+      return;
+    }
+
+    const current = await CallSession.findOne({ callId });
+    if (!current) {
+      res.status(404).json({ message: 'Call session not found' });
+      return;
+    }
+    const isParticipant =
+      String(current.callerId) === meId || String(current.receiverId) === meId;
+    if (!isParticipant) {
+      res.status(403).json({ message: 'Not allowed for this call' });
+      return;
+    }
+
+    const settled = await settleCallSession(callId, false);
+    res.status(200).json({
+      ok: true,
+      durationSec: settled.durationSec,
+      settledAmountInr: settled.settledAmountInr,
+      canRate: settled.durationSec >= 30,
+      status: settled.status,
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error('syncVoiceSession error:', msg);
     res.status(500).json({ message: msg || 'Server error' });
   }
 };

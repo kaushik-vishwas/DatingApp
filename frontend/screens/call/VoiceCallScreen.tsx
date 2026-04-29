@@ -54,6 +54,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
   const [elapsedSec, setElapsedSec] = useState(0);
   const [muted, setMuted] = useState(false);
   const [finalCanRate, setFinalCanRate] = useState(false);
+  const [liveSettledAmountInr, setLiveSettledAmountInr] = useState(0);
   const activeCallRef = useRef<{
     leave: () => Promise<void>;
   } | null>(null);
@@ -63,11 +64,14 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
   const signalSocketRef = useRef<Socket | null>(null);
   const endingRef = useRef(false);
   const endedSessionRef = useRef(false);
+  const endedSessionResultRef = useRef<{ canRate: boolean } | null>(null);
+  const endSessionPromiseRef = useRef<Promise<{ canRate: boolean } | null> | null>(null);
   const callIdRef = useRef(route.params.callId);
   const liveRatePerMinute = Number.isFinite(route.params.receiverRatePerMinute)
     ? Math.max(0, route.params.receiverRatePerMinute)
     : 0;
   const liveEarning = Math.round(((elapsedSec / 60) * liveRatePerMinute) * 100) / 100;
+  const shownLiveEarning = Math.max(liveEarning, liveSettledAmountInr);
   const showLiveEarning = user?.role === 'receiver';
 
   const callLabel = useMemo(
@@ -76,16 +80,29 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
   );
 
   const ensureSessionEnded = async (): Promise<{ canRate: boolean } | null> => {
-    if (endedSessionRef.current) return null;
-    endedSessionRef.current = true;
-    try {
-      const { data } = await callApi.sessionEnd(callIdRef.current);
-      setFinalCanRate(Boolean(data.canRate));
-      return { canRate: Boolean(data.canRate) };
-    } catch {
-      // Ignore best-effort session end failures.
-      return null;
-    }
+    if (endedSessionRef.current) return endedSessionResultRef.current;
+    if (endSessionPromiseRef.current) return endSessionPromiseRef.current;
+    endSessionPromiseRef.current = (async () => {
+      try {
+        const { data } = await callApi.sessionEnd(callIdRef.current);
+        const result = { canRate: Boolean(data.canRate) };
+        endedSessionRef.current = true;
+        endedSessionResultRef.current = result;
+        setFinalCanRate(result.canRate);
+        setLiveSettledAmountInr(
+          typeof data.settledAmountInr === 'number' && Number.isFinite(data.settledAmountInr)
+            ? Math.max(0, data.settledAmountInr)
+            : 0
+        );
+        return result;
+      } catch {
+        // Allow future retries if a transient failure happens now.
+        return null;
+      } finally {
+        endSessionPromiseRef.current = null;
+      }
+    })();
+    return endSessionPromiseRef.current;
   };
 
   const showRatingPrompt = () => {
@@ -266,6 +283,32 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
     return () => clearInterval(timer);
   }, [ready]);
 
+  useEffect(() => {
+    if (!ready || endingRef.current) return;
+    const poll = setInterval(() => {
+      if (endingRef.current) return;
+      void (async () => {
+        try {
+          const { data } = await callApi.sessionSync(callIdRef.current);
+          if (!data?.ok) return;
+          if (typeof data.durationSec === 'number' && Number.isFinite(data.durationSec) && data.durationSec >= 0) {
+            setElapsedSec((prev) => (data.durationSec > prev ? data.durationSec : prev));
+          }
+          if (
+            typeof data.settledAmountInr === 'number' &&
+            Number.isFinite(data.settledAmountInr) &&
+            data.settledAmountInr >= 0
+          ) {
+            setLiveSettledAmountInr((prev) => (data.settledAmountInr > prev ? data.settledAmountInr : prev));
+          }
+        } catch {
+          // Best-effort live settlement sync.
+        }
+      })();
+    }, 5000);
+    return () => clearInterval(poll);
+  }, [ready]);
+
   const hangup = async () => {
     if (endingRef.current) return;
     endingRef.current = true;
@@ -355,7 +398,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
             {showLiveEarning ? (
               <View style={styles.earningCard}>
                 <Text style={styles.earningTitle}>Live Earning</Text>
-                <Text style={styles.earningValue}>₹{liveEarning}</Text>
+                <Text style={styles.earningValue}>₹{shownLiveEarning}</Text>
                 <Text style={styles.earningSub}>Updating every second</Text>
               </View>
             ) : null}

@@ -1,4 +1,5 @@
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
+import { useIsFocused } from '@react-navigation/native';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -31,6 +32,7 @@ function sleep(ms: number): Promise<void> {
 export default function CallerQueueScreen({ navigation, route }: Props): React.JSX.Element {
   const { user } = useAuth();
   const { setIncomingCallHandler, acceptIncomingCall, setQueueMode, startCallInvite } = useCallSignals();
+  const isFocused = useIsFocused();
   const [incoming, setIncoming] = useState<IncomingCallRequest | null>(null);
   const [joining, setJoining] = useState(false);
   const [calling, setCalling] = useState(false);
@@ -89,6 +91,7 @@ export default function CallerQueueScreen({ navigation, route }: Props): React.J
   }, []);
 
   useEffect(() => {
+    if (!isFocused) return;
     let mounted = true;
     queueStoppedRef.current = false;
     void setQueueMode(true).catch(() => {});
@@ -116,10 +119,10 @@ export default function CallerQueueScreen({ navigation, route }: Props): React.J
       setIncomingCallHandler(null);
       void setQueueMode(false).catch(() => {});
     };
-  }, [acceptIncomingCall, setIncomingCallHandler, setQueueMode]);
+  }, [acceptIncomingCall, isFocused, setIncomingCallHandler, setQueueMode]);
 
   useEffect(() => {
-    if (!peerId || invitedRef.current) return;
+    if (!isFocused || !peerId || invitedRef.current) return;
     invitedRef.current = true;
     setCalling(true);
     void (async () => {
@@ -158,10 +161,10 @@ export default function CallerQueueScreen({ navigation, route }: Props): React.J
       .finally(() => {
         setCalling(false);
       });
-  }, [navigation, peerId, peerImage, peerName, startCallInvite]);
+  }, [isFocused, navigation, peerId, peerImage, peerName, startCallInvite]);
 
   useEffect(() => {
-    if (peerId || invitedRef.current) return;
+    if (!isFocused || peerId || invitedRef.current) return;
     invitedRef.current = true;
     setCalling(true);
     void (async () => {
@@ -205,7 +208,7 @@ export default function CallerQueueScreen({ navigation, route }: Props): React.J
       .finally(() => {
         setCalling(false);
       });
-  }, [navigation, peerId, startCallInvite]);
+  }, [isFocused, navigation, peerId, startCallInvite]);
 
   const goOffline = useCallback(() => {
     setMenuOpen(false);

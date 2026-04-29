@@ -117,6 +117,21 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     peerProfileRef.current.set(id, { name, image: peerImage ?? null });
   }, []);
 
+  const clearPendingInvites = useCallback((emitEnd: boolean) => {
+    const socket = socketRef.current;
+    if (emitEnd && socket?.connected) {
+      for (const callId of pendingOutgoingByCallIdRef.current.keys()) {
+        socket.emit('call:end', { callId });
+      }
+    }
+    pendingOutgoingByCallIdRef.current.clear();
+    for (const waiter of pendingInviteOutcomeRef.current.values()) {
+      clearTimeout(waiter.timeout);
+      waiter.resolve(false);
+    }
+    pendingInviteOutcomeRef.current.clear();
+  }, []);
+
   const startCallInvite = useCallback(
     async (peerId: string, peerName: string, peerImage?: string | null): Promise<void> => {
       const id = peerId.trim();
@@ -158,6 +173,10 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         pendingInviteOutcomeRef.current.set(data.callId, { resolve, timeout });
       });
       if (!accepted) {
+        pendingOutgoingByCallIdRef.current.delete(data.callId);
+        if (socket.connected) {
+          socket.emit('call:end', { callId: data.callId });
+        }
         throw new Error('Receiver is not available right now.');
       }
     },
@@ -187,6 +206,9 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
   const setQueueMode = useCallback(async (active: boolean): Promise<void> => {
     queueModeRef.current = active;
+    if (!active) {
+      clearPendingInvites(true);
+    }
     const socket = socketRef.current;
     if (!socket?.connected) {
       return;
@@ -199,7 +221,7 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     if (ack.ok === false) {
       throw new Error(ack.error || 'Unable to update queue mode.');
     }
-  }, []);
+  }, [clearPendingInvites]);
 
   useEffect(() => {
     if (!isSignedIn || !user) {
@@ -294,6 +316,10 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
           return;
         }
 
+        if (!queueModeRef.current) {
+          return;
+        }
+
         if (pending) {
           openVoiceCall(pending.bootstrap, pending.peerName, pending.peerImage);
           return;
@@ -330,14 +356,10 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         s.removeAllListeners();
         s.disconnect();
       }
-      for (const waiter of pendingInviteOutcomeRef.current.values()) {
-        clearTimeout(waiter.timeout);
-        waiter.resolve(false);
-      }
-      pendingInviteOutcomeRef.current.clear();
+      clearPendingInvites(false);
       socketRef.current = null;
     };
-  }, [isSignedIn, openVoiceCall, user]);
+  }, [clearPendingInvites, isSignedIn, openVoiceCall, user]);
 
   const value = useMemo<CallSignalContextValue>(
     () => ({
