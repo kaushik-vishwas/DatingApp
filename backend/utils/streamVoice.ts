@@ -1,4 +1,5 @@
 import jwt from 'jsonwebtoken';
+import crypto from 'crypto';
 
 type AccountKind = 'user' | 'receiver';
 
@@ -39,6 +40,8 @@ export function getStreamApiKey(): string {
 
 export function buildVoiceCallId(a: string, b: string): string {
   const [left, right] = [a, b].sort();
-  const nonce = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-  return `voice_${left}_${right}_${nonce}`;
+  // Stream call IDs must stay <= 64 chars; keep compact while preserving uniqueness.
+  const pairHash = crypto.createHash('sha1').update(`${left}|${right}`).digest('hex').slice(0, 12);
+  const nonce = crypto.randomBytes(8).toString('hex');
+  return `v_${pairHash}_${nonce}`;
 }
