@@ -78,6 +78,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
     () => `Voice call with ${route.params.peerName}`,
     [route.params.peerName]
   );
+  const callerCanRateByDuration = user?.role === 'caller' && elapsedSec >= 30;
 
   const ensureSessionEnded = async (): Promise<{ canRate: boolean } | null> => {
     if (endedSessionRef.current) return endedSessionResultRef.current;
@@ -255,7 +256,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
         void (async () => {
           const ended = await ensureSessionEnded();
           await leaveMedia();
-          if (user?.role === 'caller' && (ended?.canRate || finalCanRate)) {
+          if (user?.role === 'caller' && (ended?.canRate || finalCanRate || callerCanRateByDuration)) {
             showRatingPrompt();
             return;
           }
@@ -275,7 +276,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
       }
       signalSocketRef.current = null;
     };
-  }, [navigation, route.params.peerName]);
+  }, [callerCanRateByDuration, finalCanRate, navigation, route.params.peerName, user?.role]);
 
   useEffect(() => {
     if (!ready) return;
@@ -321,7 +322,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
     const ended = await ensureSessionEnded();
     await leaveMedia();
 
-    if (user?.role === 'caller' && (ended?.canRate || finalCanRate)) {
+    if (user?.role === 'caller' && (ended?.canRate || finalCanRate || callerCanRateByDuration)) {
       showRatingPrompt();
       return;
     }
