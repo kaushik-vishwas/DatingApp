@@ -8,6 +8,7 @@ const mongoose_1 = __importDefault(require("mongoose"));
 const discoverReceiverFilter_1 = require("../services/discoverReceiverFilter");
 const Receiver_1 = __importDefault(require("../models/Receiver"));
 const ChatBlock_1 = __importDefault(require("../models/ChatBlock"));
+const ReceiverRating_1 = __importDefault(require("../models/ReceiverRating"));
 const accountAccess_1 = require("../utils/accountAccess");
 function iso(d) {
     return d.toISOString();
@@ -27,8 +28,9 @@ function parseIntQuery(val) {
     const n = parseInt(s, 10);
     return Number.isFinite(n) ? n : NaN;
 }
-function toCard(r) {
+function toCard(r, ratingByReceiverId) {
     const o = r.toObject();
+    const rating = ratingByReceiverId.get(String(r._id));
     return {
         _id: String(r._id),
         name: o.name,
@@ -42,6 +44,8 @@ function toCard(r) {
         gender: o.gender === 'male' || o.gender === 'female' || o.gender === 'other' ? o.gender : null,
         isAvailable: Boolean(o.isAvailable),
         isOnline: Boolean(o.isOnline),
+        ratingAvg: rating ? Math.round(rating.avg * 10) / 10 : 0,
+        ratingCount: rating?.count ?? 0,
     };
 }
 /**
@@ -78,8 +82,30 @@ const listReceiversForCaller = async (req, res) => {
             .sort({ updatedAt: -1 })
             .limit(limit)
             .exec();
+        const receiverIds = receivers.map((r) => new mongoose_1.default.Types.ObjectId(String(r._id)));
+        const ratingRows = receiverIds.length === 0
+            ? []
+            : await ReceiverRating_1.default.aggregate([
+                { $match: { receiverId: { $in: receiverIds } } },
+                {
+                    $group: {
+                        _id: '$receiverId',
+                        avg: { $avg: '$rating' },
+                        count: { $sum: 1 },
+                    },
+                },
+                {
+                    $project: {
+                        _id: 0,
+                        receiverId: '$_id',
+                        avg: 1,
+                        count: 1,
+                    },
+                },
+            ]);
+        const ratingByReceiverId = new Map(ratingRows.map((row) => [String(row.receiverId), { avg: row.avg, count: row.count }]));
         res.status(200).json({
-            receivers: receivers.map((r) => toCard(r)),
+            receivers: receivers.map((r) => toCard(r, ratingByReceiverId)),
         });
     }
     catch (err) {

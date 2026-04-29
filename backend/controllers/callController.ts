@@ -4,6 +4,7 @@ import ChatBlock from '../models/ChatBlock';
 import User from '../models/User';
 import Receiver from '../models/Receiver';
 import CallSession from '../models/CallSession';
+import ReceiverRating from '../models/ReceiverRating';
 import {
   buildVoiceCallId,
   createStreamUserToken,
@@ -12,7 +13,6 @@ import {
 } from '../utils/streamVoice';
 import { pickRandomQueuedReceiverForCaller } from '../services/callQueue';
 import { isReceiverBusy, releaseReceiverReservation, syncReceiverQueueState } from '../services/callQueue';
-import { isReceiverInQueueScreen } from '../services/callQueue';
 
 function roundInr(n: number): number {
   return Math.round(n * 100) / 100;
@@ -90,16 +90,14 @@ export const getVoiceBootstrap = async (req: Request, res: Response): Promise<vo
     receiverId: new mongoose.Types.ObjectId(receiverId),
     status: 'ongoing',
   });
-  if (ongoing || isReceiverBusy(receiverId)) {
+  // Receiver gets reserved as soon as invite is created; that reservation must not block
+  // the receiver-side bootstrap after accepting the same invite.
+  if (ongoing || (accountKind === 'user' && isReceiverBusy(receiverId))) {
     res.status(409).json({ message: 'Receiver is busy on another call' });
     return;
   }
-  if (!isReceiverInQueueScreen(receiverId)) {
-    res.status(409).json({ message: 'Receiver is not in waiting queue right now.' });
-    return;
-  }
-  if (!receiverDoc.isAvailable || !receiverDoc.isOnline) {
-    res.status(409).json({ message: 'Receiver is currently offline' });
+  if (!receiverDoc.isAvailable) {
+    res.status(409).json({ message: 'Receiver is currently unavailable' });
     return;
   }
   if (await ChatBlock.exists({ userId: callerUserId, receiverId })) {
@@ -277,6 +275,7 @@ export const endVoiceSession = async (
       durationSec: finalDurationSec,
       estimatedEarning: settledAmountInr,
       settledAmountInr,
+      canRate: finalDurationSec >= 30,
     });
     releaseReceiverReservation(String(current.receiverId));
     await syncReceiverQueueState(String(current.receiverId));
@@ -312,9 +311,35 @@ export const rateVoiceSession = async (
       res.status(404).json({ message: 'Call session not found' });
       return;
     }
+    if (session.status !== 'completed') {
+      res.status(409).json({ message: 'You can rate only after a completed call.' });
+      return;
+    }
+    if (session.durationSec < 30) {
+      res.status(409).json({ message: 'Call too short for rating. Minimum 30 seconds required.' });
+      return;
+    }
+    if (typeof session.callerRating === 'number') {
+      res.status(409).json({ message: 'This call has already been rated.' });
+      return;
+    }
 
-    session.callerRating = Math.round(rating);
+    const rounded = Math.round(rating);
+    session.callerRating = rounded;
     await session.save();
+    await ReceiverRating.findOneAndUpdate(
+      {
+        receiverId: session.receiverId,
+        raterId: session.callerId,
+      },
+      {
+        $set: {
+          rating: rounded,
+          lastCallId: session.callId,
+        },
+      },
+      { upsert: true, new: true }
+    );
     res.status(200).json({ ok: true });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);

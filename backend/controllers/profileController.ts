@@ -11,6 +11,7 @@ import UserReport from '../models/UserReport';
 import WalletTopup from '../models/WalletTopup';
 import ReceiverAvailabilityNotification from '../models/ReceiverAvailabilityNotification';
 import ReceiverPriorityNotification from '../models/ReceiverPriorityNotification';
+import ReceiverRating from '../models/ReceiverRating';
 import { CALLER_INTEREST_ALLOWLIST, CALLER_LANGUAGE_ALLOWLIST } from '../constants/callerProfileAllowlist';
 import { toApiReceiver, toApiUser } from './authController';
 import { blockReceiverUntilApproved } from '../utils/accountAccess';
@@ -1046,6 +1047,18 @@ export const getReceiverCallInsights = async (
         avgRating: row.ratingCount > 0 ? roundInr(row.ratingSum / row.ratingCount) : null,
       }));
 
+    const [ratingSummary] = await ReceiverRating.aggregate<{ avg: number; count: number }>([
+      { $match: { receiverId: rid } },
+      {
+        $group: {
+          _id: null,
+          avg: { $avg: '$rating' },
+          count: { $sum: 1 },
+        },
+      },
+      { $project: { _id: 0, avg: 1, count: 1 } },
+    ]);
+
     res.status(200).json({
       leaderboard: {
         totalDurationSec,
@@ -1057,6 +1070,9 @@ export const getReceiverCallInsights = async (
       },
       recentCalls,
       callerHistory,
+      receiverRatingAvg:
+        ratingSummary && Number.isFinite(ratingSummary.avg) ? roundInr(ratingSummary.avg) : 0,
+      receiverRatingCount: ratingSummary?.count ?? 0,
     });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);

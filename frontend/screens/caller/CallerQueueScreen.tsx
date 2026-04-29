@@ -57,6 +57,28 @@ export default function CallerQueueScreen({ navigation, route }: Props): React.J
   const shownPeerImage = incoming?.peerImage ?? queuedPeerImage;
   const peerInitial = useMemo(() => (shownPeerName.charAt(0) || '?').toUpperCase(), [shownPeerName]);
 
+  const exitQueue = useCallback(
+    (mode: 'back' | 'home') => {
+      setIncoming(null);
+      setQueuedPeerName(DEFAULT_RECEIVER_NAME);
+      setQueuedPeerImage(null);
+      void (async () => {
+        try {
+          await setQueueMode(false);
+        } catch {
+          // ignore
+        } finally {
+          if (mode === 'back') {
+            navigation.goBack();
+          } else {
+            navigation.navigate('CallerDiscover');
+          }
+        }
+      })();
+    },
+    [navigation, setQueueMode]
+  );
+
   useEffect(() => {
     const id = setInterval(() => {
       setHintIdx((prev) => (prev + 1) % WAITING_HINTS.length);
@@ -77,6 +99,9 @@ export default function CallerQueueScreen({ navigation, route }: Props): React.J
         } catch (e: unknown) {
           if (mounted) {
             setJoining(false);
+            setIncoming(null);
+            setQueuedPeerName(DEFAULT_RECEIVER_NAME);
+            setQueuedPeerImage(null);
             Alert.alert('Call failed', getErrorMessage(e));
           }
         }
@@ -102,7 +127,9 @@ export default function CallerQueueScreen({ navigation, route }: Props): React.J
         } catch (e: unknown) {
           const msg = getErrorMessage(e).toLowerCase();
           const retriable =
-            msg.includes('waiting queue') || msg.includes('not available in queue right now');
+            msg.includes('waiting queue') ||
+            msg.includes('not available in queue right now') ||
+            msg.includes('not available right now');
           if (!retriable) {
             Alert.alert('Call failed', getErrorMessage(e));
             navigation.goBack();
@@ -143,6 +170,7 @@ export default function CallerQueueScreen({ navigation, route }: Props): React.J
           const retriable =
             msg.includes('waiting queue') ||
             msg.includes('not available in queue right now') ||
+            msg.includes('not available right now') ||
             msg.includes('no queued receivers');
           if (!retriable) {
             Alert.alert('Call failed', getErrorMessage(e));
@@ -168,22 +196,14 @@ export default function CallerQueueScreen({ navigation, route }: Props): React.J
 
   const goOffline = useCallback(() => {
     setMenuOpen(false);
-    void (async () => {
-      try {
-        await setQueueMode(false);
-      } catch {
-        // ignore
-      } finally {
-        navigation.navigate('CallerDiscover');
-      }
-    })();
-  }, [navigation, setQueueMode]);
+    exitQueue('home');
+  }, [exitQueue]);
 
   return (
     <SafeAreaView style={styles.safe}>
       <View style={styles.container}>
         <View style={styles.header}>
-          <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}>
+          <TouchableOpacity style={styles.backBtn} onPress={() => exitQueue('back')}>
             <Text style={styles.backTxt}>‹</Text>
           </TouchableOpacity>
           <Text style={styles.headerTitle}>Call Queue</Text>

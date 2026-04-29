@@ -67,8 +67,6 @@ export function attachChatSocket(httpServer: HTTPServer): Server {
   });
 
   const queueKey = (typ: AccountType, accountId: string): string => `${typ}:${String(accountId).trim()}`;
-  const isInQueue = (typ: AccountType, accountId: string): boolean =>
-    waitingCallQueueAccounts.has(queueKey(typ, accountId));
   const cancelPendingInvitesFor = (typ: AccountType, accountId: string): void => {
     for (const [callId, invite] of activeCallInvites) {
       const isTarget = invite.targetType === typ && invite.targetId === accountId;
@@ -81,11 +79,15 @@ export function attachChatSocket(httpServer: HTTPServer): Server {
       activeCallInvites.delete(callId);
       releaseReceiverReservation(invite.receiverId);
       void syncReceiverQueueState(invite.receiverId);
-      io.to(accountRoom(invite.inviterType, invite.inviterId)).emit('call:response', {
+      io.to(accountRoom(invite.inviterType, invite.inviterId)).emit('call:ended', {
         callId,
-        accepted: false,
-        fromType: invite.targetType,
-        fromId: invite.targetId,
+        fromType: typ,
+        fromId: accountId,
+      });
+      io.to(accountRoom(invite.targetType, invite.targetId)).emit('call:ended', {
+        callId,
+        fromType: typ,
+        fromId: accountId,
       });
     }
   };
@@ -518,15 +520,6 @@ export function attachChatSocket(httpServer: HTTPServer): Server {
         }
 
         const targetType: AccountType = typ === 'u' ? 'r' : 'u';
-        if (!isInQueue(typ, myId)) {
-          ack?.({ ok: false, error: 'Open queue screen first to start calls.' });
-          return;
-        }
-        if (!isInQueue(targetType, targetId)) {
-          ack?.({ ok: false, error: 'User is not in waiting queue right now.' });
-          return;
-        }
-
         let userId: string;
         let receiverId: string;
         if (typ === 'u') {
@@ -549,10 +542,14 @@ export function attachChatSocket(httpServer: HTTPServer): Server {
             !recv ||
             recv.accountStatus !== 'approved' ||
             recv.suspended ||
-            !recv.isAvailable ||
-            !recv.isOnline
+            !recv.isAvailable
           ) {
             ack?.({ ok: false, error: 'Cannot call this receiver right now.' });
+            return;
+          }
+          const targetOnline = (io.sockets.adapter.rooms.get(accountRoom('r', targetId))?.size ?? 0) > 0;
+          if (!targetOnline) {
+            ack?.({ ok: false, error: 'Receiver is offline right now.' });
             return;
           }
           receiverForInviteId = targetId;

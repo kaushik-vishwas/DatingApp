@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Alert,
   ActivityIndicator,
@@ -61,6 +61,28 @@ export default function ReceiverQueueScreen({ navigation, route }: Props): React
   const shownPeerImage = incoming?.peerImage ?? queuedPeerImage;
   const peerInitial = useMemo(() => (shownPeerName.charAt(0) || '?').toUpperCase(), [shownPeerName]);
 
+  const exitQueue = useCallback(
+    (mode: 'back' | 'home') => {
+      setIncoming(null);
+      setQueuedPeerName(DEFAULT_CALLER_NAME);
+      setQueuedPeerImage(null);
+      void (async () => {
+        try {
+          await setQueueMode(false);
+        } catch {
+          // ignore
+        } finally {
+          if (mode === 'back') {
+            navigation.goBack();
+          } else {
+            navigation.navigate('ReceiverHome');
+          }
+        }
+      })();
+    },
+    [navigation, setQueueMode]
+  );
+
   useEffect(() => {
     const id = setInterval(() => {
       setHintIdx((prev) => (prev + 1) % WAITING_HINTS.length);
@@ -78,7 +100,12 @@ export default function ReceiverQueueScreen({ navigation, route }: Props): React
         try {
           await acceptIncomingCall(req);
         } catch (e: unknown) {
-          if (mounted) setJoining(false);
+          if (mounted) {
+            setJoining(false);
+            setIncoming(null);
+            setQueuedPeerName(DEFAULT_CALLER_NAME);
+            setQueuedPeerImage(null);
+          }
         }
       })();
     });
@@ -103,7 +130,9 @@ export default function ReceiverQueueScreen({ navigation, route }: Props): React
         } catch (e: unknown) {
           const msg = getErrorMessage(e).toLowerCase();
           const retriable =
-            msg.includes('waiting queue') || msg.includes('not available in queue right now');
+            msg.includes('waiting queue') ||
+            msg.includes('not available in queue right now') ||
+            msg.includes('not available right now');
           if (!retriable) {
             Alert.alert('Call failed', getErrorMessage(e));
             navigation.goBack();
@@ -144,15 +173,7 @@ export default function ReceiverQueueScreen({ navigation, route }: Props): React
 
   const goOffline = () => {
     setMenuOpen(false);
-    void (async () => {
-      try {
-        await setQueueMode(false);
-      } catch {
-        // ignore
-      } finally {
-        navigation.navigate('ReceiverHome');
-      }
-    })();
+    exitQueue('home');
   };
 
   const openNotifyUsers = () => {
@@ -195,7 +216,7 @@ export default function ReceiverQueueScreen({ navigation, route }: Props): React
     <SafeAreaView style={styles.safe}>
       <View style={styles.container}>
         <View style={styles.header}>
-          <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}>
+          <TouchableOpacity style={styles.backBtn} onPress={() => exitQueue('back')}>
             <Text style={styles.backText}>‹</Text>
           </TouchableOpacity>
           <Text style={styles.headerTitle}>Go Online</Text>

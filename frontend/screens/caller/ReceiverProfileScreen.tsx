@@ -14,8 +14,9 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useAuth } from '../../context/AuthContext';
+import { useCallSignals } from '../../context/CallSignalContext';
 import type { CallerStackParamList } from '../../navigation/CallerStackParamList';
-import { receiverCardMetrics } from '../../utils/discoverDisplay';
+import { getErrorMessage } from '../../services/api';
 import { getReceiverPresenceInfo } from '../../utils/receiverStatus';
 
 const PURPLE = '#7b2cff';
@@ -38,10 +39,11 @@ function formatLastSeen(iso: string): string {
 export default function ReceiverProfileScreen({ navigation, route }: Props): React.JSX.Element {
   const { receiver } = route.params;
   const { user } = useAuth();
+  const { startCallInvite } = useCallSignals();
   const [rechargeModal, setRechargeModal] = useState<'none' | 'low' | 'empty'>('none');
+  const [calling, setCalling] = useState(false);
 
   const wallet = typeof user?.walletBalance === 'number' && Number.isFinite(user.walletBalance) ? user.walletBalance : 0;
-  const m = receiverCardMetrics(receiver._id);
   const rate = receiver.audioCallRate;
   const presence = getReceiverPresenceInfo(receiver);
 
@@ -51,6 +53,7 @@ export default function ReceiverProfileScreen({ navigation, route }: Props): Rea
   };
 
   const onVoiceCall = () => {
+    if (calling) return;
     if (!presence.canCall) {
       const reason =
         presence.status === 'offline'
@@ -71,11 +74,16 @@ export default function ReceiverProfileScreen({ navigation, route }: Props): Rea
       setRechargeModal('low');
       return;
     }
-    navigation.navigate('CallerQueue', {
-      peerId: receiver._id,
-      peerName: receiver.name,
-      peerImage: receiver.profileImage ?? null,
-    });
+    setCalling(true);
+    void (async () => {
+      try {
+        await startCallInvite(receiver._id, receiver.name, receiver.profileImage ?? null);
+      } catch (e: unknown) {
+        Alert.alert('Call failed', getErrorMessage(e));
+      } finally {
+        setCalling(false);
+      }
+    })();
   };
 
   return (
@@ -123,7 +131,7 @@ export default function ReceiverProfileScreen({ navigation, route }: Props): Rea
           <View style={styles.ratingRow}>
             <Text style={styles.star}>★</Text>
             <Text style={styles.ratingTxt}>
-              {m.rating} ({m.reviews})
+              {receiver.ratingAvg} ({receiver.ratingCount})
             </Text>
           </View>
           <Text style={styles.lastSeen}>
@@ -156,11 +164,11 @@ export default function ReceiverProfileScreen({ navigation, route }: Props): Rea
         <TouchableOpacity
           style={[styles.outlineBtn, !presence.canCall && styles.outlineBtnDisabled]}
           onPress={onVoiceCall}
-          activeOpacity={presence.canCall ? 0.9 : 1}
-          disabled={!presence.canCall}
+          activeOpacity={presence.canCall && !calling ? 0.9 : 1}
+          disabled={!presence.canCall || calling}
         >
           <Text style={styles.outlineIcon}>📞</Text>
-          <Text style={styles.outlineLbl}>Voice Call</Text>
+          <Text style={styles.outlineLbl}>{calling ? 'Calling…' : 'Voice Call'}</Text>
         </TouchableOpacity>
         <TouchableOpacity
           style={[styles.outlineBtn, styles.outlineBtnLast]}

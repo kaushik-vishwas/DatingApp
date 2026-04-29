@@ -64,7 +64,7 @@ type ChatTypingEvent = {
 
 export default function ChatConversationScreen({ navigation, route }: Props): React.JSX.Element {
   const { user, refreshUser } = useAuth();
-  const { registerPeer } = useCallSignals();
+  const { registerPeer, startCallInvite } = useCallSignals();
   const { markPeerReadLocal, setActivePeer } = useChatInbox();
   const callerNav = useNavigation<NativeStackNavigationProp<CallerStackParamList>>();
   const receiverNav = useNavigation<NativeStackNavigationProp<ReceiverStackParamList>>();
@@ -373,11 +373,20 @@ export default function ChatConversationScreen({ navigation, route }: Props): Re
     }
     setCalling(true);
     if (isCaller) {
-      callerNav.navigate('CallerQueue', { peerId, peerName, peerImage });
+      void (async () => {
+        try {
+          await startCallInvite(peerId, peerName, peerImage);
+        } catch (e: unknown) {
+          const msg = e instanceof Error ? e.message : 'Could not start call right now.';
+          Alert.alert('Call failed', msg);
+        } finally {
+          setCalling(false);
+        }
+      })();
     } else {
       receiverNav.navigate('ReceiverQueue', { peerId, peerName, peerImage });
+      setCalling(false);
     }
-    setCalling(false);
   };
 
   const renderItem = ({ item }: { item: ChatMessageDto }) => {

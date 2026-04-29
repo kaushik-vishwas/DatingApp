@@ -74,6 +74,7 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   const pendingInviteOutcomeRef = useRef<Map<string, InviteOutcomeWaiter>>(new Map());
   const userRoleRef = useRef(user?.role ?? null);
   const incomingCallHandlerRef = useRef<((req: IncomingCallRequest) => void) | null>(null);
+  const queueModeRef = useRef<boolean>(false);
 
   useEffect(() => {
     userRoleRef.current = user?.role ?? null;
@@ -157,7 +158,7 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         pendingInviteOutcomeRef.current.set(data.callId, { resolve, timeout });
       });
       if (!accepted) {
-        throw new Error('Receiver is not available in queue right now.');
+        throw new Error('Receiver is not available right now.');
       }
     },
     [registerPeer]
@@ -185,9 +186,10 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   }, []);
 
   const setQueueMode = useCallback(async (active: boolean): Promise<void> => {
+    queueModeRef.current = active;
     const socket = socketRef.current;
     if (!socket?.connected) {
-      throw new Error('Call signaling is not connected.');
+      return;
     }
     const ack = await new Promise<CallQueueAck>((resolve) => {
       socket.emit('call:queue:set', { active }, (res: CallQueueAck) => {
@@ -225,6 +227,9 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         reconnectionDelay: 1000,
       });
       socketRef.current = socket;
+      socket.on('connect', () => {
+        socket.emit('call:queue:set', { active: queueModeRef.current }, () => {});
+      });
 
       socket.on('call:incoming', (payload: CallIncomingPayload) => {
         if (payload.fromType === (userRoleRef.current === 'caller' ? 'u' : 'r')) return;
@@ -247,8 +252,28 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
           return;
         }
 
-        // Ringing is allowed only when the app is on a queue screen and has a handler attached.
-        rejectIncomingCall(incoming);
+        Alert.alert(`${peerName} is calling`, 'Accept this voice call request?', [
+          {
+            text: 'Reject',
+            style: 'destructive',
+            onPress: () => {
+              rejectIncomingCall(incoming);
+            },
+          },
+          {
+            text: 'Accept',
+            onPress: () => {
+              void (async () => {
+                try {
+                  await acceptIncomingCall(incoming);
+                } catch (e: unknown) {
+                  const msg = e instanceof Error ? e.message : 'Unable to join call.';
+                  Alert.alert('Call failed', msg);
+                }
+              })();
+            },
+          },
+        ]);
       });
 
       socket.on('call:response', (payload: CallResponsePayload) => {
@@ -264,7 +289,7 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
         if (!payload.accepted) {
           if (!waiter) {
-            Alert.alert('Call unavailable', 'Receiver is not available in queue right now.');
+            Alert.alert('Call unavailable', 'Receiver is not available right now.');
           }
           return;
         }

@@ -1,10 +1,11 @@
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useFocusEffect } from '@react-navigation/native';
 import React, { useCallback, useMemo, useState } from 'react';
-import { ActivityIndicator, Image, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, Image, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import CallerBottomTabs from '../../components/caller/CallerBottomTabs';
+import { useCallSignals } from '../../context/CallSignalContext';
 import type { CallerStackParamList } from '../../navigation/CallerStackParamList';
 import { getErrorMessage, profileApi } from '../../services/api';
 import type { CallerCallHistoryRow } from '../../types/api';
@@ -12,10 +13,12 @@ import type { CallerCallHistoryRow } from '../../types/api';
 type Props = NativeStackScreenProps<CallerStackParamList, 'CallerCalls'>;
 
 export default function CallerCallsTabScreen({ navigation }: Props): React.JSX.Element {
+  const { startCallInvite } = useCallSignals();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [range, setRange] = useState<'all' | 'week' | 'month'>('all');
   const [rows, setRows] = useState<CallerCallHistoryRow[]>([]);
+  const [callingReceiverId, setCallingReceiverId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -46,11 +49,17 @@ export default function CallerCallsTabScreen({ navigation }: Props): React.JSX.E
   );
 
   const onCallFromHistory = (row: CallerCallHistoryRow) => {
-    navigation.navigate('CallerQueue', {
-      peerId: row.receiverId,
-      peerName: row.receiverName,
-      peerImage: row.receiverImage ?? null,
-    });
+    if (callingReceiverId) return;
+    setCallingReceiverId(row.receiverId);
+    void (async () => {
+      try {
+        await startCallInvite(row.receiverId, row.receiverName, row.receiverImage ?? null);
+      } catch (e: unknown) {
+        Alert.alert('Call failed', getErrorMessage(e));
+      } finally {
+        setCallingReceiverId(null);
+      }
+    })();
   };
 
   return (
@@ -105,9 +114,12 @@ export default function CallerCallsTabScreen({ navigation }: Props): React.JSX.E
                 <TouchableOpacity
                   style={[styles.actionBtn, styles.callBtn]}
                   onPress={() => onCallFromHistory(row)}
+                  disabled={callingReceiverId === row.receiverId}
                   activeOpacity={0.85}
                 >
-                  <Text style={styles.actionTxt}>📞</Text>
+                  <Text style={styles.actionTxt}>
+                    {callingReceiverId === row.receiverId ? '…' : '📞'}
+                  </Text>
                 </TouchableOpacity>
                 <TouchableOpacity
                   style={styles.actionBtn}

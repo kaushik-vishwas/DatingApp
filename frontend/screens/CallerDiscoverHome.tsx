@@ -23,9 +23,9 @@ import DiscoverFiltersModal, {
 } from '../components/caller/DiscoverFiltersModal';
 import { CALLER_LANGUAGE_OPTIONS } from '../constants/userOnboarding';
 import { useAuth } from '../context/AuthContext';
+import { useCallSignals } from '../context/CallSignalContext';
 import { discoverApi, getErrorMessage } from '../services/api';
 import type { DiscoverReceiverSummary } from '../types/api';
-import { receiverCardMetrics } from '../utils/discoverDisplay';
 import { getReceiverPresenceInfo } from '../utils/receiverStatus';
 
 const PURPLE = '#7b2cff';
@@ -34,6 +34,7 @@ const GREEN = '#22c55e';
 export default function CallerDiscoverHome(): React.JSX.Element {
   const navigation = useNavigation<CallerTabBarNavigation>();
   const { user, refreshUser } = useAuth();
+  const { startCallInvite } = useCallSignals();
   const [language, setLanguage] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [debounced, setDebounced] = useState('');
@@ -64,7 +65,7 @@ export default function CallerDiscoverHome(): React.JSX.Element {
     });
     let rows = data.receivers;
     if (appliedFilters.rating4Plus) {
-      rows = rows.filter((r) => receiverCardMetrics(r._id).rating >= 4);
+      rows = rows.filter((r) => (r.ratingAvg ?? 0) >= 4);
     }
     if (appliedFilters.onlineOnly) {
       rows = rows.filter((r) => r.isOnline);
@@ -120,11 +121,13 @@ export default function CallerDiscoverHome(): React.JSX.Element {
       navigation.navigate('Wallet');
       return;
     }
-    navigation.navigate('CallerQueue', {
-      peerId: item._id,
-      peerName: item.name,
-      peerImage: item.profileImage ?? null,
-    });
+    void (async () => {
+      try {
+        await startCallInvite(item._id, item.name, item.profileImage ?? null);
+      } catch (e: unknown) {
+        Alert.alert('Call failed', getErrorMessage(e));
+      }
+    })();
   };
 
   const onCallRandom = () => {
@@ -149,7 +152,6 @@ export default function CallerDiscoverHome(): React.JSX.Element {
   };
 
   const renderItem = ({ item }: { item: DiscoverReceiverSummary }) => {
-    const m = receiverCardMetrics(item._id);
     const presence = getReceiverPresenceInfo(item);
     const statusColor = presence.color;
     const statusLabel = presence.label;
@@ -181,7 +183,7 @@ export default function CallerDiscoverHome(): React.JSX.Element {
             <View style={styles.ratingRow}>
               <Text style={styles.star}>★</Text>
               <Text style={styles.ratingText}>
-                {m.rating} ({m.reviews})
+                {item.ratingAvg} ({item.ratingCount})
               </Text>
             </View>
           </View>

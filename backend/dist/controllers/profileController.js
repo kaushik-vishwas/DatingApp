@@ -16,6 +16,7 @@ const UserReport_1 = __importDefault(require("../models/UserReport"));
 const WalletTopup_1 = __importDefault(require("../models/WalletTopup"));
 const ReceiverAvailabilityNotification_1 = __importDefault(require("../models/ReceiverAvailabilityNotification"));
 const ReceiverPriorityNotification_1 = __importDefault(require("../models/ReceiverPriorityNotification"));
+const ReceiverRating_1 = __importDefault(require("../models/ReceiverRating"));
 const callerProfileAllowlist_1 = require("../constants/callerProfileAllowlist");
 const authController_1 = require("./authController");
 const accountAccess_1 = require("../utils/accountAccess");
@@ -837,6 +838,17 @@ const getReceiverCallInsights = async (req, res) => {
             durationMonthSec: row.durationMonthSec,
             avgRating: row.ratingCount > 0 ? roundInr(row.ratingSum / row.ratingCount) : null,
         }));
+        const [ratingSummary] = await ReceiverRating_1.default.aggregate([
+            { $match: { receiverId: rid } },
+            {
+                $group: {
+                    _id: null,
+                    avg: { $avg: '$rating' },
+                    count: { $sum: 1 },
+                },
+            },
+            { $project: { _id: 0, avg: 1, count: 1 } },
+        ]);
         res.status(200).json({
             leaderboard: {
                 totalDurationSec,
@@ -848,6 +860,8 @@ const getReceiverCallInsights = async (req, res) => {
             },
             recentCalls,
             callerHistory,
+            receiverRatingAvg: ratingSummary && Number.isFinite(ratingSummary.avg) ? roundInr(ratingSummary.avg) : 0,
+            receiverRatingCount: ratingSummary?.count ?? 0,
         });
     }
     catch (err) {

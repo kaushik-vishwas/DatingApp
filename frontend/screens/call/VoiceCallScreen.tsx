@@ -53,6 +53,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
   const [error, setError] = useState<string | null>(null);
   const [elapsedSec, setElapsedSec] = useState(0);
   const [muted, setMuted] = useState(false);
+  const [finalCanRate, setFinalCanRate] = useState(false);
   const activeCallRef = useRef<{
     leave: () => Promise<void>;
   } | null>(null);
@@ -74,14 +75,28 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
     [route.params.peerName]
   );
 
-  const ensureSessionEnded = async () => {
-    if (endedSessionRef.current) return;
+  const ensureSessionEnded = async (): Promise<{ canRate: boolean } | null> => {
+    if (endedSessionRef.current) return null;
     endedSessionRef.current = true;
     try {
-      await callApi.sessionEnd(callIdRef.current);
+      const { data } = await callApi.sessionEnd(callIdRef.current);
+      setFinalCanRate(Boolean(data.canRate));
+      return { canRate: Boolean(data.canRate) };
     } catch {
       // Ignore best-effort session end failures.
+      return null;
     }
+  };
+
+  const showRatingPrompt = () => {
+    Alert.alert('Rate this call', 'How was the call quality?', [
+      { text: 'Skip', onPress: () => navigation.goBack() },
+      { text: '1', onPress: async () => { try { await callApi.sessionRate(callIdRef.current, 1); } catch { /* ignore */ } navigation.goBack(); } },
+      { text: '2', onPress: async () => { try { await callApi.sessionRate(callIdRef.current, 2); } catch { /* ignore */ } navigation.goBack(); } },
+      { text: '3', onPress: async () => { try { await callApi.sessionRate(callIdRef.current, 3); } catch { /* ignore */ } navigation.goBack(); } },
+      { text: '4', onPress: async () => { try { await callApi.sessionRate(callIdRef.current, 4); } catch { /* ignore */ } navigation.goBack(); } },
+      { text: '5', onPress: async () => { try { await callApi.sessionRate(callIdRef.current, 5); } catch { /* ignore */ } navigation.goBack(); } },
+    ]);
   };
 
   const leaveMedia = async () => {
@@ -208,8 +223,12 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
         if (endingRef.current) return;
         endingRef.current = true;
         void (async () => {
-          await ensureSessionEnded();
+          const ended = await ensureSessionEnded();
           await leaveMedia();
+          if (user?.role === 'caller' && (ended?.canRate || finalCanRate)) {
+            showRatingPrompt();
+            return;
+          }
           Alert.alert('Call ended', `${route.params.peerName} ended the call.`, [
             { text: 'OK', onPress: () => navigation.goBack() },
           ]);
@@ -243,16 +262,11 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
     } catch {
       // ignore signaling failures
     }
-    await ensureSessionEnded();
+    const ended = await ensureSessionEnded();
     await leaveMedia();
 
-    if (user?.role === 'caller') {
-      Alert.alert('Rate this call', 'How was the call quality?', [
-        { text: 'Skip', onPress: () => navigation.goBack() },
-        { text: '3', onPress: async () => { try { await callApi.sessionRate(callIdRef.current, 3); } catch { /* ignore */ } navigation.goBack(); } },
-        { text: '4', onPress: async () => { try { await callApi.sessionRate(callIdRef.current, 4); } catch { /* ignore */ } navigation.goBack(); } },
-        { text: '5', onPress: async () => { try { await callApi.sessionRate(callIdRef.current, 5); } catch { /* ignore */ } navigation.goBack(); } },
-      ]);
+    if (user?.role === 'caller' && (ended?.canRate || finalCanRate)) {
+      showRatingPrompt();
       return;
     }
     navigation.goBack();

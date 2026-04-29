@@ -66,6 +66,8 @@ export interface DiscoverReceiverSummary {
   gender: Gender | null;
   isAvailable: boolean;
   isOnline: boolean;
+  ratingAvg: number;
+  ratingCount: number;
 }
 
 export interface WalletCreditResponse {
@@ -168,6 +170,8 @@ export interface ReceiverCallInsightsResponse {
   };
   recentCalls: ReceiverCallInsightRow[];
   callerHistory: ReceiverCallerHistoryRow[];
+  receiverRatingAvg: number;
+  receiverRatingCount: number;
 }
 
 export type ReceiverNotifyCandidateRow = {

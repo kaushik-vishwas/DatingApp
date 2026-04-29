@@ -1,16 +1,37 @@
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { Image, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '../../context/AuthContext';
 import type { ReceiverStackParamList } from '../../navigation/ReceiverStackParamList';
+import { getErrorMessage, profileApi } from '../../services/api';
 
 type Nav = NativeStackNavigationProp<ReceiverStackParamList, 'ReceiverProfilePreview'>;
 
 export default function ReceiverProfilePreviewScreen(): React.JSX.Element {
   const navigation = useNavigation<Nav>();
   const { user } = useAuth();
+  const [ratingAvg, setRatingAvg] = useState(0);
+  const [ratingCount, setRatingCount] = useState(0);
+
+  useEffect(() => {
+    let mounted = true;
+    void (async () => {
+      try {
+        const { data } = await profileApi.receiverCallInsights('all');
+        if (!mounted) return;
+        setRatingAvg(data.receiverRatingAvg ?? 0);
+        setRatingCount(data.receiverRatingCount ?? 0);
+      } catch (e) {
+        if (!mounted) return;
+        console.warn('receiver profile preview rating load failed:', getErrorMessage(e));
+      }
+    })();
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'left', 'right']}>
@@ -35,7 +56,7 @@ export default function ReceiverProfilePreviewScreen(): React.JSX.Element {
             .filter(Boolean)
             .join(' | ') || (user?.state ?? 'State not set')}
         </Text>
-        <Text style={styles.rating}>4.5 ★</Text>
+        <Text style={styles.rating}>{ratingAvg} ★ ({ratingCount})</Text>
         <Text style={styles.lastSeen}>Last Seen: {new Date().toLocaleTimeString()}</Text>
       </View>
 

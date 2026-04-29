@@ -346,7 +346,10 @@ export const callApi = {
   sessionStart: (callId: string, peerId: string) =>
     api.post<{ ok: boolean }>('/calls/session/start', { callId, peerId }),
   sessionEnd: (callId: string) =>
-    api.post<{ ok: boolean; durationSec: number; estimatedEarning: number }>('/calls/session/end', { callId }),
+    api.post<{ ok: boolean; durationSec: number; estimatedEarning: number; settledAmountInr: number; canRate: boolean }>(
+      '/calls/session/end',
+      { callId }
+    ),
   sessionRate: (callId: string, rating: number) =>
     api.post<{ ok: boolean }>('/calls/session/rate', { callId, rating }),
 };

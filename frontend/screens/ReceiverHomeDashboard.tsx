@@ -20,7 +20,6 @@ import { useChatInbox } from '../context/ChatInboxContext';
 import type { ReceiverStackParamList } from '../navigation/ReceiverStackParamList';
 import { getErrorMessage, profileApi } from '../services/api';
 import type { ReceiverCallInsightsResponse, ReceiverWalletSummaryResponse } from '../types/api';
-import { receiverCardMetrics } from '../utils/discoverDisplay';
 
 function formatInr(n: number): string {
   const v = Math.round(n * 100) / 100;
@@ -43,7 +42,6 @@ export default function ReceiverHomeDashboard(): React.JSX.Element {
   /** Use stable `user._id` only — `refreshUser()` replaces `user` with a new object each time and would
    *  recreate this callback forever when combined with `useFocusEffect`. */
   const receiverId = user?.role === 'receiver' ? user._id : undefined;
-  const previewMetrics = user?.role === 'receiver' ? receiverCardMetrics(user._id) : null;
 
   const availabilityFromServer = user?.role === 'receiver' ? Boolean(user.isAvailable ?? true) : true;
 
@@ -174,7 +172,7 @@ export default function ReceiverHomeDashboard(): React.JSX.Element {
                   <View style={styles.publicRatingRow}>
                     <Text style={styles.publicStar}>★</Text>
                     <Text style={styles.publicRatingText}>
-                      {previewMetrics?.rating ?? 4.0} ({previewMetrics?.reviews ?? 0})
+                      {callInsights?.receiverRatingAvg ?? 0} ({callInsights?.receiverRatingCount ?? 0})
                     </Text>
                   </View>
                 </View>

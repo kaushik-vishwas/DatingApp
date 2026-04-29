@@ -3,6 +3,7 @@ import mongoose from 'mongoose';
 import { buildDiscoverReceiverFilter } from '../services/discoverReceiverFilter';
 import Receiver, { type ReceiverDocument } from '../models/Receiver';
 import ChatBlock from '../models/ChatBlock';
+import ReceiverRating from '../models/ReceiverRating';
 import { blockCallerUntilApproved } from '../utils/accountAccess';
 
 function iso(d: Date): string {
@@ -36,10 +37,16 @@ export type DiscoverReceiverCard = {
   gender: 'male' | 'female' | 'other' | null;
   isAvailable: boolean;
   isOnline: boolean;
+  ratingAvg: number;
+  ratingCount: number;
 };
 
-function toCard(r: ReceiverDocument): DiscoverReceiverCard {
+function toCard(
+  r: ReceiverDocument,
+  ratingByReceiverId: Map<string, { avg: number; count: number }>
+): DiscoverReceiverCard {
   const o = r.toObject();
+  const rating = ratingByReceiverId.get(String(r._id));
   return {
     _id: String(r._id),
     name: o.name,
@@ -55,6 +62,8 @@ function toCard(r: ReceiverDocument): DiscoverReceiverCard {
       o.gender === 'male' || o.gender === 'female' || o.gender === 'other' ? o.gender : null,
     isAvailable: Boolean(o.isAvailable),
     isOnline: Boolean(o.isOnline),
+    ratingAvg: rating ? Math.round(rating.avg * 10) / 10 : 0,
+    ratingCount: rating?.count ?? 0,
   };
 }
 
@@ -98,8 +107,38 @@ export const listReceiversForCaller = async (req: Request, res: Response): Promi
       .limit(limit)
       .exec();
 
+    const receiverIds = receivers.map((r) => new mongoose.Types.ObjectId(String(r._id)));
+    const ratingRows =
+      receiverIds.length === 0
+        ? []
+        : await ReceiverRating.aggregate<{
+            receiverId: mongoose.Types.ObjectId;
+            avg: number;
+            count: number;
+          }>([
+            { $match: { receiverId: { $in: receiverIds } } },
+            {
+              $group: {
+                _id: '$receiverId',
+                avg: { $avg: '$rating' },
+                count: { $sum: 1 },
+              },
+            },
+            {
+              $project: {
+                _id: 0,
+                receiverId: '$_id',
+                avg: 1,
+                count: 1,
+              },
+            },
+          ]);
+    const ratingByReceiverId = new Map(
+      ratingRows.map((row) => [String(row.receiverId), { avg: row.avg, count: row.count }])
+    );
+
     res.status(200).json({
-      receivers: receivers.map((r) => toCard(r as ReceiverDocument)),
+      receivers: receivers.map((r) => toCard(r as ReceiverDocument, ratingByReceiverId)),
     });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
