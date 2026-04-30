@@ -5,6 +5,8 @@ export type ReceiverAccountStatus = 'pending_profile' | 'pending_review' | 'appr
 export type BankAccountType = 'savings' | 'current';
 
 export type Gender = 'male' | 'female' | 'other';
+export const RECEIVER_AUDIO_CALL_RATE_INR_PER_MIN = 5;
+export type ReceiverBadgeLevel = 'platinum' | 'diamond' | 'supreme';
 
 /** Call receivers — KYC, bank, commission-related profile (collection: `receivers`) */
 export interface IReceiver {
@@ -49,6 +51,16 @@ export interface IReceiver {
   pendingBankAccountNumber: string | null;
   pendingBankIfsc: string | null;
   pendingBankName: string | null;
+  /** Cumulative anti-fraud score across all tracked activity. */
+  cumulativeScore: number;
+  /** Cumulative call minutes considered valid for payout calculation. */
+  cumulativeValidCallMinutes: number;
+  /** Current badge tier derived from cumulative score. */
+  badgeLevel: ReceiverBadgeLevel;
+  /** Current payout rate (INR per valid call minute) derived from badge level. */
+  earningRatePerMinute: number;
+  /** Timestamp when the active online session started. */
+  onlineSince: Date | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -84,7 +96,7 @@ const receiverSchema = new Schema<IReceiver>(
     age: { type: Number, default: null },
     state: { type: String, default: null, trim: true },
     passwordHash: { type: String, default: null, select: false },
-    audioCallRate: { type: Number, default: null },
+    audioCallRate: { type: Number, default: RECEIVER_AUDIO_CALL_RATE_INR_PER_MIN },
     walletBalance: { type: Number, default: 0 },
     suspended: { type: Boolean, default: false },
     isAvailable: { type: Boolean, default: true },
@@ -95,6 +107,11 @@ const receiverSchema = new Schema<IReceiver>(
     pendingBankAccountNumber: { type: String, default: null },
     pendingBankIfsc: { type: String, default: null },
     pendingBankName: { type: String, default: null },
+    cumulativeScore: { type: Number, default: 0, min: 0 },
+    cumulativeValidCallMinutes: { type: Number, default: 0, min: 0 },
+    badgeLevel: { type: String, enum: ['platinum', 'diamond', 'supreme'], default: 'platinum' },
+    earningRatePerMinute: { type: Number, default: 2.0, min: 0 },
+    onlineSince: { type: Date, default: null },
   },
   { timestamps: true }
 );

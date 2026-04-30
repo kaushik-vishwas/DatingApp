@@ -124,18 +124,6 @@ export default function ProfileInfoScreen({ navigation }: Props): React.JSX.Elem
             onChange={(interests) => update({ interests })}
           />
 
-          <View style={styles.ratesBox}>
-            <Text style={styles.ratesTitle}>Set Your Call Rates</Text>
-            <Input
-              label="Audio Call Rate *"
-              value={state.audioCallRate}
-              onChangeText={(t) => update({ audioCallRate: t })}
-              placeholder="e.g., 3"
-              keyboardType="decimal-pad"
-            />
-            <Text style={styles.ratesHint}>Amount in ₹ per minute for audio calls.</Text>
-          </View>
-
           <Button title="Continue" onPress={onNext} />
         </ScrollView>
       </KeyboardAvoidingView>
@@ -300,27 +288,6 @@ const styles = StyleSheet.create({
   stateRowActive: { backgroundColor: 'rgba(123,44,255,0.12)' },
   stateRowText: { fontSize: 15, color: '#222' },
   stateRowTextActive: { fontWeight: '700', color: PURPLE },
-  ratesBox: {
-    marginTop: 8,
-    marginBottom: 8,
-    padding: 16,
-    borderRadius: 14,
-    backgroundColor: 'rgba(123, 44, 255, 0.08)',
-    borderWidth: 1,
-    borderColor: 'rgba(123, 44, 255, 0.22)',
-  },
-  ratesTitle: {
-    fontSize: 16,
-    fontWeight: '800',
-    color: '#111',
-    marginBottom: 12,
-  },
-  ratesHint: {
-    marginTop: 6,
-    fontSize: 12,
-    color: '#666',
-    lineHeight: 17,
-  },
   avatarGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',

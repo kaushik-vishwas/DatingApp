@@ -13,6 +13,7 @@ const ChatBlock_1 = __importDefault(require("../models/ChatBlock"));
 const User_1 = __importDefault(require("../models/User"));
 const Receiver_1 = __importDefault(require("../models/Receiver"));
 const chatPricing_1 = require("../constants/chatPricing");
+const receiverScore_1 = require("../services/receiverScore");
 const receiverAvailabilityNotifier_1 = require("../services/receiverAvailabilityNotifier");
 const callQueue_1 = require("../services/callQueue");
 function roomKey(userId, receiverId) {
@@ -105,7 +106,10 @@ function attachChatSocket(httpServer) {
         if (socketType === 'r') {
             void (async () => {
                 try {
-                    const prev = await Receiver_1.default.findOneAndUpdate({ _id: socketAccountId }, { $set: { isOnline: true } }, { new: false }).select('isOnline isAvailable accountStatus suspended');
+                    const prev = await Receiver_1.default.findOneAndUpdate({ _id: socketAccountId }, { $set: { isOnline: true }, $setOnInsert: {} }, { new: false }).select('isOnline isAvailable accountStatus suspended onlineSince');
+                    if (prev && !prev.isOnline) {
+                        await Receiver_1.default.updateOne({ _id: socketAccountId, onlineSince: null }, { $set: { onlineSince: new Date() } }).exec();
+                    }
                     if (prev &&
                         !prev.isOnline &&
                         prev.isAvailable &&
@@ -148,7 +152,14 @@ function attachChatSocket(httpServer) {
                     const stillConnected = (io.sockets.adapter.rooms.get(room)?.size ?? 0) > 0;
                     if (!stillConnected) {
                         void (async () => {
-                            await Receiver_1.default.updateOne({ _id: leavingId }, { $set: { isOnline: false } }).exec();
+                            const prev = await Receiver_1.default.findOneAndUpdate({ _id: leavingId }, { $set: { isOnline: false, onlineSince: null } }, { new: false }).select('onlineSince');
+                            if (prev?.onlineSince) {
+                                await (0, receiverScore_1.finalizeReceiverOnlineSession)({
+                                    receiverId: leavingId,
+                                    onlineSince: prev.onlineSince,
+                                    endedAt: new Date(),
+                                });
+                            }
                             (0, callQueue_1.releaseReceiverReservation)(leavingId);
                             await (0, callQueue_1.syncReceiverQueueState)(leavingId);
                         })();

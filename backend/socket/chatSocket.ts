@@ -7,6 +7,7 @@ import ChatBlock from '../models/ChatBlock';
 import User from '../models/User';
 import Receiver from '../models/Receiver';
 import { CHAT_TEXT_FEE_INR } from '../constants/chatPricing';
+import { finalizeReceiverOnlineSession } from '../services/receiverScore';
 import { scheduleReceiverAvailabilityNotifications } from '../services/receiverAvailabilityNotifier';
 import {
   isReceiverBusy,
@@ -128,9 +129,15 @@ export function attachChatSocket(httpServer: HTTPServer): Server {
         try {
           const prev = await Receiver.findOneAndUpdate(
             { _id: socketAccountId },
-            { $set: { isOnline: true } },
+            { $set: { isOnline: true }, $setOnInsert: {} },
             { new: false }
-          ).select('isOnline isAvailable accountStatus suspended');
+          ).select('isOnline isAvailable accountStatus suspended onlineSince');
+          if (prev && !prev.isOnline) {
+            await Receiver.updateOne(
+              { _id: socketAccountId, onlineSince: null },
+              { $set: { onlineSince: new Date() } }
+            ).exec();
+          }
           if (
             prev &&
             !prev.isOnline &&
@@ -177,7 +184,18 @@ export function attachChatSocket(httpServer: HTTPServer): Server {
           const stillConnected = (io.sockets.adapter.rooms.get(room)?.size ?? 0) > 0;
           if (!stillConnected) {
             void (async () => {
-              await Receiver.updateOne({ _id: leavingId }, { $set: { isOnline: false } }).exec();
+              const prev = await Receiver.findOneAndUpdate(
+                { _id: leavingId },
+                { $set: { isOnline: false, onlineSince: null } },
+                { new: false }
+              ).select('onlineSince');
+              if (prev?.onlineSince) {
+                await finalizeReceiverOnlineSession({
+                  receiverId: leavingId,
+                  onlineSince: prev.onlineSince,
+                  endedAt: new Date(),
+                });
+              }
               releaseReceiverReservation(leavingId);
               await syncReceiverQueueState(leavingId);
             })();

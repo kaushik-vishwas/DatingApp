@@ -1,7 +1,10 @@
 import type { Request, Response } from 'express';
 import mongoose from 'mongoose';
 import { buildDiscoverReceiverFilter } from '../services/discoverReceiverFilter';
-import Receiver, { type ReceiverDocument } from '../models/Receiver';
+import Receiver, {
+  RECEIVER_AUDIO_CALL_RATE_INR_PER_MIN,
+  type ReceiverDocument,
+} from '../models/Receiver';
 import ChatBlock from '../models/ChatBlock';
 import ReceiverRating from '../models/ReceiverRating';
 import { blockCallerUntilApproved } from '../utils/accountAccess';
@@ -55,8 +58,7 @@ function toCard(
     interests: Array.isArray(o.interests) ? o.interests.map(String) : [],
     languages: Array.isArray(o.languages) ? o.languages.map(String) : [],
     profileImage: o.profileImage ?? null,
-    audioCallRate:
-      typeof o.audioCallRate === 'number' && Number.isFinite(o.audioCallRate) ? o.audioCallRate : null,
+    audioCallRate: RECEIVER_AUDIO_CALL_RATE_INR_PER_MIN,
     updatedAt: iso(o.updatedAt),
     gender:
       o.gender === 'male' || o.gender === 'female' || o.gender === 'other' ? o.gender : null,

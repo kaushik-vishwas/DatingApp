@@ -53,9 +53,6 @@ export default function BankDetailsScreen({ navigation }: Props): React.JSX.Elem
 
     setSubmitting(true);
     try {
-      const rateParsed = Number(state.audioCallRate.trim().replace(',', '.'));
-      const audioCallRate = Math.round(rateParsed * 100) / 100;
-
       const profileImageUrl = /^https?:\/\//i.test(state.profileImageUri)
         ? state.profileImageUri.trim()
         : (
@@ -88,7 +85,6 @@ export default function BankDetailsScreen({ navigation }: Props): React.JSX.Elem
         gender: state.gender!,
         dateOfBirth: dobStr,
         state: state.state.trim(),
-        audioCallRate,
         bankAccountHolderName: state.bankAccountHolderName.trim(),
         bankAccountType: state.bankAccountType,
         bankAccountNumber: state.bankAccountNumber.trim(),

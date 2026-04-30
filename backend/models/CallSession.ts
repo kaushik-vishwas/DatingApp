@@ -11,7 +11,7 @@ export interface ICallSession {
   durationSec: number;
   status: CallSessionStatus;
   ratePerMinute: number;
-  /** Final settled transfer from caller -> receiver for this call. */
+  /** Final settled debit captured from caller wallet for this call. */
   settledAmountInr: number;
   callerRating: number | null;
   createdAt: Date;

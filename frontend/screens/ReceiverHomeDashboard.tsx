@@ -120,6 +120,12 @@ export default function ReceiverHomeDashboard(): React.JSX.Element {
       <View style={styles.headerRow}>
         <Text style={styles.pageTitle}>Dashboard</Text>
         <View style={styles.headerIcons}>
+          <View style={styles.scoreChip}>
+            <Text style={styles.scoreChipLabel}>Score</Text>
+            <Text style={styles.scoreChipValue}>
+              {Math.round(callInsights?.totalScore ?? 0).toLocaleString('en-IN')}
+            </Text>
+          </View>
           <TouchableOpacity
             style={styles.iconBtn}
             onPress={() => navigation.navigate('ReceiverNotifications')}
@@ -147,11 +153,11 @@ export default function ReceiverHomeDashboard(): React.JSX.Element {
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Public Preview</Text>
             <View style={styles.publicCard}>
-              <View style={styles.publicCardTop}>
-                <View style={styles.publicAvatarCol}>
+              <View style={styles.publicCardRow}>
+                <View style={styles.publicLeftColumn}>
                   <View
                     style={[
-                      styles.publicAvatarRing,
+                      styles.publicAvatarWrapper,
                       {
                         borderColor: !Boolean(user.isOnline)
                           ? '#dc2626'
@@ -168,54 +174,85 @@ export default function ReceiverHomeDashboard(): React.JSX.Element {
                         <Text style={styles.publicAvatarGlyph}>👤</Text>
                       </View>
                     )}
+                    <View
+                      style={[
+                        styles.publicStatusDot,
+                        {
+                          backgroundColor: !Boolean(user.isOnline)
+                            ? '#dc2626'
+                            : available
+                              ? '#22c55e'
+                              : '#f59e0b',
+                        },
+                      ]}
+                    />
                   </View>
-                  <View style={styles.publicRatingRow}>
+                  <View style={styles.publicRatingBelow}>
                     <Text style={styles.publicStar}>★</Text>
-                    <Text style={styles.publicRatingText}>
-                      {callInsights?.receiverRatingAvg ?? 0} ({callInsights?.receiverRatingCount ?? 0})
+                    <Text style={styles.publicRatingText}>{callInsights?.receiverRatingAvg ?? 0}</Text>
+                    <Text style={styles.publicRatingCount}>({callInsights?.receiverRatingCount ?? 0})</Text>
+                  </View>
+                </View>
+                <View style={styles.publicInfoSection}>
+                  <Text style={styles.publicCardName} numberOfLines={1}>
+                    {user.name}
+                    {user.age != null ? `, ${user.age}` : ''}
+                  </Text>
+                  <Text style={styles.publicCardInterests} numberOfLines={1}>
+                    {(user.interests ?? []).length > 0
+                      ? user.interests.slice(0, 3).join(' • ')
+                      : '—'}
+                  </Text>
+                  <Text style={styles.publicCardLoc} numberOfLines={1}>
+                    {user.state?.trim() || '—'}
+                  </Text>
+                </View>
+                <View style={styles.publicRightColumn}>
+                  <View style={styles.publicRateBtn}>
+                    <Text style={styles.publicRateBtnText}>
+                      {typeof user.audioCallRate === 'number' && Number.isFinite(user.audioCallRate)
+                        ? `₹${user.audioCallRate}/min`
+                        : '₹5/min'}
+                    </Text>
+                  </View>
+                  <View style={styles.publicLanguagesRow}>
+                    {(user.languages ?? []).slice(0, 2).map((lang) => (
+                      <View key={lang} style={styles.publicMiniLang}>
+                        <Text style={styles.publicMiniLangText}>{lang.substring(0, 3)}</Text>
+                      </View>
+                    ))}
+                    {(user.languages ?? []).length > 2 ? (
+                      <Text style={styles.publicMoreLang}>+{(user.languages ?? []).length - 2}</Text>
+                    ) : null}
+                  </View>
+                  <View
+                    style={[
+                      styles.publicStatusPillRight,
+                      {
+                        backgroundColor: !Boolean(user.isOnline)
+                          ? '#dc262615'
+                          : available
+                            ? '#22c55e15'
+                            : '#f59e0b15',
+                      },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.publicStatusTextRight,
+                        {
+                          color: !Boolean(user.isOnline)
+                            ? '#dc2626'
+                            : available
+                              ? '#22c55e'
+                              : '#f59e0b',
+                        },
+                      ]}
+                    >
+                      {!Boolean(user.isOnline) ? 'Offline' : available ? 'Available' : 'Busy'}
                     </Text>
                   </View>
                 </View>
-                <View style={styles.publicMain}>
-                  <Text style={styles.publicName}>
-                    {user.name}
-                    {user.age != null ? `, ${user.age} Y` : ''}
-                  </Text>
-                  <Text style={styles.publicInterests} numberOfLines={2}>
-                    {(user.interests ?? []).length > 0
-                      ? user.interests.slice(0, 4).join(' | ')
-                      : '—'}
-                  </Text>
-                  <Text style={styles.publicState}>{user.state?.trim() || '—'}</Text>
-                </View>
-                <View style={styles.publicLangCol}>
-                  {(user.languages ?? []).slice(0, 3).map((lang) => (
-                    <View key={lang} style={styles.publicMiniLang}>
-                      <Text style={styles.publicMiniLangText}>{lang}</Text>
-                    </View>
-                  ))}
-                </View>
-              </View>
-              <View style={styles.publicCardBottom}>
-                <Text
-                  style={[
-                    styles.publicStatus,
-                    {
-                      color: !Boolean(user.isOnline)
-                        ? '#dc2626'
-                        : available
-                          ? '#22c55e'
-                          : '#f59e0b',
-                    },
-                  ]}
-                >
-                  {!Boolean(user.isOnline) ? 'Offline' : available ? 'Available' : 'Busy'}
-                </Text>
-                <Text style={styles.publicRate}>
-                  {typeof user.audioCallRate === 'number' && Number.isFinite(user.audioCallRate)
-                    ? `₹${user.audioCallRate} / Min`
-                    : 'Rate TBD'}
-                </Text>
               </View>
             </View>
           </View>
@@ -395,7 +432,20 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     marginBottom: 8,
   },
-  headerIcons: { flexDirection: 'row', gap: 8 },
+  headerIcons: { flexDirection: 'row', gap: 8, alignItems: 'center' },
+  scoreChip: {
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: '#fff',
+    borderWidth: 1,
+    borderColor: '#ececec',
+    paddingHorizontal: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  scoreChipLabel: { fontSize: 11, color: '#666', fontWeight: '700' },
+  scoreChipValue: { fontSize: 12, color: '#7b2cff', fontWeight: '900' },
   iconBtn: {
     width: 34,
     height: 34,
@@ -475,59 +525,74 @@ const styles = StyleSheet.create({
   section: { marginTop: 16 },
   publicCard: {
     backgroundColor: '#fff',
-    borderRadius: 16,
-    padding: 14,
+    borderRadius: 12,
+    padding: 12,
     borderWidth: 1,
     borderColor: '#ececec',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.04,
+    shadowRadius: 4,
+    elevation: 2,
   },
-  publicCardTop: { flexDirection: 'row', gap: 12 },
-  publicAvatarCol: { width: 76, alignItems: 'center', paddingTop: 2 },
-  publicAvatarRing: {
-    borderWidth: 3,
-    borderRadius: 35,
-    width: 70,
-    height: 70,
+  publicCardRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 12 },
+  publicLeftColumn: { alignItems: 'center', width: 60 },
+  publicAvatarWrapper: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    borderWidth: 2,
     alignItems: 'center',
     justifyContent: 'center',
+    position: 'relative',
   },
-  publicAvatar: { width: 64, height: 64, borderRadius: 32 },
+  publicAvatar: { width: 48, height: 48, borderRadius: 24 },
   publicAvatarPlaceholder: { backgroundColor: '#eee', alignItems: 'center', justifyContent: 'center' },
-  publicAvatarGlyph: { fontSize: 28 },
-  publicRatingRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 8 },
-  publicStar: { color: '#fbbf24', fontSize: 14 },
-  publicRatingText: { fontSize: 12, fontWeight: '700', color: '#444' },
-  publicMain: { flex: 1, minWidth: 0 },
-  publicName: { fontSize: 15, fontWeight: '900', color: '#111' },
-  publicInterests: { fontSize: 11, color: '#888', marginTop: 6, lineHeight: 16 },
-  publicState: { fontSize: 12, color: '#666', marginTop: 6 },
-  publicLangCol: { alignItems: 'flex-end', gap: 4 },
-  publicMiniLang: {
-    backgroundColor: 'rgba(123,44,255,0.08)',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 8,
+  publicAvatarGlyph: { fontSize: 22 },
+  publicStatusDot: {
+    position: 'absolute',
+    bottom: 2,
+    right: 2,
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    borderWidth: 1.5,
+    borderColor: '#fff',
   },
-  publicMiniLangText: { fontSize: 10, fontWeight: '800', color: '#7b2cff' },
-  publicCardBottom: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginTop: 12,
-    paddingTop: 10,
-    borderTopWidth: 1,
-    borderTopColor: '#f0f0f0',
-  },
-  publicStatus: { fontSize: 12, fontWeight: '800' },
-  publicRate: {
+  publicRatingBelow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 3, marginTop: 6 },
+  publicStar: { color: '#fbbf24', fontSize: 10 },
+  publicRatingText: { fontSize: 11, fontWeight: '700', color: '#444' },
+  publicRatingCount: { fontSize: 9, color: '#888' },
+  publicInfoSection: { flex: 1, gap: 6 },
+  publicCardName: { fontSize: 15, fontWeight: '700', color: '#111' },
+  publicCardInterests: { fontSize: 11, color: '#666', lineHeight: 14 },
+  publicCardLoc: { fontSize: 11, color: '#888', fontWeight: '500', marginTop: 2 },
+  publicRightColumn: { alignItems: 'flex-end', minWidth: 70, gap: 8 },
+  publicRateBtn: {
     backgroundColor: '#22c55e',
-    color: '#fff',
-    fontWeight: '900',
-    fontSize: 13,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: 12,
-    overflow: 'hidden',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 8,
+    minWidth: 65,
+    alignItems: 'center',
+    shadowColor: '#22c55e',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 2,
   },
+  publicRateBtnText: { color: '#fff', fontWeight: '700', fontSize: 11 },
+  publicLanguagesRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', justifyContent: 'flex-end', gap: 4 },
+  publicMiniLang: {
+    backgroundColor: '#f0f0f0',
+    paddingHorizontal: 6,
+    paddingVertical: 3,
+    borderRadius: 5,
+  },
+  publicMiniLangText: { fontSize: 9, fontWeight: '600', color: '#666', textTransform: 'uppercase' },
+  publicMoreLang: { fontSize: 9, color: '#999', fontWeight: '500' },
+  publicStatusPillRight: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 10 },
+  publicStatusTextRight: { fontSize: 10, fontWeight: '600' },
   sectionTitle: {
     fontSize: 18,
     fontWeight: '900',

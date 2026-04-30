@@ -8,6 +8,7 @@ exports.createStreamUserToken = createStreamUserToken;
 exports.getStreamApiKey = getStreamApiKey;
 exports.buildVoiceCallId = buildVoiceCallId;
 const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
+const crypto_1 = __importDefault(require("crypto"));
 const STREAM_TOKEN_TTL_SECONDS = 60 * 60; // 1 hour
 function getStreamConfig() {
     const apiKey = (process.env.STREAM_API_KEY ?? '').trim();
@@ -36,5 +37,8 @@ function getStreamApiKey() {
 }
 function buildVoiceCallId(a, b) {
     const [left, right] = [a, b].sort();
-    return `voice_${left}_${right}`;
+    // Stream call IDs must stay <= 64 chars; keep compact while preserving uniqueness.
+    const pairHash = crypto_1.default.createHash('sha1').update(`${left}|${right}`).digest('hex').slice(0, 12);
+    const nonce = crypto_1.default.randomBytes(8).toString('hex');
+    return `v_${pairHash}_${nonce}`;
 }

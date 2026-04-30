@@ -18,8 +18,6 @@ export type CompleteProfileState = {
   interests: string[];
   gender: Gender | null;
   state: string;
-  /** INR per minute (digits / decimal from input) */
-  audioCallRate: string;
   aadhaarFront: PickedDocument | null;
   aadhaarBack: PickedDocument | null;
   bankAccountHolderName: string;
@@ -38,7 +36,6 @@ const initialState: CompleteProfileState = {
   interests: [],
   gender: null,
   state: '',
-  audioCallRate: '',
   aadhaarFront: null,
   aadhaarBack: null,
   bankAccountHolderName: '',

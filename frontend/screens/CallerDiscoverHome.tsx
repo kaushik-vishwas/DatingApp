@@ -27,6 +27,7 @@ import { useCallSignals } from '../context/CallSignalContext';
 import { discoverApi, getErrorMessage } from '../services/api';
 import type { DiscoverReceiverSummary } from '../types/api';
 import { getReceiverPresenceInfo } from '../utils/receiverStatus';
+import SelectoLogo from '../assets/SelectoLogo.png'
 
 const PURPLE = '#7b2cff';
 const GREEN = '#22c55e';
@@ -151,16 +152,25 @@ export default function CallerDiscoverHome(): React.JSX.Element {
     );
   };
 
+  // Helper function to get short language code (first 3 letters)
+  const getShortLang = (lang: string) => {
+    return lang.substring(0, 3);
+  };
+
   const renderItem = ({ item }: { item: DiscoverReceiverSummary }) => {
     const presence = getReceiverPresenceInfo(item);
     const statusColor = presence.color;
     const statusLabel = presence.label;
     const interestStr =
-      item.interests.length > 0 ? item.interests.slice(0, 4).join(' | ') : '—';
+      item.interests.length > 0 ? item.interests.slice(0, 3).join(' • ') : '—';
     const rateLabel =
       item.audioCallRate != null && Number.isFinite(item.audioCallRate)
-        ? `₹${item.audioCallRate} / Min`
-        : 'Rate TBD';
+        ? `₹${item.audioCallRate}/min`
+        : 'TBD';
+
+    // Show only first 2 languages with 3-letter codes
+    const displayedLanguages = item.languages.slice(0, 2).map(getShortLang);
+    const remainingCount = item.languages.length - 2;
 
     return (
       <TouchableOpacity
@@ -168,9 +178,10 @@ export default function CallerDiscoverHome(): React.JSX.Element {
         activeOpacity={0.92}
         onPress={() => navigation.navigate('ReceiverProfile', { receiver: item })}
       >
-        <View style={styles.cardTop}>
-          <View style={styles.avatarCol}>
-            <View style={[styles.avatarWrap, styles.avatarRing, { borderColor: statusColor }]}>
+        <View style={styles.cardRow}>
+          {/* Left Column: Avatar + Rating below */}
+          <View style={styles.leftColumn}>
+            <View style={[styles.avatarWrapper, { borderColor: statusColor }]}>
               {item.profileImage ? (
                 <Image source={{ uri: item.profileImage }} style={styles.avatar} />
               ) : (
@@ -180,43 +191,63 @@ export default function CallerDiscoverHome(): React.JSX.Element {
               )}
               <View style={[styles.statusDot, { backgroundColor: statusColor }]} />
             </View>
-            <View style={styles.ratingRow}>
+            
+            {/* Rating below avatar */}
+            <View style={styles.ratingBelow}>
               <Text style={styles.star}>★</Text>
-              <Text style={styles.ratingText}>
-                {item.ratingAvg} ({item.ratingCount})
-              </Text>
+              <Text style={styles.ratingText}>{item.ratingAvg}</Text>
+              <Text style={styles.ratingCount}>({item.ratingCount})</Text>
             </View>
           </View>
-          <View style={styles.cardMain}>
-            <Text style={styles.cardName}>
+
+          {/* Middle Column: Main Info */}
+          <View style={styles.infoSection}>
+            {/* Name */}
+            <Text style={styles.cardName} numberOfLines={1}>
               {item.name}
-              {item.age != null ? `, ${item.age} Y` : ''}
+              {item.age != null ? `, ${item.age}` : ''}
             </Text>
-            <Text style={styles.cardInterests} numberOfLines={2}>
+            
+            <Text style={styles.cardInterests} numberOfLines={1}>
               {interestStr}
             </Text>
-            <Text style={styles.cardLoc}>{item.state?.trim() || '—'}</Text>
+            
+            {/* State */}
+            <Text style={styles.cardLoc} numberOfLines={1}>
+              {item.state?.trim() || '—'}
+            </Text>
           </View>
-          <View style={styles.langCol}>
-            {item.languages.slice(0, 3).map((lang) => (
-              <View key={lang} style={styles.miniLang}>
-                <Text style={styles.miniLangText}>{lang}</Text>
-              </View>
-            ))}
+
+          {/* Right Column: Rate Button + Languages (horizontal) + Status below */}
+          <View style={styles.rightColumn}>
+            <TouchableOpacity
+              style={styles.callBtn}
+              onPress={(e) => {
+                e.stopPropagation();
+                onCall(item);
+              }}
+              activeOpacity={0.9}
+            >
+              <Text style={styles.callBtnText}>{rateLabel}</Text>
+            </TouchableOpacity>
+            
+            {/* Languages in horizontal row */}
+            <View style={styles.languagesRow}>
+              {displayedLanguages.map((lang) => (
+                <View key={lang} style={styles.miniLang}>
+                  <Text style={styles.miniLangText}>{lang}</Text>
+                </View>
+              ))}
+              {remainingCount > 0 && (
+                <Text style={styles.moreLang}>+{remainingCount}</Text>
+              )}
+            </View>
+            
+            {/* Status below languages */}
+            <View style={[styles.statusPillRight, { backgroundColor: `${statusColor}15` }]}>
+              <Text style={[styles.statusTextRight, { color: statusColor }]}>{statusLabel}</Text>
+            </View>
           </View>
-        </View>
-        <View style={styles.cardBottom}>
-          <Text style={[styles.statusPill, { color: statusColor }]}>{statusLabel}</Text>
-          <TouchableOpacity
-            style={styles.callBtn}
-            onPress={(e) => {
-              e.stopPropagation();
-              onCall(item);
-            }}
-            activeOpacity={0.9}
-          >
-            <Text style={styles.callBtnText}>{rateLabel}</Text>
-          </TouchableOpacity>
         </View>
       </TouchableOpacity>
     );
@@ -224,27 +255,44 @@ export default function CallerDiscoverHome(): React.JSX.Element {
 
   const listHeader = (
     <View style={styles.headerBlock}>
-      <View style={styles.topBar}>
-        <Text style={styles.brand}>Selecto</Text>
-        <View style={styles.topRight}>
-          <TouchableOpacity
-            style={styles.walletTap}
-            onPress={() => navigation.navigate('Wallet')}
-            activeOpacity={0.85}
-          >
-            <Text style={styles.walletIco}>👛</Text>
-            <Text style={styles.wallet}>₹{wallet.toLocaleString('en-IN')}</Text>
-          </TouchableOpacity>
-          {user?.profileImage ? (
-            <Image source={{ uri: user.profileImage }} style={styles.meAvatar} />
-          ) : (
-            <View style={[styles.meAvatar, styles.meAvatarPh]}>
-              <Text style={styles.meAvatarTxt}>{user?.name?.charAt(0) ?? '?'}</Text>
-            </View>
-          )}
+      {/* Enhanced Top Section */}
+      <View style={styles.topSection}>
+        <View style={styles.topBar}>
+          <Image 
+            source={SelectoLogo} 
+            style={styles.brandLogo}
+            resizeMode="contain"
+          />
+          <View style={styles.topRight}>
+            {/* Wallet Capsule with Ring (Border) - No background color, just border ring */}
+            <TouchableOpacity
+              style={styles.walletCapsule}
+              onPress={() => navigation.navigate('Wallet')}
+              activeOpacity={0.85}
+            >
+              <View style={styles.walletContainer}>
+                <Text style={styles.walletIco}>💰</Text>
+                <Text style={styles.wallet}>₹{wallet.toLocaleString('en-IN')}</Text>
+              </View>
+            </TouchableOpacity>
+            
+            {/* Enhanced Avatar with Border */}
+            {user?.profileImage ? (
+              <View style={styles.avatarCapsule}>
+                <Image source={{ uri: user.profileImage }} style={styles.meAvatar} />
+              </View>
+            ) : (
+              <View style={[styles.avatarCapsule, styles.meAvatarPh]}>
+                <View style={styles.avatarContainer}>
+                  <Text style={styles.meAvatarTxt}>{user?.name?.charAt(0) ?? '?'}</Text>
+                </View>
+              </View>
+            )}
+          </View>
         </View>
       </View>
 
+      {/* Promo Card */}
       <TouchableOpacity
         style={styles.promoPink}
         activeOpacity={0.9}
@@ -256,40 +304,34 @@ export default function CallerDiscoverHome(): React.JSX.Element {
         </View>
       </TouchableOpacity>
 
-      <View style={styles.promoWhite}>
-        <Text style={styles.promoWhiteTitle}>Everything Starts with a Hii!</Text>
-        <Text style={styles.promoWhiteBody}>
-          Spam-free chats, verified profiles, and multiple languages — pick who you connect with.
-        </Text>
+      {/* Search Section */}
+      <View style={styles.searchSection}>
+        <View style={styles.searchRow}>
+          <TextInput
+            style={styles.searchInput}
+            placeholder="Search by name or interest…"
+            placeholderTextColor="#999"
+            value={search}
+            onChangeText={setSearch}
+          />
+          <TouchableOpacity
+            style={styles.filterBtn}
+            onPress={() => {
+              setModalDraft({ ...appliedFilters });
+              setFilterModalVisible(true);
+            }}
+            activeOpacity={0.85}
+          >
+            <DiscoverFilterIcon />
+          </TouchableOpacity>
+        </View>
+
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.langScroll}>
+          {langChip('All', null)}
+          {CALLER_LANGUAGE_OPTIONS.map((l) => langChip(l, l))}
+        </ScrollView>
       </View>
 
-      <View style={styles.searchRow}>
-        <TextInput
-          style={styles.searchInput}
-          placeholder="Search by name or interest…"
-          placeholderTextColor="#999"
-          value={search}
-          onChangeText={setSearch}
-        />
-        <TouchableOpacity
-          style={styles.filterBtn}
-          onPress={() => {
-            setModalDraft({ ...appliedFilters });
-            setFilterModalVisible(true);
-          }}
-          activeOpacity={0.85}
-        >
-          <DiscoverFilterIcon />
-        </TouchableOpacity>
-      </View>
-
-      <Text style={styles.sectionLabel}>Language</Text>
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.langScroll}>
-        {langChip('All', null)}
-        {CALLER_LANGUAGE_OPTIONS.map((l) => langChip(l, l))}
-      </ScrollView>
-
-      <Text style={styles.sectionLabel}>Discover</Text>
       {err ? <Text style={styles.errText}>{err}</Text> : null}
       {loading && receivers.length === 0 ? (
         <ActivityIndicator style={styles.loader} color={PURPLE} />
@@ -334,27 +376,122 @@ const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: '#f6f6f7' },
   listContent: { paddingHorizontal: 16, paddingBottom: 24 },
   headerBlock: { paddingBottom: 8 },
+  
+  // Enhanced Top Section Styles
+  topSection: {
+    marginHorizontal: -16,
+    marginTop: -8,
+    marginBottom: 16,
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    paddingBottom: 16,
+    backgroundColor: '#fff',
+    borderBottomLeftRadius: 24,
+    borderBottomRightRadius: 24,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.08,
+    shadowRadius: 12,
+    elevation: 8,
+  },
   topBar: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 14,
   },
-  brand: { fontSize: 22, fontWeight: '900', color: '#1b4d3e' },
-  topRight: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  walletTap: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  walletIco: { fontSize: 16 },
-  wallet: { fontSize: 15, fontWeight: '800', color: '#111' },
-  meAvatar: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#e5e5e5' },
-  meAvatarPh: { alignItems: 'center', justifyContent: 'center' },
-  meAvatarTxt: { fontWeight: '900', color: PURPLE, fontSize: 14 },
+  brandLogo: {
+    width: 140,
+    height: 50,
+  },
+  topRight: { 
+    flexDirection: 'row', 
+    alignItems: 'center', 
+    gap: 12 
+  },
+  
+  // Wallet Capsule with Ring (Border) - Just outer ring, no background color inside
+  walletCapsule: {
+    borderRadius: 40,
+    borderWidth: 1.5,
+    borderColor: PURPLE,
+    backgroundColor: 'transparent', // No background color
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  walletContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    gap: 6,
+    backgroundColor: 'transparent', // Transparent background
+  },
+  walletIco: { 
+    fontSize: 16,
+  },
+  wallet: { 
+    fontSize: 15, 
+    fontWeight: '800', 
+    color: '#111', // Dark text for contrast
+  },
+  
+  // Enhanced Avatar Capsule
+  avatarCapsule: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    borderWidth: 2,
+    borderColor: PURPLE,
+    overflow: 'hidden',
+    shadowColor: PURPLE,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  avatarContainer: {
+    width: '100%',
+    height: '100%',
+    backgroundColor: PURPLE,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  meAvatar: { 
+    width: 40, 
+    height: 40, 
+    borderRadius: 20,
+  },
+  meAvatarPh: { 
+    alignItems: 'center', 
+    justifyContent: 'center',
+  },
+  meAvatarTxt: { 
+    fontWeight: '900', 
+    color: '#fff', 
+    fontSize: 18,
+  },
+  
+  // Promo Card
   promoPink: {
     borderRadius: 16,
     padding: 16,
     backgroundColor: '#ff72d2',
-    marginBottom: 10,
+    marginBottom: 16,
+    shadowColor: '#ff72d2',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+    elevation: 4,
   },
-  promoTitle: { color: '#fff', fontSize: 18, fontWeight: '900', marginBottom: 12 },
+  promoTitle: { 
+    color: '#fff', 
+    fontSize: 18, 
+    fontWeight: '900', 
+    marginBottom: 12 
+  },
   promoBtn: {
     alignSelf: 'flex-start',
     backgroundColor: 'rgba(255,255,255,0.95)',
@@ -362,18 +499,22 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     borderRadius: 12,
   },
-  promoBtnText: { color: PURPLE, fontWeight: '900', fontSize: 14 },
-  promoWhite: {
-    backgroundColor: '#fff',
-    borderRadius: 16,
-    padding: 14,
-    borderWidth: 1,
-    borderColor: '#eee',
-    marginBottom: 14,
+  promoBtnText: { 
+    color: PURPLE, 
+    fontWeight: '900', 
+    fontSize: 14 
   },
-  promoWhiteTitle: { fontSize: 15, fontWeight: '900', color: '#111', marginBottom: 6 },
-  promoWhiteBody: { fontSize: 12, color: '#666', lineHeight: 18 },
-  searchRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 6 },
+  
+  // Search Section
+  searchSection: {
+    marginBottom: 12,
+  },
+  searchRow: { 
+    flexDirection: 'row', 
+    alignItems: 'center', 
+    gap: 10, 
+    marginBottom: 12 
+  },
   searchInput: {
     flex: 1,
     backgroundColor: '#fff',
@@ -384,6 +525,11 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     fontSize: 14,
     color: '#111',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
+    elevation: 1,
   },
   filterBtn: {
     width: 44,
@@ -394,15 +540,18 @@ const styles = StyleSheet.create({
     borderColor: '#e8e8e8',
     alignItems: 'center',
     justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
+    elevation: 1,
   },
-  sectionLabel: {
-    fontSize: 13,
-    fontWeight: '900',
-    color: '#111',
-    marginTop: 10,
-    marginBottom: 8,
+  langScroll: { 
+    flexDirection: 'row', 
+    alignItems: 'center', 
+    gap: 8, 
+    paddingBottom: 6 
   },
-  langScroll: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingBottom: 6 },
   langChip: {
     paddingHorizontal: 14,
     paddingVertical: 8,
@@ -410,82 +559,195 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
     borderWidth: 1,
     borderColor: '#e4e4e4',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
+    elevation: 1,
   },
   langChipActive: {
     backgroundColor: 'rgba(123,44,255,0.12)',
     borderColor: PURPLE,
   },
-  langChipText: { fontSize: 13, fontWeight: '700', color: '#555' },
-  langChipTextActive: { color: PURPLE },
-  errText: { color: '#b91c1c', fontSize: 13, marginBottom: 8 },
-  loader: { marginVertical: 16 },
-  empty: { textAlign: 'center', color: '#888', marginTop: 12, fontSize: 14 },
+  langChipText: { 
+    fontSize: 13, 
+    fontWeight: '700', 
+    color: '#555' 
+  },
+  langChipTextActive: { 
+    color: PURPLE 
+  },
+  errText: { 
+    color: '#b91c1c', 
+    fontSize: 13, 
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  loader: { 
+    marginVertical: 16 
+  },
+  empty: { 
+    textAlign: 'center', 
+    color: '#888', 
+    marginTop: 12, 
+    fontSize: 14 
+  },
+  
+  // Card Styles
   card: {
     backgroundColor: '#fff',
-    borderRadius: 16,
-    padding: 14,
-    marginBottom: 12,
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 10,
     borderWidth: 1,
     borderColor: '#ececec',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.04,
+    shadowRadius: 4,
+    elevation: 2,
   },
-  cardTop: { flexDirection: 'row', gap: 12 },
-  avatarCol: {
-    width: 76,
+  cardRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 12,
+  },
+  
+  // Left Column: Avatar + Rating below
+  leftColumn: {
     alignItems: 'center',
-    paddingTop: 2,
+    width: 60,
   },
-  avatarWrap: { position: 'relative' },
-  avatarRing: {
-    borderWidth: 3,
-    borderRadius: 35,
-    width: 70,
-    height: 70,
+  avatarWrapper: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    borderWidth: 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+    position: 'relative',
+  },
+  avatar: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+  },
+  avatarPlaceholder: {
+    backgroundColor: '#f0f0f0',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  avatar: { width: 64, height: 64, borderRadius: 32 },
-  avatarPlaceholder: { backgroundColor: '#eee', alignItems: 'center', justifyContent: 'center' },
-  avatarGlyph: { fontSize: 28 },
+  avatarGlyph: {
+    fontSize: 22,
+  },
   statusDot: {
     position: 'absolute',
     bottom: 2,
     right: 2,
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-    borderWidth: 2,
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    borderWidth: 1.5,
     borderColor: '#fff',
   },
-  cardMain: { flex: 1, minWidth: 0 },
-  cardName: { fontSize: 15, fontWeight: '900', color: '#111' },
-  cardLoc: { fontSize: 12, color: '#666', marginTop: 6 },
-  cardInterests: { fontSize: 11, color: '#888', marginTop: 6, lineHeight: 16 },
-  ratingRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 8 },
-  star: { color: '#fbbf24', fontSize: 14 },
-  ratingText: { fontSize: 12, fontWeight: '700', color: '#444' },
-  langCol: { alignItems: 'flex-end', gap: 4 },
-  miniLang: {
-    backgroundColor: 'rgba(123,44,255,0.08)',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 8,
-  },
-  miniLangText: { fontSize: 10, fontWeight: '800', color: PURPLE },
-  cardBottom: {
+  ratingBelow: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    marginTop: 12,
-    paddingTop: 10,
-    borderTopWidth: 1,
-    borderTopColor: '#f0f0f0',
+    justifyContent: 'center',
+    gap: 3,
+    marginTop: 6,
   },
-  statusPill: { fontSize: 12, fontWeight: '800' },
+  star: {
+    color: '#fbbf24',
+    fontSize: 10,
+  },
+  ratingText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#444',
+  },
+  ratingCount: {
+    fontSize: 9,
+    color: '#888',
+  },
+  
+  // Middle Column: Main Info
+  infoSection: {
+    flex: 1,
+    gap: 6,
+  },
+  cardName: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#111',
+  },
+  cardInterests: {
+    fontSize: 11,
+    color: '#666',
+    lineHeight: 14,
+  },
+  cardLoc: {
+    fontSize: 11,
+    color: '#888',
+    fontWeight: '500',
+    marginTop: 2,
+  },
+  
+  // Right Column: Rate Button + Languages + Status
+  rightColumn: {
+    alignItems: 'flex-end',
+    minWidth: 70,
+    gap: 8,
+  },
   callBtn: {
     backgroundColor: GREEN,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 8,
+    minWidth: 65,
+    alignItems: 'center',
+    shadowColor: GREEN,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 2,
   },
-  callBtnText: { color: '#fff', fontWeight: '900', fontSize: 13 },
+  callBtnText: {
+    color: '#fff',
+    fontWeight: '700',
+    fontSize: 11,
+  },
+  languagesRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    justifyContent: 'flex-end',
+    gap: 4,
+  },
+  miniLang: {
+    backgroundColor: '#f0f0f0',
+    paddingHorizontal: 6,
+    paddingVertical: 3,
+    borderRadius: 5,
+  },
+  miniLangText: {
+    fontSize: 9,
+    fontWeight: '600',
+    color: '#666',
+    textTransform: 'uppercase',
+  },
+  moreLang: {
+    fontSize: 9,
+    color: '#999',
+    fontWeight: '500',
+  },
+  statusPillRight: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 10,
+  },
+  statusTextRight: {
+    fontSize: 10,
+    fontWeight: '600',
+  },
 });

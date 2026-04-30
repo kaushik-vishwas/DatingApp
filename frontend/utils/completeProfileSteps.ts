@@ -9,11 +9,6 @@ export function validateProfileInfo(state: CompleteProfileState): string | null 
   if (state.interests.length === 0) return 'Select at least one interest';
   if (!state.gender) return 'Select your gender';
   if (!state.state.trim()) return 'Select your state';
-  const raw = state.audioCallRate.trim().replace(',', '.');
-  const rate = Number(raw);
-  if (!Number.isFinite(rate) || rate < 1 || rate > 99_999) {
-    return 'Enter a valid audio call rate (₹ per minute, e.g. 3)';
-  }
   return null;
 }
 

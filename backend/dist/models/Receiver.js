@@ -33,7 +33,9 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.RECEIVER_AUDIO_CALL_RATE_INR_PER_MIN = void 0;
 const mongoose_1 = __importStar(require("mongoose"));
+exports.RECEIVER_AUDIO_CALL_RATE_INR_PER_MIN = 5;
 const receiverSchema = new mongoose_1.Schema({
     name: { type: String, required: true, trim: true },
     email: { type: String, required: true, unique: true, lowercase: true, trim: true },
@@ -62,7 +64,7 @@ const receiverSchema = new mongoose_1.Schema({
     age: { type: Number, default: null },
     state: { type: String, default: null, trim: true },
     passwordHash: { type: String, default: null, select: false },
-    audioCallRate: { type: Number, default: null },
+    audioCallRate: { type: Number, default: exports.RECEIVER_AUDIO_CALL_RATE_INR_PER_MIN },
     walletBalance: { type: Number, default: 0 },
     suspended: { type: Boolean, default: false },
     isAvailable: { type: Boolean, default: true },
@@ -73,6 +75,11 @@ const receiverSchema = new mongoose_1.Schema({
     pendingBankAccountNumber: { type: String, default: null },
     pendingBankIfsc: { type: String, default: null },
     pendingBankName: { type: String, default: null },
+    cumulativeScore: { type: Number, default: 0, min: 0 },
+    cumulativeValidCallMinutes: { type: Number, default: 0, min: 0 },
+    badgeLevel: { type: String, enum: ['platinum', 'diamond', 'supreme'], default: 'platinum' },
+    earningRatePerMinute: { type: Number, default: 2.0, min: 0 },
+    onlineSince: { type: Date, default: null },
 }, { timestamps: true });
 const Receiver = mongoose_1.default.model('Receiver', receiverSchema);
 exports.default = Receiver;

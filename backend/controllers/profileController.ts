@@ -2,7 +2,10 @@ import type { Request, Response } from 'express';
 import crypto from 'crypto';
 import mongoose from 'mongoose';
 import User, { type Gender, type UserDocument } from '../models/User';
-import Receiver, { type ReceiverDocument } from '../models/Receiver';
+import Receiver, {
+  RECEIVER_AUDIO_CALL_RATE_INR_PER_MIN,
+  type ReceiverDocument,
+} from '../models/Receiver';
 import ChatMessage from '../models/ChatMessage';
 import WithdrawalRequest from '../models/WithdrawalRequest';
 import CallSession from '../models/CallSession';
@@ -41,7 +44,6 @@ type CompleteProfileBody = {
   bankAccountNumber: string;
   bankIfsc: string;
   bankName: string;
-  audioCallRate: number;
 };
 
 type CompleteCallerBody = {
@@ -145,7 +147,6 @@ export const completeProfile = async (
       bankAccountNumber,
       bankIfsc,
       bankName,
-      audioCallRate,
     } = req.body;
 
     if (!name || !String(name).trim()) {
@@ -211,12 +212,6 @@ export const completeProfile = async (
       res.status(400).json({ message: 'bankName is required' });
       return;
     }
-    const rateNum = Number(audioCallRate);
-    if (!Number.isFinite(rateNum) || rateNum < 1 || rateNum > 99_999) {
-      res.status(400).json({ message: 'audioCallRate must be a number between 1 and 99999 (INR per minute)' });
-      return;
-    }
-
     const receiver = await Receiver.findById(authReceiver._id);
     if (!receiver) {
       res.status(404).json({ message: 'Receiver not found' });
@@ -249,7 +244,7 @@ export const completeProfile = async (
     receiver.bankAccountNumber = String(bankAccountNumber).trim();
     receiver.bankIfsc = String(bankIfsc).trim().toUpperCase();
     receiver.bankName = String(bankName).trim();
-    receiver.audioCallRate = Math.round(rateNum * 100) / 100;
+    receiver.audioCallRate = RECEIVER_AUDIO_CALL_RATE_INR_PER_MIN;
     receiver.accountStatus = 'pending_review';
 
     await receiver.save();
@@ -929,6 +924,9 @@ export const getReceiverCallInsights = async (
 
     const rid = new mongoose.Types.ObjectId(String(req.receiver!._id));
     const range = String(req.query.range ?? 'all').toLowerCase();
+    const receiverMeta = await Receiver.findById(rid).select('cumulativeScore').lean<{
+      cumulativeScore?: number;
+    } | null>();
 
     const now = new Date();
     const weekStart = new Date(now);
@@ -1073,6 +1071,10 @@ export const getReceiverCallInsights = async (
       receiverRatingAvg:
         ratingSummary && Number.isFinite(ratingSummary.avg) ? roundInr(ratingSummary.avg) : 0,
       receiverRatingCount: ratingSummary?.count ?? 0,
+      totalScore:
+        typeof receiverMeta?.cumulativeScore === 'number' && Number.isFinite(receiverMeta.cumulativeScore)
+          ? roundInr(receiverMeta.cumulativeScore)
+          : 0,
     });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -1280,14 +1282,7 @@ export const updateReceiverProfile = async (
     if (Array.isArray(req.body.interests)) {
       receiver.interests = req.body.interests.map((x) => String(x).trim()).filter(Boolean);
     }
-    if (typeof req.body.audioCallRate === 'number' && Number.isFinite(req.body.audioCallRate)) {
-      const n = Math.round(req.body.audioCallRate * 100) / 100;
-      if (n < 1 || n > 99_999) {
-        res.status(400).json({ message: 'audioCallRate must be between 1 and 99999 INR/min' });
-        return;
-      }
-      receiver.audioCallRate = n;
-    }
+    receiver.audioCallRate = RECEIVER_AUDIO_CALL_RATE_INR_PER_MIN;
     if (typeof req.body.isAvailable === 'boolean') {
       receiver.isAvailable = req.body.isAvailable;
     }

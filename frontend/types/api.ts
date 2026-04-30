@@ -172,6 +172,7 @@ export interface ReceiverCallInsightsResponse {
   callerHistory: ReceiverCallerHistoryRow[];
   receiverRatingAvg: number;
   receiverRatingCount: number;
+  totalScore: number;
 }
 
 export type ReceiverNotifyCandidateRow = {
@@ -317,8 +318,6 @@ export interface CompleteProfilePayload {
   bankAccountNumber: string;
   bankIfsc: string;
   bankName: string;
-  /** INR per minute */
-  audioCallRate: number;
 }
 
 export interface CompleteProfileResponse {

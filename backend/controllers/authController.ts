@@ -2,7 +2,7 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import type { Response, Request } from 'express';
 import User, { type UserDocument } from '../models/User';
-import Receiver, { type ReceiverDocument } from '../models/Receiver';
+import Receiver, { RECEIVER_AUDIO_CALL_RATE_INR_PER_MIN, type ReceiverDocument } from '../models/Receiver';
 import { sendOtpEmail } from '../config/email';
 import {
   calculateAgeFromBirthDateUtc,
@@ -162,8 +162,7 @@ export function toApiReceiver(receiver: ReceiverDocument): SafeUser {
     suspended: Boolean(r.suspended),
     walletBalance:
       typeof r.walletBalance === 'number' && Number.isFinite(r.walletBalance) ? r.walletBalance : 0,
-    audioCallRate:
-      typeof r.audioCallRate === 'number' && Number.isFinite(r.audioCallRate) ? r.audioCallRate : null,
+    audioCallRate: RECEIVER_AUDIO_CALL_RATE_INR_PER_MIN,
     userAudio: null,
     isAvailable: Boolean(r.isAvailable),
     isOnline: Boolean(r.isOnline),
@@ -256,6 +255,7 @@ export const register = async (
       passwordHash,
       dateOfBirth: dob,
       age,
+      audioCallRate: RECEIVER_AUDIO_CALL_RATE_INR_PER_MIN,
     });
     res.status(201).json({
       message: 'User registered successfully',

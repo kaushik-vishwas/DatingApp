@@ -2,7 +2,7 @@ import type { Request, Response } from 'express';
 import mongoose from 'mongoose';
 import ChatBlock from '../models/ChatBlock';
 import User from '../models/User';
-import Receiver from '../models/Receiver';
+import Receiver, { RECEIVER_AUDIO_CALL_RATE_INR_PER_MIN } from '../models/Receiver';
 import CallSession from '../models/CallSession';
 import ReceiverRating from '../models/ReceiverRating';
 import {
@@ -11,6 +11,7 @@ import {
   getStreamApiKey,
   toStreamUserId,
 } from '../utils/streamVoice';
+import { recordReceiverCallScore } from '../services/receiverScore';
 import { pickRandomQueuedReceiverForCaller } from '../services/callQueue';
 import { isReceiverBusy, releaseReceiverReservation, syncReceiverQueueState } from '../services/callQueue';
 
@@ -29,6 +30,9 @@ type SettledCallSnapshot = {
   settledAmountInr: number;
   status: 'ongoing' | 'completed';
   receiverId: string;
+  callerId: string;
+  startedAt: Date;
+  justCompleted: boolean;
 };
 
 async function settleCallSession(
@@ -48,6 +52,9 @@ async function settleCallSession(
           settledAmountInr: roundInr(call.settledAmountInr || 0),
           status: 'completed',
           receiverId: String(call.receiverId),
+          callerId: String(call.callerId),
+          startedAt: call.startedAt,
+          justCompleted: false,
         };
         return;
       }
@@ -62,7 +69,7 @@ async function settleCallSession(
       if (dueAmount > 0) {
         const [callerDoc, receiverDoc] = await Promise.all([
           User.findById(call.callerId).select('walletBalance').session(dbSession),
-          Receiver.findById(call.receiverId).select('walletBalance').session(dbSession),
+          Receiver.findById(call.receiverId).select('_id').session(dbSession),
         ]);
         if (!callerDoc || !receiverDoc) {
           throw new Error('Call participant account not found');
@@ -75,12 +82,7 @@ async function settleCallSession(
         settledNow = roundInr(Math.min(dueAmount, callerBalance));
         if (settledNow > 0) {
           callerDoc.walletBalance = roundInr(callerBalance - settledNow);
-          receiverDoc.walletBalance = roundInr(
-            (typeof receiverDoc.walletBalance === 'number' && Number.isFinite(receiverDoc.walletBalance)
-              ? receiverDoc.walletBalance
-              : 0) + settledNow
-          );
-          await Promise.all([callerDoc.save({ session: dbSession }), receiverDoc.save({ session: dbSession })]);
+          await callerDoc.save({ session: dbSession });
         }
       }
 
@@ -98,6 +100,9 @@ async function settleCallSession(
         settledAmountInr: nextSettled,
         status: complete ? 'completed' : 'ongoing',
         receiverId: String(call.receiverId),
+        callerId: String(call.callerId),
+        startedAt: call.startedAt,
+        justCompleted: complete,
       };
     });
   } finally {
@@ -207,10 +212,7 @@ export const getVoiceBootstrap = async (req: Request, res: Response): Promise<vo
     streamUserId: meStreamUserId,
     peerStreamUserId,
     peerAccountId: peerId,
-    receiverRatePerMinute:
-      typeof receiverDoc.audioCallRate === 'number' && Number.isFinite(receiverDoc.audioCallRate)
-        ? Math.max(0, receiverDoc.audioCallRate)
-        : 0,
+    receiverRatePerMinute: RECEIVER_AUDIO_CALL_RATE_INR_PER_MIN,
     callType: 'default',
     callId,
   });
@@ -247,10 +249,7 @@ export const startVoiceSession = async (
       res.status(404).json({ message: 'Receiver not found' });
       return;
     }
-    const ratePerMinute =
-      typeof receiver.audioCallRate === 'number' && Number.isFinite(receiver.audioCallRate)
-        ? Math.max(0, receiver.audioCallRate)
-        : 0;
+    const ratePerMinute = RECEIVER_AUDIO_CALL_RATE_INR_PER_MIN;
 
     await CallSession.findOneAndUpdate(
       { callId },
@@ -306,6 +305,18 @@ export const endVoiceSession = async (
     }
 
     const settled = await settleCallSession(callId, true);
+    if (settled.justCompleted) {
+      void recordReceiverCallScore({
+        callId,
+        receiverId: settled.receiverId,
+        callerId: settled.callerId,
+        startedAt: settled.startedAt,
+        durationSec: settled.durationSec,
+      }).catch((e: unknown) => {
+        const msg = e instanceof Error ? e.message : String(e);
+        console.error('receiver call score record error:', msg);
+      });
+    }
 
     res.status(200).json({
       ok: true,
