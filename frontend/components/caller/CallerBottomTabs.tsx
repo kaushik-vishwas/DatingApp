@@ -7,6 +7,10 @@ import type { CallerStackParamList } from '../../navigation/CallerStackParamList
 import { useChatInbox } from '../../context/ChatInboxContext';
 
 const PURPLE = '#7b2cff';
+export const CALLER_TAB_BAR_HEIGHT = 62;
+const TAB_BAR_BOTTOM_COVER = 0;
+export const getCallerTabBarContentPadding = (bottomInset: number): number =>
+  CALLER_TAB_BAR_HEIGHT + Math.max(bottomInset, 0) + TAB_BAR_BOTTOM_COVER;
 
 export type CallerTabId = 'home' | 'calls' | 'alerts' | 'profile';
 
@@ -24,6 +28,7 @@ type Props = {
 export default function CallerBottomTabs({ active, navigation }: Props): React.JSX.Element {
   const insets = useSafeAreaInsets();
   const { totalUnread } = useChatInbox();
+  const bottomInset = Math.max(insets.bottom, 0);
   const tab = (
     id: CallerTabId,
     icon: string,
@@ -48,7 +53,16 @@ export default function CallerBottomTabs({ active, navigation }: Props): React.J
   };
 
   return (
-    <View style={[styles.wrap, { paddingBottom: Math.max(insets.bottom, 10) }]}>
+    <View
+      style={[
+        styles.wrap,
+        {
+          bottom: -TAB_BAR_BOTTOM_COVER,
+          height: CALLER_TAB_BAR_HEIGHT + bottomInset + TAB_BAR_BOTTOM_COVER,
+          paddingBottom: bottomInset + TAB_BAR_BOTTOM_COVER,
+        },
+      ]}
+    >
       <View style={styles.inner}>
         {tab('home', '⌂', 'Home', () => navigation.navigate('CallerDiscover'))}
         {tab('calls', '📞', 'Calls', () => navigation.navigate('CallerCalls'))}
@@ -68,19 +82,35 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
     borderTopWidth: 1,
     borderTopColor: '#eee',
+    zIndex: 50,
+    elevation: 20,
+    overflow: 'hidden',
   },
   inner: {
     flexDirection: 'row',
     justifyContent: 'space-around',
     alignItems: 'center',
-    paddingTop: 10,
-    paddingBottom: 4,
+    height: CALLER_TAB_BAR_HEIGHT,
     paddingHorizontal: 8,
+    backgroundColor: '#fff',
   },
-  tabItem: { alignItems: 'center', minWidth: 56 },
-  tabIcon: { fontSize: 20, marginBottom: 2, opacity: 0.45 },
+  tabItem: {
+    flexDirection: 'column',
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 44,
+  },
+  tabIcon: {
+    fontSize: 20,
+    lineHeight: 20,
+    marginBottom: 3,
+    opacity: 0.45,
+    textAlign: 'center',
+    includeFontPadding: false,
+  },
   tabIconActive: { opacity: 1, color: PURPLE },
-  tabLbl: { fontSize: 10, fontWeight: '700', color: '#888' },
+  tabLbl: { fontSize: 10, lineHeight: 12, fontWeight: '700', color: '#888' },
   tabLblActive: { color: PURPLE },
   badge: {
     position: 'absolute',

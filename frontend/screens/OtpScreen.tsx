@@ -86,7 +86,7 @@ export default function OtpScreen({ navigation, route }: Props) {
     <View style={styles.bg}>
       <KeyboardAvoidingView
         style={styles.card}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       >
         {navigation.canGoBack() ? (
           <TouchableOpacity style={styles.backRow} onPress={() => navigation.goBack()}>

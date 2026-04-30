@@ -20,6 +20,10 @@ import { useChatInbox } from '../context/ChatInboxContext';
 import type { ReceiverStackParamList } from '../navigation/ReceiverStackParamList';
 import { getErrorMessage, profileApi } from '../services/api';
 import type { ReceiverCallInsightsResponse, ReceiverWalletSummaryResponse } from '../types/api';
+import SelectoLogo from '../assets/SelectoLogo.png';
+
+const PURPLE = '#7b2cff';
+const PINK = '#ff72d2';
 
 function formatInr(n: number): string {
   const v = Math.round(n * 100) / 100;
@@ -98,8 +102,8 @@ export default function ReceiverHomeDashboard(): React.JSX.Element {
     }
   };
 
-  const onMessageCaller = (callerId: string, callerName: string) => {
-    navigation.navigate('ReceiverChat', { userId: callerId, userName: callerName, userImage: null });
+  const onMessageCaller = (callerId: string, callerName: string, callerImage?: string | null) => {
+    navigation.navigate('ReceiverChat', { userId: callerId, userName: callerName, userImage: callerImage ?? null });
   };
 
   if (!user) {
@@ -110,6 +114,10 @@ export default function ReceiverHomeDashboard(): React.JSX.Element {
     );
   }
 
+  const wallet = typeof walletSummary?.walletBalance === 'number' && Number.isFinite(walletSummary.walletBalance) 
+    ? walletSummary.walletBalance 
+    : 0;
+
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'left', 'right']}>
       <ScrollView
@@ -117,131 +125,78 @@ export default function ReceiverHomeDashboard(): React.JSX.Element {
         contentContainerStyle={styles.content}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
       >
-      <View style={styles.headerRow}>
-        <Text style={styles.pageTitle}>Dashboard</Text>
-        <View style={styles.headerIcons}>
-          <View style={styles.scoreChip}>
-            <Text style={styles.scoreChipLabel}>Score</Text>
-            <Text style={styles.scoreChipValue}>
-              {Math.round(callInsights?.totalScore ?? 0).toLocaleString('en-IN')}
-            </Text>
+        {/* Enhanced Top Section */}
+        <View style={styles.topSection}>
+          <View style={styles.topBar}>
+            <Image 
+              source={SelectoLogo} 
+              style={styles.brandLogo}
+              resizeMode="contain"
+            />
+            <View style={styles.topRight}>
+              {/* Score Capsule - Purple/Pink border, no bell border */}
+              <TouchableOpacity
+                style={styles.scoreCapsule}
+                onPress={() => navigation.navigate('WithdrawEarnings')}
+                activeOpacity={0.85}
+              >
+                <View style={styles.scoreContainer}>
+                  <Text style={styles.scoreIco}>🏆</Text>
+                  <Text style={styles.scoreText}>
+                    {Math.round(callInsights?.totalScore ?? 0).toLocaleString('en-IN')}
+                  </Text>
+                </View>
+              </TouchableOpacity>
+              
+              {/* Bell Icon - No outer border */}
+              <TouchableOpacity
+                style={styles.bellButton}
+                onPress={() => navigation.navigate('ReceiverNotifications')}
+                activeOpacity={0.85}
+              >
+                <Text style={styles.bellIcon}>🔔</Text>
+              </TouchableOpacity>
+              
+              {/* Avatar Capsule - Purple/Pink border */}
+              {user?.profileImage ? (
+                <View style={styles.avatarCapsule}>
+                  <Image source={{ uri: user.profileImage }} style={styles.meAvatar} />
+                </View>
+              ) : (
+                <View style={styles.avatarCapsule}>
+                  <View style={styles.avatarContainer}>
+                    <Text style={styles.meAvatarTxt}>{user?.name?.charAt(0) ?? '?'}</Text>
+                  </View>
+                </View>
+              )}
+            </View>
           </View>
-          <TouchableOpacity
-            style={styles.iconBtn}
-            onPress={() => navigation.navigate('ReceiverNotifications')}
-          >
-            <Text style={styles.iconText}>🔔</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.headerProfileBtn}
-            onPress={() => navigation.navigate('ReceiverSettings')}
-            activeOpacity={0.85}
-          >
-            {user?.profileImage ? (
-              <Image source={{ uri: user.profileImage }} style={styles.headerProfileImg} />
-            ) : (
-              <View style={styles.headerProfilePh}>
-                <Text style={styles.headerProfileTxt}>{user?.name?.charAt(0) ?? '?'}</Text>
-              </View>
-            )}
-          </TouchableOpacity>
         </View>
-      </View>
 
-      {user ? (
-        <>
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Public Preview</Text>
-            <View style={styles.publicCard}>
-              <View style={styles.publicCardRow}>
-                <View style={styles.publicLeftColumn}>
-                  <View
-                    style={[
-                      styles.publicAvatarWrapper,
-                      {
-                        borderColor: !Boolean(user.isOnline)
-                          ? '#dc2626'
-                          : available
-                            ? '#22c55e'
-                            : '#f59e0b',
-                      },
-                    ]}
-                  >
-                    {user.profileImage ? (
-                      <Image source={{ uri: user.profileImage }} style={styles.publicAvatar} />
-                    ) : (
-                      <View style={[styles.publicAvatar, styles.publicAvatarPlaceholder]}>
-                        <Text style={styles.publicAvatarGlyph}>👤</Text>
-                      </View>
-                    )}
+        {/* Highlighted Card - Ready to Earn */}
+        <TouchableOpacity
+          style={styles.highlightedCard}
+          activeOpacity={0.9}
+          onPress={() => navigation.navigate('ReceiverQueue')}
+        >
+          <Text style={styles.highlightedTitle}>Ready to Earn!</Text>
+          <View style={styles.highlightedBtn}>
+            <Text style={styles.highlightedBtnText}>Go Online →</Text>
+          </View>
+        </TouchableOpacity>
+
+        {user ? (
+          <>
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>Public Preview</Text>
+              <View style={styles.publicCard}>
+                <View style={styles.publicCardRow}>
+                  <View style={styles.publicLeftColumn}>
                     <View
                       style={[
-                        styles.publicStatusDot,
+                        styles.publicAvatarWrapper,
                         {
-                          backgroundColor: !Boolean(user.isOnline)
-                            ? '#dc2626'
-                            : available
-                              ? '#22c55e'
-                              : '#f59e0b',
-                        },
-                      ]}
-                    />
-                  </View>
-                  <View style={styles.publicRatingBelow}>
-                    <Text style={styles.publicStar}>★</Text>
-                    <Text style={styles.publicRatingText}>{callInsights?.receiverRatingAvg ?? 0}</Text>
-                    <Text style={styles.publicRatingCount}>({callInsights?.receiverRatingCount ?? 0})</Text>
-                  </View>
-                </View>
-                <View style={styles.publicInfoSection}>
-                  <Text style={styles.publicCardName} numberOfLines={1}>
-                    {user.name}
-                    {user.age != null ? `, ${user.age}` : ''}
-                  </Text>
-                  <Text style={styles.publicCardInterests} numberOfLines={1}>
-                    {(user.interests ?? []).length > 0
-                      ? user.interests.slice(0, 3).join(' • ')
-                      : '—'}
-                  </Text>
-                  <Text style={styles.publicCardLoc} numberOfLines={1}>
-                    {user.state?.trim() || '—'}
-                  </Text>
-                </View>
-                <View style={styles.publicRightColumn}>
-                  <View style={styles.publicRateBtn}>
-                    <Text style={styles.publicRateBtnText}>
-                      {typeof user.audioCallRate === 'number' && Number.isFinite(user.audioCallRate)
-                        ? `₹${user.audioCallRate}/min`
-                        : '₹5/min'}
-                    </Text>
-                  </View>
-                  <View style={styles.publicLanguagesRow}>
-                    {(user.languages ?? []).slice(0, 2).map((lang) => (
-                      <View key={lang} style={styles.publicMiniLang}>
-                        <Text style={styles.publicMiniLangText}>{lang.substring(0, 3)}</Text>
-                      </View>
-                    ))}
-                    {(user.languages ?? []).length > 2 ? (
-                      <Text style={styles.publicMoreLang}>+{(user.languages ?? []).length - 2}</Text>
-                    ) : null}
-                  </View>
-                  <View
-                    style={[
-                      styles.publicStatusPillRight,
-                      {
-                        backgroundColor: !Boolean(user.isOnline)
-                          ? '#dc262615'
-                          : available
-                            ? '#22c55e15'
-                            : '#f59e0b15',
-                      },
-                    ]}
-                  >
-                    <Text
-                      style={[
-                        styles.publicStatusTextRight,
-                        {
-                          color: !Boolean(user.isOnline)
+                          borderColor: !Boolean(user.isOnline)
                             ? '#dc2626'
                             : available
                               ? '#22c55e'
@@ -249,159 +204,234 @@ export default function ReceiverHomeDashboard(): React.JSX.Element {
                         },
                       ]}
                     >
-                      {!Boolean(user.isOnline) ? 'Offline' : available ? 'Available' : 'Busy'}
+                      {user.profileImage ? (
+                        <Image source={{ uri: user.profileImage }} style={styles.publicAvatar} />
+                      ) : (
+                        <View style={[styles.publicAvatar, styles.publicAvatarPlaceholder]}>
+                          <Text style={styles.publicAvatarGlyph}>👤</Text>
+                        </View>
+                      )}
+                      <View
+                        style={[
+                          styles.publicStatusDot,
+                          {
+                            backgroundColor: !Boolean(user.isOnline)
+                              ? '#dc2626'
+                              : available
+                                ? '#22c55e'
+                                : '#f59e0b',
+                          },
+                        ]}
+                      />
+                    </View>
+                    <View style={styles.publicRatingBelow}>
+                      <Text style={styles.publicStar}>★</Text>
+                      <Text style={styles.publicRatingText}>{callInsights?.receiverRatingAvg ?? 0}</Text>
+                      <Text style={styles.publicRatingCount}>({callInsights?.receiverRatingCount ?? 0})</Text>
+                    </View>
+                  </View>
+                  <View style={styles.publicInfoSection}>
+                    <Text style={styles.publicCardName} numberOfLines={1}>
+                      {user.name}
+                      {user.age != null ? `, ${user.age}` : ''}
                     </Text>
+                    <Text style={styles.publicCardInterests} numberOfLines={1}>
+                      {(user.interests ?? []).length > 0
+                        ? user.interests.slice(0, 3).join(' • ')
+                        : '—'}
+                    </Text>
+                    <Text style={styles.publicCardLoc} numberOfLines={1}>
+                      {user.state?.trim() || '—'}
+                    </Text>
+                  </View>
+                  <View style={styles.publicRightColumn}>
+                    <View style={styles.publicRateBtn}>
+                      <Text style={styles.publicRateBtnText}>
+                        {typeof user.audioCallRate === 'number' && Number.isFinite(user.audioCallRate)
+                          ? `₹${user.audioCallRate}/min`
+                          : '₹5/min'}
+                      </Text>
+                    </View>
+                    <View style={styles.publicLanguagesRow}>
+                      {(user.languages ?? []).slice(0, 2).map((lang) => (
+                        <View key={lang} style={styles.publicMiniLang}>
+                          <Text style={styles.publicMiniLangText}>{lang.substring(0, 3)}</Text>
+                        </View>
+                      ))}
+                      {(user.languages ?? []).length > 2 ? (
+                        <Text style={styles.publicMoreLang}>+{(user.languages ?? []).length - 2}</Text>
+                      ) : null}
+                    </View>
+                    <View
+                      style={[
+                        styles.publicStatusPillRight,
+                        {
+                          backgroundColor: !Boolean(user.isOnline)
+                            ? '#dc262615'
+                            : available
+                              ? '#22c55e15'
+                              : '#f59e0b15',
+                        },
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.publicStatusTextRight,
+                          {
+                            color: !Boolean(user.isOnline)
+                              ? '#dc2626'
+                              : available
+                                ? '#22c55e'
+                                : '#f59e0b',
+                          },
+                        ]}
+                      >
+                        {!Boolean(user.isOnline) ? 'Offline' : available ? 'Available' : 'Busy'}
+                      </Text>
+                    </View>
                   </View>
                 </View>
               </View>
             </View>
-          </View>
 
-          <View style={styles.availabilityCard}>
-            <View style={styles.availabilityLeft}>
-              <View style={styles.availabilityIcon} />
-              <View>
-                <Text style={styles.availabilityTitle}>Availability Status</Text>
-                <Text style={styles.availabilitySub}>
-                  {available && Boolean(user.isOnline)
-                    ? "You're online"
-                    : available
-                      ? 'Going online...'
-                      : 'You are Offline'}
+            {/* Availability Status with Power Icon */}
+            <View style={styles.availabilityCard}>
+              <View style={styles.availabilityLeft}>
+                <View style={styles.powerIconWrap}>
+                  <Text style={styles.powerIcon}>⏻</Text>
+                </View>
+                <View>
+                  <Text style={styles.availabilityTitle}>Availability Status</Text>
+                  <Text style={[styles.availabilitySub, { color: available && Boolean(user.isOnline) ? '#22c55e' : '#ef4444' }]}>
+                    {available && Boolean(user.isOnline) 
+                      ? 'You are available' 
+                      : available && !Boolean(user.isOnline)
+                        ? '⏳'
+                        : 'You are not available'}
+                  </Text>
+                </View>
+              </View>
+              <Switch
+                value={available}
+                onValueChange={(next) => void onToggleAvailability(next)}
+                trackColor={{ false: '#e5e5e5', true: 'rgba(123,44,255,0.35)' }}
+                thumbColor={available ? PURPLE : '#bdbdbd'}
+              />
+            </View>
+
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>Earnings Summary</Text>
+              {summaryError ? <Text style={styles.summaryErr}>{summaryError}</Text> : null}
+
+              <View style={styles.earningsMainCard}>
+                <View style={styles.earningsHeader}>
+                  <Text style={styles.earningsSubtitle}>Total Earnings</Text>
+                  <View style={styles.earningsIconWrap}>
+                    <Text style={styles.earningsIcon}>💰</Text>
+                  </View>
+                </View>
+                <Text style={styles.earningsAmount}>
+                  {walletSummary ? formatInr(walletSummary.walletBalance) : '…'}
+                </Text>
+                <Text style={styles.earningsPeriod}>
+                  Lifetime earnings from all calls
                 </Text>
               </View>
-            </View>
-            <Switch
-              value={available}
-              onValueChange={(next) => void onToggleAvailability(next)}
-              trackColor={{ false: '#e5e5e5', true: 'rgba(123,44,255,0.35)' }}
-              thumbColor={available ? '#7b2cff' : '#bdbdbd'}
-            />
-          </View>
 
-          <TouchableOpacity
-            style={styles.goOnlineCard}
-            activeOpacity={0.9}
-            onPress={() => navigation.navigate('ReceiverQueue')}
-          >
-            <View style={styles.goOnlineLeft}>
-              <View style={styles.goOnlinePowerWrap}>
-                <Text style={styles.goOnlinePowerIcon}>⏻</Text>
-              </View>
-              <View>
-                <Text style={styles.goOnlineTitle}>Go Online</Text>
-                {/* <Text style={styles.goOnlineSub}>Open waiting queue and receive callers instantly</Text> */}
+              <View style={styles.smallEarningsRow}>
+                <View style={styles.smallEarningsCard}>
+                  <Text style={styles.smallEarningsLabel}>Today</Text>
+                  <Text style={styles.smallEarningsText}>
+                    {walletSummary ? formatInr(walletSummary.chatToday) : '₹0'}
+                  </Text>
+                </View>
+                <View style={styles.smallEarningsCard}>
+                  <Text style={styles.smallEarningsLabel}>This Week</Text>
+                  <Text style={[styles.smallEarningsText, { color: '#2563eb' }]}>
+                    {walletSummary ? formatInr(walletSummary.chatThisMonth) : '₹0'}
+                  </Text>
+                </View>
               </View>
             </View>
-            <Text style={styles.goOnlineArrow}>→</Text>
-          </TouchableOpacity>
 
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Earnings Summary</Text>
-            {summaryError ? <Text style={styles.summaryErr}>{summaryError}</Text> : null}
-
-            <View style={styles.earningsMainCard}>
-              <View style={styles.earningsHeader}>
-                <Text style={styles.earningsSubtitle}>Total Earnings</Text>
-                <View style={styles.earningsTrend} />
+            <View style={styles.section}>
+              <View style={styles.sectionHeaderRow}>
+                <Text style={styles.sectionTitle}>Recent Calls</Text>
+                <TouchableOpacity onPress={() => navigation.navigate('ReceiverCallHistory')}>
+                  <Text style={styles.viewAll}>View all</Text>
+                </TouchableOpacity>
               </View>
-              <Text style={styles.earningsAmount}>
-                {walletSummary ? formatInr(walletSummary.walletBalance) : '…'}
-              </Text>
-              <Text style={styles.earningsPeriod}>
-                Lifetime earnings from all calls
-              </Text>
+
+              {callInsights && callInsights.recentCalls.length === 0 ? (
+                <Text style={styles.emptyRecent}>No voice calls yet.</Text>
+              ) : null}
+              {(callInsights?.recentCalls ?? []).slice(0, 4).map((row) => (
+                <CallRow
+                  key={row.id}
+                  callerId={row.callerId}
+                  title={row.callerName}
+                  subtitle={`${Math.max(1, Math.round(row.durationSec / 60))} min`}
+                  callerImage={row.callerImage}
+                  onMessage={onMessageCaller}
+                />
+              ))}
             </View>
 
-            <View style={styles.smallEarningsRow}>
-              <View style={styles.smallEarningsCard}>
-                <Text style={styles.smallEarningsLabel}>Today</Text>
-                <Text style={styles.smallEarningsText}>
-                  {walletSummary ? formatInr(walletSummary.chatToday) : '₹0'}
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>Quick Actions</Text>
+              <View style={styles.quickActionsCol}>
+                <QuickAction
+                  label="View Profile"
+                  sublabel="Click to see your Profile"
+                  icon="👤"
+                  onPress={() => navigation.navigate('ReceiverProfilePreview')}
+                />
+                <QuickAction
+                  label="Withdraw Earnings"
+                  sublabel="Transfer money to your bank account"
+                  icon="💸"
+                  onPress={() => navigation.navigate('WithdrawEarnings')}
+                />
+                <QuickAction
+                  label="View Call History"
+                  sublabel="See all your past calls and earnings"
+                  icon="📞"
+                  onPress={() => navigation.navigate('ReceiverCallHistory')}
+                />
+                <QuickAction
+                  label="Messages"
+                  sublabel="Open your chats"
+                  icon="💬"
+                  badgeCount={totalUnread}
+                  onPress={() => navigation.navigate('ReceiverChats')}
+                />
+              </View>
+            </View>
+
+            <View style={styles.section}>
+              <View style={styles.sectionHeaderRow}>
+                <Text style={styles.sectionTitle}>Leader Board</Text>
+              </View>
+              <View style={styles.leaderBoardCard}>
+                <Text style={styles.leaderMinutesBig}>
+                  {callInsights ? Math.round(callInsights.leaderboard.totalMinutes) : 0}
+                  <Text style={styles.leaderMinutesUnit}> Minutes</Text>
                 </Text>
               </View>
-              <View style={styles.smallEarningsCard}>
-                <Text style={styles.smallEarningsLabel}>This Week</Text>
-                <Text style={[styles.smallEarningsText, { color: '#2563eb' }]}>
-                  {walletSummary ? formatInr(walletSummary.chatThisMonth) : '₹0'}
+              <View style={styles.leaderBoardCardPurple}>
+                <Text style={styles.leaderMinutesBig}>
+                  {callInsights ? Math.round(callInsights.leaderboard.thisMonthMinutes) : 0}
+                  <Text style={styles.leaderMinutesUnit}> Minutes</Text>
                 </Text>
+                <View style={styles.progressTrack}>
+                  <View style={styles.progressFill} />
+                </View>
               </View>
             </View>
-          </View>
-
-          <View style={styles.section}>
-            <View style={styles.sectionHeaderRow}>
-              <Text style={styles.sectionTitle}>Recent Calls</Text>
-              <TouchableOpacity onPress={() => navigation.navigate('ReceiverCallHistory')}>
-                <Text style={styles.viewAll}>View all</Text>
-              </TouchableOpacity>
-            </View>
-
-            {callInsights && callInsights.recentCalls.length === 0 ? (
-              <Text style={styles.emptyRecent}>No voice calls yet.</Text>
-            ) : null}
-            {(callInsights?.recentCalls ?? []).slice(0, 4).map((row) => (
-              <CallRow
-                key={row.id}
-                callerId={row.callerId}
-                title={row.callerName}
-                subtitle={`${Math.max(1, Math.round(row.durationSec / 60))} min`}
-                onMessage={onMessageCaller}
-              />
-            ))}
-          </View>
-
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Quick Actions</Text>
-            <View style={styles.quickActionsCol}>
-              <QuickAction
-                label="View Profile"
-                sublabel="Click to see your Profile"
-                onPress={() => navigation.navigate('ReceiverProfilePreview')}
-              />
-              <QuickAction
-                label="Withdraw Earnings"
-                sublabel="Transfer money to your bank account"
-                onPress={() => navigation.navigate('WithdrawEarnings')}
-              />
-              <QuickAction
-                label="View Call History"
-                sublabel="See all your past calls and earnings"
-                onPress={() => navigation.navigate('ReceiverCallHistory')}
-              />
-              <QuickAction
-                label="Messages"
-                sublabel="Open your chats"
-                badgeCount={totalUnread}
-                onPress={() => navigation.navigate('ReceiverChats')}
-              />
-            </View>
-          </View>
-
-          <View style={styles.section}>
-            <View style={styles.sectionHeaderRow}>
-              <Text style={styles.sectionTitle}>Leader Board</Text>
-            </View>
-            <View style={styles.leaderBoardCard}>
-              <Text style={styles.leaderMinutesBig}>
-                {callInsights ? Math.round(callInsights.leaderboard.totalMinutes) : 0}
-                <Text style={styles.leaderMinutesUnit}> Minutes</Text>
-              </Text>
-            </View>
-            <View style={styles.leaderBoardCardPurple}>
-              <Text style={styles.leaderMinutesBig}>
-                {callInsights ? Math.round(callInsights.leaderboard.thisMonthMinutes) : 0}
-                <Text style={styles.leaderMinutesUnit}> Minutes</Text>
-              </Text>
-              <View style={styles.progressTrack}>
-                <View style={styles.progressFill} />
-              </View>
-            </View>
-          </View>
-        </>
-      ) : (
-        <Text style={styles.muted}>Could not load profile.</Text>
-      )}
+          </>
+        ) : (
+          <Text style={styles.muted}>Could not load profile.</Text>
+        )}
 
       </ScrollView>
     </SafeAreaView>
@@ -409,131 +439,161 @@ export default function ReceiverHomeDashboard(): React.JSX.Element {
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: '#f8f8f8' },
+  safe: { flex: 1, backgroundColor: '#f6f6f7' },
   scroll: {
     flex: 1,
-    backgroundColor: '#f8f8f8',
+    backgroundColor: '#f6f6f7',
   },
   content: {
-    paddingHorizontal: 14,
-    paddingTop: 14,
     paddingBottom: 48,
   },
   centered: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  pageTitle: {
+  
+  // Enhanced Top Section Styles
+  topSection: {
+    marginBottom: 20,
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    paddingBottom: 20,
+    backgroundColor: '#fff',
+    borderBottomLeftRadius: 24,
+    borderBottomRightRadius: 24,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.08,
+    shadowRadius: 12,
+    elevation: 8,
+  },
+  topBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  brandLogo: {
+    width: 140,
+    height: 50,
+  },
+  topRight: { 
+    flexDirection: 'row', 
+    alignItems: 'center', 
+    gap: 12 
+  },
+  
+  // Score Capsule - Purple/Pink border
+  scoreCapsule: {
+    borderRadius: 40,
+    borderWidth: 1.5,
+    borderColor: PINK,
+    backgroundColor: 'transparent',
+  },
+  scoreContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    gap: 6,
+    backgroundColor: 'transparent',
+  },
+  scoreIco: { 
+    fontSize: 16,
+  },
+  scoreText: { 
+    fontSize: 15, 
+    fontWeight: '800', 
+    color: '#111',
+  },
+  
+  // Bell Button - No border
+  bellButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#f5f5f5',
+  },
+  bellIcon: { 
+    fontSize: 20,
+  },
+  
+  // Avatar Capsule - Purple/Pink border
+  avatarCapsule: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    borderWidth: 2,
+    borderColor: PINK,
+    overflow: 'hidden',
+  },
+  avatarContainer: {
+    width: '100%',
+    height: '100%',
+    backgroundColor: PURPLE,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  meAvatar: { 
+    width: 40, 
+    height: 40, 
+    borderRadius: 20,
+  },
+  meAvatarTxt: { 
+    fontWeight: '900', 
+    color: '#fff', 
+    fontSize: 18,
+  },
+  
+  // Highlighted Card
+  highlightedCard: {
+    borderRadius: 16,
+    padding: 16,
+    backgroundColor: PINK,
+    marginHorizontal: 16,
+    marginBottom: 20,
+  },
+  highlightedTitle: { 
+    color: '#fff', 
+    fontSize: 18, 
+    fontWeight: '900', 
+    marginBottom: 12 
+  },
+  highlightedBtn: {
+    alignSelf: 'flex-start',
+    backgroundColor: 'rgba(255,255,255,0.95)',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 12,
+  },
+  highlightedBtnText: { 
+    color: PURPLE, 
+    fontWeight: '900', 
+    fontSize: 14 
+  },
+  
+  section: { marginTop: 16, paddingHorizontal: 16 },
+  sectionTitle: {
     fontSize: 18,
     fontWeight: '900',
     color: '#111',
-    marginBottom: 8,
+    marginBottom: 10,
   },
-  headerRow: {
+  sectionHeaderRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 8,
+    marginBottom: 10,
   },
-  headerIcons: { flexDirection: 'row', gap: 8, alignItems: 'center' },
-  scoreChip: {
-    height: 34,
-    borderRadius: 17,
-    backgroundColor: '#fff',
-    borderWidth: 1,
-    borderColor: '#ececec',
-    paddingHorizontal: 10,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
+  viewAll: {
+    color: PURPLE,
+    fontSize: 12,
+    fontWeight: '800',
   },
-  scoreChipLabel: { fontSize: 11, color: '#666', fontWeight: '700' },
-  scoreChipValue: { fontSize: 12, color: '#7b2cff', fontWeight: '900' },
-  iconBtn: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    backgroundColor: '#fff',
-    borderWidth: 1,
-    borderColor: '#ececec',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  iconText: { fontSize: 16 },
-  headerProfileBtn: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    overflow: 'hidden',
-    borderWidth: 1,
-    borderColor: '#ececec',
-    backgroundColor: '#fff',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  headerProfileImg: { width: '100%', height: '100%' },
-  headerProfilePh: {
-    width: '100%',
-    height: '100%',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#f1e9ff',
-  },
-  headerProfileTxt: { fontSize: 13, fontWeight: '900', color: '#7b2cff' },
-  availabilityCard: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#ececec',
-    padding: 12,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  availabilityLeft: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  availabilityIcon: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
-    backgroundColor: 'rgba(123,44,255,0.12)',
-  },
-  availabilityTitle: { fontSize: 14, color: '#111', fontWeight: '800' },
-  availabilitySub: { fontSize: 12, color: '#16a34a', fontWeight: '700', marginTop: 2 },
-  goOnlineCard: {
-    marginHorizontal: 16,
-    marginTop: 10,
-    borderRadius: 18,
-    backgroundColor: '#eef2ff',
-    borderWidth: 1,
-    borderColor: '#c7d2fe',
-    paddingHorizontal: 15,
-    paddingVertical: 13,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  goOnlineLeft: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  goOnlinePowerWrap: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: '#312e81',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  goOnlinePowerIcon: { color: '#fff', fontSize: 18, fontWeight: '900' },
-  goOnlineTitle: { fontSize: 14, color: '#0f172a', fontWeight: '800' },
-  goOnlineSub: { fontSize: 12, color: '#4338ca', fontWeight: '600', marginTop: 2 },
-  goOnlineArrow: { fontSize: 20, color: '#4338ca', fontWeight: '900' },
-  section: { marginTop: 16 },
   publicCard: {
     backgroundColor: '#fff',
     borderRadius: 12,
     padding: 12,
     borderWidth: 1,
     borderColor: '#ececec',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.04,
-    shadowRadius: 4,
-    elevation: 2,
   },
   publicCardRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 12 },
   publicLeftColumn: { alignItems: 'center', width: 60 },
@@ -575,11 +635,6 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     minWidth: 65,
     alignItems: 'center',
-    shadowColor: '#22c55e',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2,
-    shadowRadius: 4,
-    elevation: 2,
   },
   publicRateBtnText: { color: '#fff', fontWeight: '700', fontSize: 11 },
   publicLanguagesRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', justifyContent: 'flex-end', gap: 4 },
@@ -593,23 +648,38 @@ const styles = StyleSheet.create({
   publicMoreLang: { fontSize: 9, color: '#999', fontWeight: '500' },
   publicStatusPillRight: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 10 },
   publicStatusTextRight: { fontSize: 10, fontWeight: '600' },
-  sectionTitle: {
-    fontSize: 18,
-    fontWeight: '900',
-    color: '#111',
-    marginBottom: 10,
-  },
-  sectionHeaderRow: {
+  
+  // Availability Card with Power Icon
+  availabilityCard: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#ececec',
+    padding: 12,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 10,
+    marginHorizontal: 16,
+    marginTop: 16,
   },
-  viewAll: {
-    color: '#7b2cff',
-    fontSize: 12,
-    fontWeight: '800',
+  availabilityLeft: { flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 },
+  powerIconWrap: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(123,44,255,0.12)',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
+  powerIcon: { 
+    fontSize: 20, 
+    color: PURPLE,
+    fontWeight: '600',
+  },
+  availabilityTitle: { fontSize: 14, color: '#111', fontWeight: '800' },
+  availabilitySub: { fontSize: 12, fontWeight: '700', marginTop: 2 },
+  
+  // Earnings Card
   earningsMainCard: {
     backgroundColor: '#e97cdd',
     borderColor: '#dd67cf',
@@ -618,12 +688,15 @@ const styles = StyleSheet.create({
     padding: 14,
   },
   earningsHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  earningsTrend: {
+  earningsIconWrap: {
     width: 32,
     height: 32,
     borderRadius: 10,
     backgroundColor: 'rgba(255,255,255,0.35)',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
+  earningsIcon: { fontSize: 18 },
   earningsSubtitle: { fontSize: 12, fontWeight: '700', color: '#492245' },
   earningsAmount: { fontSize: 36, fontWeight: '900', color: '#111', marginTop: 4 },
   earningsPeriod: { fontSize: 12, fontWeight: '600', color: '#5f3b5d', marginTop: 2 },
@@ -637,7 +710,7 @@ const styles = StyleSheet.create({
     borderColor: '#ececec',
   },
   smallEarningsLabel: { fontSize: 12, fontWeight: '700', color: '#666', marginBottom: 4 },
-  smallEarningsText: { color: '#16a34a', fontSize: 36, fontWeight: '900' },
+  smallEarningsText: { color: '#16a34a', fontSize: 28, fontWeight: '900' },
   summaryErr: {
     color: '#b91c1c',
     fontSize: 12,
@@ -647,7 +720,7 @@ const styles = StyleSheet.create({
   emptyRecent: { color: '#666', fontSize: 13, paddingVertical: 8, textAlign: 'center' },
   quickActionsCol: { gap: 10 },
   leaderBoardCard: {
-    backgroundColor: '#7b2cff',
+    backgroundColor: PURPLE,
     borderRadius: 12,
     padding: 14,
   },
@@ -669,23 +742,32 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   progressFill: { width: '58%', height: 7, backgroundColor: '#f4b900' },
-  muted: { color: '#888', textAlign: 'center' },
+  muted: { color: '#888', textAlign: 'center', paddingHorizontal: 16 },
 });
 
+// Updated CallRow with DP image
 function CallRow({
   callerId,
   title,
   subtitle,
+  callerImage,
   onMessage,
 }: {
   callerId: string;
   title: string;
   subtitle: string;
-  onMessage: (callerId: string, callerName: string) => void;
+  callerImage?: string | null;
+  onMessage: (callerId: string, callerName: string, callerImage?: string | null) => void;
 }) {
   return (
     <View style={callRowStyles.row}>
-      <View style={callRowStyles.icon} />
+      {callerImage ? (
+        <Image source={{ uri: callerImage }} style={callRowStyles.avatar} />
+      ) : (
+        <View style={callRowStyles.avatarPlaceholder}>
+          <Text style={callRowStyles.avatarText}>{title.charAt(0).toUpperCase()}</Text>
+        </View>
+      )}
       <View style={{ flex: 1 }}>
         <Text style={callRowStyles.title}>{title}</Text>
         <Text style={callRowStyles.subtitle}>{subtitle}</Text>
@@ -693,7 +775,7 @@ function CallRow({
       <View style={callRowStyles.actions}>
         <TouchableOpacity
           style={callRowStyles.actionBtn}
-          onPress={() => onMessage(callerId, title)}
+          onPress={() => onMessage(callerId, title, callerImage)}
           activeOpacity={0.85}
         >
           <Text style={callRowStyles.actionTxt}>💬</Text>
@@ -703,21 +785,24 @@ function CallRow({
   );
 }
 
+// Updated QuickAction with proper icons
 function QuickAction({
   label,
   sublabel,
+  icon,
   onPress,
   badgeCount = 0,
 }: {
   label: string;
   sublabel: string;
+  icon: string;
   onPress: () => void;
   badgeCount?: number;
 }) {
   return (
     <TouchableOpacity style={quickActionStyles.btn} onPress={onPress}>
       <View style={quickActionStyles.iconBox}>
-        <View style={quickActionStyles.icon} />
+        <Text style={quickActionStyles.iconText}>{icon}</Text>
       </View>
       <View style={{ flex: 1 }}>
         <Text style={quickActionStyles.text}>{label}</Text>
@@ -730,7 +815,7 @@ function QuickAction({
           </Text>
         </View>
       ) : null}
-      <Text style={quickActionStyles.chev}>{'>'}</Text>
+      <Text style={quickActionStyles.chev}>→</Text>
     </TouchableOpacity>
   );
 }
@@ -745,26 +830,38 @@ const callRowStyles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     marginBottom: 8,
+    gap: 10,
   },
-  icon: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
-    backgroundColor: 'rgba(123,44,255,0.12)',
-    marginRight: 10,
+  avatar: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
   },
-  title: { fontSize: 12, fontWeight: '900', color: '#111' },
+  avatarPlaceholder: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: PURPLE,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  avatarText: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: '900',
+  },
+  title: { fontSize: 14, fontWeight: '900', color: '#111' },
   subtitle: { fontSize: 11, color: '#666', fontWeight: '700', marginTop: 2 },
   actions: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   actionBtn: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
+    width: 34,
+    height: 34,
+    borderRadius: 17,
     backgroundColor: '#f3f4f6',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  actionTxt: { fontSize: 14 },
+  actionTxt: { fontSize: 16 },
 });
 
 const quickActionStyles = StyleSheet.create({
@@ -779,22 +876,17 @@ const quickActionStyles = StyleSheet.create({
     gap: 10,
   },
   iconBox: {
-    width: 34,
-    height: 34,
+    width: 40,
+    height: 40,
     borderRadius: 10,
     backgroundColor: '#f5ecff',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  icon: {
-    width: 16,
-    height: 16,
-    borderRadius: 8,
-    backgroundColor: '#7b2cff',
-  },
+  iconText: { fontSize: 20 },
   text: { fontSize: 15, fontWeight: '800', color: '#111' },
   sub: { fontSize: 11, color: '#777', marginTop: 2, fontWeight: '600' },
-  chev: { fontSize: 16, color: '#aaa', fontWeight: '700' },
+  chev: { fontSize: 18, color: PURPLE, fontWeight: '700' },
   badge: {
     minWidth: 20,
     height: 20,

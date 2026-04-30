@@ -406,7 +406,7 @@ export default function ChatConversationScreen({ navigation, route }: Props): Re
     <SafeAreaView style={styles.safe} edges={['top', 'left', 'right']}>
       <KeyboardAvoidingView
         style={styles.flex}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         keyboardVerticalOffset={Platform.OS === 'ios' ? 8 : 0}
       >
         <View style={styles.topBar}>

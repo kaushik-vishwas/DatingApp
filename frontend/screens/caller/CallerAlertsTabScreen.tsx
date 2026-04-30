@@ -1,10 +1,10 @@
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useFocusEffect } from '@react-navigation/native';
 import React, { useCallback, useMemo, useState } from 'react';
-import { ActivityIndicator, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { ActivityIndicator, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import CallerBottomTabs from '../../components/caller/CallerBottomTabs';
+import CallerBottomTabs, { getCallerTabBarContentPadding } from '../../components/caller/CallerBottomTabs';
 import type { CallerStackParamList } from '../../navigation/CallerStackParamList';
 import { getErrorMessage, profileApi } from '../../services/api';
 import type { CallerNotificationRow, CallerNotificationType } from '../../types/api';
@@ -12,6 +12,8 @@ import type { CallerNotificationRow, CallerNotificationType } from '../../types/
 type Props = NativeStackScreenProps<CallerStackParamList, 'CallerAlerts'>;
 
 export default function CallerAlertsTabScreen({ navigation }: Props): React.JSX.Element {
+  const insets = useSafeAreaInsets();
+  const contentBottomPadding = getCallerTabBarContentPadding(insets.bottom);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState<'all' | CallerNotificationType>('all');
@@ -85,7 +87,11 @@ export default function CallerAlertsTabScreen({ navigation }: Props): React.JSX.
         ))}
       </View>
 
-      <View style={styles.listWrap}>
+      <ScrollView
+        style={[styles.listWrap, { marginBottom: contentBottomPadding }]}
+        contentContainerStyle={{ paddingBottom: contentBottomPadding }}
+        showsVerticalScrollIndicator={false}
+      >
         {loading ? (
           <ActivityIndicator size="large" color="#7b2cff" />
         ) : error ? (
@@ -113,7 +119,7 @@ export default function CallerAlertsTabScreen({ navigation }: Props): React.JSX.
             </TouchableOpacity>
           ))
         )}
-      </View>
+      </ScrollView>
       <CallerBottomTabs active="alerts" navigation={navigation} />
     </SafeAreaView>
   );
@@ -133,7 +139,7 @@ const styles = StyleSheet.create({
   filterBtnActive: { borderColor: '#7b2cff', backgroundColor: '#f5ecff' },
   filterText: { fontSize: 11, color: '#666', fontWeight: '700' },
   filterTextActive: { color: '#7b2cff' },
-  listWrap: { flex: 1, paddingHorizontal: 14, paddingBottom: 88 },
+  listWrap: { flex: 1, paddingHorizontal: 14 },
   center: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 32 },
   emoji: { fontSize: 48, marginBottom: 16 },
   head: { fontSize: 18, fontWeight: '900', color: '#111', marginBottom: 8 },

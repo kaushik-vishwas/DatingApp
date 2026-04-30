@@ -94,7 +94,7 @@ export function AuthLoginCard({
     <View style={styles.bg}>
       <KeyboardAvoidingView
         style={styles.card}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       >
         <View style={styles.logoCircle}>
           <Text style={styles.logoLetter}>{logoLetter}</Text>

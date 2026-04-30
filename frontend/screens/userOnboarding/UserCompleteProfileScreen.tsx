@@ -160,7 +160,7 @@ export default function UserCompleteProfileScreen({ navigation }: Props): React.
     <View style={styles.bg}>
       <KeyboardAvoidingView
         style={styles.flex}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       >
         <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
           <TouchableOpacity style={styles.backWrap} onPress={() => navigation.goBack()}>

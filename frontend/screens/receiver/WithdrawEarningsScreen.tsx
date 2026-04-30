@@ -1,5 +1,16 @@
 import React, { useCallback, useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import {
+  ActivityIndicator,
+  Alert,
+  KeyboardAvoidingView,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
+} from 'react-native';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -106,7 +117,15 @@ export default function WithdrawEarningsScreen(): React.JSX.Element {
 
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'left', 'right']}>
-      <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
+      <KeyboardAvoidingView
+        style={styles.screen}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      >
+        <ScrollView
+          style={styles.screen}
+          contentContainerStyle={styles.content}
+          keyboardShouldPersistTaps="handled"
+        >
       <View style={styles.topRow}>
         <TouchableOpacity onPress={() => navigation.goBack()}>
           <Text style={styles.back}>←</Text>
@@ -235,7 +254,8 @@ export default function WithdrawEarningsScreen(): React.JSX.Element {
           </View>
         </>
       ) : null}
-      </ScrollView>
+        </ScrollView>
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }

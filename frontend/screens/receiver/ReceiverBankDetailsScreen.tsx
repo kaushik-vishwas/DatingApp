@@ -1,7 +1,17 @@
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import React, { useState } from 'react';
-import { Alert, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import {
+  Alert,
+  KeyboardAvoidingView,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '../../context/AuthContext';
 import type { ReceiverStackParamList } from '../../navigation/ReceiverStackParamList';
@@ -73,7 +83,15 @@ export default function ReceiverBankDetailsScreen(): React.JSX.Element {
 
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'left', 'right']}>
-      <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
+      <KeyboardAvoidingView
+        style={styles.screen}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      >
+      <ScrollView
+        style={styles.screen}
+        contentContainerStyle={styles.content}
+        keyboardShouldPersistTaps="handled"
+      >
       <View style={styles.header}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
           <Text style={styles.backText}>←</Text>
@@ -145,6 +163,7 @@ export default function ReceiverBankDetailsScreen(): React.JSX.Element {
         </View>
       ) : null}
       </ScrollView>
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }

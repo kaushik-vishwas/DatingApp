@@ -1,7 +1,20 @@
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import React, { useMemo, useState } from 'react';
-import { Alert, Image, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import {
+  Alert,
+  Image,
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { CALLER_FEMALE_AVATAR_PRESETS } from '../../constants/userOnboarding';
 import { useAuth } from '../../context/AuthContext';
@@ -66,7 +79,15 @@ export default function ReceiverEditProfileScreen(): React.JSX.Element {
 
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'left', 'right']}>
-      <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
+      <KeyboardAvoidingView
+        style={styles.screen}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      >
+      <ScrollView
+        style={styles.screen}
+        contentContainerStyle={styles.content}
+        keyboardShouldPersistTaps="handled"
+      >
       <View style={styles.header}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
           <Text style={styles.backText}>←</Text>
@@ -133,6 +154,7 @@ export default function ReceiverEditProfileScreen(): React.JSX.Element {
         </View>
       ) : null}
       </ScrollView>
+      </KeyboardAvoidingView>
       <Modal visible={avatarModal} transparent animationType="fade">
         <View style={styles.modalOverlay}>
           <Pressable style={styles.modalDismiss} onPress={() => setAvatarModal(false)} />

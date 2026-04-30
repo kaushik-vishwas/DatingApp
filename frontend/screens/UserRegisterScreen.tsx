@@ -98,7 +98,7 @@ export default function UserRegisterScreen({ navigation, route }: Props) {
     <View style={styles.bg}>
       <KeyboardAvoidingView
         style={styles.card}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       >
         <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
           <TouchableOpacity onPress={() => navigation.goBack()}>

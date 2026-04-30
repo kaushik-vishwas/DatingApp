@@ -5,6 +5,8 @@ import {
   Alert,
   FlatList,
   Image,
+  KeyboardAvoidingView,
+  Platform,
   RefreshControl,
   ScrollView,
   StyleSheet,
@@ -13,9 +15,12 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import CallerBottomTabs, { type CallerTabBarNavigation } from '../components/caller/CallerBottomTabs';
+import CallerBottomTabs, {
+  getCallerTabBarContentPadding,
+  type CallerTabBarNavigation,
+} from '../components/caller/CallerBottomTabs';
 import DiscoverFiltersModal, {
   DEFAULT_DISCOVER_FILTERS,
   DiscoverFilterIcon,
@@ -33,6 +38,8 @@ const PURPLE = '#7b2cff';
 const GREEN = '#22c55e';
 
 export default function CallerDiscoverHome(): React.JSX.Element {
+  const insets = useSafeAreaInsets();
+  const contentBottomPadding = getCallerTabBarContentPadding(insets.bottom);
   const navigation = useNavigation<CallerTabBarNavigation>();
   const { user, refreshUser } = useAuth();
   const { startCallInvite } = useCallSignals();
@@ -341,20 +348,27 @@ export default function CallerDiscoverHome(): React.JSX.Element {
 
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'left', 'right']}>
-      <FlatList
-        data={receivers}
-        keyExtractor={(it) => it._id}
-        renderItem={renderItem}
-        ListHeaderComponent={listHeader}
-        contentContainerStyle={styles.listContent}
-        ListFooterComponent={<View style={{ height: 72 }} />}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void onRefresh()} />}
-        ListEmptyComponent={
-          !loading ? (
-            <Text style={styles.empty}>No receivers match your filters yet.</Text>
-          ) : null
-        }
-      />
+      <KeyboardAvoidingView
+        style={styles.safe}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      >
+        <FlatList
+          style={{ marginBottom: contentBottomPadding }}
+          data={receivers}
+          keyExtractor={(it) => it._id}
+          renderItem={renderItem}
+          ListHeaderComponent={listHeader}
+          contentContainerStyle={[styles.listContent, { paddingBottom: contentBottomPadding }]}
+          ListFooterComponent={<View style={{ height: 12 }} />}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void onRefresh()} />}
+          keyboardShouldPersistTaps="handled"
+          ListEmptyComponent={
+            !loading ? (
+              <Text style={styles.empty}>No receivers match your filters yet.</Text>
+            ) : null
+          }
+        />
+      </KeyboardAvoidingView>
       <CallerBottomTabs active="home" navigation={navigation} />
 
       <DiscoverFiltersModal

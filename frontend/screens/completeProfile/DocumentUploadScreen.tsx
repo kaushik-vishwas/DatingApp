@@ -95,7 +95,7 @@ export default function DocumentUploadScreen({ navigation }: Props): React.JSX.E
     <View style={styles.bg}>
       <KeyboardAvoidingView
         style={styles.card}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       >
         <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
           <ScreenHeader

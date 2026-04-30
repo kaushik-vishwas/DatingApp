@@ -161,7 +161,7 @@ export default function CallerEditProfileScreen({ navigation }: Props): React.JS
     <SafeAreaView style={styles.safe} edges={['top', 'left', 'right']}>
       <KeyboardAvoidingView
         style={styles.flex}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       >
         <View style={styles.topRow}>
           <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>

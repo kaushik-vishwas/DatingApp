@@ -13,9 +13,9 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import CallerBottomTabs from '../../components/caller/CallerBottomTabs';
+import CallerBottomTabs, { getCallerTabBarContentPadding } from '../../components/caller/CallerBottomTabs';
 import { useAuth } from '../../context/AuthContext';
 import type { CallerStackParamList } from '../../navigation/CallerStackParamList';
 
@@ -32,6 +32,8 @@ function formatWalletShort(inr: number): string {
 }
 
 export default function CallerProfileTabScreen({ navigation }: Props): React.JSX.Element {
+  const insets = useSafeAreaInsets();
+  const contentBottomPadding = getCallerTabBarContentPadding(insets.bottom);
   const { user, signOut } = useAuth();
   const [logoutOpen, setLogoutOpen] = useState(false);
 
@@ -90,7 +92,11 @@ export default function CallerProfileTabScreen({ navigation }: Props): React.JSX
     <SafeAreaView style={styles.safe} edges={['top', 'left', 'right']}>
       <Text style={styles.title}>Profile</Text>
 
-      <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        style={{ marginBottom: contentBottomPadding }}
+        contentContainerStyle={[styles.scroll, { paddingBottom: contentBottomPadding }]}
+        showsVerticalScrollIndicator={false}
+      >
         <View style={styles.avatarRing}>
           {user.profileImage ? (
             <Image source={{ uri: user.profileImage }} style={styles.avatar} />
@@ -164,7 +170,7 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     paddingVertical: 14,
   },
-  scroll: { paddingHorizontal: 20, paddingBottom: 100 },
+  scroll: { paddingHorizontal: 20 },
   avatarRing: {
     alignSelf: 'center',
     padding: 4,
