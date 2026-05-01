@@ -924,9 +924,13 @@ export const getReceiverCallInsights = async (
 
     const rid = new mongoose.Types.ObjectId(String(req.receiver!._id));
     const range = String(req.query.range ?? 'all').toLowerCase();
-    const receiverMeta = await Receiver.findById(rid).select('cumulativeScore').lean<{
-      cumulativeScore?: number;
-    } | null>();
+    const receiverMeta = await Receiver.findById(rid)
+      .select('cumulativeScore badgeLevel earningRatePerMinute')
+      .lean<{
+        cumulativeScore?: number;
+        badgeLevel?: 'platinum' | 'diamond' | 'supreme';
+        earningRatePerMinute?: number;
+      } | null>();
 
     const now = new Date();
     const weekStart = new Date(now);
@@ -1075,6 +1079,32 @@ export const getReceiverCallInsights = async (
         typeof receiverMeta?.cumulativeScore === 'number' && Number.isFinite(receiverMeta.cumulativeScore)
           ? roundInr(receiverMeta.cumulativeScore)
           : 0,
+      badgeLevel: receiverMeta?.badgeLevel ?? 'platinum',
+      earningRatePerMinute:
+        typeof receiverMeta?.earningRatePerMinute === 'number' &&
+        Number.isFinite(receiverMeta.earningRatePerMinute)
+          ? roundInr(receiverMeta.earningRatePerMinute)
+          : 2.0,
+      scoreRules: {
+        call: {
+          ignoreAtOrBelowSeconds: 55,
+          midBand: { minMinutes: 3, maxMinutesExclusive: 10, multiplier: 3 },
+          topBand: { minMinutes: 10, multiplier: 5 },
+        },
+        online: {
+          timezone: 'Asia/Kolkata',
+          windows: [
+            { from: '09:00', to: '21:00', multiplier: 0.5 },
+            { from: '22:00', to: '24:00', multiplier: 3 },
+            { from: '00:00', to: '02:00', multiplier: 10 },
+          ],
+        },
+        weekendTargets: {
+          weekday: { supremeAt: 12000, diamondAt: 8000 },
+          weekend: { supremeAt: 13000, diamondAt: 9000 },
+          note: 'Targets can be adjusted on weekends due to demand.',
+        },
+      },
     });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);

@@ -29,7 +29,7 @@ import DiscoverFiltersModal, {
 import { CALLER_LANGUAGE_OPTIONS } from '../constants/userOnboarding';
 import { useAuth } from '../context/AuthContext';
 import { useCallSignals } from '../context/CallSignalContext';
-import { discoverApi, getErrorMessage } from '../services/api';
+import { callApi, discoverApi, getErrorMessage } from '../services/api';
 import type { DiscoverReceiverSummary } from '../types/api';
 import { getReceiverPresenceInfo } from '../utils/receiverStatus';
 import SelectoLogo from '../assets/SelectoLogo.png'
@@ -141,8 +141,24 @@ export default function CallerDiscoverHome(): React.JSX.Element {
   const onCallRandom = () => {
     if (randomCalling) return;
     setRandomCalling(true);
-    navigation.navigate('CallerQueue');
-    setRandomCalling(false);
+    void (async () => {
+      try {
+        const { data } = await callApi.randomReceiver();
+        const rate =
+          typeof data.audioCallRate === 'number' && Number.isFinite(data.audioCallRate)
+            ? data.audioCallRate
+            : null;
+        if (rate != null && wallet < rate) {
+          navigation.navigate('Wallet');
+          return;
+        }
+        await startCallInvite(data.receiverId, data.name, data.profileImage ?? null);
+      } catch (e: unknown) {
+        Alert.alert('Random call', getErrorMessage(e));
+      } finally {
+        setRandomCalling(false);
+      }
+    })();
   };
 
   const langChip = (label: string, value: string | null) => {

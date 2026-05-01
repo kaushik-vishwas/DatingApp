@@ -368,27 +368,35 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
               <Text style={styles.statusText}>Call Active</Text>
             </View>
             <View style={styles.avatarRow}>
-              <View style={styles.avatarWrap}>
-                {route.params.peerImage ? (
-                  <Image source={{ uri: route.params.peerImage }} style={styles.avatar} />
-                ) : (
-                  <View style={[styles.avatar, styles.avatarPlaceholder]}>
-                    <Text style={styles.avatarInitial}>
-                      {(route.params.peerName || 'U').trim().charAt(0).toUpperCase()}
-                    </Text>
-                  </View>
-                )}
+              <View style={styles.avatarCol}>
+                <View style={styles.avatarWrap}>
+                  {route.params.peerImage ? (
+                    <Image source={{ uri: route.params.peerImage }} style={styles.avatar} />
+                  ) : (
+                    <View style={[styles.avatar, styles.avatarPlaceholder]}>
+                      <Text style={styles.avatarInitial}>
+                        {(route.params.peerName || 'U').trim().charAt(0).toUpperCase()}
+                      </Text>
+                    </View>
+                  )}
+                </View>
+                <Text style={styles.avatarCaption} numberOfLines={1}>
+                  {route.params.peerName || 'Contact'}
+                </Text>
               </View>
-              <View style={styles.avatarWrap}>
-                {user?.profileImage ? (
-                  <Image source={{ uri: user.profileImage }} style={styles.avatar} />
-                ) : (
-                  <View style={[styles.avatar, styles.avatarPlaceholder]}>
-                    <Text style={styles.avatarInitial}>
-                      {(user?.name || 'Y').trim().charAt(0).toUpperCase()}
-                    </Text>
-                  </View>
-                )}
+              <View style={styles.avatarCol}>
+                <View style={styles.avatarWrap}>
+                  {user?.profileImage ? (
+                    <Image source={{ uri: user.profileImage }} style={styles.avatar} />
+                  ) : (
+                    <View style={[styles.avatar, styles.avatarPlaceholder]}>
+                      <Text style={styles.avatarInitial}>
+                        {(user?.name || 'Y').trim().charAt(0).toUpperCase()}
+                      </Text>
+                    </View>
+                  )}
+                </View>
+                <Text style={styles.avatarCaption}>You</Text>
               </View>
             </View>
             <Text style={styles.peerName}>{route.params.peerName}</Text>
@@ -439,10 +447,21 @@ const styles = StyleSheet.create({
   statusText: { color: '#fff', fontSize: 12, fontWeight: '800' },
   avatarRow: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     justifyContent: 'center',
     gap: 22,
     marginTop: 6,
+  },
+  avatarCol: {
+    alignItems: 'center',
+    maxWidth: 140,
+  },
+  avatarCaption: {
+    marginTop: 8,
+    color: '#333',
+    fontSize: 13,
+    fontWeight: '800',
+    textAlign: 'center',
   },
   avatarWrap: {
     width: 102,

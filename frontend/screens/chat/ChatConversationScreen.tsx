@@ -67,7 +67,6 @@ export default function ChatConversationScreen({ navigation, route }: Props): Re
   const { registerPeer, startCallInvite } = useCallSignals();
   const { markPeerReadLocal, setActivePeer } = useChatInbox();
   const callerNav = useNavigation<NativeStackNavigationProp<CallerStackParamList>>();
-  const receiverNav = useNavigation<NativeStackNavigationProp<ReceiverStackParamList>>();
   const isCaller = route.name === 'CallerChat';
   const peerId = isCaller ? route.params.receiverId : route.params.userId;
   const peerName = isCaller ? route.params.receiverName : route.params.userName;
@@ -384,8 +383,16 @@ export default function ChatConversationScreen({ navigation, route }: Props): Re
         }
       })();
     } else {
-      receiverNav.navigate('ReceiverQueue', { peerId, peerName, peerImage });
-      setCalling(false);
+      void (async () => {
+        try {
+          await startCallInvite(peerId, peerName, peerImage);
+        } catch (e: unknown) {
+          const msg = e instanceof Error ? e.message : 'Could not start call right now.';
+          Alert.alert('Call failed', msg);
+        } finally {
+          setCalling(false);
+        }
+      })();
     }
   };
 

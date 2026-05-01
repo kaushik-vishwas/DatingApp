@@ -70,31 +70,36 @@ async function syncReceiverQueueState(receiverId) {
     }
     waitingReceiverIds.delete(rid);
 }
+/**
+ * Pick a random receiver who can take a call right now: approved, online, available,
+ * not busy, not blocked by this caller. Does not require "queue" or Go Online screen.
+ */
 async function pickRandomQueuedReceiverForCaller(callerId) {
     const cid = normalizeId(callerId);
-    const queueIds = [...waitingReceiverIds].filter((id) => mongoose_1.default.Types.ObjectId.isValid(id));
-    if (queueIds.length === 0)
+    if (!mongoose_1.default.Types.ObjectId.isValid(cid))
         return null;
-    const blockedIds = await ChatBlock_1.default.distinct('receiverId', {
-        userId: new mongoose_1.default.Types.ObjectId(cid),
-        receiverId: { $in: queueIds.map((id) => new mongoose_1.default.Types.ObjectId(id)) },
-    });
-    const blockedSet = new Set(blockedIds.map((id) => String(id)));
-    const eligible = await Receiver_1.default.find({
-        _id: {
-            $in: queueIds
-                .filter((id) => queueActiveReceiverIds.has(id) &&
-                !blockedSet.has(id) &&
-                !busyReceiverIds.has(id))
-                .map((id) => new mongoose_1.default.Types.ObjectId(id)),
-        },
+    const baseFilter = {
         accountStatus: 'approved',
         suspended: { $ne: true },
         isOnline: true,
         isAvailable: true,
-    })
-        .select('_id name profileImage')
+    };
+    const candidates = await Receiver_1.default.find(baseFilter)
+        .select('_id name profileImage audioCallRate')
         .lean();
+    const eligibleRows = candidates.filter((r) => {
+        const id = String(r._id);
+        return !busyReceiverIds.has(id);
+    });
+    if (eligibleRows.length === 0)
+        return null;
+    const eligibleIds = eligibleRows.map((r) => r._id);
+    const blockedIds = await ChatBlock_1.default.distinct('receiverId', {
+        userId: new mongoose_1.default.Types.ObjectId(cid),
+        receiverId: { $in: eligibleIds },
+    });
+    const blockedSet = new Set(blockedIds.map((id) => String(id)));
+    const eligible = eligibleRows.filter((r) => !blockedSet.has(String(r._id)));
     if (eligible.length === 0)
         return null;
     const eligibleById = new Map(eligible.map((r) => [String(r._id), r]));
@@ -117,6 +122,9 @@ async function pickRandomQueuedReceiverForCaller(callerId) {
             receiverId: String(prioritized._id),
             name: prioritized.name,
             profileImage: prioritized.profileImage ?? null,
+            audioCallRate: typeof prioritized.audioCallRate === 'number' && Number.isFinite(prioritized.audioCallRate)
+                ? prioritized.audioCallRate
+                : null,
         };
     }
     const chosen = eligible[Math.floor(Math.random() * eligible.length)];
@@ -126,5 +134,8 @@ async function pickRandomQueuedReceiverForCaller(callerId) {
         receiverId: String(chosen._id),
         name: chosen.name,
         profileImage: chosen.profileImage ?? null,
+        audioCallRate: typeof chosen.audioCallRate === 'number' && Number.isFinite(chosen.audioCallRate)
+            ? chosen.audioCallRate
+            : null,
     };
 }

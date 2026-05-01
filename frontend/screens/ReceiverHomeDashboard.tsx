@@ -173,17 +173,14 @@ export default function ReceiverHomeDashboard(): React.JSX.Element {
           </View>
         </View>
 
-        {/* Highlighted Card - Ready to Earn */}
-        <TouchableOpacity
-          style={styles.highlightedCard}
-          activeOpacity={0.9}
-          onPress={() => navigation.navigate('ReceiverQueue')}
-        >
-          <Text style={styles.highlightedTitle}>Ready to Earn!</Text>
-          <View style={styles.highlightedBtn}>
-            <Text style={styles.highlightedBtnText}>Go Online →</Text>
-          </View>
-        </TouchableOpacity>
+        {/* Earnings tip — availability is toggled below; no separate queue screen */}
+        {/* <View style={styles.highlightedCard}>
+          <Text style={styles.highlightedTitle}>Ready to earn</Text>
+          <Text style={styles.highlightedSub}>
+            Turn on availability below when you are free to receive calls. Callers can reach you directly — no
+            queue to join.
+          </Text>
+        </View> */}
 
         {user ? (
           <>
@@ -555,7 +552,13 @@ const styles = StyleSheet.create({
     color: '#fff', 
     fontSize: 18, 
     fontWeight: '900', 
-    marginBottom: 12 
+    marginBottom: 8 
+  },
+  highlightedSub: {
+    color: 'rgba(255,255,255,0.95)',
+    fontSize: 13,
+    fontWeight: '600',
+    lineHeight: 20,
   },
   highlightedBtn: {
     alignSelf: 'flex-start',

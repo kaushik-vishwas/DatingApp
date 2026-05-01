@@ -67,40 +67,49 @@ export async function syncReceiverQueueState(receiverId: string): Promise<void> 
   waitingReceiverIds.delete(rid);
 }
 
+/**
+ * Pick a random receiver who can take a call right now: approved, online, available,
+ * not busy, not blocked by this caller. Does not require "queue" or Go Online screen.
+ */
 export async function pickRandomQueuedReceiverForCaller(callerId: string): Promise<{
   receiverId: string;
   name: string;
   profileImage: string | null;
+  audioCallRate: number | null;
 } | null> {
   const cid = normalizeId(callerId);
-  const queueIds = [...waitingReceiverIds].filter((id) => mongoose.Types.ObjectId.isValid(id));
-  if (queueIds.length === 0) return null;
+  if (!mongoose.Types.ObjectId.isValid(cid)) return null;
 
-  const blockedIds = await ChatBlock.distinct('receiverId', {
-    userId: new mongoose.Types.ObjectId(cid),
-    receiverId: { $in: queueIds.map((id) => new mongoose.Types.ObjectId(id)) },
-  });
-  const blockedSet = new Set((blockedIds as mongoose.Types.ObjectId[]).map((id) => String(id)));
-
-  const eligible = await Receiver.find({
-    _id: {
-      $in: queueIds
-        .filter(
-          (id) =>
-            queueActiveReceiverIds.has(id) &&
-            !blockedSet.has(id) &&
-            !busyReceiverIds.has(id)
-        )
-        .map((id) => new mongoose.Types.ObjectId(id)),
-    },
-    accountStatus: 'approved',
+  const baseFilter = {
+    accountStatus: 'approved' as const,
     suspended: { $ne: true },
     isOnline: true,
     isAvailable: true,
-  })
-    .select('_id name profileImage')
-    .lean<{ _id: mongoose.Types.ObjectId; name: string; profileImage?: string | null }[]>();
+  };
 
+  const candidates = await Receiver.find(baseFilter)
+    .select('_id name profileImage audioCallRate')
+    .lean<{
+      _id: mongoose.Types.ObjectId;
+      name: string;
+      profileImage?: string | null;
+      audioCallRate?: number | null;
+    }[]>();
+
+  const eligibleRows = candidates.filter((r) => {
+    const id = String(r._id);
+    return !busyReceiverIds.has(id);
+  });
+  if (eligibleRows.length === 0) return null;
+
+  const eligibleIds = eligibleRows.map((r) => r._id);
+  const blockedIds = await ChatBlock.distinct('receiverId', {
+    userId: new mongoose.Types.ObjectId(cid),
+    receiverId: { $in: eligibleIds },
+  });
+  const blockedSet = new Set((blockedIds as mongoose.Types.ObjectId[]).map((id) => String(id)));
+
+  const eligible = eligibleRows.filter((r) => !blockedSet.has(String(r._id)));
   if (eligible.length === 0) return null;
   const eligibleById = new Map(eligible.map((r) => [String(r._id), r]));
   const priorityRows = await ReceiverPriorityNotification.find({
@@ -121,6 +130,10 @@ export async function pickRandomQueuedReceiverForCaller(callerId: string): Promi
       receiverId: String(prioritized._id),
       name: prioritized.name,
       profileImage: prioritized.profileImage ?? null,
+      audioCallRate:
+        typeof prioritized.audioCallRate === 'number' && Number.isFinite(prioritized.audioCallRate)
+          ? prioritized.audioCallRate
+          : null,
     };
   }
   const chosen = eligible[Math.floor(Math.random() * eligible.length)];
@@ -129,5 +142,9 @@ export async function pickRandomQueuedReceiverForCaller(callerId: string): Promi
     receiverId: String(chosen._id),
     name: chosen.name,
     profileImage: chosen.profileImage ?? null,
+    audioCallRate:
+      typeof chosen.audioCallRate === 'number' && Number.isFinite(chosen.audioCallRate)
+        ? chosen.audioCallRate
+        : null,
   };
 }

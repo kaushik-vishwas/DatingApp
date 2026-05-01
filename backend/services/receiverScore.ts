@@ -7,6 +7,7 @@ const MAX_SCORED_CALLS_PER_CALLER_PER_DAY = 3;
 const MIN_VALID_CALL_SECONDS = 55;
 const MIN_MID_BAND_SECONDS = 3 * 60;
 const MIN_TOP_BAND_SECONDS = 10 * 60;
+const IST_OFFSET_MINUTES = 330;
 
 function round2(n: number): number {
   return Math.round(n * 100) / 100;
@@ -21,14 +22,15 @@ function dayStartUtc(dateKey: string): Date {
 }
 
 function badgeForScore(score: number): { badgeLevel: 'platinum' | 'diamond' | 'supreme'; ratePerMinute: number } {
-  if (score > 12000) return { badgeLevel: 'supreme', ratePerMinute: 2.6 };
-  if (score > 8000) return { badgeLevel: 'diamond', ratePerMinute: 2.3 };
+  if (score >= 12000) return { badgeLevel: 'supreme', ratePerMinute: 2.6 };
+  if (score >= 8000) return { badgeLevel: 'diamond', ratePerMinute: 2.3 };
   return { badgeLevel: 'platinum', ratePerMinute: 2.0 };
 }
 
 function callScoreForDuration(durationSec: number): number {
+  if (durationSec <= MIN_VALID_CALL_SECONDS) return 0;
   const minutes = durationSec / 60;
-  if (durationSec > MIN_TOP_BAND_SECONDS) return round2(minutes * 5);
+  if (durationSec >= MIN_TOP_BAND_SECONDS) return round2(minutes * 5);
   if (durationSec >= MIN_MID_BAND_SECONDS) return round2(minutes * 3);
   return 0;
 }
@@ -43,7 +45,7 @@ export async function recordReceiverCallScore(args: {
   const { callId, receiverId, callerId, startedAt, durationSec } = args;
   const dateKey = utcDateKey(startedAt);
 
-  if (durationSec < MIN_VALID_CALL_SECONDS) {
+  if (durationSec <= MIN_VALID_CALL_SECONDS) {
     await ReceiverDailyScore.findOneAndUpdate(
       { receiverId: new mongoose.Types.ObjectId(receiverId), dateKey },
       { $inc: { shortCallsIgnored: 1 } },
@@ -59,7 +61,7 @@ export async function recordReceiverCallScore(args: {
     receiverId: new mongoose.Types.ObjectId(receiverId),
     callerId: new mongoose.Types.ObjectId(callerId),
     status: 'completed',
-    durationSec: { $gte: MIN_VALID_CALL_SECONDS },
+    durationSec: { $gt: MIN_VALID_CALL_SECONDS },
     startedAt: { $gte: dayStart, $lt: dayEnd },
   });
   if (sameCallerCount >= MAX_SCORED_CALLS_PER_CALLER_PER_DAY) {
@@ -103,6 +105,10 @@ type OnlineWindowBuckets = {
   lateNightMinutes: number;
 };
 
+function toIstDate(d: Date): Date {
+  return new Date(d.getTime() + IST_OFFSET_MINUTES * 60 * 1000);
+}
+
 function splitOnlineMinutes(start: Date, end: Date): OnlineWindowBuckets {
   if (end <= start) return { dayMinutes: 0, nightMinutes: 0, lateNightMinutes: 0 };
   let dayMinutes = 0;
@@ -111,7 +117,7 @@ function splitOnlineMinutes(start: Date, end: Date): OnlineWindowBuckets {
   const cursor = new Date(start.getTime());
   while (cursor < end) {
     const nextMinute = new Date(cursor.getTime() + 60 * 1000);
-    const h = cursor.getUTCHours();
+    const h = toIstDate(cursor).getUTCHours();
     if (h >= 9 && h < 21) dayMinutes += 1;
     else if (h >= 22) nightMinutes += 1;
     else if (h >= 0 && h < 2) lateNightMinutes += 1;

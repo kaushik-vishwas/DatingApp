@@ -136,6 +136,8 @@ export interface RandomReceiverMatchResponse {
   receiverId: string;
   name: string;
   profileImage: string | null;
+  /** Per-minute rate when matched; used for wallet checks before placing call */
+  audioCallRate?: number | null;
 }
 
 export type ReceiverCallInsightRow = {
@@ -173,6 +175,24 @@ export interface ReceiverCallInsightsResponse {
   receiverRatingAvg: number;
   receiverRatingCount: number;
   totalScore: number;
+  badgeLevel?: 'platinum' | 'diamond' | 'supreme';
+  earningRatePerMinute?: number;
+  scoreRules?: {
+    call: {
+      ignoreAtOrBelowSeconds: number;
+      midBand: { minMinutes: number; maxMinutesExclusive: number; multiplier: number };
+      topBand: { minMinutes: number; multiplier: number };
+    };
+    online: {
+      timezone: string;
+      windows: Array<{ from: string; to: string; multiplier: number }>;
+    };
+    weekendTargets: {
+      weekday: { supremeAt: number; diamondAt: number };
+      weekend: { supremeAt: number; diamondAt: number };
+      note: string;
+    };
+  };
 }
 
 export type ReceiverNotifyCandidateRow = {

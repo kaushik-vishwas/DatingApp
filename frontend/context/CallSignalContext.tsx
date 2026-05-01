@@ -316,10 +316,6 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
           return;
         }
 
-        if (!queueModeRef.current) {
-          return;
-        }
-
         if (pending) {
           openVoiceCall(pending.bootstrap, pending.peerName, pending.peerImage);
           return;

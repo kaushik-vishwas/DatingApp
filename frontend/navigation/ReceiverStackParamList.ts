@@ -2,13 +2,6 @@ import type { VoiceBootstrapResponse } from '../types/api';
 
 export type ReceiverStackParamList = {
   ReceiverHome: undefined;
-  ReceiverQueue:
-    | {
-        peerId: string;
-        peerName: string;
-        peerImage?: string | null;
-      }
-    | undefined;
   ReceiverSettings: undefined;
   ReceiverNotifications: undefined;
   ReceiverBankDetails: undefined;
