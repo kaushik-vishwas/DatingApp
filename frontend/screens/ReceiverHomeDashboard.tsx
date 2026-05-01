@@ -18,7 +18,12 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '../context/AuthContext';
 import { useChatInbox } from '../context/ChatInboxContext';
 import type { ReceiverStackParamList } from '../navigation/ReceiverStackParamList';
-import { getErrorMessage, profileApi } from '../services/api';
+import {
+  countUnreadByTimestamp,
+  getNotificationLastSeenAt,
+  markNotificationsSeenNow,
+} from '../services/notificationUnread';
+import { chatApi, getErrorMessage, profileApi } from '../services/api';
 import type { ReceiverCallInsightsResponse, ReceiverWalletSummaryResponse } from '../types/api';
 import SelectoLogo from '../assets/SelectoLogo.png';
 
@@ -42,6 +47,7 @@ export default function ReceiverHomeDashboard(): React.JSX.Element {
   const [walletSummary, setWalletSummary] = useState<ReceiverWalletSummaryResponse | null>(null);
   const [callInsights, setCallInsights] = useState<ReceiverCallInsightsResponse | null>(null);
   const [summaryError, setSummaryError] = useState<string | null>(null);
+  const [notificationUnread, setNotificationUnread] = useState(0);
 
   /** Use stable `user._id` only — `refreshUser()` replaces `user` with a new object each time and would
    *  recreate this callback forever when combined with `useFocusEffect`. */
@@ -74,19 +80,43 @@ export default function ReceiverHomeDashboard(): React.JSX.Element {
     }
   }, [receiverId]);
 
+  const loadReceiverNotificationUnread = useCallback(async () => {
+    if (!receiverId) return;
+    try {
+      const [lastSeenAt, { data: conversations }, { data: calls }, { data: withdrawals }] =
+        await Promise.all([
+          getNotificationLastSeenAt('receiver'),
+          // Mirror same data sources as ReceiverNotificationsScreen for consistent count.
+          chatApi.conversations(),
+          profileApi.receiverCallInsights('all'),
+          profileApi.receiverWithdrawalOverview(),
+        ]);
+      const rows = [
+        ...conversations.conversations.map((c) => ({ at: c.lastAt })),
+        ...calls.recentCalls.map((c) => ({ at: c.startedAt })),
+        ...calls.recentCalls.map((c) => ({ at: c.startedAt })),
+        ...withdrawals.recent.map((w) => ({ at: w.createdAt })),
+      ];
+      setNotificationUnread(countUnreadByTimestamp(rows, lastSeenAt));
+    } catch {
+      // Keep current badge on transient failures.
+    }
+  }, [receiverId]);
+
   useFocusEffect(
     useCallback(() => {
       if (!receiverId) return;
       void loadWalletSummary();
       void loadCallInsights();
+      void loadReceiverNotificationUnread();
       void refreshUser();
       void refreshUnreadFromServer();
-    }, [receiverId, loadWalletSummary, loadCallInsights, refreshUser])
+    }, [receiverId, loadWalletSummary, loadCallInsights, loadReceiverNotificationUnread, refreshUser])
   );
 
   const onRefresh = async () => {
     setRefreshing(true);
-    await Promise.all([refreshUser(), loadWalletSummary(), loadCallInsights()]);
+    await Promise.all([refreshUser(), loadWalletSummary(), loadCallInsights(), loadReceiverNotificationUnread()]);
     setRefreshing(false);
   };
 
@@ -134,7 +164,7 @@ export default function ReceiverHomeDashboard(): React.JSX.Element {
               resizeMode="contain"
             />
             <View style={styles.topRight}>
-              {/* Score Capsule - Purple/Pink border, no bell border */}
+              {/* Score Capsule - Reduced size */}
               <TouchableOpacity
                 style={styles.scoreCapsule}
                 onPress={() => navigation.navigate('WithdrawEarnings')}
@@ -148,27 +178,42 @@ export default function ReceiverHomeDashboard(): React.JSX.Element {
                 </View>
               </TouchableOpacity>
               
-              {/* Bell Icon - No outer border */}
+              {/* Bell Icon - Slightly reduced */}
               <TouchableOpacity
                 style={styles.bellButton}
-                onPress={() => navigation.navigate('ReceiverNotifications')}
+                onPress={() => {
+                  void (async () => {
+                    await markNotificationsSeenNow('receiver');
+                    setNotificationUnread(0);
+                    navigation.navigate('ReceiverNotifications');
+                  })();
+                }}
                 activeOpacity={0.85}
               >
                 <Text style={styles.bellIcon}>🔔</Text>
+                {notificationUnread > 0 ? (
+                  <View style={styles.bellBadge}>
+                    <Text style={styles.bellBadgeText}>
+                      {notificationUnread > 99 ? '99+' : String(notificationUnread)}
+                    </Text>
+                  </View>
+                ) : null}
               </TouchableOpacity>
               
-              {/* Avatar Capsule - Purple/Pink border */}
-              {user?.profileImage ? (
-                <View style={styles.avatarCapsule}>
+              {/* Avatar Capsule - Slightly reduced */}
+              <TouchableOpacity
+                style={styles.avatarCapsule}
+                onPress={() => navigation.navigate('ReceiverSettings')}
+                activeOpacity={0.85}
+              >
+                {user?.profileImage ? (
                   <Image source={{ uri: user.profileImage }} style={styles.meAvatar} />
-                </View>
-              ) : (
-                <View style={styles.avatarCapsule}>
+                ) : (
                   <View style={styles.avatarContainer}>
                     <Text style={styles.meAvatarTxt}>{user?.name?.charAt(0) ?? '?'}</Text>
                   </View>
-                </View>
-              )}
+                )}
+              </TouchableOpacity>
             </View>
           </View>
         </View>
@@ -476,49 +521,62 @@ const styles = StyleSheet.create({
     gap: 12 
   },
   
-  // Score Capsule - Purple/Pink border
+  // Score Capsule - Reduced size
   scoreCapsule: {
-    borderRadius: 40,
-    borderWidth: 1.5,
+    borderRadius: 30,
+    borderWidth: 1.2,
     borderColor: PINK,
     backgroundColor: 'transparent',
   },
   scoreContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    gap: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    gap: 4,
     backgroundColor: 'transparent',
   },
   scoreIco: { 
-    fontSize: 16,
+    fontSize: 13,
   },
   scoreText: { 
-    fontSize: 15, 
+    fontSize: 12, 
     fontWeight: '800', 
     color: '#111',
   },
   
-  // Bell Button - No border
+  // Bell Button - Slightly reduced (No border)
   bellButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: '#f5f5f5',
   },
   bellIcon: { 
-    fontSize: 20,
+    fontSize: 18,
   },
+  bellBadge: {
+    position: 'absolute',
+    top: -4,
+    right: -4,
+    minWidth: 16,
+    height: 16,
+    borderRadius: 8,
+    backgroundColor: '#ef4444',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 3,
+  },
+  bellBadgeText: { color: '#fff', fontSize: 9, fontWeight: '900' },
   
-  // Avatar Capsule - Purple/Pink border
+  // Avatar Capsule - Slightly reduced
   avatarCapsule: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    borderWidth: 2,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    borderWidth: 1.8,
     borderColor: PINK,
     overflow: 'hidden',
   },
@@ -530,14 +588,14 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   meAvatar: { 
-    width: 40, 
-    height: 40, 
-    borderRadius: 20,
+    width: 36, 
+    height: 36, 
+    borderRadius: 18,
   },
   meAvatarTxt: { 
     fontWeight: '900', 
     color: '#fff', 
-    fontSize: 18,
+    fontSize: 16,
   },
   
   // Highlighted Card
@@ -788,7 +846,7 @@ function CallRow({
   );
 }
 
-// Updated QuickAction with proper icons
+// Updated QuickAction with grey chevron right icon (›) that is not too wide
 function QuickAction({
   label,
   sublabel,
@@ -818,7 +876,7 @@ function QuickAction({
           </Text>
         </View>
       ) : null}
-      <Text style={quickActionStyles.chev}>→</Text>
+      <Text style={quickActionStyles.chev}>›</Text>
     </TouchableOpacity>
   );
 }
@@ -889,7 +947,7 @@ const quickActionStyles = StyleSheet.create({
   iconText: { fontSize: 20 },
   text: { fontSize: 15, fontWeight: '800', color: '#111' },
   sub: { fontSize: 11, color: '#777', marginTop: 2, fontWeight: '600' },
-  chev: { fontSize: 18, color: PURPLE, fontWeight: '700' },
+  chev: { fontSize: 20, color: '#9ca3af', fontWeight: '400', lineHeight: 22 },
   badge: {
     minWidth: 20,
     height: 20,

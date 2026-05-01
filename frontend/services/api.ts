@@ -346,12 +346,26 @@ export const callApi = {
   sessionStart: (callId: string, peerId: string) =>
     api.post<{ ok: boolean }>('/calls/session/start', { callId, peerId }),
   sessionSync: (callId: string) =>
-    api.post<{ ok: boolean; durationSec: number; settledAmountInr: number; canRate: boolean; status: string }>(
+    api.post<{
+      ok: boolean;
+      durationSec: number;
+      settledAmountInr: number;
+      receiverEarnedInr: number;
+      canRate: boolean;
+      status: string;
+    }>(
       '/calls/session/sync',
       { callId }
     ),
   sessionEnd: (callId: string) =>
-    api.post<{ ok: boolean; durationSec: number; estimatedEarning: number; settledAmountInr: number; canRate: boolean }>(
+    api.post<{
+      ok: boolean;
+      durationSec: number;
+      estimatedEarning: number;
+      settledAmountInr: number;
+      receiverEarnedInr: number;
+      canRate: boolean;
+    }>(
       '/calls/session/end',
       { callId }
     ),

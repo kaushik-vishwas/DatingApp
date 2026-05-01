@@ -1,6 +1,6 @@
 import type { DiscoverReceiverSummary } from '../types/api';
 
-export type ReceiverPresenceStatus = 'offline' | 'available' | 'busy';
+export type ReceiverPresenceStatus = 'available' | 'not_available';
 
 export type ReceiverPresenceInfo = {
   status: ReceiverPresenceStatus;
@@ -11,25 +11,15 @@ export type ReceiverPresenceInfo = {
 };
 
 const STATUS_GREEN = '#22c55e';
-const STATUS_YELLOW = '#f59e0b';
 const STATUS_RED = '#dc2626';
 
 export function getReceiverPresenceInfo(receiver: DiscoverReceiverSummary): ReceiverPresenceInfo {
-  if (!receiver.isOnline) {
+  const canTakeCall = Boolean(receiver.isOnline) && Boolean(receiver.isAvailable);
+  if (!canTakeCall) {
     return {
-      status: 'offline',
-      label: 'Offline',
+      status: 'not_available',
+      label: 'Receiver not available',
       color: STATUS_RED,
-      canCall: false,
-      canMessage: true,
-    };
-  }
-
-  if (!receiver.isAvailable) {
-    return {
-      status: 'busy',
-      label: 'Busy',
-      color: STATUS_YELLOW,
       canCall: false,
       canMessage: true,
     };
@@ -39,7 +29,7 @@ export function getReceiverPresenceInfo(receiver: DiscoverReceiverSummary): Rece
     status: 'available',
     label: 'Available',
     color: STATUS_GREEN,
-    canCall: true,
+    canCall: canTakeCall,
     canMessage: true,
   };
 }

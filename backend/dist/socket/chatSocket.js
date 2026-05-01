@@ -46,7 +46,9 @@ function attachChatSocket(httpServer) {
     const io = new socket_io_1.Server(httpServer, {
         cors: { origin: '*', methods: ['GET', 'POST'] },
     });
+    const DISCONNECT_GRACE_MS = 5000;
     const queueKey = (typ, accountId) => `${typ}:${String(accountId).trim()}`;
+    const hasActiveSocketForAccount = (typ, accountId) => (io.sockets.adapter.rooms.get(accountRoom(typ, accountId))?.size ?? 0) > 0;
     const cancelPendingInvitesFor = (typ, accountId) => {
         for (const [callId, invite] of activeCallInvites) {
             const isTarget = invite.targetType === typ && invite.targetId === accountId;
@@ -128,28 +130,31 @@ function attachChatSocket(httpServer) {
         socket.on('disconnect', () => {
             const leavingId = String(socket.data.accountId);
             const leavingType = socket.data.typ;
-            waitingCallQueueAccounts.delete(queueKey(leavingType, leavingId));
-            if (leavingType === 'r') {
-                (0, callQueue_1.setReceiverQueuePresence)(leavingId, false);
-            }
-            cancelPendingInvitesFor(leavingType, leavingId);
-            for (const [callId, invite] of activeCallInvites) {
-                if ((invite.inviterId === leavingId && invite.inviterType === leavingType) ||
-                    (invite.targetId === leavingId && invite.targetType === leavingType)) {
-                    if (invite.timeoutHandle) {
-                        clearTimeout(invite.timeoutHandle);
-                        invite.timeoutHandle = null;
-                    }
-                    activeCallInvites.delete(callId);
-                    (0, callQueue_1.releaseReceiverReservation)(invite.receiverId);
-                    void (0, callQueue_1.syncReceiverQueueState)(invite.receiverId);
+            setTimeout(() => {
+                if (hasActiveSocketForAccount(leavingType, leavingId))
+                    return;
+                waitingCallQueueAccounts.delete(queueKey(leavingType, leavingId));
+                if (leavingType === 'r') {
+                    (0, callQueue_1.setReceiverQueuePresence)(leavingId, false);
                 }
-            }
+                cancelPendingInvitesFor(leavingType, leavingId);
+                for (const [callId, invite] of activeCallInvites) {
+                    if ((invite.inviterId === leavingId && invite.inviterType === leavingType) ||
+                        (invite.targetId === leavingId && invite.targetType === leavingType)) {
+                        if (invite.timeoutHandle) {
+                            clearTimeout(invite.timeoutHandle);
+                            invite.timeoutHandle = null;
+                        }
+                        activeCallInvites.delete(callId);
+                        (0, callQueue_1.releaseReceiverReservation)(invite.receiverId);
+                        void (0, callQueue_1.syncReceiverQueueState)(invite.receiverId);
+                    }
+                }
+            }, DISCONNECT_GRACE_MS);
             if (leavingType === 'r') {
                 // Keep online=true while any receiver socket remains connected for this account.
                 setTimeout(() => {
-                    const room = accountRoom('r', leavingId);
-                    const stillConnected = (io.sockets.adapter.rooms.get(room)?.size ?? 0) > 0;
+                    const stillConnected = hasActiveSocketForAccount('r', leavingId);
                     if (!stillConnected) {
                         void (async () => {
                             const prev = await Receiver_1.default.findOneAndUpdate({ _id: leavingId }, { $set: { isOnline: false, onlineSince: null } }, { new: false }).select('onlineSince');

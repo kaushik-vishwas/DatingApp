@@ -1,6 +1,6 @@
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Image, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, Image, Modal, Pressable, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Audio } from 'expo-av';
 import Constants from 'expo-constants';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -15,6 +15,7 @@ type Props =
   | NativeStackScreenProps<ReceiverStackParamList, 'VoiceCall'>;
 
 export default function VoiceCallScreen({ navigation, route }: Props): React.JSX.Element {
+  const MIN_RATING_SECONDS = 55;
   const insets = useSafeAreaInsets();
   const { user } = useAuth();
   const [sdk, setSdk] = useState<null | {
@@ -53,8 +54,11 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
   const [error, setError] = useState<string | null>(null);
   const [elapsedSec, setElapsedSec] = useState(0);
   const [muted, setMuted] = useState(false);
-  const [finalCanRate, setFinalCanRate] = useState(false);
   const [liveSettledAmountInr, setLiveSettledAmountInr] = useState(0);
+  const [ratingOpen, setRatingOpen] = useState(false);
+  const [selectedRating, setSelectedRating] = useState(0);
+  const [submittingRating, setSubmittingRating] = useState(false);
+  const autoEndByBalanceRef = useRef(false);
   const activeCallRef = useRef<{
     leave: () => Promise<void>;
   } | null>(null);
@@ -67,18 +71,42 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
   const endedSessionResultRef = useRef<{ canRate: boolean } | null>(null);
   const endSessionPromiseRef = useRef<Promise<{ canRate: boolean } | null> | null>(null);
   const callIdRef = useRef(route.params.callId);
-  const liveRatePerMinute = Number.isFinite(route.params.receiverRatePerMinute)
-    ? Math.max(0, route.params.receiverRatePerMinute)
+  const liveRatePerMinute = Number.isFinite(route.params.receiverEarningRatePerMinute)
+    ? Math.max(0, route.params.receiverEarningRatePerMinute)
     : 0;
   const liveEarning = Math.round(((elapsedSec / 60) * liveRatePerMinute) * 100) / 100;
   const shownLiveEarning = Math.max(liveEarning, liveSettledAmountInr);
   const showLiveEarning = user?.role === 'receiver';
+  const callerWalletInr =
+    user?.role === 'caller' && typeof user.walletBalance === 'number' && Number.isFinite(user.walletBalance)
+      ? Math.max(0, user.walletBalance)
+      : 0;
+  const callerRatePerMinute = Number.isFinite(route.params.receiverRatePerMinute)
+    ? Math.max(0, route.params.receiverRatePerMinute)
+    : 0;
+  const initialCallerTalkSec =
+    user?.role === 'caller' && callerRatePerMinute > 0
+      ? Math.floor((callerWalletInr / callerRatePerMinute) * 60)
+      : 0;
+  const callerRemainingTalkSec =
+    user?.role === 'caller'
+      ? Math.max(0, initialCallerTalkSec - elapsedSec)
+      : 0;
+  const showCallerCountdown = user?.role === 'caller' && callerRatePerMinute > 0;
 
   const callLabel = useMemo(
     () => `Voice call with ${route.params.peerName}`,
     [route.params.peerName]
   );
-  const callerCanRateByDuration = user?.role === 'caller' && elapsedSec >= 30;
+  const callerCanRateByDuration = user?.role === 'caller' && elapsedSec >= MIN_RATING_SECONDS;
+
+  const formatHms = (totalSec: number): string => {
+    const safe = Math.max(0, Math.floor(totalSec));
+    const hh = String(Math.floor(safe / 3600)).padStart(2, '0');
+    const mm = String(Math.floor((safe % 3600) / 60)).padStart(2, '0');
+    const ss = String(safe % 60).padStart(2, '0');
+    return `${hh}:${mm}:${ss}`;
+  };
 
   const ensureSessionEnded = async (): Promise<{ canRate: boolean } | null> => {
     if (endedSessionRef.current) return endedSessionResultRef.current;
@@ -89,10 +117,9 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
         const result = { canRate: Boolean(data.canRate) };
         endedSessionRef.current = true;
         endedSessionResultRef.current = result;
-        setFinalCanRate(result.canRate);
         setLiveSettledAmountInr(
-          typeof data.settledAmountInr === 'number' && Number.isFinite(data.settledAmountInr)
-            ? Math.max(0, data.settledAmountInr)
+          typeof data.receiverEarnedInr === 'number' && Number.isFinite(data.receiverEarnedInr)
+            ? Math.max(0, data.receiverEarnedInr)
             : 0
         );
         return result;
@@ -107,14 +134,8 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
   };
 
   const showRatingPrompt = () => {
-    Alert.alert('Rate this call', 'How was the call quality?', [
-      { text: 'Skip', onPress: stopQueueAndExit },
-      { text: '1', onPress: async () => { try { await callApi.sessionRate(callIdRef.current, 1); } catch { /* ignore */ } stopQueueAndExit(); } },
-      { text: '2', onPress: async () => { try { await callApi.sessionRate(callIdRef.current, 2); } catch { /* ignore */ } stopQueueAndExit(); } },
-      { text: '3', onPress: async () => { try { await callApi.sessionRate(callIdRef.current, 3); } catch { /* ignore */ } stopQueueAndExit(); } },
-      { text: '4', onPress: async () => { try { await callApi.sessionRate(callIdRef.current, 4); } catch { /* ignore */ } stopQueueAndExit(); } },
-      { text: '5', onPress: async () => { try { await callApi.sessionRate(callIdRef.current, 5); } catch { /* ignore */ } stopQueueAndExit(); } },
-    ]);
+    setSelectedRating(0);
+    setRatingOpen(true);
   };
 
   const stopQueueAndExit = () => {
@@ -254,9 +275,9 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
         if (endingRef.current) return;
         endingRef.current = true;
         void (async () => {
-          const ended = await ensureSessionEnded();
+          await ensureSessionEnded();
           await leaveMedia();
-          if (user?.role === 'caller' && (ended?.canRate || finalCanRate || callerCanRateByDuration)) {
+          if (user?.role === 'caller' && callerCanRateByDuration) {
             showRatingPrompt();
             return;
           }
@@ -276,7 +297,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
       }
       signalSocketRef.current = null;
     };
-  }, [callerCanRateByDuration, finalCanRate, navigation, route.params.peerName, user?.role]);
+  }, [callerCanRateByDuration, navigation, route.params.peerName, user?.role]);
 
   useEffect(() => {
     if (!ready) return;
@@ -296,11 +317,11 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
             setElapsedSec((prev) => (data.durationSec > prev ? data.durationSec : prev));
           }
           if (
-            typeof data.settledAmountInr === 'number' &&
-            Number.isFinite(data.settledAmountInr) &&
-            data.settledAmountInr >= 0
+            typeof data.receiverEarnedInr === 'number' &&
+            Number.isFinite(data.receiverEarnedInr) &&
+            data.receiverEarnedInr >= 0
           ) {
-            setLiveSettledAmountInr((prev) => (data.settledAmountInr > prev ? data.settledAmountInr : prev));
+            setLiveSettledAmountInr((prev) => (data.receiverEarnedInr > prev ? data.receiverEarnedInr : prev));
           }
         } catch {
           // Best-effort live settlement sync.
@@ -309,6 +330,19 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
     }, 5000);
     return () => clearInterval(poll);
   }, [ready]);
+
+  useEffect(() => {
+    if (!ready) return;
+    if (user?.role !== 'caller') return;
+    if (!showCallerCountdown) return;
+    if (callerRemainingTalkSec > 0) return;
+    if (endingRef.current || autoEndByBalanceRef.current) return;
+    autoEndByBalanceRef.current = true;
+    void (async () => {
+      Alert.alert('Call ended', 'Your talk time is over.');
+      await hangup();
+    })();
+  }, [callerRemainingTalkSec, ready, showCallerCountdown, user?.role]);
 
   const hangup = async () => {
     if (endingRef.current) return;
@@ -319,10 +353,10 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
     } catch {
       // ignore signaling failures
     }
-    const ended = await ensureSessionEnded();
+    await ensureSessionEnded();
     await leaveMedia();
 
-    if (user?.role === 'caller' && (ended?.canRate || finalCanRate || callerCanRateByDuration)) {
+    if (user?.role === 'caller' && callerCanRateByDuration) {
       showRatingPrompt();
       return;
     }
@@ -404,6 +438,12 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
             <Text style={styles.durationValue}>
               {`${String(Math.floor(elapsedSec / 60)).padStart(2, '0')}:${String(elapsedSec % 60).padStart(2, '0')}`}
             </Text>
+            {showCallerCountdown ? (
+              <View style={styles.countdownCard}>
+                <Text style={styles.countdownTitle}>Remaining Talk Time</Text>
+                <Text style={styles.countdownValue}>{formatHms(callerRemainingTalkSec)}</Text>
+              </View>
+            ) : null}
             {showLiveEarning ? (
               <View style={styles.earningCard}>
                 <Text style={styles.earningTitle}>Live Earning</Text>
@@ -420,11 +460,59 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
               </TouchableOpacity>
             </View>
             <TouchableOpacity style={styles.hangup} onPress={hangup}>
-              <Text style={styles.hangupText}>End Call</Text>
+              <Text style={styles.hangupText}>
+                {user?.role === 'receiver' ? 'Go Offline' : 'Disconnect'}
+              </Text>
             </TouchableOpacity>
           </View>
         </sdk.StreamCall>
       </sdk.StreamVideo>
+      <Modal visible={ratingOpen} transparent animationType="fade">
+        <View style={styles.modalOverlay}>
+          <View style={styles.ratingCard}>
+            <Text style={styles.ratingTitle}>Rate this call</Text>
+            <Text style={styles.ratingSubtitle}>How was the call quality?</Text>
+            <View style={styles.starRow}>
+              {[1, 2, 3, 4, 5].map((n) => (
+                <Pressable key={n} onPress={() => setSelectedRating(n)} hitSlop={8}>
+                  <Text style={[styles.star, n <= selectedRating ? styles.starOn : styles.starOff]}>★</Text>
+                </Pressable>
+              ))}
+            </View>
+            <TouchableOpacity
+              style={[styles.ratingSubmitBtn, selectedRating === 0 && styles.ratingSubmitBtnOff]}
+              disabled={selectedRating === 0 || submittingRating}
+              onPress={() => {
+                void (async () => {
+                  if (!selectedRating) return;
+                  setSubmittingRating(true);
+                  try {
+                    await callApi.sessionRate(callIdRef.current, selectedRating);
+                  } catch {
+                    // Keep exit behavior even if rating submit fails.
+                  } finally {
+                    setSubmittingRating(false);
+                    setRatingOpen(false);
+                    stopQueueAndExit();
+                  }
+                })();
+              }}
+            >
+              <Text style={styles.ratingSubmitText}>{submittingRating ? 'Submitting...' : 'Submit'}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.ratingSkipBtn}
+              disabled={submittingRating}
+              onPress={() => {
+                setRatingOpen(false);
+                stopQueueAndExit();
+              }}
+            >
+              <Text style={styles.ratingSkipText}>Skip</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -531,4 +619,47 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   loadingText: { color: '#fff', fontSize: 15, textAlign: 'center' },
+  countdownCard: {
+    marginTop: 12,
+    backgroundColor: '#111827',
+    borderRadius: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    alignItems: 'center',
+  },
+  countdownTitle: { color: '#d1d5db', fontSize: 11, fontWeight: '700' },
+  countdownValue: { color: '#fff', fontSize: 28, fontWeight: '900', marginTop: 2 },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 24,
+  },
+  ratingCard: {
+    width: '100%',
+    maxWidth: 340,
+    borderRadius: 16,
+    backgroundColor: '#fff',
+    padding: 20,
+    alignItems: 'center',
+  },
+  ratingTitle: { fontSize: 20, fontWeight: '900', color: '#111' },
+  ratingSubtitle: { marginTop: 6, fontSize: 13, color: '#666', fontWeight: '600' },
+  starRow: { marginTop: 18, flexDirection: 'row', gap: 8 },
+  star: { fontSize: 34 },
+  starOn: { color: '#fbbf24' },
+  starOff: { color: '#d1d5db' },
+  ratingSubmitBtn: {
+    marginTop: 20,
+    width: '100%',
+    borderRadius: 10,
+    backgroundColor: '#7b2cff',
+    alignItems: 'center',
+    paddingVertical: 12,
+  },
+  ratingSubmitBtnOff: { opacity: 0.45 },
+  ratingSubmitText: { color: '#fff', fontSize: 15, fontWeight: '900' },
+  ratingSkipBtn: { marginTop: 10, paddingVertical: 8, paddingHorizontal: 12 },
+  ratingSkipText: { color: '#666', fontSize: 14, fontWeight: '700' },
 });

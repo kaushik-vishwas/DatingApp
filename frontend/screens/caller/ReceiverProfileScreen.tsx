@@ -55,11 +55,7 @@ export default function ReceiverProfileScreen({ navigation, route }: Props): Rea
   const onVoiceCall = () => {
     if (calling) return;
     if (!presence.canCall) {
-      const reason =
-        presence.status === 'offline'
-          ? 'This receiver is currently offline.'
-          : 'This receiver is online but not available right now.';
-      Alert.alert('Unavailable', reason);
+      Alert.alert('Unavailable', 'Receiver not available.');
       return;
     }
     if (rate == null || !Number.isFinite(rate)) {
@@ -136,10 +132,8 @@ export default function ReceiverProfileScreen({ navigation, route }: Props): Rea
           </View>
           <Text style={styles.lastSeen}>
             {presence.status === 'available'
-              ? 'Online & available'
-              : presence.status === 'busy'
-                ? 'Online but not available'
-                : `Last seen — ${formatLastSeen(receiver.updatedAt)}`}
+              ? 'Available'
+              : `Receiver not available • Last seen ${formatLastSeen(receiver.updatedAt)}`}
           </Text>
         </View>
 

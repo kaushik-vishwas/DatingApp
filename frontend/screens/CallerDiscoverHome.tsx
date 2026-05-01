@@ -103,6 +103,23 @@ export default function CallerDiscoverHome(): React.JSX.Element {
     };
   }, [fetchList]);
 
+  useEffect(() => {
+    let cancelled = false;
+    const poll = setInterval(() => {
+      void fetchList()
+        .then((rows) => {
+          if (!cancelled) setReceivers(rows);
+        })
+        .catch(() => {
+          // Keep existing cards on transient poll failures.
+        });
+    }, 8000);
+    return () => {
+      cancelled = true;
+      clearInterval(poll);
+    };
+  }, [fetchList]);
+
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     setErr(null);
@@ -142,17 +159,42 @@ export default function CallerDiscoverHome(): React.JSX.Element {
     if (randomCalling) return;
     setRandomCalling(true);
     void (async () => {
+      const MAX_RANDOM_RETRIES = 3;
+      const isRetryableRandomInviteError = (message: string): boolean => {
+        const msg = message.toLowerCase();
+        return (
+          msg.includes('offline') ||
+          msg.includes('unavailable') ||
+          msg.includes('busy') ||
+          msg.includes('not available') ||
+          msg.includes('cannot call this receiver')
+        );
+      };
       try {
-        const { data } = await callApi.randomReceiver();
-        const rate =
-          typeof data.audioCallRate === 'number' && Number.isFinite(data.audioCallRate)
-            ? data.audioCallRate
-            : null;
-        if (rate != null && wallet < rate) {
-          navigation.navigate('Wallet');
-          return;
+        let lastErr: unknown = null;
+        for (let attempt = 0; attempt < MAX_RANDOM_RETRIES; attempt += 1) {
+          try {
+            const { data } = await callApi.randomReceiver();
+            const rate =
+              typeof data.audioCallRate === 'number' && Number.isFinite(data.audioCallRate)
+                ? data.audioCallRate
+                : null;
+            if (rate != null && wallet < rate) {
+              navigation.navigate('Wallet');
+              return;
+            }
+            await startCallInvite(data.receiverId, data.name, data.profileImage ?? null);
+            return;
+          } catch (e: unknown) {
+            lastErr = e;
+            const msg = getErrorMessage(e);
+            // Random match can race with other callers; retry with another receiver.
+            if (!isRetryableRandomInviteError(msg) || attempt === MAX_RANDOM_RETRIES - 1) {
+              throw e;
+            }
+          }
         }
-        await startCallInvite(data.receiverId, data.name, data.profileImage ?? null);
+        throw lastErr ?? new Error('No available receiver found right now. Please try again shortly.');
       } catch (e: unknown) {
         Alert.alert('Random call', getErrorMessage(e));
       } finally {

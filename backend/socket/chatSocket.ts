@@ -66,8 +66,11 @@ export function attachChatSocket(httpServer: HTTPServer): Server {
   const io = new Server(httpServer, {
     cors: { origin: '*', methods: ['GET', 'POST'] },
   });
+  const DISCONNECT_GRACE_MS = 5000;
 
   const queueKey = (typ: AccountType, accountId: string): string => `${typ}:${String(accountId).trim()}`;
+  const hasActiveSocketForAccount = (typ: AccountType, accountId: string): boolean =>
+    (io.sockets.adapter.rooms.get(accountRoom(typ, accountId))?.size ?? 0) > 0;
   const cancelPendingInvitesFor = (typ: AccountType, accountId: string): void => {
     for (const [callId, invite] of activeCallInvites) {
       const isTarget = invite.targetType === typ && invite.targetId === accountId;
@@ -158,30 +161,32 @@ export function attachChatSocket(httpServer: HTTPServer): Server {
     socket.on('disconnect', () => {
       const leavingId = String(socket.data.accountId);
       const leavingType = socket.data.typ as AccountType;
-      waitingCallQueueAccounts.delete(queueKey(leavingType, leavingId));
-      if (leavingType === 'r') {
-        setReceiverQueuePresence(leavingId, false);
-      }
-      cancelPendingInvitesFor(leavingType, leavingId);
-      for (const [callId, invite] of activeCallInvites) {
-        if (
-          (invite.inviterId === leavingId && invite.inviterType === leavingType) ||
-          (invite.targetId === leavingId && invite.targetType === leavingType)
-        ) {
-          if (invite.timeoutHandle) {
-            clearTimeout(invite.timeoutHandle);
-            invite.timeoutHandle = null;
-          }
-          activeCallInvites.delete(callId);
-          releaseReceiverReservation(invite.receiverId);
-          void syncReceiverQueueState(invite.receiverId);
+      setTimeout(() => {
+        if (hasActiveSocketForAccount(leavingType, leavingId)) return;
+        waitingCallQueueAccounts.delete(queueKey(leavingType, leavingId));
+        if (leavingType === 'r') {
+          setReceiverQueuePresence(leavingId, false);
         }
-      }
+        cancelPendingInvitesFor(leavingType, leavingId);
+        for (const [callId, invite] of activeCallInvites) {
+          if (
+            (invite.inviterId === leavingId && invite.inviterType === leavingType) ||
+            (invite.targetId === leavingId && invite.targetType === leavingType)
+          ) {
+            if (invite.timeoutHandle) {
+              clearTimeout(invite.timeoutHandle);
+              invite.timeoutHandle = null;
+            }
+            activeCallInvites.delete(callId);
+            releaseReceiverReservation(invite.receiverId);
+            void syncReceiverQueueState(invite.receiverId);
+          }
+        }
+      }, DISCONNECT_GRACE_MS);
       if (leavingType === 'r') {
         // Keep online=true while any receiver socket remains connected for this account.
         setTimeout(() => {
-          const room = accountRoom('r', leavingId);
-          const stillConnected = (io.sockets.adapter.rooms.get(room)?.size ?? 0) > 0;
+          const stillConnected = hasActiveSocketForAccount('r', leavingId);
           if (!stillConnected) {
             void (async () => {
               const prev = await Receiver.findOneAndUpdate(
@@ -571,6 +576,23 @@ export function attachChatSocket(httpServer: HTTPServer): Server {
             return;
           }
           receiverForInviteId = targetId;
+          const notifyReceiverBusyMissedCall = async (): Promise<void> => {
+            const inviter = await User.findById(myId).select('name profileImage').lean<{
+              name?: string;
+              profileImage?: string | null;
+            } | null>();
+            io.to(accountRoom('r', targetId)).emit('call:missed', {
+              callerId: myId,
+              callerName: inviter?.name?.trim() || 'Caller',
+              callerImage: inviter?.profileImage ?? null,
+              at: new Date().toISOString(),
+            });
+          };
+          if (isReceiverBusy(receiverForInviteId)) {
+            await notifyReceiverBusyMissedCall();
+            ack?.({ ok: false, error: 'Busy on another call.' });
+            return;
+          }
         } else {
           const recv = await Receiver.findById(myId).select('accountStatus suspended isAvailable isOnline');
           if (
@@ -601,6 +623,18 @@ export function attachChatSocket(httpServer: HTTPServer): Server {
         }
 
         if (!tryReserveReceiver(receiverForInviteId)) {
+          if (typ === 'u') {
+            const inviter = await User.findById(myId).select('name profileImage').lean<{
+              name?: string;
+              profileImage?: string | null;
+            } | null>();
+            io.to(accountRoom('r', targetId)).emit('call:missed', {
+              callerId: myId,
+              callerName: inviter?.name?.trim() || 'Caller',
+              callerImage: inviter?.profileImage ?? null,
+              at: new Date().toISOString(),
+            });
+          }
           ack?.({ ok: false, error: 'Busy on another call.' });
           return;
         }

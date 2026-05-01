@@ -67,6 +67,7 @@ async function settleCallSession(callId, complete) {
                 snapshot = {
                     durationSec: call.durationSec,
                     settledAmountInr: roundInr(call.settledAmountInr || 0),
+                    receiverEarnedInr: roundInr(call.receiverEarnedInr || 0),
                     status: 'completed',
                     receiverId: String(call.receiverId),
                     callerId: String(call.callerId),
@@ -80,6 +81,7 @@ async function settleCallSession(callId, complete) {
             const grossAmountInr = roundInr((durationSec / 60) * Math.max(0, call.ratePerMinute));
             const alreadySettled = roundInr(call.settledAmountInr || 0);
             const dueAmount = roundInr(Math.max(0, grossAmountInr - alreadySettled));
+            const receiverEarnedInr = roundInr((durationSec / 60) * Math.max(0, Number(call.receiverPayoutRatePerMinute || 0)));
             let settledNow = 0;
             if (dueAmount > 0) {
                 const [callerDoc, receiverDoc] = await Promise.all([
@@ -101,6 +103,7 @@ async function settleCallSession(callId, complete) {
             const nextSettled = roundInr(alreadySettled + settledNow);
             call.durationSec = durationSec;
             call.settledAmountInr = nextSettled;
+            call.receiverEarnedInr = receiverEarnedInr;
             if (complete) {
                 call.status = 'completed';
                 call.endedAt = now;
@@ -109,6 +112,7 @@ async function settleCallSession(callId, complete) {
             snapshot = {
                 durationSec,
                 settledAmountInr: nextSettled,
+                receiverEarnedInr,
                 status: complete ? 'completed' : 'ongoing',
                 receiverId: String(call.receiverId),
                 callerId: String(call.callerId),
@@ -178,7 +182,7 @@ const getVoiceBootstrap = async (req, res) => {
     const receiverId = accountKind === 'receiver' ? meId : peerId;
     const [callerDoc, receiverDoc] = await Promise.all([
         User_1.default.findById(callerUserId).select('accountStatus suspended'),
-        Receiver_1.default.findById(receiverId).select('accountStatus suspended audioCallRate isAvailable isOnline'),
+        Receiver_1.default.findById(receiverId).select('accountStatus suspended audioCallRate isAvailable isOnline earningRatePerMinute'),
     ]);
     if (!callerDoc || callerDoc.accountStatus !== 'approved' || callerDoc.suspended) {
         res.status(403).json({ message: 'Caller account is not allowed for calling' });
@@ -218,6 +222,9 @@ const getVoiceBootstrap = async (req, res) => {
         peerStreamUserId,
         peerAccountId: peerId,
         receiverRatePerMinute: Receiver_1.RECEIVER_AUDIO_CALL_RATE_INR_PER_MIN,
+        receiverEarningRatePerMinute: typeof receiverDoc.earningRatePerMinute === 'number' && Number.isFinite(receiverDoc.earningRatePerMinute)
+            ? roundInr(receiverDoc.earningRatePerMinute)
+            : 0,
         callType: 'default',
         callId,
     });
@@ -243,12 +250,15 @@ const startVoiceSession = async (req, res) => {
         }
         const callerId = accountKind === 'user' ? meId : peerId;
         const receiverId = accountKind === 'receiver' ? meId : peerId;
-        const receiver = await Receiver_1.default.findById(receiverId).select('audioCallRate');
+        const receiver = await Receiver_1.default.findById(receiverId).select('audioCallRate earningRatePerMinute');
         if (!receiver) {
             res.status(404).json({ message: 'Receiver not found' });
             return;
         }
         const ratePerMinute = Receiver_1.RECEIVER_AUDIO_CALL_RATE_INR_PER_MIN;
+        const receiverPayoutRatePerMinute = typeof receiver.earningRatePerMinute === 'number' && Number.isFinite(receiver.earningRatePerMinute)
+            ? Math.max(0, receiver.earningRatePerMinute)
+            : 0;
         await CallSession_1.default.findOneAndUpdate({ callId }, {
             $setOnInsert: {
                 callId,
@@ -257,6 +267,7 @@ const startVoiceSession = async (req, res) => {
                 startedAt: new Date(),
                 status: 'ongoing',
                 ratePerMinute,
+                receiverPayoutRatePerMinute,
             },
         }, { upsert: true, new: true, setDefaultsOnInsert: true });
         res.status(200).json({ ok: true });
@@ -307,8 +318,9 @@ const endVoiceSession = async (req, res) => {
         res.status(200).json({
             ok: true,
             durationSec: settled.durationSec,
-            estimatedEarning: settled.settledAmountInr,
+            estimatedEarning: settled.receiverEarnedInr,
             settledAmountInr: settled.settledAmountInr,
+            receiverEarnedInr: settled.receiverEarnedInr,
             canRate: settled.durationSec >= 30,
         });
         (0, callQueue_2.releaseReceiverReservation)(settled.receiverId);
@@ -349,6 +361,7 @@ const syncVoiceSession = async (req, res) => {
             ok: true,
             durationSec: settled.durationSec,
             settledAmountInr: settled.settledAmountInr,
+            receiverEarnedInr: settled.receiverEarnedInr,
             canRate: settled.durationSec >= 30,
             status: settled.status,
         });

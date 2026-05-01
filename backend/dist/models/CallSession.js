@@ -43,7 +43,9 @@ const callSessionSchema = new mongoose_1.Schema({
     durationSec: { type: Number, default: 0, min: 0 },
     status: { type: String, enum: ['ongoing', 'completed'], default: 'ongoing', index: true },
     ratePerMinute: { type: Number, default: 0, min: 0 },
+    receiverPayoutRatePerMinute: { type: Number, default: 0, min: 0 },
     settledAmountInr: { type: Number, default: 0, min: 0 },
+    receiverEarnedInr: { type: Number, default: 0, min: 0 },
     callerRating: { type: Number, default: null, min: 1, max: 5 },
 }, { timestamps: true });
 callSessionSchema.index({ receiverId: 1, startedAt: -1 });

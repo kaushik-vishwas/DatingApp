@@ -423,6 +423,30 @@ exports.updateCallerProfile = updateCallerProfile;
 function roundInr(n) {
     return Math.round(n * 100) / 100;
 }
+const IST_OFFSET_MINUTES = 330;
+function toIstDate(d) {
+    return new Date(d.getTime() + IST_OFFSET_MINUTES * 60 * 1000);
+}
+function computeLiveOnlineScore(onlineSince, now) {
+    if (!(onlineSince instanceof Date) || !(now instanceof Date) || now <= onlineSince)
+        return 0;
+    let dayMinutes = 0;
+    let nightMinutes = 0;
+    let lateNightMinutes = 0;
+    const cursor = new Date(onlineSince.getTime());
+    while (cursor < now) {
+        const nextMinute = new Date(cursor.getTime() + 60 * 1000);
+        const h = toIstDate(cursor).getUTCHours();
+        if (h >= 9 && h < 21)
+            dayMinutes += 1;
+        else if (h >= 22)
+            nightMinutes += 1;
+        else if (h >= 0 && h < 2)
+            lateNightMinutes += 1;
+        cursor.setTime(nextMinute.getTime());
+    }
+    return roundInr(dayMinutes * 0.5 + nightMinutes * 3 + lateNightMinutes * 10);
+}
 function toInrAmount(raw) {
     const n = Number(raw);
     if (!Number.isFinite(n))
@@ -780,8 +804,17 @@ const getReceiverCallInsights = async (req, res) => {
             return;
         const rid = new mongoose_1.default.Types.ObjectId(String(req.receiver._id));
         const range = String(req.query.range ?? 'all').toLowerCase();
-        const receiverMeta = await Receiver_1.default.findById(rid).select('cumulativeScore').lean();
         const now = new Date();
+        const receiverMeta = await Receiver_1.default.findById(rid)
+            .select('cumulativeScore badgeLevel earningRatePerMinute isOnline onlineSince')
+            .lean();
+        const liveOnlineScore = receiverMeta?.isOnline && receiverMeta.onlineSince instanceof Date
+            ? computeLiveOnlineScore(receiverMeta.onlineSince, now)
+            : 0;
+        const persistedScore = typeof receiverMeta?.cumulativeScore === 'number' && Number.isFinite(receiverMeta.cumulativeScore)
+            ? roundInr(receiverMeta.cumulativeScore)
+            : 0;
+        const effectiveTotalScore = roundInr(persistedScore + liveOnlineScore);
         const weekStart = new Date(now);
         weekStart.setDate(now.getDate() - 7);
         const monthStart = new Date(now);
@@ -822,9 +855,13 @@ const getReceiverCallInsights = async (req, res) => {
             callerImage: callerById.get(String(row.callerId))?.profileImage ?? null,
             startedAt: row.startedAt.toISOString(),
             durationSec: row.durationSec,
-            earningInr: roundInr(typeof row.settledAmountInr === 'number' && Number.isFinite(row.settledAmountInr)
-                ? row.settledAmountInr
-                : (row.durationSec / 60) * row.ratePerMinute),
+            earningInr: roundInr(typeof row.receiverEarnedInr === 'number' && Number.isFinite(row.receiverEarnedInr)
+                ? row.receiverEarnedInr
+                : (row.durationSec / 60) *
+                    (typeof row.receiverPayoutRatePerMinute === 'number' &&
+                        Number.isFinite(row.receiverPayoutRatePerMinute)
+                        ? row.receiverPayoutRatePerMinute
+                        : 0)),
             rating: typeof row.callerRating === 'number' ? row.callerRating : null,
         }));
         const byCaller = new Map();
@@ -891,9 +928,33 @@ const getReceiverCallInsights = async (req, res) => {
             callerHistory,
             receiverRatingAvg: ratingSummary && Number.isFinite(ratingSummary.avg) ? roundInr(ratingSummary.avg) : 0,
             receiverRatingCount: ratingSummary?.count ?? 0,
-            totalScore: typeof receiverMeta?.cumulativeScore === 'number' && Number.isFinite(receiverMeta.cumulativeScore)
-                ? roundInr(receiverMeta.cumulativeScore)
-                : 0,
+            totalScore: effectiveTotalScore,
+            liveOnlineScore,
+            badgeLevel: receiverMeta?.badgeLevel ?? 'platinum',
+            earningRatePerMinute: typeof receiverMeta?.earningRatePerMinute === 'number' &&
+                Number.isFinite(receiverMeta.earningRatePerMinute)
+                ? roundInr(receiverMeta.earningRatePerMinute)
+                : 2.0,
+            scoreRules: {
+                call: {
+                    ignoreAtOrBelowSeconds: 55,
+                    midBand: { minMinutes: 3, maxMinutesExclusive: 10, multiplier: 3 },
+                    topBand: { minMinutes: 10, multiplier: 5 },
+                },
+                online: {
+                    timezone: 'Asia/Kolkata',
+                    windows: [
+                        { from: '09:00', to: '21:00', multiplier: 0.5 },
+                        { from: '22:00', to: '24:00', multiplier: 3 },
+                        { from: '00:00', to: '02:00', multiplier: 10 },
+                    ],
+                },
+                weekendTargets: {
+                    weekday: { supremeAt: 12000, diamondAt: 8000 },
+                    weekend: { supremeAt: 13000, diamondAt: 9000 },
+                    note: 'Targets can be adjusted on weekends due to demand.',
+                },
+            },
         });
     }
     catch (err) {
@@ -1308,9 +1369,13 @@ const getReceiverEarningsBreakdown = async (req, res) => {
                 .lean(),
         ]);
         const callRows = calls.map((c) => {
-            const gross = roundInr(typeof c.settledAmountInr === 'number' && Number.isFinite(c.settledAmountInr)
-                ? c.settledAmountInr
-                : (c.durationSec / 60) * c.ratePerMinute);
+            const gross = roundInr(typeof c.receiverEarnedInr === 'number' && Number.isFinite(c.receiverEarnedInr)
+                ? c.receiverEarnedInr
+                : (c.durationSec / 60) *
+                    (typeof c.receiverPayoutRatePerMinute === 'number' &&
+                        Number.isFinite(c.receiverPayoutRatePerMinute)
+                        ? c.receiverPayoutRatePerMinute
+                        : 0));
             const fee = roundInr(gross * 0.2);
             const net = roundInr(gross - fee);
             return {

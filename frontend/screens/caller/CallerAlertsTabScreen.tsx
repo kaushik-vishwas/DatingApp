@@ -6,6 +6,7 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 
 import CallerBottomTabs, { getCallerTabBarContentPadding } from '../../components/caller/CallerBottomTabs';
 import type { CallerStackParamList } from '../../navigation/CallerStackParamList';
+import { markNotificationsSeenNow } from '../../services/notificationUnread';
 import { getErrorMessage, profileApi } from '../../services/api';
 import type { CallerNotificationRow, CallerNotificationType } from '../../types/api';
 
@@ -34,6 +35,7 @@ export default function CallerAlertsTabScreen({ navigation }: Props): React.JSX.
 
   useFocusEffect(
     useCallback(() => {
+      void markNotificationsSeenNow('caller');
       void load();
     }, [load])
   );

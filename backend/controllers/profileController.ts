@@ -510,6 +510,29 @@ function roundInr(n: number): number {
   return Math.round(n * 100) / 100;
 }
 
+const IST_OFFSET_MINUTES = 330;
+
+function toIstDate(d: Date): Date {
+  return new Date(d.getTime() + IST_OFFSET_MINUTES * 60 * 1000);
+}
+
+function computeLiveOnlineScore(onlineSince: Date, now: Date): number {
+  if (!(onlineSince instanceof Date) || !(now instanceof Date) || now <= onlineSince) return 0;
+  let dayMinutes = 0;
+  let nightMinutes = 0;
+  let lateNightMinutes = 0;
+  const cursor = new Date(onlineSince.getTime());
+  while (cursor < now) {
+    const nextMinute = new Date(cursor.getTime() + 60 * 1000);
+    const h = toIstDate(cursor).getUTCHours();
+    if (h >= 9 && h < 21) dayMinutes += 1;
+    else if (h >= 22) nightMinutes += 1;
+    else if (h >= 0 && h < 2) lateNightMinutes += 1;
+    cursor.setTime(nextMinute.getTime());
+  }
+  return roundInr(dayMinutes * 0.5 + nightMinutes * 3 + lateNightMinutes * 10);
+}
+
 function toInrAmount(raw: unknown): number | null {
   const n = Number(raw);
   if (!Number.isFinite(n)) return null;
@@ -924,15 +947,25 @@ export const getReceiverCallInsights = async (
 
     const rid = new mongoose.Types.ObjectId(String(req.receiver!._id));
     const range = String(req.query.range ?? 'all').toLowerCase();
+    const now = new Date();
     const receiverMeta = await Receiver.findById(rid)
-      .select('cumulativeScore badgeLevel earningRatePerMinute')
+      .select('cumulativeScore badgeLevel earningRatePerMinute isOnline onlineSince')
       .lean<{
         cumulativeScore?: number;
         badgeLevel?: 'platinum' | 'diamond' | 'supreme';
         earningRatePerMinute?: number;
+        isOnline?: boolean;
+        onlineSince?: Date | null;
       } | null>();
-
-    const now = new Date();
+    const liveOnlineScore =
+      receiverMeta?.isOnline && receiverMeta.onlineSince instanceof Date
+        ? computeLiveOnlineScore(receiverMeta.onlineSince, now)
+        : 0;
+    const persistedScore =
+      typeof receiverMeta?.cumulativeScore === 'number' && Number.isFinite(receiverMeta.cumulativeScore)
+        ? roundInr(receiverMeta.cumulativeScore)
+        : 0;
+    const effectiveTotalScore = roundInr(persistedScore + liveOnlineScore);
     const weekStart = new Date(now);
     weekStart.setDate(now.getDate() - 7);
     const monthStart = new Date(now);
@@ -952,7 +985,9 @@ export const getReceiverCallInsights = async (
           startedAt: Date;
           durationSec: number;
           ratePerMinute: number;
+          receiverPayoutRatePerMinute?: number;
           settledAmountInr?: number;
+          receiverEarnedInr?: number;
           callerRating?: number | null;
         }[]
       >();
@@ -990,9 +1025,13 @@ export const getReceiverCallInsights = async (
       startedAt: row.startedAt.toISOString(),
       durationSec: row.durationSec,
       earningInr: roundInr(
-        typeof row.settledAmountInr === 'number' && Number.isFinite(row.settledAmountInr)
-          ? row.settledAmountInr
-          : (row.durationSec / 60) * row.ratePerMinute
+        typeof row.receiverEarnedInr === 'number' && Number.isFinite(row.receiverEarnedInr)
+          ? row.receiverEarnedInr
+          : (row.durationSec / 60) *
+              (typeof row.receiverPayoutRatePerMinute === 'number' &&
+              Number.isFinite(row.receiverPayoutRatePerMinute)
+                ? row.receiverPayoutRatePerMinute
+                : 0)
       ),
       rating: typeof row.callerRating === 'number' ? row.callerRating : null,
     }));
@@ -1075,10 +1114,8 @@ export const getReceiverCallInsights = async (
       receiverRatingAvg:
         ratingSummary && Number.isFinite(ratingSummary.avg) ? roundInr(ratingSummary.avg) : 0,
       receiverRatingCount: ratingSummary?.count ?? 0,
-      totalScore:
-        typeof receiverMeta?.cumulativeScore === 'number' && Number.isFinite(receiverMeta.cumulativeScore)
-          ? roundInr(receiverMeta.cumulativeScore)
-          : 0,
+      totalScore: effectiveTotalScore,
+      liveOnlineScore,
       badgeLevel: receiverMeta?.badgeLevel ?? 'platinum',
       earningRatePerMinute:
         typeof receiverMeta?.earningRatePerMinute === 'number' &&
@@ -1568,7 +1605,9 @@ export const getReceiverEarningsBreakdown = async (
             startedAt: Date;
             durationSec: number;
             ratePerMinute: number;
+          receiverPayoutRatePerMinute?: number;
             settledAmountInr?: number;
+          receiverEarnedInr?: number;
           }[]
         >(),
       ChatMessage.find({
@@ -1589,9 +1628,13 @@ export const getReceiverEarningsBreakdown = async (
 
     const callRows = calls.map((c) => {
       const gross = roundInr(
-        typeof c.settledAmountInr === 'number' && Number.isFinite(c.settledAmountInr)
-          ? c.settledAmountInr
-          : (c.durationSec / 60) * c.ratePerMinute
+        typeof c.receiverEarnedInr === 'number' && Number.isFinite(c.receiverEarnedInr)
+          ? c.receiverEarnedInr
+          : (c.durationSec / 60) *
+              (typeof c.receiverPayoutRatePerMinute === 'number' &&
+              Number.isFinite(c.receiverPayoutRatePerMinute)
+                ? c.receiverPayoutRatePerMinute
+                : 0)
       );
       const fee = roundInr(gross * 0.2);
       const net = roundInr(gross - fee);

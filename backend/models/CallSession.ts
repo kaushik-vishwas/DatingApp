@@ -11,8 +11,12 @@ export interface ICallSession {
   durationSec: number;
   status: CallSessionStatus;
   ratePerMinute: number;
+  /** Receiver payout rate per minute snapshot based on score tier at call start. */
+  receiverPayoutRatePerMinute: number;
   /** Final settled debit captured from caller wallet for this call. */
   settledAmountInr: number;
+  /** Final earned amount for receiver side based on payout rate. */
+  receiverEarnedInr: number;
   callerRating: number | null;
   createdAt: Date;
   updatedAt: Date;
@@ -30,7 +34,9 @@ const callSessionSchema = new Schema<ICallSession>(
     durationSec: { type: Number, default: 0, min: 0 },
     status: { type: String, enum: ['ongoing', 'completed'], default: 'ongoing', index: true },
     ratePerMinute: { type: Number, default: 0, min: 0 },
+    receiverPayoutRatePerMinute: { type: Number, default: 0, min: 0 },
     settledAmountInr: { type: Number, default: 0, min: 0 },
+    receiverEarnedInr: { type: Number, default: 0, min: 0 },
     callerRating: { type: Number, default: null, min: 1, max: 5 },
   },
   { timestamps: true }

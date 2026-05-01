@@ -1,9 +1,11 @@
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { chatApi, getErrorMessage, profileApi } from '../../services/api';
+import { io, type Socket } from 'socket.io-client';
+import { chatApi, getErrorMessage, getJwt, getResolvedApiBaseUrl, profileApi } from '../../services/api';
+import { markNotificationsSeenNow } from '../../services/notificationUnread';
 import type { ReceiverStackParamList } from '../../navigation/ReceiverStackParamList';
 
 type NotificationKind = 'message' | 'call' | 'withdrawal' | 'earning';
@@ -83,9 +85,59 @@ export default function ReceiverNotificationsScreen(): React.JSX.Element {
 
   useFocusEffect(
     useCallback(() => {
+      void markNotificationsSeenNow('receiver');
       void load();
     }, [load])
   );
+
+  useEffect(() => {
+    let cancelled = false;
+    const base = getResolvedApiBaseUrl();
+    let socket: Socket | null = null;
+    void (async () => {
+      const token = await getJwt();
+      if (!token || cancelled) return;
+      socket = io(base, {
+        auth: { token },
+        transports: ['polling', 'websocket'],
+        timeout: 20000,
+      });
+      socket.on(
+        'call:missed',
+        (payload: { callerId: string; callerName?: string; callerImage?: string | null; at?: string }) => {
+          const at =
+            typeof payload?.at === 'string' && payload.at.trim()
+              ? payload.at
+              : new Date().toISOString();
+          const callerName =
+            typeof payload?.callerName === 'string' && payload.callerName.trim()
+              ? payload.callerName.trim()
+              : 'Caller';
+          const newRow: NotificationRow = {
+            id: `missed-live-${payload?.callerId ?? 'unknown'}-${Date.now()}`,
+            title: 'Missed Call',
+            subtitle: `${callerName} tried to call while you were busy.`,
+            at,
+            type: 'call',
+            peerId: String(payload?.callerId ?? ''),
+            peerName: callerName,
+            peerImage: payload?.callerImage ?? null,
+          };
+          setRows((prev) =>
+            [newRow, ...prev].sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime())
+          );
+        }
+      );
+    })();
+
+    return () => {
+      cancelled = true;
+      if (socket) {
+        socket.removeAllListeners();
+        socket.disconnect();
+      }
+    };
+  }, []);
 
   const filtered = useMemo(
     () => (tab === 'all' ? rows : rows.filter((x) => x.type === tab)),

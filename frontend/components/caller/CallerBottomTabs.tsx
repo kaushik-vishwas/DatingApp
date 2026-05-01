@@ -1,10 +1,15 @@
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import type { CallerStackParamList } from '../../navigation/CallerStackParamList';
-import { useChatInbox } from '../../context/ChatInboxContext';
+import { profileApi } from '../../services/api';
+import {
+  countUnreadByTimestamp,
+  getNotificationLastSeenAt,
+  markNotificationsSeenNow,
+} from '../../services/notificationUnread';
 
 const PURPLE = '#7b2cff';
 export const CALLER_TAB_BAR_HEIGHT = 62;
@@ -27,8 +32,37 @@ type Props = {
 
 export default function CallerBottomTabs({ active, navigation }: Props): React.JSX.Element {
   const insets = useSafeAreaInsets();
-  const { totalUnread } = useChatInbox();
+  const [notificationUnread, setNotificationUnread] = useState(0);
   const bottomInset = Math.max(insets.bottom, 0);
+
+  useEffect(() => {
+    let cancelled = false;
+    const refresh = async () => {
+      try {
+        if (active === 'alerts') {
+          await markNotificationsSeenNow('caller');
+          if (!cancelled) setNotificationUnread(0);
+          return;
+        }
+        const [lastSeenAt, { data }] = await Promise.all([
+          getNotificationLastSeenAt('caller'),
+          profileApi.callerNotifications(),
+        ]);
+        const unread = countUnreadByTimestamp(data.notifications, lastSeenAt);
+        if (!cancelled) setNotificationUnread(unread);
+      } catch {
+        // Keep prior unread badge on transient failures.
+      }
+    };
+    void refresh();
+    const timer = setInterval(() => {
+      void refresh();
+    }, 10000);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [active]);
   const tab = (
     id: CallerTabId,
     icon: string,
@@ -66,7 +100,7 @@ export default function CallerBottomTabs({ active, navigation }: Props): React.J
       <View style={styles.inner}>
         {tab('home', '⌂', 'Home', () => navigation.navigate('CallerDiscover'))}
         {tab('calls', '📞', 'Calls', () => navigation.navigate('CallerCalls'))}
-        {tab('alerts', '🔔', 'Alerts', () => navigation.navigate('CallerAlerts'), totalUnread)}
+        {tab('alerts', '🔔', 'Alerts', () => navigation.navigate('CallerAlerts'), notificationUnread)}
         {tab('profile', '👤', 'Profile', () => navigation.navigate('CallerProfile'))}
       </View>
     </View>

@@ -28,6 +28,7 @@ function sleep(ms: number): Promise<void> {
 type SettledCallSnapshot = {
   durationSec: number;
   settledAmountInr: number;
+  receiverEarnedInr: number;
   status: 'ongoing' | 'completed';
   receiverId: string;
   callerId: string;
@@ -50,6 +51,7 @@ async function settleCallSession(
         snapshot = {
           durationSec: call.durationSec,
           settledAmountInr: roundInr(call.settledAmountInr || 0),
+          receiverEarnedInr: roundInr(call.receiverEarnedInr || 0),
           status: 'completed',
           receiverId: String(call.receiverId),
           callerId: String(call.callerId),
@@ -64,6 +66,9 @@ async function settleCallSession(
       const grossAmountInr = roundInr((durationSec / 60) * Math.max(0, call.ratePerMinute));
       const alreadySettled = roundInr(call.settledAmountInr || 0);
       const dueAmount = roundInr(Math.max(0, grossAmountInr - alreadySettled));
+      const receiverEarnedInr = roundInr(
+        (durationSec / 60) * Math.max(0, Number(call.receiverPayoutRatePerMinute || 0))
+      );
 
       let settledNow = 0;
       if (dueAmount > 0) {
@@ -89,6 +94,7 @@ async function settleCallSession(
       const nextSettled = roundInr(alreadySettled + settledNow);
       call.durationSec = durationSec;
       call.settledAmountInr = nextSettled;
+      call.receiverEarnedInr = receiverEarnedInr;
       if (complete) {
         call.status = 'completed';
         call.endedAt = now;
@@ -98,6 +104,7 @@ async function settleCallSession(
       snapshot = {
         durationSec,
         settledAmountInr: nextSettled,
+        receiverEarnedInr,
         status: complete ? 'completed' : 'ongoing',
         receiverId: String(call.receiverId),
         callerId: String(call.callerId),
@@ -170,7 +177,9 @@ export const getVoiceBootstrap = async (req: Request, res: Response): Promise<vo
 
   const [callerDoc, receiverDoc] = await Promise.all([
     User.findById(callerUserId).select('accountStatus suspended'),
-    Receiver.findById(receiverId).select('accountStatus suspended audioCallRate isAvailable isOnline'),
+    Receiver.findById(receiverId).select(
+      'accountStatus suspended audioCallRate isAvailable isOnline earningRatePerMinute'
+    ),
   ]);
 
   if (!callerDoc || callerDoc.accountStatus !== 'approved' || callerDoc.suspended) {
@@ -213,6 +222,10 @@ export const getVoiceBootstrap = async (req: Request, res: Response): Promise<vo
     peerStreamUserId,
     peerAccountId: peerId,
     receiverRatePerMinute: RECEIVER_AUDIO_CALL_RATE_INR_PER_MIN,
+    receiverEarningRatePerMinute:
+      typeof receiverDoc.earningRatePerMinute === 'number' && Number.isFinite(receiverDoc.earningRatePerMinute)
+        ? roundInr(receiverDoc.earningRatePerMinute)
+        : 0,
     callType: 'default',
     callId,
   });
@@ -244,12 +257,16 @@ export const startVoiceSession = async (
     const callerId = accountKind === 'user' ? meId : peerId;
     const receiverId = accountKind === 'receiver' ? meId : peerId;
 
-    const receiver = await Receiver.findById(receiverId).select('audioCallRate');
+    const receiver = await Receiver.findById(receiverId).select('audioCallRate earningRatePerMinute');
     if (!receiver) {
       res.status(404).json({ message: 'Receiver not found' });
       return;
     }
     const ratePerMinute = RECEIVER_AUDIO_CALL_RATE_INR_PER_MIN;
+    const receiverPayoutRatePerMinute =
+      typeof receiver.earningRatePerMinute === 'number' && Number.isFinite(receiver.earningRatePerMinute)
+        ? Math.max(0, receiver.earningRatePerMinute)
+        : 0;
 
     await CallSession.findOneAndUpdate(
       { callId },
@@ -261,6 +278,7 @@ export const startVoiceSession = async (
           startedAt: new Date(),
           status: 'ongoing',
           ratePerMinute,
+          receiverPayoutRatePerMinute,
         },
       },
       { upsert: true, new: true, setDefaultsOnInsert: true }
@@ -321,8 +339,9 @@ export const endVoiceSession = async (
     res.status(200).json({
       ok: true,
       durationSec: settled.durationSec,
-      estimatedEarning: settled.settledAmountInr,
+      estimatedEarning: settled.receiverEarnedInr,
       settledAmountInr: settled.settledAmountInr,
+      receiverEarnedInr: settled.receiverEarnedInr,
       canRate: settled.durationSec >= 30,
     });
     releaseReceiverReservation(settled.receiverId);
@@ -368,6 +387,7 @@ export const syncVoiceSession = async (
       ok: true,
       durationSec: settled.durationSec,
       settledAmountInr: settled.settledAmountInr,
+      receiverEarnedInr: settled.receiverEarnedInr,
       canRate: settled.durationSec >= 30,
       status: settled.status,
     });

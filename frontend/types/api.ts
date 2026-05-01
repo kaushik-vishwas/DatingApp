@@ -127,7 +127,10 @@ export interface VoiceBootstrapResponse {
   streamUserId: string;
   peerStreamUserId: string;
   peerAccountId: string;
+  /** Caller charge rate per minute (deduction side). */
   receiverRatePerMinute: number;
+  /** Receiver earning rate per minute based on current score tier. */
+  receiverEarningRatePerMinute?: number;
   callType: string;
   callId: string;
 }
