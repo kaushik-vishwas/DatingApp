@@ -12,9 +12,12 @@ const ChatMessage_1 = __importDefault(require("../models/ChatMessage"));
 const ChatBlock_1 = __importDefault(require("../models/ChatBlock"));
 const User_1 = __importDefault(require("../models/User"));
 const Receiver_1 = __importDefault(require("../models/Receiver"));
+const authToken_1 = require("../utils/authToken");
+const socketRegistry_1 = require("./socketRegistry");
 const chatPricing_1 = require("../constants/chatPricing");
 const receiverScore_1 = require("../services/receiverScore");
 const receiverAvailabilityNotifier_1 = require("../services/receiverAvailabilityNotifier");
+const callInviteRegistry_1 = require("../services/callInviteRegistry");
 const callQueue_1 = require("../services/callQueue");
 function roomKey(userId, receiverId) {
     return `chat:${userId}:${receiverId}`;
@@ -60,6 +63,7 @@ function attachChatSocket(httpServer) {
                 invite.timeoutHandle = null;
             }
             activeCallInvites.delete(callId);
+            (0, callInviteRegistry_1.unregisterPendingCallInvite)(invite.receiverId);
             (0, callQueue_1.releaseReceiverReservation)(invite.receiverId);
             void (0, callQueue_1.syncReceiverQueueState)(invite.receiverId);
             io.to(accountRoom(invite.inviterType, invite.inviterId)).emit('call:ended', {
@@ -75,30 +79,57 @@ function attachChatSocket(httpServer) {
         }
     };
     io.use((socket, next) => {
-        try {
-            const raw = socket.handshake.auth?.token;
-            const token = typeof raw === 'string' ? raw.trim() : '';
-            if (!token) {
-                next(new Error('auth required'));
-                return;
+        void (async () => {
+            try {
+                const raw = socket.handshake.auth?.token;
+                const token = typeof raw === 'string' ? raw.trim() : '';
+                if (!token) {
+                    next(new Error('auth required'));
+                    return;
+                }
+                const secret = process.env.JWT_SECRET;
+                if (!secret) {
+                    next(new Error('server misconfigured'));
+                    return;
+                }
+                const decoded = jsonwebtoken_1.default.verify(token, secret);
+                if (decoded.typ !== 'u' && decoded.typ !== 'r') {
+                    next(new Error('invalid token'));
+                    return;
+                }
+                const tokenSv = (0, authToken_1.getPayloadSessionVersion)(decoded);
+                if (decoded.typ === 'u') {
+                    const user = await User_1.default.findById(decoded.id).select('authSessionVersion');
+                    if (!user) {
+                        next(new Error('auth failed'));
+                        return;
+                    }
+                    const dbSv = typeof user.authSessionVersion === 'number' ? user.authSessionVersion : 0;
+                    if (tokenSv !== dbSv) {
+                        next(new Error('session superseded'));
+                        return;
+                    }
+                }
+                else {
+                    const receiver = await Receiver_1.default.findById(decoded.id).select('authSessionVersion');
+                    if (!receiver) {
+                        next(new Error('auth failed'));
+                        return;
+                    }
+                    const dbSv = typeof receiver.authSessionVersion === 'number' ? receiver.authSessionVersion : 0;
+                    if (tokenSv !== dbSv) {
+                        next(new Error('session superseded'));
+                        return;
+                    }
+                }
+                socket.data.typ = decoded.typ;
+                socket.data.accountId = decoded.id;
+                next();
             }
-            const secret = process.env.JWT_SECRET;
-            if (!secret) {
-                next(new Error('server misconfigured'));
-                return;
+            catch {
+                next(new Error('auth failed'));
             }
-            const decoded = jsonwebtoken_1.default.verify(token, secret);
-            if (decoded.typ !== 'u' && decoded.typ !== 'r') {
-                next(new Error('invalid token'));
-                return;
-            }
-            socket.data.typ = decoded.typ;
-            socket.data.accountId = decoded.id;
-            next();
-        }
-        catch {
-            next(new Error('auth failed'));
-        }
+        })();
     });
     io.on('connection', (socket) => {
         const socketType = socket.data.typ;
@@ -146,6 +177,7 @@ function attachChatSocket(httpServer) {
                             invite.timeoutHandle = null;
                         }
                         activeCallInvites.delete(callId);
+                        (0, callInviteRegistry_1.unregisterPendingCallInvite)(invite.receiverId);
                         (0, callQueue_1.releaseReceiverReservation)(invite.receiverId);
                         void (0, callQueue_1.syncReceiverQueueState)(invite.receiverId);
                     }
@@ -516,6 +548,21 @@ function attachChatSocket(httpServer) {
                         return;
                     }
                     receiverForInviteId = targetId;
+                    await (0, callQueue_1.releaseIfStaleReceiverBusy)(receiverForInviteId);
+                    const notifyReceiverBusyMissedCall = async () => {
+                        const inviter = await User_1.default.findById(myId).select('name profileImage').lean();
+                        io.to(accountRoom('r', targetId)).emit('call:missed', {
+                            callerId: myId,
+                            callerName: inviter?.name?.trim() || 'Caller',
+                            callerImage: inviter?.profileImage ?? null,
+                            at: new Date().toISOString(),
+                        });
+                    };
+                    if ((0, callQueue_1.isReceiverBusy)(receiverForInviteId)) {
+                        await notifyReceiverBusyMissedCall();
+                        ack?.({ ok: false, error: 'Busy on another call.' });
+                        return;
+                    }
                 }
                 else {
                     const recv = await Receiver_1.default.findById(myId).select('accountStatus suspended isAvailable isOnline');
@@ -528,6 +575,7 @@ function attachChatSocket(httpServer) {
                         return;
                     }
                     receiverForInviteId = myId;
+                    await (0, callQueue_1.releaseIfStaleReceiverBusy)(receiverForInviteId);
                     if ((0, callQueue_1.isReceiverBusy)(receiverForInviteId)) {
                         ack?.({ ok: false, error: 'Busy on another call.' });
                         return;
@@ -544,15 +592,26 @@ function attachChatSocket(httpServer) {
                     }
                 }
                 if (!(0, callQueue_1.tryReserveReceiver)(receiverForInviteId)) {
+                    if (typ === 'u') {
+                        const inviter = await User_1.default.findById(myId).select('name profileImage').lean();
+                        io.to(accountRoom('r', targetId)).emit('call:missed', {
+                            callerId: myId,
+                            callerName: inviter?.name?.trim() || 'Caller',
+                            callerImage: inviter?.profileImage ?? null,
+                            at: new Date().toISOString(),
+                        });
+                    }
                     ack?.({ ok: false, error: 'Busy on another call.' });
                     return;
                 }
+                (0, callInviteRegistry_1.registerPendingCallInvite)(receiverForInviteId);
                 (0, callQueue_1.removeReceiverFromQueue)(receiverForInviteId);
                 const timeoutHandle = setTimeout(() => {
                     const invite = activeCallInvites.get(callId);
                     if (!invite)
                         return;
                     activeCallInvites.delete(callId);
+                    (0, callInviteRegistry_1.unregisterPendingCallInvite)(invite.receiverId);
                     (0, callQueue_1.releaseReceiverReservation)(invite.receiverId);
                     void (0, callQueue_1.syncReceiverQueueState)(invite.receiverId);
                     io.to(accountRoom(invite.inviterType, invite.inviterId)).emit('call:response', {
@@ -630,6 +689,7 @@ function attachChatSocket(httpServer) {
             });
             if (!accepted) {
                 activeCallInvites.delete(callId);
+                (0, callInviteRegistry_1.unregisterPendingCallInvite)(invite.receiverId);
                 (0, callQueue_1.releaseReceiverReservation)(invite.receiverId);
                 void (0, callQueue_1.syncReceiverQueueState)(invite.receiverId);
             }
@@ -660,11 +720,13 @@ function attachChatSocket(httpServer) {
                     fromId: endedById,
                 });
                 activeCallInvites.delete(callId);
+                (0, callInviteRegistry_1.unregisterPendingCallInvite)(invite.receiverId);
                 (0, callQueue_1.releaseReceiverReservation)(invite.receiverId);
                 void (0, callQueue_1.syncReceiverQueueState)(invite.receiverId);
             }
             ack?.({ ok: true });
         });
     });
+    (0, socketRegistry_1.registerSocketIOServer)(io);
     return io;
 }

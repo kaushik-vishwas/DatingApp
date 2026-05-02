@@ -7,7 +7,9 @@ import React, {
   useMemo,
   useState,
 } from 'react';
-import { authApi, clearJwt, getJwt } from '../services/api';
+import { Alert } from 'react-native';
+import { io, type Socket } from 'socket.io-client';
+import { authApi, clearJwt, getJwt, getResolvedApiBaseUrl } from '../services/api';
 import { markAuthWelcomeSeen } from '../services/authWelcomeStorage';
 import type { UserProfile } from '../types/user';
 
@@ -97,6 +99,48 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setToken(null);
     setUser(null);
   }, []);
+
+  /** Single-device login: server emits when this account signs in elsewhere; older JWT `sv` is lower. */
+  useEffect(() => {
+    if (!token) return;
+    let cancelled = false;
+    let socket: Socket | null = null;
+    const base = getResolvedApiBaseUrl();
+    void (async () => {
+      const authTok = await getJwt();
+      if (!authTok || cancelled) return;
+      socket = io(base, {
+        auth: { token: authTok },
+        transports: ['polling', 'websocket'],
+        timeout: 20000,
+      });
+      socket.on('auth:session_superseded', (payload: { currentSessionVersion?: number }) => {
+        const nextVer = payload?.currentSessionVersion;
+        if (typeof nextVer !== 'number' || !Number.isFinite(nextVer)) return;
+        try {
+          const part = token.split('.')[1];
+          if (!part) return;
+          const decoded = JSON.parse(atob(part)) as { sv?: number };
+          const sv = typeof decoded.sv === 'number' ? decoded.sv : 0;
+          if (sv < nextVer) {
+            void (async () => {
+              await signOut();
+              Alert.alert('Signed out', 'This account was signed in on another device.');
+            })();
+          }
+        } catch {
+          // ignore malformed token
+        }
+      });
+    })();
+    return () => {
+      cancelled = true;
+      if (socket) {
+        socket.removeAllListeners();
+        socket.disconnect();
+      }
+    };
+  }, [token, signOut]);
 
   const value = useMemo<AuthContextValue>(
     () => ({

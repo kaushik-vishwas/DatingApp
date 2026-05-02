@@ -80,6 +80,7 @@ const receiverSchema = new mongoose_1.Schema({
     badgeLevel: { type: String, enum: ['platinum', 'diamond', 'supreme'], default: 'platinum' },
     earningRatePerMinute: { type: Number, default: 2.0, min: 0 },
     onlineSince: { type: Date, default: null },
+    authSessionVersion: { type: Number, default: 0, min: 0 },
 }, { timestamps: true });
 const Receiver = mongoose_1.default.model('Receiver', receiverSchema);
 exports.default = Receiver;

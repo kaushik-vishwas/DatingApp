@@ -129,6 +129,58 @@ async function settleCallSession(callId, complete) {
     }
     return snapshot;
 }
+/** Live calls hit sessionSync every ~5s, which bumps updatedAt. No updates for this long ⇒ abandoned. */
+const DEFAULT_STALE_ONGOING_MS = 15 * 60 * 1000;
+/**
+ * Ongoing CallSession rows persist in MongoDB; orphan "ongoing" blocks bootstrap forever.
+ * - Same caller+receiver as the DB row → allow (reconnect / second bootstrap for same call).
+ * - Different caller → if session is stale (no updatedAt activity), settle and clear; else busy.
+ */
+async function receiverHasBlockingOngoingSession(receiverId, callerUserId) {
+    const oid = new mongoose_1.default.Types.ObjectId(receiverId);
+    const staleMs = Number(process.env.STALE_ONGOING_CALL_MS ?? DEFAULT_STALE_ONGOING_MS);
+    if (!Number.isFinite(staleMs) || staleMs < 60_000) {
+        const doc = await CallSession_1.default.exists({ receiverId: oid, status: 'ongoing' });
+        return doc != null;
+    }
+    const session = await CallSession_1.default.findOne({ receiverId: oid, status: 'ongoing' })
+        .select('callerId callId updatedAt startedAt')
+        .lean();
+    if (!session)
+        return false;
+    if (String(session.callerId) === callerUserId) {
+        return false;
+    }
+    const touch = (session.updatedAt && session.updatedAt.getTime()) ||
+        (session.startedAt && session.startedAt.getTime()) ||
+        0;
+    if (Date.now() - touch <= staleMs) {
+        return true;
+    }
+    try {
+        const settled = await settleCallSession(session.callId, true);
+        if (settled.justCompleted) {
+            void (0, receiverScore_1.recordReceiverCallScore)({
+                callId: session.callId,
+                receiverId: settled.receiverId,
+                callerId: settled.callerId,
+                startedAt: settled.startedAt,
+                durationSec: settled.durationSec,
+            }).catch((e) => {
+                const msg = e instanceof Error ? e.message : String(e);
+                console.error('receiver call score record (stale settle):', msg);
+            });
+        }
+        (0, callQueue_2.releaseReceiverReservation)(settled.receiverId);
+        await (0, callQueue_2.syncReceiverQueueState)(settled.receiverId);
+    }
+    catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        console.error('receiverHasBlockingOngoingSession stale settle:', msg);
+    }
+    const doc = await CallSession_1.default.exists({ receiverId: oid, status: 'ongoing' });
+    return doc != null;
+}
 const getRandomQueuedReceiver = async (req, res) => {
     try {
         if (req.accountKind !== 'user' || !req.user?._id) {
@@ -192,13 +244,8 @@ const getVoiceBootstrap = async (req, res) => {
         res.status(403).json({ message: 'Receiver account is not allowed for calling' });
         return;
     }
-    const ongoing = await CallSession_1.default.exists({
-        receiverId: new mongoose_1.default.Types.ObjectId(receiverId),
-        status: 'ongoing',
-    });
-    // Receiver gets reserved as soon as invite is created; that reservation must not block
-    // the receiver-side bootstrap after accepting the same invite.
-    if (ongoing || (accountKind === 'user' && (0, callQueue_2.isReceiverBusy)(receiverId))) {
+    const blocking = await receiverHasBlockingOngoingSession(receiverId, callerUserId);
+    if (blocking) {
         res.status(409).json({ message: 'Receiver is busy on another call' });
         return;
     }

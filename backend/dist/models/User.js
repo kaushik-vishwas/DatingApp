@@ -58,6 +58,7 @@ const userSchema = new mongoose_1.Schema({
     walletBalance: { type: Number, default: 0 },
     moderationWarningAt: { type: Date, default: null },
     userAudio: { type: String, default: null },
+    authSessionVersion: { type: Number, default: 0, min: 0 },
 }, { timestamps: true });
 const User = mongoose_1.default.model('User', userSchema);
 exports.default = User;

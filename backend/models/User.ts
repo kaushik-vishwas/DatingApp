@@ -30,6 +30,8 @@ export interface IUser {
   moderationWarningAt: Date | null;
   /** HTTPS URL of voice sample (callers only); stored as `userAudio` in MongoDB. */
   userAudio: string | null;
+  /** Incremented on each new login; JWT must match for single-device sessions. */
+  authSessionVersion: number;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -61,6 +63,7 @@ const userSchema = new Schema<IUser>(
     walletBalance: { type: Number, default: 0 },
     moderationWarningAt: { type: Date, default: null },
     userAudio: { type: String, default: null },
+    authSessionVersion: { type: Number, default: 0, min: 0 },
   },
   { timestamps: true }
 );

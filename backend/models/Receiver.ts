@@ -61,6 +61,8 @@ export interface IReceiver {
   earningRatePerMinute: number;
   /** Timestamp when the active online session started. */
   onlineSince: Date | null;
+  /** Incremented on each new login; JWT must match for single-device sessions. */
+  authSessionVersion: number;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -112,6 +114,7 @@ const receiverSchema = new Schema<IReceiver>(
     badgeLevel: { type: String, enum: ['platinum', 'diamond', 'supreme'], default: 'platinum' },
     earningRatePerMinute: { type: Number, default: 2.0, min: 0 },
     onlineSince: { type: Date, default: null },
+    authSessionVersion: { type: Number, default: 0, min: 0 },
   },
   { timestamps: true }
 );

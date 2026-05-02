@@ -14,7 +14,21 @@ export default function ReceiverProfilePreviewScreen(): React.JSX.Element {
   const { user } = useAuth();
   const [ratingAvg, setRatingAvg] = useState(0);
   const [ratingCount, setRatingCount] = useState(0);
-  const [totalScore, setTotalScore] = useState(0);
+  const [totalScore, setTotalScore] = useState(() =>
+    user?.role === 'receiver' && typeof user.cumulativeScore === 'number' && Number.isFinite(user.cumulativeScore)
+      ? user.cumulativeScore
+      : 0
+  );
+
+  useEffect(() => {
+    if (
+      user?.role === 'receiver' &&
+      typeof user.cumulativeScore === 'number' &&
+      Number.isFinite(user.cumulativeScore)
+    ) {
+      setTotalScore(user.cumulativeScore);
+    }
+  }, [user?.role, user?.cumulativeScore]);
 
   useEffect(() => {
     let mounted = true;

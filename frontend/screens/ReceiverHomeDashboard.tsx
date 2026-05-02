@@ -144,9 +144,14 @@ export default function ReceiverHomeDashboard(): React.JSX.Element {
     );
   }
 
-  const wallet = typeof walletSummary?.walletBalance === 'number' && Number.isFinite(walletSummary.walletBalance) 
-    ? walletSummary.walletBalance 
-    : 0;
+  const persistedScoreFromProfile =
+    user.role === 'receiver' && typeof user.cumulativeScore === 'number' && Number.isFinite(user.cumulativeScore)
+      ? user.cumulativeScore
+      : 0;
+  const trophyScoreRounded =
+    callInsights != null
+      ? Math.round(callInsights.totalScore)
+      : Math.round(persistedScoreFromProfile);
 
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'left', 'right']}>
@@ -173,7 +178,7 @@ export default function ReceiverHomeDashboard(): React.JSX.Element {
                 <View style={styles.scoreContainer}>
                   <Text style={styles.scoreIco}>🏆</Text>
                   <Text style={styles.scoreText}>
-                    {Math.round(callInsights?.totalScore ?? 0).toLocaleString('en-IN')}
+                    {trophyScoreRounded.toLocaleString('en-IN')}
                   </Text>
                 </View>
               </TouchableOpacity>
@@ -373,24 +378,49 @@ export default function ReceiverHomeDashboard(): React.JSX.Element {
                   </View>
                 </View>
                 <Text style={styles.earningsAmount}>
-                  {walletSummary ? formatInr(walletSummary.walletBalance) : '…'}
+                  {walletSummary
+                    ? formatInr(
+                        typeof walletSummary.callEarningsLifetime === 'number'
+                          ? walletSummary.callEarningsLifetime
+                          : 0
+                      )
+                    : '…'}
                 </Text>
                 <Text style={styles.earningsPeriod}>
-                  Lifetime earnings from all calls
+                  Score-tier payout from voice calls (your earning rate × talk time)
                 </Text>
+                {walletSummary &&
+                typeof walletSummary.walletBalance === 'number' &&
+                walletSummary.walletBalance > 0 ? (
+                  <Text style={styles.earningsWalletNote}>
+                    Withdrawable chat credits: {formatInr(walletSummary.walletBalance)}
+                  </Text>
+                ) : null}
               </View>
 
               <View style={styles.smallEarningsRow}>
                 <View style={styles.smallEarningsCard}>
-                  <Text style={styles.smallEarningsLabel}>Today</Text>
+                  <Text style={styles.smallEarningsLabel}>Calls today</Text>
                   <Text style={styles.smallEarningsText}>
-                    {walletSummary ? formatInr(walletSummary.chatToday) : '₹0'}
+                    {walletSummary
+                      ? formatInr(
+                          typeof walletSummary.callEarningsToday === 'number'
+                            ? walletSummary.callEarningsToday
+                            : 0
+                        )
+                      : '₹0'}
                   </Text>
                 </View>
                 <View style={styles.smallEarningsCard}>
-                  <Text style={styles.smallEarningsLabel}>This Week</Text>
+                  <Text style={styles.smallEarningsLabel}>Calls (7 days)</Text>
                   <Text style={[styles.smallEarningsText, { color: '#2563eb' }]}>
-                    {walletSummary ? formatInr(walletSummary.chatThisMonth) : '₹0'}
+                    {walletSummary
+                      ? formatInr(
+                          typeof walletSummary.callEarningsThisWeek === 'number'
+                            ? walletSummary.callEarningsThisWeek
+                            : 0
+                        )
+                      : '₹0'}
                   </Text>
                 </View>
               </View>
@@ -761,6 +791,7 @@ const styles = StyleSheet.create({
   earningsSubtitle: { fontSize: 12, fontWeight: '700', color: '#492245' },
   earningsAmount: { fontSize: 36, fontWeight: '900', color: '#111', marginTop: 4 },
   earningsPeriod: { fontSize: 12, fontWeight: '600', color: '#5f3b5d', marginTop: 2 },
+  earningsWalletNote: { fontSize: 11, fontWeight: '600', color: '#7c4a78', marginTop: 8 },
   smallEarningsRow: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 12, gap: 10 },
   smallEarningsCard: {
     flex: 1,

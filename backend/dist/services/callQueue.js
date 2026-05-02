@@ -6,6 +6,8 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.isReceiverBusy = isReceiverBusy;
 exports.tryReserveReceiver = tryReserveReceiver;
 exports.releaseReceiverReservation = releaseReceiverReservation;
+exports.releaseIfStaleReceiverBusy = releaseIfStaleReceiverBusy;
+exports.releaseStaleReceiverBusyFlags = releaseStaleReceiverBusyFlags;
 exports.removeReceiverFromQueue = removeReceiverFromQueue;
 exports.setReceiverQueuePresence = setReceiverQueuePresence;
 exports.isReceiverInQueueScreen = isReceiverInQueueScreen;
@@ -13,8 +15,10 @@ exports.syncReceiverQueueState = syncReceiverQueueState;
 exports.pickRandomQueuedReceiverForCaller = pickRandomQueuedReceiverForCaller;
 const mongoose_1 = __importDefault(require("mongoose"));
 const ChatBlock_1 = __importDefault(require("../models/ChatBlock"));
+const CallSession_1 = __importDefault(require("../models/CallSession"));
 const Receiver_1 = __importDefault(require("../models/Receiver"));
 const ReceiverPriorityNotification_1 = __importDefault(require("../models/ReceiverPriorityNotification"));
+const callInviteRegistry_1 = require("./callInviteRegistry");
 const waitingReceiverIds = new Set();
 const busyReceiverIds = new Set();
 const queueActiveReceiverIds = new Set();
@@ -34,6 +38,29 @@ function tryReserveReceiver(receiverId) {
 }
 function releaseReceiverReservation(receiverId) {
     busyReceiverIds.delete(normalizeId(receiverId));
+}
+/** Clears in-memory "busy" when it is not backed by an ongoing session or an active socket invite. */
+async function releaseIfStaleReceiverBusy(receiverId) {
+    const rid = normalizeId(receiverId);
+    if (!rid || !mongoose_1.default.Types.ObjectId.isValid(rid))
+        return;
+    if (!busyReceiverIds.has(rid))
+        return;
+    if ((0, callInviteRegistry_1.hasPendingCallInviteForReceiver)(rid))
+        return;
+    const ongoing = await CallSession_1.default.exists({
+        receiverId: new mongoose_1.default.Types.ObjectId(rid),
+        status: 'ongoing',
+    });
+    if (!ongoing) {
+        busyReceiverIds.delete(rid);
+    }
+}
+async function releaseStaleReceiverBusyFlags() {
+    const snapshot = [...busyReceiverIds];
+    for (const rid of snapshot) {
+        await releaseIfStaleReceiverBusy(rid);
+    }
 }
 function removeReceiverFromQueue(receiverId) {
     waitingReceiverIds.delete(normalizeId(receiverId));
@@ -78,6 +105,7 @@ async function pickRandomQueuedReceiverForCaller(callerId) {
     const cid = normalizeId(callerId);
     if (!mongoose_1.default.Types.ObjectId.isValid(cid))
         return null;
+    await releaseStaleReceiverBusyFlags();
     const baseFilter = {
         accountStatus: 'approved',
         suspended: { $ne: true },

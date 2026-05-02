@@ -1,5 +1,4 @@
 import bcrypt from 'bcryptjs';
-import jwt from 'jsonwebtoken';
 import type { Response, Request } from 'express';
 import User, { type UserDocument } from '../models/User';
 import Receiver, { RECEIVER_AUDIO_CALL_RATE_INR_PER_MIN, type ReceiverDocument } from '../models/Receiver';
@@ -11,12 +10,13 @@ import {
   validateBirthDateForAccount,
 } from '../utils/birthDate';
 import { PAUSED_MSG } from '../utils/accountAccess';
+import { signAppAccessToken } from '../utils/authToken';
+import { bumpReceiverAuthSession, bumpUserAuthSession } from '../services/authSessionService';
+import { emitAuthSessionSuperseded } from '../socket/socketRegistry';
 
 const OTP_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
 export type AccountTypeParam = 'user' | 'receiver';
-
-type JwtPayload = { id: string; typ: 'u' | 'r' };
 
 export type UserRole = 'caller' | 'receiver';
 
@@ -56,6 +56,12 @@ export interface SafeUser {
   isAvailable: boolean;
   /** Runtime online presence from socket connection(s). */
   isOnline: boolean;
+  /** Receivers only: persisted score in MongoDB (`cumulativeScore`). */
+  cumulativeScore?: number;
+  /** Receivers only: tier derived from cumulative score. */
+  badgeLevel?: 'platinum' | 'diamond' | 'supreme';
+  /** Receivers only: INR per valid call minute from tier. */
+  earningRatePerMinute?: number;
 }
 
 type LegacyRegisterRole = 'caller' | 'receiver' | 'both';
@@ -94,6 +100,11 @@ type ResetPasswordBody = {
 
 function iso(d: Date): string {
   return d.toISOString();
+}
+
+function roundScoreField(n: unknown): number {
+  const x = typeof n === 'number' && Number.isFinite(n) ? n : 0;
+  return Math.round(x * 100) / 100;
 }
 
 export function toApiUser(user: UserDocument): SafeUser {
@@ -166,6 +177,12 @@ export function toApiReceiver(receiver: ReceiverDocument): SafeUser {
     userAudio: null,
     isAvailable: Boolean(r.isAvailable),
     isOnline: Boolean(r.isOnline),
+    cumulativeScore: roundScoreField(r.cumulativeScore),
+    badgeLevel:
+      r.badgeLevel === 'diamond' || r.badgeLevel === 'supreme' || r.badgeLevel === 'platinum'
+        ? r.badgeLevel
+        : 'platinum',
+    earningRatePerMinute: roundScoreField(r.earningRatePerMinute),
   };
 }
 
@@ -175,14 +192,6 @@ export function toSafeUser(doc: UserDocument | ReceiverDocument): SafeUser {
   if (modelName === 'User') return toApiUser(doc as UserDocument);
   return toApiReceiver(doc as ReceiverDocument);
 }
-
-const signToken = (userId: string, typ: 'u' | 'r'): string => {
-  const secret = process.env.JWT_SECRET;
-  if (!secret) {
-    throw new Error('JWT_SECRET is not set in environment');
-  }
-  return jwt.sign({ id: userId, typ } satisfies JwtPayload, secret, { expiresIn: '7d' });
-};
 
 async function emailTaken(normalizedEmail: string): Promise<boolean> {
   const [u, r] = await Promise.all([
@@ -296,8 +305,15 @@ export const login = async (req: Request<{}, {}, LoginBody>, res: Response): Pro
         res.status(401).json({ message: 'Invalid email or password' });
         return;
       }
-      const token = signToken(String(user._id), 'u');
-      res.json({ message: 'Login successful', token, user: toApiUser(user) });
+      const sv = await bumpUserAuthSession(String(user._id));
+      emitAuthSessionSuperseded('u', String(user._id), sv);
+      const token = signAppAccessToken(String(user._id), 'u', sv);
+      const fresh = await User.findById(user._id).select('-passwordHash');
+      if (!fresh) {
+        res.status(401).json({ message: 'User not found' });
+        return;
+      }
+      res.json({ message: 'Login successful', token, user: toApiUser(fresh) });
       return;
     }
 
@@ -315,8 +331,15 @@ export const login = async (req: Request<{}, {}, LoginBody>, res: Response): Pro
       res.status(403).json({ message: PAUSED_MSG });
       return;
     }
-    const token = signToken(String(receiver._id), 'r');
-    res.json({ message: 'Login successful', token, user: toApiReceiver(receiver) });
+    const sv = await bumpReceiverAuthSession(String(receiver._id));
+    emitAuthSessionSuperseded('r', String(receiver._id), sv);
+    const token = signAppAccessToken(String(receiver._id), 'r', sv);
+    const fresh = await Receiver.findById(receiver._id).select('-passwordHash');
+    if (!fresh) {
+      res.status(401).json({ message: 'User not found' });
+      return;
+    }
+    res.json({ message: 'Login successful', token, user: toApiReceiver(fresh) });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error('login error:', msg);
@@ -497,7 +520,12 @@ export const resetPassword = async (
       doc.isVerified = true;
       await doc.save();
       const typ = accountType === 'user' ? 'u' : 'r';
-      const token = signToken(String(doc._id), typ);
+      const sv =
+        accountType === 'user'
+          ? await bumpUserAuthSession(String(doc._id))
+          : await bumpReceiverAuthSession(String(doc._id));
+      emitAuthSessionSuperseded(typ, String(doc._id), sv);
+      const token = signAppAccessToken(String(doc._id), typ, sv);
       const userJson =
         accountType === 'user' ? toApiUser(doc as UserDocument) : toApiReceiver(doc as ReceiverDocument);
       return { token, userJson };
@@ -594,9 +622,14 @@ export const verifyOtp = async (
 
     const normalizedEmail = String(email).toLowerCase().trim();
 
-    const respondVerified = (doc: UserDocument | ReceiverDocument): void => {
+    const respondVerified = async (doc: UserDocument | ReceiverDocument): Promise<void> => {
       const typ = accountType === 'user' ? 'u' : 'r';
-      const token = signToken(String(doc._id), typ);
+      const sv =
+        accountType === 'user'
+          ? await bumpUserAuthSession(String(doc._id))
+          : await bumpReceiverAuthSession(String(doc._id));
+      emitAuthSessionSuperseded(typ, String(doc._id), sv);
+      const token = signAppAccessToken(String(doc._id), typ, sv);
       const userJson =
         accountType === 'user' ? toApiUser(doc as UserDocument) : toApiReceiver(doc as ReceiverDocument);
       res.json({
@@ -620,7 +653,7 @@ export const verifyOtp = async (
         doc.otp = null;
         doc.otpExpiry = null;
         await doc.save();
-        respondVerified(doc);
+        await respondVerified(doc);
         return;
       }
 
@@ -643,7 +676,7 @@ export const verifyOtp = async (
       doc.otp = null;
       doc.otpExpiry = null;
       await doc.save();
-      respondVerified(doc);
+      await respondVerified(doc);
     };
 
     if (accountType === 'user') {

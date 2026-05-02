@@ -100,6 +100,16 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
   );
   const callerCanRateByDuration = user?.role === 'caller' && elapsedSec >= MIN_RATING_SECONDS;
 
+  /** Kept in refs so the signaling socket effect does not re-run when duration crosses the rating threshold (that was disconnecting the socket ~55s into the call). */
+  const callerCanRateByDurationRef = useRef(callerCanRateByDuration);
+  const callEndedPeerNameRef = useRef(route.params.peerName);
+  const userRoleRef = useRef(user?.role);
+  useEffect(() => {
+    callerCanRateByDurationRef.current = callerCanRateByDuration;
+    callEndedPeerNameRef.current = route.params.peerName;
+    userRoleRef.current = user?.role;
+  }, [callerCanRateByDuration, route.params.peerName, user?.role]);
+
   const formatHms = (totalSec: number): string => {
     const safe = Math.max(0, Math.floor(totalSec));
     const hh = String(Math.floor(safe / 3600)).padStart(2, '0');
@@ -277,11 +287,11 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
         void (async () => {
           await ensureSessionEnded();
           await leaveMedia();
-          if (user?.role === 'caller' && callerCanRateByDuration) {
+          if (userRoleRef.current === 'caller' && callerCanRateByDurationRef.current) {
             showRatingPrompt();
             return;
           }
-          Alert.alert('Call ended', `${route.params.peerName} ended the call.`, [
+          Alert.alert('Call ended', `${callEndedPeerNameRef.current ?? 'Contact'} ended the call.`, [
             { text: 'OK', onPress: stopQueueAndExit },
           ]);
         })();
@@ -297,7 +307,8 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
       }
       signalSocketRef.current = null;
     };
-  }, [callerCanRateByDuration, navigation, route.params.peerName, user?.role]);
+    // Intentionally static: do not depend on callerCanRateByDuration (flips at 55s) or the socket will reconnect and drop the call.
+  }, []);
 
   useEffect(() => {
     if (!ready) return;

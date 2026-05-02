@@ -7,6 +7,7 @@ exports.protect = void 0;
 const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
 const User_1 = __importDefault(require("../models/User"));
 const Receiver_1 = __importDefault(require("../models/Receiver"));
+const authToken_1 = require("../utils/authToken");
 /**
  * JWT authentication middleware for protected routes.
  * Expects: Authorization: Bearer <token>
@@ -30,10 +31,16 @@ const protect = async (req, res, next) => {
             res.status(401).json({ message: 'Invalid session. Please sign in again.' });
             return;
         }
+        const tokenSv = (0, authToken_1.getPayloadSessionVersion)(decoded);
         if (decoded.typ === 'u') {
             const user = await User_1.default.findById(decoded.id).select('-otp -otpExpiry -passwordHash');
             if (!user) {
                 res.status(401).json({ message: 'User not found' });
+                return;
+            }
+            const dbSv = typeof user.authSessionVersion === 'number' ? user.authSessionVersion : 0;
+            if (tokenSv !== dbSv) {
+                res.status(401).json({ message: 'Signed in on another device. Please sign in again.' });
                 return;
             }
             req.user = user;
@@ -45,6 +52,11 @@ const protect = async (req, res, next) => {
         const receiver = await Receiver_1.default.findById(decoded.id).select('-otp -otpExpiry -passwordHash');
         if (!receiver) {
             res.status(401).json({ message: 'User not found' });
+            return;
+        }
+        const dbSvR = typeof receiver.authSessionVersion === 'number' ? receiver.authSessionVersion : 0;
+        if (tokenSv !== dbSvR) {
+            res.status(401).json({ message: 'Signed in on another device. Please sign in again.' });
             return;
         }
         req.user = undefined;

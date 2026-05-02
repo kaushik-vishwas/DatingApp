@@ -222,11 +222,16 @@ export type ReceiverWalletRecentRow = {
 };
 
 export interface ReceiverWalletSummaryResponse {
+  /** Withdrawable balance (e.g. chat message credits credited to wallet). */
   walletBalance: number;
   /** Paid chat (and same rules as billing) since local midnight on the server. */
   chatToday: number;
   /** Same, since the first day of this calendar month (server local). */
   chatThisMonth: number;
+  /** Lifetime voice-call earnings from score-tier rate × duration (`receiverEarnedInr` per session). */
+  callEarningsLifetime: number;
+  callEarningsToday: number;
+  callEarningsThisWeek: number;
   recent: ReceiverWalletRecentRow[];
 }
 

@@ -41,12 +41,14 @@ exports.toApiUser = toApiUser;
 exports.toApiReceiver = toApiReceiver;
 exports.toSafeUser = toSafeUser;
 const bcryptjs_1 = __importDefault(require("bcryptjs"));
-const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
 const User_1 = __importDefault(require("../models/User"));
 const Receiver_1 = __importStar(require("../models/Receiver"));
 const email_1 = require("../config/email");
 const birthDate_1 = require("../utils/birthDate");
 const accountAccess_1 = require("../utils/accountAccess");
+const authToken_1 = require("../utils/authToken");
+const authSessionService_1 = require("../services/authSessionService");
+const socketRegistry_1 = require("../socket/socketRegistry");
 const OTP_TTL_MS = 5 * 60 * 1000; // 5 minutes
 function resolveRegisterBirthDate(raw) {
     const dob = (0, birthDate_1.parseDateOnlyToUtcMidnight)(raw);
@@ -138,13 +140,6 @@ function toSafeUser(doc) {
         return toApiUser(doc);
     return toApiReceiver(doc);
 }
-const signToken = (userId, typ) => {
-    const secret = process.env.JWT_SECRET;
-    if (!secret) {
-        throw new Error('JWT_SECRET is not set in environment');
-    }
-    return jsonwebtoken_1.default.sign({ id: userId, typ }, secret, { expiresIn: '7d' });
-};
 async function emailTaken(normalizedEmail) {
     const [u, r] = await Promise.all([
         User_1.default.exists({ email: normalizedEmail }),
@@ -245,8 +240,15 @@ const login = async (req, res) => {
                 res.status(401).json({ message: 'Invalid email or password' });
                 return;
             }
-            const token = signToken(String(user._id), 'u');
-            res.json({ message: 'Login successful', token, user: toApiUser(user) });
+            const sv = await (0, authSessionService_1.bumpUserAuthSession)(String(user._id));
+            (0, socketRegistry_1.emitAuthSessionSuperseded)('u', String(user._id), sv);
+            const token = (0, authToken_1.signAppAccessToken)(String(user._id), 'u', sv);
+            const fresh = await User_1.default.findById(user._id).select('-passwordHash');
+            if (!fresh) {
+                res.status(401).json({ message: 'User not found' });
+                return;
+            }
+            res.json({ message: 'Login successful', token, user: toApiUser(fresh) });
             return;
         }
         const receiver = await Receiver_1.default.findOne({ email: normalizedEmail }).select('+passwordHash');
@@ -263,8 +265,15 @@ const login = async (req, res) => {
             res.status(403).json({ message: accountAccess_1.PAUSED_MSG });
             return;
         }
-        const token = signToken(String(receiver._id), 'r');
-        res.json({ message: 'Login successful', token, user: toApiReceiver(receiver) });
+        const sv = await (0, authSessionService_1.bumpReceiverAuthSession)(String(receiver._id));
+        (0, socketRegistry_1.emitAuthSessionSuperseded)('r', String(receiver._id), sv);
+        const token = (0, authToken_1.signAppAccessToken)(String(receiver._id), 'r', sv);
+        const fresh = await Receiver_1.default.findById(receiver._id).select('-passwordHash');
+        if (!fresh) {
+            res.status(401).json({ message: 'User not found' });
+            return;
+        }
+        res.json({ message: 'Login successful', token, user: toApiReceiver(fresh) });
     }
     catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
@@ -416,7 +425,11 @@ const resetPassword = async (req, res) => {
             doc.isVerified = true;
             await doc.save();
             const typ = accountType === 'user' ? 'u' : 'r';
-            const token = signToken(String(doc._id), typ);
+            const sv = accountType === 'user'
+                ? await (0, authSessionService_1.bumpUserAuthSession)(String(doc._id))
+                : await (0, authSessionService_1.bumpReceiverAuthSession)(String(doc._id));
+            (0, socketRegistry_1.emitAuthSessionSuperseded)(typ, String(doc._id), sv);
+            const token = (0, authToken_1.signAppAccessToken)(String(doc._id), typ, sv);
             const userJson = accountType === 'user' ? toApiUser(doc) : toApiReceiver(doc);
             return { token, userJson };
         };
@@ -496,9 +509,13 @@ const verifyOtp = async (req, res) => {
             return;
         }
         const normalizedEmail = String(email).toLowerCase().trim();
-        const respondVerified = (doc) => {
+        const respondVerified = async (doc) => {
             const typ = accountType === 'user' ? 'u' : 'r';
-            const token = signToken(String(doc._id), typ);
+            const sv = accountType === 'user'
+                ? await (0, authSessionService_1.bumpUserAuthSession)(String(doc._id))
+                : await (0, authSessionService_1.bumpReceiverAuthSession)(String(doc._id));
+            (0, socketRegistry_1.emitAuthSessionSuperseded)(typ, String(doc._id), sv);
+            const token = (0, authToken_1.signAppAccessToken)(String(doc._id), typ, sv);
             const userJson = accountType === 'user' ? toApiUser(doc) : toApiReceiver(doc);
             res.json({
                 message: otpBypass ? 'Login successful (OTP bypass)' : 'Login successful',
@@ -520,7 +537,7 @@ const verifyOtp = async (req, res) => {
                 doc.otp = null;
                 doc.otpExpiry = null;
                 await doc.save();
-                respondVerified(doc);
+                await respondVerified(doc);
                 return;
             }
             if (!doc.otp || !doc.otpExpiry) {
@@ -539,7 +556,7 @@ const verifyOtp = async (req, res) => {
             doc.otp = null;
             doc.otpExpiry = null;
             await doc.save();
-            respondVerified(doc);
+            await respondVerified(doc);
         };
         if (accountType === 'user') {
             const doc = await User_1.default.findOne({ email: normalizedEmail });

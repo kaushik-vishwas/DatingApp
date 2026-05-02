@@ -1,7 +1,9 @@
 import mongoose from 'mongoose';
 import ChatBlock from '../models/ChatBlock';
+import CallSession from '../models/CallSession';
 import Receiver from '../models/Receiver';
 import ReceiverPriorityNotification from '../models/ReceiverPriorityNotification';
+import { hasPendingCallInviteForReceiver } from './callInviteRegistry';
 
 const waitingReceiverIds = new Set<string>();
 const busyReceiverIds = new Set<string>();
@@ -25,6 +27,28 @@ export function tryReserveReceiver(receiverId: string): boolean {
 
 export function releaseReceiverReservation(receiverId: string): void {
   busyReceiverIds.delete(normalizeId(receiverId));
+}
+
+/** Clears in-memory "busy" when it is not backed by an ongoing session or an active socket invite. */
+export async function releaseIfStaleReceiverBusy(receiverId: string): Promise<void> {
+  const rid = normalizeId(receiverId);
+  if (!rid || !mongoose.Types.ObjectId.isValid(rid)) return;
+  if (!busyReceiverIds.has(rid)) return;
+  if (hasPendingCallInviteForReceiver(rid)) return;
+  const ongoing = await CallSession.exists({
+    receiverId: new mongoose.Types.ObjectId(rid),
+    status: 'ongoing',
+  });
+  if (!ongoing) {
+    busyReceiverIds.delete(rid);
+  }
+}
+
+export async function releaseStaleReceiverBusyFlags(): Promise<void> {
+  const snapshot = [...busyReceiverIds];
+  for (const rid of snapshot) {
+    await releaseIfStaleReceiverBusy(rid);
+  }
 }
 
 export function removeReceiverFromQueue(receiverId: string): void {
@@ -79,6 +103,8 @@ export async function pickRandomQueuedReceiverForCaller(callerId: string): Promi
 } | null> {
   const cid = normalizeId(callerId);
   if (!mongoose.Types.ObjectId.isValid(cid)) return null;
+
+  await releaseStaleReceiverBusyFlags();
 
   const baseFilter = {
     accountStatus: 'approved' as const,

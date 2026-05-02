@@ -44,4 +44,8 @@ export interface UserProfile {
   isAvailable?: boolean;
   /** Runtime online presence (receiver only). */
   isOnline?: boolean;
+  /** Receiver: anti-fraud score persisted on server (`cumulativeScore`). */
+  cumulativeScore?: number;
+  badgeLevel?: 'platinum' | 'diamond' | 'supreme';
+  earningRatePerMinute?: number;
 }
