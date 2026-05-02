@@ -1,6 +1,6 @@
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import React, { useMemo, useState } from 'react';
+import React, { useState } from 'react';
 import {
   Alert,
   Image,
@@ -32,22 +32,13 @@ export default function ReceiverEditProfileScreen(): React.JSX.Element {
   const [stateValue, setStateValue] = useState(user?.state ?? '');
   const [languages, setLanguages] = useState<string[]>(user?.languages ?? []);
   const [interests, setInterests] = useState<string[]>(user?.interests ?? []);
-  const [audioCallRate, setAudioCallRate] = useState(
-    user?.audioCallRate && Number.isFinite(user.audioCallRate) ? String(user.audioCallRate) : ''
-  );
   const [showSuccess, setShowSuccess] = useState(false);
   const [profileImageUri, setProfileImageUri] = useState<string | null>(user?.profileImage ?? null);
   const [avatarModal, setAvatarModal] = useState(false);
 
-  const parsedRate = useMemo(() => Number(audioCallRate), [audioCallRate]);
-
   const onSave = async () => {
     if (!name.trim()) {
       Alert.alert('Validation', 'Name is required.');
-      return;
-    }
-    if (!Number.isFinite(parsedRate) || parsedRate < 1) {
-      Alert.alert('Validation', 'Audio call rate must be at least 1.');
       return;
     }
     if (!profileImageUri) {
@@ -66,7 +57,6 @@ export default function ReceiverEditProfileScreen(): React.JSX.Element {
         state: stateValue.trim(),
         languages,
         interests,
-        audioCallRate: parsedRate,
       });
       await refreshUser();
       setShowSuccess(true);
@@ -132,8 +122,6 @@ export default function ReceiverEditProfileScreen(): React.JSX.Element {
         max={3}
         onChange={setInterests}
       />
-
-      <Field label="Set Call Prices (Audio Call Rate)" value={audioCallRate} onChangeText={setAudioCallRate} keyboardType="numeric" />
 
       <TouchableOpacity style={[styles.saveBtn, saving && styles.saveBtnDisabled]} disabled={saving} onPress={onSave}>
         <Text style={styles.saveText}>{saving ? 'Saving...' : 'Continue'}</Text>

@@ -1,9 +1,11 @@
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import React, { useState } from 'react';
+import React, { useCallback, useRef, useState } from 'react';
 import {
   Alert,
   KeyboardAvoidingView,
+  Keyboard,
   Platform,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -56,6 +58,19 @@ export function AuthLoginCard({
   const { signIn } = useAuth();
   const [password, setPassword] = useState<string>('');
   const [loading, setLoading] = useState<boolean>(false);
+  const scrollRef = useRef<ScrollView | null>(null);
+
+  const scrollToFocusedInput = useCallback(() => {
+    // Let the keyboard animate in first.
+    requestAnimationFrame(() => {
+      setTimeout(() => {
+        const responder = TextInput.State.currentlyFocusedInput?.();
+        if (!responder || !scrollRef.current) return;
+        // @ts-expect-error: RN types don't expose `scrollResponderScrollNativeHandleToKeyboard` on ref
+        scrollRef.current.getScrollResponder()?.scrollResponderScrollNativeHandleToKeyboard(responder, 120, true);
+      }, 30);
+    });
+  }, []);
 
   const validate = (): string | null => {
     const e = normalizeEmail(email);
@@ -92,72 +107,83 @@ export function AuthLoginCard({
 
   return (
     <View style={styles.bg}>
-      <KeyboardAvoidingView
-        style={styles.card}
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      >
-        <View style={styles.logoCircle}>
-          <Text style={styles.logoLetter}>{logoLetter}</Text>
-        </View>
-        <Text style={styles.title}>{title}</Text>
-        <Text style={styles.subtitle}>{subtitle}</Text>
-
-        <Text style={styles.label}>Email</Text>
-        <TextInput
-          style={styles.input}
-          placeholder="you@example.com"
-          placeholderTextColor="#999"
-          keyboardType="email-address"
-          autoCapitalize="none"
-          autoCorrect={false}
-          value={email}
-          onChangeText={onEmailChange}
-        />
-
-        <Text style={styles.label}>Password</Text>
-        <TextInput
-          style={styles.input}
-          placeholder="••••••••"
-          placeholderTextColor="#999"
-          secureTextEntry
-          autoCapitalize="none"
-          autoCorrect={false}
-          value={password}
-          onChangeText={setPassword}
-        />
-
-        <TouchableOpacity onPress={() => navigation.navigate('ForgotPassword', { accountType: authAccountType })}>
-          <Text style={styles.forgot}>Forgot password?</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={[styles.button, loading && styles.buttonDisabled]}
-          onPress={() => void handleLogin()}
-          disabled={loading}
+      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} enabled={Platform.OS === 'ios'}>
+        <ScrollView
+          ref={(r) => {
+            scrollRef.current = r;
+          }}
+          contentContainerStyle={styles.scrollContent}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
+          onScrollBeginDrag={Keyboard.dismiss}
         >
-          <Text style={styles.buttonText}>{loading ? 'Signing in…' : 'Log in'}</Text>
-        </TouchableOpacity>
+          <View style={styles.card}>
+            <View style={styles.logoCircle}>
+              <Text style={styles.logoLetter}>{logoLetter}</Text>
+            </View>
+            <Text style={styles.title}>{title}</Text>
+            <Text style={styles.subtitle}>{subtitle}</Text>
 
-        <TouchableOpacity style={styles.footer} onPress={onPrimaryRegister}>
-          <Text style={styles.footerText}>{primaryRegisterLabel}</Text>
-        </TouchableOpacity>
+            <Text style={styles.label}>Email</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="you@example.com"
+              placeholderTextColor="#999"
+              keyboardType="email-address"
+              autoCapitalize="none"
+              autoCorrect={false}
+              value={email}
+              onChangeText={onEmailChange}
+              onFocus={scrollToFocusedInput}
+            />
 
-        {showSecondaryRegister ? (
-          <TouchableOpacity style={styles.footerSecondary} onPress={onSecondaryRegister}>
-            <Text style={styles.footerSecondaryText}>{secondaryRegisterLabel}</Text>
-          </TouchableOpacity>
-        ) : null}
+            <Text style={styles.label}>Password</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="••••••••"
+              placeholderTextColor="#999"
+              secureTextEntry
+              autoCapitalize="none"
+              autoCorrect={false}
+              value={password}
+              onChangeText={setPassword}
+              onFocus={scrollToFocusedInput}
+            />
 
-        <View style={styles.switchDivider} />
-        <TouchableOpacity style={styles.switchLogin} onPress={onSwitchLogin}>
-          <Text style={styles.switchLoginText}>{switchLoginLabel}</Text>
-        </TouchableOpacity>
+            <TouchableOpacity onPress={() => navigation.navigate('ForgotPassword', { accountType: authAccountType })}>
+              <Text style={styles.forgot}>Forgot password?</Text>
+            </TouchableOpacity>
 
-        {onChooseAccountType ? (
-          <TouchableOpacity style={styles.chooseRole} onPress={onChooseAccountType}>
-            <Text style={styles.chooseRoleText}>Choose account type</Text>
-          </TouchableOpacity>
-        ) : null}
+            <TouchableOpacity
+              style={[styles.button, loading && styles.buttonDisabled]}
+              onPress={() => void handleLogin()}
+              disabled={loading}
+            >
+              <Text style={styles.buttonText}>{loading ? 'Signing in…' : 'Log in'}</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity style={styles.footer} onPress={onPrimaryRegister}>
+              <Text style={styles.footerText}>{primaryRegisterLabel}</Text>
+            </TouchableOpacity>
+
+            {showSecondaryRegister ? (
+              <TouchableOpacity style={styles.footerSecondary} onPress={onSecondaryRegister}>
+                <Text style={styles.footerSecondaryText}>{secondaryRegisterLabel}</Text>
+              </TouchableOpacity>
+            ) : null}
+
+            <View style={styles.switchDivider} />
+            <TouchableOpacity style={styles.switchLogin} onPress={onSwitchLogin}>
+              <Text style={styles.switchLoginText}>{switchLoginLabel}</Text>
+            </TouchableOpacity>
+
+            {onChooseAccountType ? (
+              <TouchableOpacity style={styles.chooseRole} onPress={onChooseAccountType}>
+                <Text style={styles.chooseRoleText}>Choose account type</Text>
+              </TouchableOpacity>
+            ) : null}
+          </View>
+        </ScrollView>
       </KeyboardAvoidingView>
     </View>
   );
@@ -172,6 +198,13 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     paddingHorizontal: 18,
+  },
+  scrollContent: {
+    flexGrow: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: 24,
+    paddingBottom: 180,
   },
   card: {
     width: '100%',

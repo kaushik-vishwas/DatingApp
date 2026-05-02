@@ -488,8 +488,18 @@ function effectiveCallerFeeInr(m, receiverHasReplied) {
         return roundInr(stored);
     return receiverHasReplied ? chatPricing_1.CHAT_TEXT_FEE_INR : 0;
 }
+/** INR credited on score-tier payout (`receiverPayoutRatePerMinute` × minutes), not caller wallet settled amount. */
+function effectiveCallReceiverEarnedInr(row) {
+    if (typeof row.receiverEarnedInr === 'number' && Number.isFinite(row.receiverEarnedInr)) {
+        return roundInr(row.receiverEarnedInr);
+    }
+    const rate = typeof row.receiverPayoutRatePerMinute === 'number' && Number.isFinite(row.receiverPayoutRatePerMinute)
+        ? row.receiverPayoutRatePerMinute
+        : 0;
+    return roundInr((row.durationSec / 60) * Math.max(0, rate));
+}
 /**
- * GET /profile/receiver-wallet-summary — wallet balance, chat earnings today / this month, recent rows.
+ * GET /profile/receiver-wallet-summary — withdrawable wallet (chat), chat fee aggregates, score-based call earnings, recent chat rows.
  * Day/month boundaries use the server's local calendar. Legacy messages without `feeInr` are counted
  * using the same rule as billing (caller pays after receiver's first reply in the thread).
  */
@@ -502,11 +512,14 @@ const getReceiverWalletSummary = async (req, res) => {
         if ((0, accountAccess_1.blockReceiverUntilApproved)(req, res))
             return;
         const rid = new mongoose_1.default.Types.ObjectId(String(req.receiver._id));
-        const startOfToday = new Date();
+        const now = new Date();
+        const startOfToday = new Date(now);
         startOfToday.setHours(0, 0, 0, 0);
-        const startOfMonth = new Date();
+        const startOfMonth = new Date(now);
         startOfMonth.setDate(1);
         startOfMonth.setHours(0, 0, 0, 0);
+        const weekStart = new Date(now);
+        weekStart.setDate(now.getDate() - 7);
         const receiver = await Receiver_1.default.findById(rid).select('walletBalance');
         const walletBalance = typeof receiver?.walletBalance === 'number' && Number.isFinite(receiver.walletBalance)
             ? roundInr(receiver.walletBalance)
@@ -571,6 +584,27 @@ const getReceiverWalletSummary = async (req, res) => {
         }
         chatToday = roundInr(chatToday);
         chatThisMonth = roundInr(chatThisMonth);
+        const completedCalls = await CallSession_1.default.find({
+            receiverId: rid,
+            status: 'completed',
+            durationSec: { $gt: 0 },
+        })
+            .select('startedAt durationSec receiverEarnedInr receiverPayoutRatePerMinute')
+            .lean();
+        let callEarningsLifetime = 0;
+        let callEarningsToday = 0;
+        let callEarningsThisWeek = 0;
+        for (const row of completedCalls) {
+            const earned = effectiveCallReceiverEarnedInr(row);
+            callEarningsLifetime += earned;
+            if (row.startedAt >= startOfToday)
+                callEarningsToday += earned;
+            if (row.startedAt >= weekStart)
+                callEarningsThisWeek += earned;
+        }
+        callEarningsLifetime = roundInr(callEarningsLifetime);
+        callEarningsToday = roundInr(callEarningsToday);
+        callEarningsThisWeek = roundInr(callEarningsThisWeek);
         recentCandidates.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
         const topRecent = recentCandidates.slice(0, 20);
         const userIds = [...new Set(topRecent.map((r) => r.userId))];
@@ -591,6 +625,9 @@ const getReceiverWalletSummary = async (req, res) => {
             walletBalance,
             chatToday,
             chatThisMonth,
+            callEarningsLifetime,
+            callEarningsToday,
+            callEarningsThisWeek,
             recent,
         });
     }

@@ -26,7 +26,7 @@ const STEPS: Step[] = [
     subtitle: 'Understanding your income on the platform',
     icon: '📈',
     bullets: [
-      'You set your own rate per minute.',
+      'Call rate is fixed at ₹5 per minute.',
       'The platform charges a 20% commission.',
       'Earnings are credited after each call.',
       'Withdraw when you like — no minimum balance.',

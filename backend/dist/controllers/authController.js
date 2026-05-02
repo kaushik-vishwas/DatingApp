@@ -63,6 +63,10 @@ function resolveRegisterBirthDate(raw) {
 function iso(d) {
     return d.toISOString();
 }
+function roundScoreField(n) {
+    const x = typeof n === 'number' && Number.isFinite(n) ? n : 0;
+    return Math.round(x * 100) / 100;
+}
 function toApiUser(user) {
     const u = user.toObject();
     return {
@@ -131,6 +135,11 @@ function toApiReceiver(receiver) {
         userAudio: null,
         isAvailable: Boolean(r.isAvailable),
         isOnline: Boolean(r.isOnline),
+        cumulativeScore: roundScoreField(r.cumulativeScore),
+        badgeLevel: r.badgeLevel === 'diamond' || r.badgeLevel === 'supreme' || r.badgeLevel === 'platinum'
+            ? r.badgeLevel
+            : 'platinum',
+        earningRatePerMinute: roundScoreField(r.earningRatePerMinute),
     };
 }
 /** Prefer toApiUser / toApiReceiver — resolves by Mongoose modelName */

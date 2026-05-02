@@ -1,7 +1,8 @@
-import React, { useState } from 'react';
+import React, { useCallback, useRef, useState } from 'react';
 import {
   Alert,
   KeyboardAvoidingView,
+  Keyboard,
   Platform,
   ScrollView,
   StyleSheet,
@@ -29,6 +30,18 @@ export default function RegisterScreen({ navigation, route }: Props) {
   const [confirmPassword, setConfirmPassword] = useState<string>('');
   const [agreeTerms, setAgreeTerms] = useState<boolean>(false);
   const [loading, setLoading] = useState<boolean>(false);
+  const scrollRef = useRef<ScrollView | null>(null);
+
+  const scrollToFocusedInput = useCallback(() => {
+    requestAnimationFrame(() => {
+      setTimeout(() => {
+        const responder = TextInput.State.currentlyFocusedInput?.();
+        if (!responder || !scrollRef.current) return;
+        // @ts-expect-error: RN types don't expose `scrollResponderScrollNativeHandleToKeyboard` on ref
+        scrollRef.current.getScrollResponder()?.scrollResponderScrollNativeHandleToKeyboard(responder, 120, true);
+      }, 30);
+    });
+  }, []);
 
   const validate = (): string | null => {
     const name = fullName.trim();
@@ -91,9 +104,18 @@ export default function RegisterScreen({ navigation, route }: Props) {
     <View style={styles.bg}>
       <KeyboardAvoidingView
         style={styles.card}
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        enabled={Platform.OS === 'ios'}
       >
-        <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+        <ScrollView
+          ref={(r) => {
+            scrollRef.current = r;
+          }}
+          contentContainerStyle={styles.content}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
+          onScrollBeginDrag={Keyboard.dismiss}
+        >
           <TouchableOpacity onPress={() => navigation.goBack()}>
             <Text style={styles.back}>{'← Back'}</Text>
           </TouchableOpacity>
@@ -108,6 +130,7 @@ export default function RegisterScreen({ navigation, route }: Props) {
             placeholderTextColor="#999"
             value={fullName}
             onChangeText={setFullName}
+            onFocus={scrollToFocusedInput}
           />
 
           <DobPickerField
@@ -126,6 +149,7 @@ export default function RegisterScreen({ navigation, route }: Props) {
             autoCapitalize="none"
             value={emailAddress}
             onChangeText={setEmailAddress}
+            onFocus={scrollToFocusedInput}
           />
 
           <Text style={styles.label}>Phone Number</Text>
@@ -136,6 +160,7 @@ export default function RegisterScreen({ navigation, route }: Props) {
             keyboardType="phone-pad"
             value={phone}
             onChangeText={setPhone}
+            onFocus={scrollToFocusedInput}
           />
 
           <Text style={styles.label}>Password</Text>
@@ -148,6 +173,7 @@ export default function RegisterScreen({ navigation, route }: Props) {
             autoCorrect={false}
             value={password}
             onChangeText={setPassword}
+            onFocus={scrollToFocusedInput}
           />
 
           <Text style={styles.label}>Confirm password</Text>
@@ -160,6 +186,7 @@ export default function RegisterScreen({ navigation, route }: Props) {
             autoCorrect={false}
             value={confirmPassword}
             onChangeText={setConfirmPassword}
+            onFocus={scrollToFocusedInput}
           />
 
           <TouchableOpacity style={styles.termsRow} onPress={() => setAgreeTerms((v) => !v)}>
@@ -209,7 +236,7 @@ const styles = StyleSheet.create({
   content: {
     padding: 22,
     paddingTop: 12,
-    paddingBottom: 40,
+    paddingBottom: 180,
   },
   back: {
     color: PURPLE,
