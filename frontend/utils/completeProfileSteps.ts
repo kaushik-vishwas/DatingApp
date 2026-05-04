@@ -16,6 +16,11 @@ export function validateProfileInfo(state: CompleteProfileState): string | null 
 export function validateAadhaarDocuments(state: CompleteProfileState): string | null {
   if (!state.aadhaarFront) return 'Please upload the front side of your Aadhaar';
   if (!state.aadhaarBack) return 'Please upload the back side of your Aadhaar';
+  const aadhaar = state.aadhaarNumber.trim();
+  if (!/^\d{12}$/.test(aadhaar)) return 'Enter a valid 12-digit Aadhaar number';
+  const pan = state.panNumber.trim().toUpperCase();
+  if (!/^[A-Z]{5}[0-9]{4}[A-Z]$/.test(pan)) return 'Enter a valid PAN number (e.g. ABCDE1234F)';
+  if (!state.panFront) return 'Please upload the front side of your PAN card';
   return null;
 }
 

@@ -33,7 +33,16 @@ export function UploadField({
   hint,
   loading = false,
 }: Props): React.JSX.Element {
-  const isImage = Boolean(uri && mimeType?.toLowerCase().startsWith('image/'));
+  const isImageUri = (value: string): boolean => {
+    const normalized = value.trim().toLowerCase();
+    if (!normalized) return false;
+    if (normalized.startsWith('data:image/')) return true;
+    return /\.(png|jpe?g|gif|webp|bmp|heic|heif|avif)(\?.*)?$/.test(normalized);
+  };
+  const isImage = Boolean(
+    uri &&
+      (mimeType?.toLowerCase().startsWith('image/') || isImageUri(uri))
+  );
 
   return (
     <View style={styles.wrap}>
@@ -51,7 +60,9 @@ export function UploadField({
           </View>
         ) : uri ? (
           isImage ? (
-            <Image source={{ uri }} style={styles.preview} />
+            <View style={styles.imagePreviewWrap}>
+              <Image source={{ uri }} style={styles.previewCircle} />
+            </View>
           ) : (
             <View style={styles.docPreview}>
               <Text style={styles.docIcon}>📄</Text>
@@ -97,6 +108,19 @@ const styles = StyleSheet.create({
   preview: {
     width: '100%',
     height: 180,
+    resizeMode: 'cover',
+  },
+  imagePreviewWrap: {
+    width: '100%',
+    minHeight: 180,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+  },
+  previewCircle: {
+    width: 110,
+    height: 110,
+    borderRadius: 55,
     resizeMode: 'cover',
   },
   docPreview: {

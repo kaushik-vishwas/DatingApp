@@ -38,7 +38,7 @@ export default function BankDetailsScreen({ navigation }: Props): React.JSX.Elem
       Alert.alert('Validation', err);
       return;
     }
-    if (!state.profileImageUri || !state.aadhaarFront || !state.aadhaarBack) {
+    if (!state.profileImageUri || !state.aadhaarFront || !state.aadhaarBack || !state.panFront) {
       Alert.alert('Validation', 'Missing required files');
       return;
     }
@@ -74,12 +74,20 @@ export default function BankDetailsScreen({ navigation }: Props): React.JSX.Elem
         resourceType: inferResourceType(state.aadhaarBack.mimeType),
         fileName: state.aadhaarBack.name,
       });
+      const panFrontRes = await uploadToCloudinary(state.panFront.uri, {
+        mimeType: state.panFront.mimeType,
+        resourceType: inferResourceType(state.panFront.mimeType),
+        fileName: state.panFront.name,
+      });
 
       const { data } = await profileApi.complete({
         name: state.displayName.trim(),
         profileImage: profileImageUrl,
         aadhaarFront: frontRes.secure_url,
         aadhaarBack: backRes.secure_url,
+        aadhaarNumber: state.aadhaarNumber.trim(),
+        panNumber: state.panNumber.trim().toUpperCase(),
+        panFront: panFrontRes.secure_url,
         languages: state.languages,
         interests: state.interests,
         gender: state.gender!,

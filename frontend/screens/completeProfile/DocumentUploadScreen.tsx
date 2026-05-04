@@ -8,6 +8,7 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from 'react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
@@ -103,7 +104,18 @@ export default function DocumentUploadScreen({ navigation }: Props): React.JSX.E
             subtitle="Step 2 of 3"
             navigation={navigation}
           />
-          <Text style={styles.lead}>Upload both sides of your Aadhaar. Images or PDF supported.</Text>
+          <Text style={styles.lead}>Add Aadhaar and PAN details. Images or PDF supported.</Text>
+
+          <Text style={styles.fieldLabel}>Aadhaar number *</Text>
+          <TextInput
+            style={styles.input}
+            value={state.aadhaarNumber}
+            onChangeText={(t) => update({ aadhaarNumber: t.replace(/\D/g, '').slice(0, 12) })}
+            placeholder="Enter 12-digit Aadhaar number"
+            placeholderTextColor="#999"
+            keyboardType="number-pad"
+            maxLength={12}
+          />
 
           <UploadField
             label="Aadhaar — front *"
@@ -122,6 +134,31 @@ export default function DocumentUploadScreen({ navigation }: Props): React.JSX.E
             displayName={state.aadhaarBack?.name}
             onPick={onPickBack}
             onClear={() => update({ aadhaarBack: null })}
+            hint="PNG, JPG or PDF"
+          />
+
+          
+
+          <Text style={styles.fieldLabel}>PAN number *</Text>
+          <TextInput
+            style={styles.input}
+            value={state.panNumber}
+            onChangeText={(t) => update({ panNumber: t.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 10) })}
+            placeholder="Enter PAN number (e.g. ABCDE1234F)"
+            placeholderTextColor="#999"
+            autoCapitalize="characters"
+            maxLength={10}
+          />
+
+          <UploadField
+            label="PAN — front *"
+            uri={state.panFront?.uri ?? null}
+            mimeType={state.panFront?.mimeType}
+            displayName={state.panFront?.name}
+            onPick={async () => {
+              await pickAadhaarSide((doc) => update({ panFront: doc }));
+            }}
+            onClear={() => update({ panFront: null })}
             hint="PNG, JPG or PDF"
           />
 
@@ -164,6 +201,23 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 12,
     marginTop: 8,
+  },
+  fieldLabel: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#333',
+    marginBottom: 8,
+    marginTop: 10,
+  },
+  input: {
+    borderWidth: 1,
+    borderColor: '#e5e5e5',
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    fontSize: 15,
+    backgroundColor: '#fff',
+    marginBottom: 8,
   },
   flex: { flex: 1 },
 });

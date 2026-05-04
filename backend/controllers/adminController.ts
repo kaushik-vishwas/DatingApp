@@ -10,6 +10,7 @@ import WithdrawalRequest from '../models/WithdrawalRequest';
 import { toApiReceiver, toApiUser } from './authController';
 import { sendOtpEmail } from '../config/email';
 import { getConfiguredAdminEmail } from '../services/superAdminSync';
+import { emitReceiverApproved, emitReceiverRejected } from '../socket/socketRegistry';
 
 type AdminJwtPayload = { adminId: string; typ: 'admin' };
 const OTP_TTL_MS = 5 * 60 * 1000; // 5 minutes
@@ -601,13 +602,19 @@ export const approveReceiver = async (req: Request<{ id: string }>, res: Respons
       res.status(404).json({ message: 'Receiver not found' });
       return;
     }
-    if (receiver.accountStatus !== 'pending_review') {
-      res.status(400).json({ message: 'Receiver is not pending review' });
+    const canApprove =
+      receiver.accountStatus === 'pending_review' ||
+      (receiver.accountStatus === 'approved' && !receiver.isVerified);
+    if (!canApprove) {
+      res.status(400).json({ message: 'Receiver is not pending approval' });
       return;
     }
 
     receiver.accountStatus = 'approved';
+    receiver.isVerified = true;
+    receiver.rejectionReason = null;
     await receiver.save();
+    emitReceiverApproved(String(receiver._id));
 
     res.status(200).json({
       message: 'Receiver approved',
@@ -623,21 +630,32 @@ export const approveReceiver = async (req: Request<{ id: string }>, res: Respons
 /**
  * PATCH /admin/receivers/:id/reject
  */
-export const rejectReceiver = async (req: Request<{ id: string }>, res: Response): Promise<void> => {
+export const rejectReceiver = async (
+  req: Request<{ id: string }, {}, { reason?: string }>,
+  res: Response
+): Promise<void> => {
   try {
     const id = req.params.id;
+    const reasonRaw = typeof req.body.reason === 'string' ? req.body.reason.trim() : '';
+    const reason = reasonRaw || 'Your KYC details were not approved. Please edit and resubmit.';
     const receiver = await Receiver.findById(id);
     if (!receiver) {
       res.status(404).json({ message: 'Receiver not found' });
       return;
     }
-    if (receiver.accountStatus !== 'pending_review') {
-      res.status(400).json({ message: 'Receiver is not pending review' });
+    const canReject =
+      receiver.accountStatus === 'pending_review' ||
+      (receiver.accountStatus === 'approved' && !receiver.isVerified);
+    if (!canReject) {
+      res.status(400).json({ message: 'Receiver is not pending approval' });
       return;
     }
 
     receiver.accountStatus = 'rejected';
+    receiver.isVerified = false;
+    receiver.rejectionReason = reason;
     await receiver.save();
+    emitReceiverRejected(String(receiver._id), reason);
 
     res.status(200).json({
       message: 'Receiver rejected',

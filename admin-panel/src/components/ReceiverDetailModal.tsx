@@ -12,6 +12,7 @@ export function ReceiverDetailModal({ receiver, onClose }: Props) {
     { label: 'Profile', url: receiver.profileImage },
     { label: 'Aadhaar front', url: receiver.aadhaarFront },
     { label: 'Aadhaar back', url: receiver.aadhaarBack },
+    { label: 'PAN front', url: receiver.panFront },
   ].filter((d) => d.url);
 
   return (
@@ -49,6 +50,18 @@ export function ReceiverDetailModal({ receiver, onClose }: Props) {
             <dt className="text-neutral-500">Account status</dt>
             <dd className="font-medium text-neutral-900">{receiver.accountStatus}</dd>
           </div>
+          {receiver.aadhaarNumber ? (
+            <div className="flex justify-between gap-4">
+              <dt className="text-neutral-500">Aadhaar number</dt>
+              <dd className="font-medium text-neutral-900">{receiver.aadhaarNumber}</dd>
+            </div>
+          ) : null}
+          {receiver.panNumber ? (
+            <div className="flex justify-between gap-4">
+              <dt className="text-neutral-500">PAN number</dt>
+              <dd className="font-medium text-neutral-900">{receiver.panNumber}</dd>
+            </div>
+          ) : null}
           {typeof receiver.audioCallRate === 'number' && Number.isFinite(receiver.audioCallRate) ? (
             <div className="flex justify-between gap-4">
               <dt className="text-neutral-500">Audio call rate</dt>

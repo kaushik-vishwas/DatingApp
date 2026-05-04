@@ -18,6 +18,7 @@ import {
   getReceiverWalletSummary,
   getReceiverNotifyCandidates,
   notifyReceiverRecentUser,
+  reopenRejectedReceiverKyc,
 } from '../controllers/profileController';
 import { protect } from '../middleware/auth';
 
@@ -35,6 +36,7 @@ router.get('/receiver-call-insights', protect, getReceiverCallInsights);
 router.get('/receiver-notify-candidates', protect, getReceiverNotifyCandidates);
 router.post('/receiver-notify-user', protect, notifyReceiverRecentUser);
 router.patch('/receiver', protect, updateReceiverProfile);
+router.post('/receiver/reopen-kyc', protect, reopenRejectedReceiverKyc);
 router.delete('/receiver', protect, deleteReceiverAccount);
 router.get('/caller-call-history', protect, getCallerCallHistory);
 router.get('/caller-notifications', protect, getCallerNotifications);

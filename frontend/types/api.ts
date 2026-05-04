@@ -335,6 +335,9 @@ export interface CompleteProfilePayload {
   profileImage: string;
   aadhaarFront: string;
   aadhaarBack: string;
+  aadhaarNumber: string;
+  panNumber: string;
+  panFront: string;
   languages: string[];
   interests: string[];
   gender: Gender;

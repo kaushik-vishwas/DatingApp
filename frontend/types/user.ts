@@ -24,6 +24,9 @@ export interface UserProfile {
   documents: string[];
   aadhaarFront: string | null;
   aadhaarBack: string | null;
+  aadhaarNumber?: string | null;
+  panNumber?: string | null;
+  panFront?: string | null;
   bankAccountHolderName: string | null;
   bankAccountType: BankAccountType | null;
   bankAccountNumber: string | null;
@@ -44,6 +47,8 @@ export interface UserProfile {
   isAvailable?: boolean;
   /** Runtime online presence (receiver only). */
   isOnline?: boolean;
+  /** Receiver rejection reason from admin (when rejected). */
+  rejectionReason?: string | null;
   /** Receiver: anti-fraud score persisted on server (`cumulativeScore`). */
   cumulativeScore?: number;
   badgeLevel?: 'platinum' | 'diamond' | 'supreme';

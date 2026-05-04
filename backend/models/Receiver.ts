@@ -21,6 +21,9 @@ export interface IReceiver {
   documents: string[];
   aadhaarFront: string | null;
   aadhaarBack: string | null;
+  aadhaarNumber: string | null;
+  panNumber: string | null;
+  panFront: string | null;
   bankAccountHolderName: string | null;
   bankAccountType: BankAccountType | null;
   bankAccountNumber: string | null;
@@ -46,6 +49,8 @@ export interface IReceiver {
   isOnline: boolean;
   /** Set when an admin applies a warning from a moderation report. */
   moderationWarningAt: Date | null;
+  /** Last admin-provided reason when KYC is rejected. */
+  rejectionReason: string | null;
   pendingBankAccountHolderName: string | null;
   pendingBankAccountType: BankAccountType | null;
   pendingBankAccountNumber: string | null;
@@ -86,6 +91,9 @@ const receiverSchema = new Schema<IReceiver>(
     documents: { type: [String], default: [] },
     aadhaarFront: { type: String, default: null },
     aadhaarBack: { type: String, default: null },
+    aadhaarNumber: { type: String, default: null },
+    panNumber: { type: String, default: null },
+    panFront: { type: String, default: null },
     bankAccountHolderName: { type: String, default: null },
     bankAccountType: { type: String, enum: ['savings', 'current'], default: null },
     bankAccountNumber: { type: String, default: null },
@@ -104,6 +112,7 @@ const receiverSchema = new Schema<IReceiver>(
     isAvailable: { type: Boolean, default: true },
     isOnline: { type: Boolean, default: false },
     moderationWarningAt: { type: Date, default: null },
+    rejectionReason: { type: String, default: null },
     pendingBankAccountHolderName: { type: String, default: null },
     pendingBankAccountType: { type: String, enum: ['savings', 'current'], default: null },
     pendingBankAccountNumber: { type: String, default: null },

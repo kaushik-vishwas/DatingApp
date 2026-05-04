@@ -122,9 +122,9 @@ export default function AppNavigator(): React.JSX.Element {
           )
         ) : accountStatus === 'pending_profile' ? (
           <Stack.Screen name="CompleteProfileFlow" component={CompleteProfileFlow} />
-        ) : accountStatus === 'pending_review' || accountStatus === 'rejected' ? (
+        ) : !user.isVerified || accountStatus === 'pending_review' || accountStatus === 'rejected' ? (
           <Stack.Screen name="UnderReview" component={UnderReviewScreen} />
-        ) : accountStatus === 'approved' ? (
+        ) : user.isVerified && accountStatus === 'approved' ? (
           <Stack.Screen name="Home" component={ReceiverAppNavigator} />
         ) : (
           <Stack.Screen name="UnderReview" component={UnderReviewScreen} />

@@ -33,6 +33,9 @@ type CompleteProfileBody = {
   profileImage: string;
   aadhaarFront: string;
   aadhaarBack: string;
+  aadhaarNumber: string;
+  panNumber: string;
+  panFront: string;
   languages: string[];
   interests: string[];
   gender: Gender;
@@ -137,6 +140,9 @@ export const completeProfile = async (
       profileImage,
       aadhaarFront,
       aadhaarBack,
+      aadhaarNumber,
+      panNumber,
+      panFront,
       languages,
       interests,
       gender,
@@ -163,6 +169,22 @@ export const completeProfile = async (
     }
     if (!aadhaarBack || typeof aadhaarBack !== 'string') {
       res.status(400).json({ message: 'aadhaarBack URL is required' });
+      return;
+    }
+    if (!aadhaarNumber || typeof aadhaarNumber !== 'string' || !/^\d{12}$/.test(aadhaarNumber.trim())) {
+      res.status(400).json({ message: 'aadhaarNumber must be a valid 12-digit number' });
+      return;
+    }
+    if (
+      !panNumber ||
+      typeof panNumber !== 'string' ||
+      !/^[A-Z]{5}[0-9]{4}[A-Z]$/i.test(panNumber.trim())
+    ) {
+      res.status(400).json({ message: 'panNumber must be valid (e.g. ABCDE1234F)' });
+      return;
+    }
+    if (!panFront || typeof panFront !== 'string') {
+      res.status(400).json({ message: 'panFront URL is required' });
       return;
     }
     if (!Array.isArray(languages) || languages.length === 0) {
@@ -227,12 +249,16 @@ export const completeProfile = async (
 
     const front = String(aadhaarFront).trim();
     const back = String(aadhaarBack).trim();
+    const panFrontUrl = String(panFront).trim();
 
     receiver.name = String(name).trim();
     receiver.profileImage = profileImage.trim();
     receiver.aadhaarFront = front;
     receiver.aadhaarBack = back;
-    receiver.documents = [front, back];
+    receiver.aadhaarNumber = String(aadhaarNumber).trim();
+    receiver.panNumber = String(panNumber).trim().toUpperCase();
+    receiver.panFront = panFrontUrl;
+    receiver.documents = [front, back, panFrontUrl];
     receiver.languages = languages.map((l) => String(l).trim()).filter(Boolean);
     receiver.interests = interests.map((i) => String(i).trim()).filter(Boolean);
     receiver.gender = gender;
@@ -1424,6 +1450,40 @@ export const updateReceiverProfile = async (
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error('updateReceiverProfile error:', msg);
+    res.status(500).json({ message: msg || 'Server error' });
+  }
+};
+
+/**
+ * POST /profile/receiver/reopen-kyc
+ * Allows rejected receivers to re-enter the complete profile flow without logging out.
+ */
+export const reopenRejectedReceiverKyc = async (req: Request, res: Response): Promise<void> => {
+  try {
+    if (req.accountKind !== 'receiver') {
+      res.status(403).json({ message: 'Only receivers can reopen KYC' });
+      return;
+    }
+    const receiverId = String(req.receiver!._id);
+    const receiver = await Receiver.findById(receiverId);
+    if (!receiver) {
+      res.status(404).json({ message: 'Receiver not found' });
+      return;
+    }
+    if (receiver.accountStatus !== 'rejected') {
+      res.status(400).json({ message: 'KYC can be reopened only from rejected status' });
+      return;
+    }
+    receiver.accountStatus = 'pending_profile';
+    receiver.rejectionReason = null;
+    await receiver.save();
+    res.status(200).json({
+      message: 'KYC reopened',
+      user: toApiReceiver(receiver),
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error('reopenRejectedReceiverKyc error:', msg);
     res.status(500).json({ message: msg || 'Server error' });
   }
 };

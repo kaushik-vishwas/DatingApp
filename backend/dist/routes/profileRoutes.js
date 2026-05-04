@@ -16,6 +16,7 @@ router.get('/receiver-call-insights', auth_1.protect, profileController_1.getRec
 router.get('/receiver-notify-candidates', auth_1.protect, profileController_1.getReceiverNotifyCandidates);
 router.post('/receiver-notify-user', auth_1.protect, profileController_1.notifyReceiverRecentUser);
 router.patch('/receiver', auth_1.protect, profileController_1.updateReceiverProfile);
+router.post('/receiver/reopen-kyc', auth_1.protect, profileController_1.reopenRejectedReceiverKyc);
 router.delete('/receiver', auth_1.protect, profileController_1.deleteReceiverAccount);
 router.get('/caller-call-history', auth_1.protect, profileController_1.getCallerCallHistory);
 router.get('/caller-notifications', auth_1.protect, profileController_1.getCallerNotifications);

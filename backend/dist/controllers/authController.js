@@ -81,6 +81,9 @@ function toApiUser(user) {
         documents: [],
         aadhaarFront: null,
         aadhaarBack: null,
+        aadhaarNumber: null,
+        panNumber: null,
+        panFront: null,
         bankAccountHolderName: null,
         bankAccountType: null,
         bankAccountNumber: null,
@@ -100,6 +103,7 @@ function toApiUser(user) {
         userAudio: u.userAudio ?? null,
         isAvailable: false,
         isOnline: false,
+        rejectionReason: null,
     };
 }
 function toApiReceiver(receiver) {
@@ -116,6 +120,9 @@ function toApiReceiver(receiver) {
         documents: r.documents ?? [],
         aadhaarFront: r.aadhaarFront ?? null,
         aadhaarBack: r.aadhaarBack ?? null,
+        aadhaarNumber: r.aadhaarNumber ?? null,
+        panNumber: r.panNumber ?? null,
+        panFront: r.panFront ?? null,
         bankAccountHolderName: r.bankAccountHolderName ?? null,
         bankAccountType: r.bankAccountType ?? null,
         bankAccountNumber: r.bankAccountNumber ?? null,
@@ -135,6 +142,7 @@ function toApiReceiver(receiver) {
         userAudio: null,
         isAvailable: Boolean(r.isAvailable),
         isOnline: Boolean(r.isOnline),
+        rejectionReason: r.rejectionReason ?? null,
         cumulativeScore: roundScoreField(r.cumulativeScore),
         badgeLevel: r.badgeLevel === 'diamond' || r.badgeLevel === 'supreme' || r.badgeLevel === 'platinum'
             ? r.badgeLevel

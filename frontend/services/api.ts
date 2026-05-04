@@ -263,6 +263,9 @@ export const profileApi = {
   verifyReceiverBankUpdateOtp: (otp: string) =>
     api.post<CompleteProfileResponse>('/profile/receiver/bank/verify', { otp }),
 
+  reopenRejectedReceiverKyc: () =>
+    api.post<CompleteProfileResponse>('/profile/receiver/reopen-kyc'),
+
   receiverEarningsBreakdown: (range: 'week' | 'month' | 'all' = 'week') =>
     api.get<ReceiverEarningsBreakdownResponse>('/profile/receiver-earnings-breakdown', {
       params: { range },

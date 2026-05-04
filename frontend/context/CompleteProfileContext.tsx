@@ -20,6 +20,9 @@ export type CompleteProfileState = {
   state: string;
   aadhaarFront: PickedDocument | null;
   aadhaarBack: PickedDocument | null;
+  aadhaarNumber: string;
+  panNumber: string;
+  panFront: PickedDocument | null;
   bankAccountHolderName: string;
   bankAccountType: BankAccountType;
   bankAccountNumber: string;
@@ -38,6 +41,9 @@ const initialState: CompleteProfileState = {
   state: '',
   aadhaarFront: null,
   aadhaarBack: null,
+  aadhaarNumber: '',
+  panNumber: '',
+  panFront: null,
   bankAccountHolderName: '',
   bankAccountType: 'savings',
   bankAccountNumber: '',

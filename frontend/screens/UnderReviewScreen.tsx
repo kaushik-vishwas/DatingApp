@@ -1,15 +1,29 @@
 import React from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { Alert, StyleSheet, Text, View } from 'react-native';
 
 import { Button } from '../components/ui/Button';
 import { useAuth } from '../context/AuthContext';
+import { getErrorMessage, profileApi } from '../services/api';
 
 export default function UnderReviewScreen(): React.JSX.Element {
-  const { user, signOut } = useAuth();
+  const { user, signOut, refreshUser } = useAuth();
 
   const isCaller = user?.role === 'caller';
   const isRejected = user?.accountStatus === 'rejected';
   const suspended = Boolean(user?.suspended);
+  const [resubmitting, setResubmitting] = React.useState(false);
+
+  const onEditAndResubmit = async () => {
+    setResubmitting(true);
+    try {
+      await profileApi.reopenRejectedReceiverKyc();
+      await refreshUser();
+    } catch (e) {
+      Alert.alert('Unable to continue', getErrorMessage(e));
+    } finally {
+      setResubmitting(false);
+    }
+  };
 
   return (
     <View style={styles.bg}>
@@ -31,11 +45,18 @@ export default function UnderReviewScreen(): React.JSX.Element {
             </Text>
             <Text style={styles.body}>
               {isRejected
-                ? 'Your application was not approved. Contact support for more information.'
+                ? user?.rejectionReason?.trim() || 'Your application was not approved. Please edit and resubmit.'
                 : 'Thanks for submitting your profile. Our team will review it shortly. You will get access to the dashboard once approved.'}
             </Text>
             <Text style={styles.muted}>Status: {user?.accountStatus ?? 'unknown'}</Text>
           </>
+        )}
+        {isCaller || !isRejected ? null : (
+          <Button
+            title={resubmitting ? 'Opening profile…' : 'Edit & Resubmit'}
+            onPress={() => void onEditAndResubmit()}
+            disabled={resubmitting}
+          />
         )}
         <Button title="Log out" variant="outline" onPress={() => void signOut()} />
       </View>

@@ -15,6 +15,7 @@ const WithdrawalRequest_1 = __importDefault(require("../models/WithdrawalRequest
 const authController_1 = require("./authController");
 const email_1 = require("../config/email");
 const superAdminSync_1 = require("../services/superAdminSync");
+const socketRegistry_1 = require("../socket/socketRegistry");
 const OTP_TTL_MS = 5 * 60 * 1000; // 5 minutes
 const signAdminToken = (adminId) => {
     const secret = process.env.ADMIN_JWT_SECRET;
@@ -544,12 +545,17 @@ const approveReceiver = async (req, res) => {
             res.status(404).json({ message: 'Receiver not found' });
             return;
         }
-        if (receiver.accountStatus !== 'pending_review') {
-            res.status(400).json({ message: 'Receiver is not pending review' });
+        const canApprove = receiver.accountStatus === 'pending_review' ||
+            (receiver.accountStatus === 'approved' && !receiver.isVerified);
+        if (!canApprove) {
+            res.status(400).json({ message: 'Receiver is not pending approval' });
             return;
         }
         receiver.accountStatus = 'approved';
+        receiver.isVerified = true;
+        receiver.rejectionReason = null;
         await receiver.save();
+        (0, socketRegistry_1.emitReceiverApproved)(String(receiver._id));
         res.status(200).json({
             message: 'Receiver approved',
             receiver: (0, authController_1.toApiReceiver)(receiver),
@@ -568,17 +574,24 @@ exports.approveReceiver = approveReceiver;
 const rejectReceiver = async (req, res) => {
     try {
         const id = req.params.id;
+        const reasonRaw = typeof req.body.reason === 'string' ? req.body.reason.trim() : '';
+        const reason = reasonRaw || 'Your KYC details were not approved. Please edit and resubmit.';
         const receiver = await Receiver_1.default.findById(id);
         if (!receiver) {
             res.status(404).json({ message: 'Receiver not found' });
             return;
         }
-        if (receiver.accountStatus !== 'pending_review') {
-            res.status(400).json({ message: 'Receiver is not pending review' });
+        const canReject = receiver.accountStatus === 'pending_review' ||
+            (receiver.accountStatus === 'approved' && !receiver.isVerified);
+        if (!canReject) {
+            res.status(400).json({ message: 'Receiver is not pending approval' });
             return;
         }
         receiver.accountStatus = 'rejected';
+        receiver.isVerified = false;
+        receiver.rejectionReason = reason;
         await receiver.save();
+        (0, socketRegistry_1.emitReceiverRejected)(String(receiver._id), reason);
         res.status(200).json({
             message: 'Receiver rejected',
             receiver: (0, authController_1.toApiReceiver)(receiver),

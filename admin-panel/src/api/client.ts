@@ -16,7 +16,9 @@ function getBaseURL(): string {
   if (import.meta.env.PROD) {
     return normalizeApiOrigin(PROD_API);
   }
-  return normalizeApiOrigin('http://localhost:5000');
+  // Use IPv4 loopback in dev. On some Windows setups `localhost` resolves to `::1`
+  // and can hit a different local process than the backend bound on 0.0.0.0:5000.
+  return normalizeApiOrigin('http://127.0.0.1:5000');
 }
 
 /** Axios instance */
@@ -49,11 +51,16 @@ export type ReceiverRecord = {
   name: string;
   email: string;
   phone: string;
+  isVerified: boolean;
   role: string;
   accountStatus: string;
   profileImage: string | null;
   aadhaarFront?: string | null;
   aadhaarBack?: string | null;
+  aadhaarNumber?: string | null;
+  panNumber?: string | null;
+  panFront?: string | null;
+  documents?: string[];
   createdAt: string;
   updatedAt: string;
   audioCallRate?: number | null;
@@ -142,9 +149,10 @@ export async function approveReceiver(receiverId: string) {
   return data;
 }
 
-export async function rejectReceiver(receiverId: string) {
+export async function rejectReceiver(receiverId: string, reason: string) {
   const { data } = await api.patch<{ receiver: ReceiverRecord }>(
-    `/admin/receivers/${receiverId}/reject`
+    `/admin/receivers/${receiverId}/reject`,
+    { reason }
   );
   return data;
 }

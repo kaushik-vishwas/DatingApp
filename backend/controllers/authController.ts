@@ -32,6 +32,9 @@ export interface SafeUser {
   documents: string[];
   aadhaarFront: string | null;
   aadhaarBack: string | null;
+  aadhaarNumber: string | null;
+  panNumber: string | null;
+  panFront: string | null;
   bankAccountHolderName: string | null;
   bankAccountType: 'savings' | 'current' | null;
   bankAccountNumber: string | null;
@@ -56,6 +59,8 @@ export interface SafeUser {
   isAvailable: boolean;
   /** Runtime online presence from socket connection(s). */
   isOnline: boolean;
+  /** Receiver rejection reason from admin review (when accountStatus is `rejected`). */
+  rejectionReason?: string | null;
   /** Receivers only: persisted score in MongoDB (`cumulativeScore`). */
   cumulativeScore?: number;
   /** Receivers only: tier derived from cumulative score. */
@@ -121,6 +126,9 @@ export function toApiUser(user: UserDocument): SafeUser {
     documents: [],
     aadhaarFront: null,
     aadhaarBack: null,
+    aadhaarNumber: null,
+    panNumber: null,
+    panFront: null,
     bankAccountHolderName: null,
     bankAccountType: null,
     bankAccountNumber: null,
@@ -140,6 +148,7 @@ export function toApiUser(user: UserDocument): SafeUser {
     userAudio: u.userAudio ?? null,
     isAvailable: false,
     isOnline: false,
+    rejectionReason: null,
   };
 }
 
@@ -157,6 +166,9 @@ export function toApiReceiver(receiver: ReceiverDocument): SafeUser {
     documents: r.documents ?? [],
     aadhaarFront: r.aadhaarFront ?? null,
     aadhaarBack: r.aadhaarBack ?? null,
+    aadhaarNumber: r.aadhaarNumber ?? null,
+    panNumber: r.panNumber ?? null,
+    panFront: r.panFront ?? null,
     bankAccountHolderName: r.bankAccountHolderName ?? null,
     bankAccountType: r.bankAccountType ?? null,
     bankAccountNumber: r.bankAccountNumber ?? null,
@@ -177,6 +189,7 @@ export function toApiReceiver(receiver: ReceiverDocument): SafeUser {
     userAudio: null,
     isAvailable: Boolean(r.isAvailable),
     isOnline: Boolean(r.isOnline),
+    rejectionReason: r.rejectionReason ?? null,
     cumulativeScore: roundScoreField(r.cumulativeScore),
     badgeLevel:
       r.badgeLevel === 'diamond' || r.badgeLevel === 'supreme' || r.badgeLevel === 'platinum'

@@ -41,12 +41,25 @@ function statusBadge(status: string) {
   return { label: status.replace(/_/g, ' '), className: 'bg-neutral-100 text-neutral-700' };
 }
 
+function isApprovedAndVerified(r: ReceiverRecord): boolean {
+  return r.accountStatus === 'approved' && Boolean(r.isVerified);
+}
+
+function isPendingVerification(r: ReceiverRecord): boolean {
+  return r.accountStatus === 'pending_review' || (r.accountStatus === 'approved' && !r.isVerified);
+}
+
 function activityIso(r: ReceiverRecord): string {
   return r.updatedAt || r.createdAt;
 }
 
 function idTypeLabel(u: ReceiverRecord): string {
-  if (u.aadhaarFront || u.aadhaarBack) return 'Aadhaar Card';
+  const docUrls = (u.documents ?? []).filter((x): x is string => typeof x === 'string' && x.trim().length > 0);
+  const known = new Set([u.profileImage, u.aadhaarFront, u.aadhaarBack].filter(Boolean) as string[]);
+  const hasPanDoc = Boolean(u.panFront) || docUrls.some((url) => !known.has(url));
+  if ((u.aadhaarFront || u.aadhaarBack) && hasPanDoc) return 'Aadhaar + PAN';
+  if (u.aadhaarFront || u.aadhaarBack) return 'Aadhaar';
+  if (hasPanDoc) return 'PAN';
   return '—';
 }
 
@@ -92,8 +105,8 @@ export function KycApprovalsPage() {
 
   const byTab = useMemo(() => {
     return kycPool.filter((r) => {
-      if (tab === 'approved') return r.accountStatus === 'approved';
-      if (tab === 'pending') return r.accountStatus === 'pending_review';
+      if (tab === 'approved') return isApprovedAndVerified(r);
+      if (tab === 'pending') return isPendingVerification(r);
       return true;
     });
   }, [kycPool, tab]);
@@ -113,8 +126,8 @@ export function KycApprovalsPage() {
   const tabCounts = useMemo(
     () => ({
       all: kycPool.filter((r) => inDateRange(activityIso(r), range)).length,
-      approved: kycPool.filter((r) => r.accountStatus === 'approved' && inDateRange(activityIso(r), range)).length,
-      pending: kycPool.filter((r) => r.accountStatus === 'pending_review' && inDateRange(activityIso(r), range)).length,
+      approved: kycPool.filter((r) => isApprovedAndVerified(r) && inDateRange(activityIso(r), range)).length,
+      pending: kycPool.filter((r) => isPendingVerification(r) && inDateRange(activityIso(r), range)).length,
     }),
     [kycPool, range]
   );
@@ -136,10 +149,19 @@ export function KycApprovalsPage() {
   };
 
   const onReject = async (id: string) => {
-    if (!window.confirm('Reject this KYC? The receiver will see a rejected state in the app.')) return;
+    const reasonInput = window.prompt(
+      'Enter rejection reason (will be shown to receiver):',
+      'KYC details are unclear. Please upload clear Aadhaar/PAN images and resubmit.'
+    );
+    if (reasonInput === null) return;
+    const reason = reasonInput.trim();
+    if (!reason) {
+      setError('Rejection reason is required');
+      return;
+    }
     setBusyId(id);
     try {
-      await rejectReceiver(id);
+      await rejectReceiver(id, reason);
       await load();
     } catch (err: unknown) {
       const msg =
@@ -266,13 +288,27 @@ export function KycApprovalsPage() {
               </thead>
               <tbody>
                 {sorted.map((r, i) => {
-                  const badge = statusBadge(r.accountStatus);
-                  const pending = r.accountStatus === 'pending_review';
+                  const badge =
+                    r.accountStatus === 'approved' && !r.isVerified
+                      ? { label: 'Pending verification', className: 'bg-amber-100 text-amber-800' }
+                      : statusBadge(r.accountStatus);
+                  const pending = isPendingVerification(r);
                   const activity = activityIso(r);
+                  const documentUrls = (r.documents ?? []).filter(
+                    (x): x is string => typeof x === 'string' && x.trim().length > 0
+                  );
+                  const knownDocumentUrls = new Set(
+                    [r.profileImage, r.aadhaarFront, r.aadhaarBack].filter(Boolean) as string[]
+                  );
+                  const panFallbackFromDocuments =
+                    documentUrls.find((url) => !knownDocumentUrls.has(url)) ?? null;
                   const docs = [
                     r.profileImage ? { label: 'Profile', url: r.profileImage, Icon: ImageIcon } : null,
                     r.aadhaarFront ? { label: 'Aadhaar front', url: r.aadhaarFront, Icon: FileText } : null,
                     r.aadhaarBack ? { label: 'Aadhaar back', url: r.aadhaarBack, Icon: FileText } : null,
+                    (r.panFront ?? panFallbackFromDocuments)
+                      ? { label: 'PAN front', url: r.panFront ?? panFallbackFromDocuments!, Icon: FileText }
+                      : { label: 'PAN front', url: null, Icon: FileText },
                   ].filter(Boolean) as { label: string; url: string; Icon: typeof FileText }[];
 
                   return (
@@ -287,16 +323,26 @@ export function KycApprovalsPage() {
                             <span className="text-neutral-400">—</span>
                           ) : (
                             docs.map((d) => (
-                              <a
-                                key={d.label}
-                                href={d.url!}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-neutral-200 bg-neutral-50 text-neutral-600 hover:bg-neutral-100"
-                                title={d.label}
-                              >
-                                <d.Icon className="h-4 w-4" />
-                              </a>
+                              d.url ? (
+                                <a
+                                  key={d.label}
+                                  href={d.url}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-neutral-200 bg-neutral-50 text-neutral-600 hover:bg-neutral-100"
+                                  title={d.label}
+                                >
+                                  <d.Icon className="h-4 w-4" />
+                                </a>
+                              ) : (
+                                <span
+                                  key={d.label}
+                                  className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-neutral-200 bg-neutral-100 text-neutral-300"
+                                  title={`${d.label} not uploaded`}
+                                >
+                                  <d.Icon className="h-4 w-4" />
+                                </span>
+                              )
                             ))
                           )}
                         </div>

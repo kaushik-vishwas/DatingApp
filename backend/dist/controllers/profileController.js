@@ -36,7 +36,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getCallerNotifications = exports.getCallerCallHistory = exports.getReceiverEarningsBreakdown = exports.verifyReceiverBankUpdateOtp = exports.sendReceiverBankUpdateOtp = exports.deleteReceiverAccount = exports.updateReceiverProfile = exports.notifyReceiverRecentUser = exports.getReceiverNotifyCandidates = exports.getReceiverCallInsights = exports.verifyReceiverWithdrawalOtpAndCreate = exports.sendReceiverWithdrawalOtp = exports.getReceiverWithdrawalOverview = exports.getReceiverWalletSummary = exports.updateCallerProfile = exports.completeCallerProfile = exports.saveCallerUserAudio = exports.completeProfile = void 0;
+exports.getCallerNotifications = exports.getCallerCallHistory = exports.getReceiverEarningsBreakdown = exports.verifyReceiverBankUpdateOtp = exports.sendReceiverBankUpdateOtp = exports.deleteReceiverAccount = exports.reopenRejectedReceiverKyc = exports.updateReceiverProfile = exports.notifyReceiverRecentUser = exports.getReceiverNotifyCandidates = exports.getReceiverCallInsights = exports.verifyReceiverWithdrawalOtpAndCreate = exports.sendReceiverWithdrawalOtp = exports.getReceiverWithdrawalOverview = exports.getReceiverWalletSummary = exports.updateCallerProfile = exports.completeCallerProfile = exports.saveCallerUserAudio = exports.completeProfile = void 0;
 const crypto_1 = __importDefault(require("crypto"));
 const mongoose_1 = __importDefault(require("mongoose"));
 const User_1 = __importDefault(require("../models/User"));
@@ -101,7 +101,7 @@ const completeProfile = async (req, res) => {
             res.status(401).json({ message: 'Not authorized' });
             return;
         }
-        const { name, profileImage, aadhaarFront, aadhaarBack, languages, interests, gender, dateOfBirth, state, bankAccountHolderName, bankAccountType, bankAccountNumber, bankIfsc, bankName, } = req.body;
+        const { name, profileImage, aadhaarFront, aadhaarBack, aadhaarNumber, panNumber, panFront, languages, interests, gender, dateOfBirth, state, bankAccountHolderName, bankAccountType, bankAccountNumber, bankIfsc, bankName, } = req.body;
         if (!name || !String(name).trim()) {
             res.status(400).json({ message: 'name is required' });
             return;
@@ -116,6 +116,20 @@ const completeProfile = async (req, res) => {
         }
         if (!aadhaarBack || typeof aadhaarBack !== 'string') {
             res.status(400).json({ message: 'aadhaarBack URL is required' });
+            return;
+        }
+        if (!aadhaarNumber || typeof aadhaarNumber !== 'string' || !/^\d{12}$/.test(aadhaarNumber.trim())) {
+            res.status(400).json({ message: 'aadhaarNumber must be a valid 12-digit number' });
+            return;
+        }
+        if (!panNumber ||
+            typeof panNumber !== 'string' ||
+            !/^[A-Z]{5}[0-9]{4}[A-Z]$/i.test(panNumber.trim())) {
+            res.status(400).json({ message: 'panNumber must be valid (e.g. ABCDE1234F)' });
+            return;
+        }
+        if (!panFront || typeof panFront !== 'string') {
+            res.status(400).json({ message: 'panFront URL is required' });
             return;
         }
         if (!Array.isArray(languages) || languages.length === 0) {
@@ -178,11 +192,15 @@ const completeProfile = async (req, res) => {
         }
         const front = String(aadhaarFront).trim();
         const back = String(aadhaarBack).trim();
+        const panFrontUrl = String(panFront).trim();
         receiver.name = String(name).trim();
         receiver.profileImage = profileImage.trim();
         receiver.aadhaarFront = front;
         receiver.aadhaarBack = back;
-        receiver.documents = [front, back];
+        receiver.aadhaarNumber = String(aadhaarNumber).trim();
+        receiver.panNumber = String(panNumber).trim().toUpperCase();
+        receiver.panFront = panFrontUrl;
+        receiver.documents = [front, back, panFrontUrl];
         receiver.languages = languages.map((l) => String(l).trim()).filter(Boolean);
         receiver.interests = interests.map((i) => String(i).trim()).filter(Boolean);
         receiver.gender = gender;
@@ -1202,6 +1220,41 @@ const updateReceiverProfile = async (req, res) => {
     }
 };
 exports.updateReceiverProfile = updateReceiverProfile;
+/**
+ * POST /profile/receiver/reopen-kyc
+ * Allows rejected receivers to re-enter the complete profile flow without logging out.
+ */
+const reopenRejectedReceiverKyc = async (req, res) => {
+    try {
+        if (req.accountKind !== 'receiver') {
+            res.status(403).json({ message: 'Only receivers can reopen KYC' });
+            return;
+        }
+        const receiverId = String(req.receiver._id);
+        const receiver = await Receiver_1.default.findById(receiverId);
+        if (!receiver) {
+            res.status(404).json({ message: 'Receiver not found' });
+            return;
+        }
+        if (receiver.accountStatus !== 'rejected') {
+            res.status(400).json({ message: 'KYC can be reopened only from rejected status' });
+            return;
+        }
+        receiver.accountStatus = 'pending_profile';
+        receiver.rejectionReason = null;
+        await receiver.save();
+        res.status(200).json({
+            message: 'KYC reopened',
+            user: (0, authController_1.toApiReceiver)(receiver),
+        });
+    }
+    catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error('reopenRejectedReceiverKyc error:', msg);
+        res.status(500).json({ message: msg || 'Server error' });
+    }
+};
+exports.reopenRejectedReceiverKyc = reopenRejectedReceiverKyc;
 /**
  * DELETE /profile/receiver — deletes receiver account and related receiver-side data.
  */
