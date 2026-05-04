@@ -25,6 +25,7 @@ import {
 } from '../services/notificationUnread';
 import { chatApi, getErrorMessage, profileApi } from '../services/api';
 import type { ReceiverCallInsightsResponse, ReceiverWalletSummaryResponse } from '../types/api';
+import { type ReceiverPresenceInfo } from '../utils/receiverStatus';
 import SelectoLogo from '../assets/SelectoLogo.png';
 
 const PURPLE = '#7b2cff';
@@ -33,6 +34,25 @@ const PINK = '#ff72d2';
 function formatInr(n: number): string {
   const v = Math.round(n * 100) / 100;
   return `₹${v.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`;
+}
+
+function getReceiverPublicPresence(_isOnline: boolean, isAvailable: boolean): ReceiverPresenceInfo {
+  if (!isAvailable) {
+    return {
+      status: 'offline',
+      label: 'Offline',
+      color: '#dc2626',
+      canCall: false,
+      canMessage: true,
+    };
+  }
+  return {
+    status: 'available',
+    label: 'Available',
+    color: '#22c55e',
+    canCall: true,
+    canMessage: true,
+  };
 }
 
 /** Receiver (call earner) home — availability, earnings demo, etc. */
@@ -52,12 +72,32 @@ export default function ReceiverHomeDashboard(): React.JSX.Element {
   /** Use stable `user._id` only — `refreshUser()` replaces `user` with a new object each time and would
    *  recreate this callback forever when combined with `useFocusEffect`. */
   const receiverId = user?.role === 'receiver' ? user._id : undefined;
+  const autoAvailabilityAppliedForRef = React.useRef<string | null>(null);
 
   const availabilityFromServer = user?.role === 'receiver' ? Boolean(user.isAvailable ?? true) : true;
 
   React.useEffect(() => {
     setAvailable(availabilityFromServer);
   }, [availabilityFromServer]);
+
+  React.useEffect(() => {
+    if (!receiverId || user?.role !== 'receiver') return;
+    if (user.isAvailable === true) {
+      autoAvailabilityAppliedForRef.current = receiverId;
+      return;
+    }
+    if (autoAvailabilityAppliedForRef.current === receiverId) return;
+    autoAvailabilityAppliedForRef.current = receiverId;
+    setAvailable(true);
+    void (async () => {
+      try {
+        await profileApi.updateReceiverProfile({ isAvailable: true });
+        await refreshUser();
+      } catch {
+        setAvailable(Boolean(user.isAvailable ?? false));
+      }
+    })();
+  }, [receiverId, user?.role, user?.isAvailable, refreshUser]);
 
   const loadWalletSummary = useCallback(async () => {
     if (!receiverId) return;
@@ -148,6 +188,7 @@ export default function ReceiverHomeDashboard(): React.JSX.Element {
     user.role === 'receiver' && typeof user.cumulativeScore === 'number' && Number.isFinite(user.cumulativeScore)
       ? user.cumulativeScore
       : 0;
+  const publicPresence = getReceiverPublicPresence(Boolean(user.isOnline), available);
   const trophyScoreRounded =
     callInsights != null
       ? Math.round(callInsights.totalScore)
@@ -243,11 +284,7 @@ export default function ReceiverHomeDashboard(): React.JSX.Element {
                       style={[
                         styles.publicAvatarWrapper,
                         {
-                          borderColor: !Boolean(user.isOnline)
-                            ? '#dc2626'
-                            : available
-                              ? '#22c55e'
-                              : '#f59e0b',
+                          borderColor: publicPresence.color,
                         },
                       ]}
                     >
@@ -262,11 +299,7 @@ export default function ReceiverHomeDashboard(): React.JSX.Element {
                         style={[
                           styles.publicStatusDot,
                           {
-                            backgroundColor: !Boolean(user.isOnline)
-                              ? '#dc2626'
-                              : available
-                                ? '#22c55e'
-                                : '#f59e0b',
+                            backgroundColor: publicPresence.color,
                           },
                         ]}
                       />
@@ -313,11 +346,7 @@ export default function ReceiverHomeDashboard(): React.JSX.Element {
                       style={[
                         styles.publicStatusPillRight,
                         {
-                          backgroundColor: !Boolean(user.isOnline)
-                            ? '#dc262615'
-                            : available
-                              ? '#22c55e15'
-                              : '#f59e0b15',
+                          backgroundColor: `${publicPresence.color}15`,
                         },
                       ]}
                     >
@@ -325,15 +354,11 @@ export default function ReceiverHomeDashboard(): React.JSX.Element {
                         style={[
                           styles.publicStatusTextRight,
                           {
-                            color: !Boolean(user.isOnline)
-                              ? '#dc2626'
-                              : available
-                                ? '#22c55e'
-                                : '#f59e0b',
+                            color: publicPresence.color,
                           },
                         ]}
                       >
-                        {!Boolean(user.isOnline) ? 'Offline' : available ? 'Available' : 'Busy'}
+                        {publicPresence.label}
                       </Text>
                     </View>
                   </View>
@@ -349,12 +374,8 @@ export default function ReceiverHomeDashboard(): React.JSX.Element {
                 </View>
                 <View>
                   <Text style={styles.availabilityTitle}>Availability Status</Text>
-                  <Text style={[styles.availabilitySub, { color: available && Boolean(user.isOnline) ? '#22c55e' : '#ef4444' }]}>
-                    {available && Boolean(user.isOnline) 
-                      ? 'You are available' 
-                      : available && !Boolean(user.isOnline)
-                        ? '⏳'
-                        : 'You are not available'}
+                  <Text style={[styles.availabilitySub, { color: available ? '#22c55e' : '#ef4444' }]}>
+                    {available ? 'You are available' : 'You are not available'}
                   </Text>
                 </View>
               </View>

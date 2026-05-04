@@ -72,6 +72,7 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   const peerProfileRef = useRef<Map<string, { name: string; image?: string | null }>>(new Map());
   const pendingOutgoingByCallIdRef = useRef<Map<string, PendingOutgoingCall>>(new Map());
   const pendingInviteOutcomeRef = useRef<Map<string, InviteOutcomeWaiter>>(new Map());
+  const seenIncomingCallIdsRef = useRef<Map<string, number>>(new Map());
   const userRoleRef = useRef(user?.role ?? null);
   const incomingCallHandlerRef = useRef<((req: IncomingCallRequest) => void) | null>(null);
   const queueModeRef = useRef<boolean>(false);
@@ -255,6 +256,17 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
       socket.on('call:incoming', (payload: CallIncomingPayload) => {
         if (payload.fromType === (userRoleRef.current === 'caller' ? 'u' : 'r')) return;
+        const now = Date.now();
+        const seenAt = seenIncomingCallIdsRef.current.get(payload.callId);
+        // Prevent duplicate incoming prompts for the same call invite.
+        if (typeof seenAt === 'number' && now - seenAt < 45_000) {
+          return;
+        }
+        seenIncomingCallIdsRef.current.set(payload.callId, now);
+        // Keep map bounded.
+        for (const [id, ts] of seenIncomingCallIdsRef.current) {
+          if (now - ts > 60_000) seenIncomingCallIdsRef.current.delete(id);
+        }
         const peerName =
           (typeof payload.fromName === 'string' && payload.fromName.trim()) ||
           peerProfileRef.current.get(payload.fromId)?.name ||
@@ -300,6 +312,7 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
       socket.on('call:response', (payload: CallResponsePayload) => {
         if (payload.fromType === (userRoleRef.current === 'caller' ? 'u' : 'r')) return;
+        seenIncomingCallIdsRef.current.delete(payload.callId);
         const pending = pendingOutgoingByCallIdRef.current.get(payload.callId);
         pendingOutgoingByCallIdRef.current.delete(payload.callId);
         const waiter = pendingInviteOutcomeRef.current.get(payload.callId);
@@ -335,6 +348,7 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
       socket.on('call:ended', (payload: CallEndedPayload) => {
         if (payload.fromType === (userRoleRef.current === 'caller' ? 'u' : 'r')) return;
+        seenIncomingCallIdsRef.current.delete(payload.callId);
         pendingOutgoingByCallIdRef.current.delete(payload.callId);
         const waiter = pendingInviteOutcomeRef.current.get(payload.callId);
         if (waiter) {

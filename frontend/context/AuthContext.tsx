@@ -84,16 +84,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     void refreshUser();
   }, [token, refreshUser]);
 
-  /** Backup for approval flow: poll receiver status every 10s while pending/rejected. */
-  useEffect(() => {
-    if (!token || !user || user.role !== 'receiver') return;
-    if (user.accountStatus !== 'pending_review' && user.accountStatus !== 'rejected') return;
-    const id = setInterval(() => {
-      void refreshUser();
-    }, 10000);
-    return () => clearInterval(id);
-  }, [token, user, refreshUser]);
-
   const applyServerUser = useCallback((profile: UserProfile) => {
     setUser(profile);
   }, []);
@@ -148,7 +138,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       socket.on('rejected', (payload: { reason?: unknown }) => {
         const reason = typeof payload?.reason === 'string' ? payload.reason : null;
         setUser((prev) => {
-          if (!prev || prev.role !== 'receiver') return prev;
+          if (!prev) return prev;
           return {
             ...prev,
             accountStatus: 'rejected',

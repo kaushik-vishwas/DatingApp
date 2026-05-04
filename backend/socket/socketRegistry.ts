@@ -23,3 +23,15 @@ export function emitReceiverRejected(accountId: string, reason: string): void {
   const room = `account:r:${String(accountId).trim()}`;
   ioInstance.to(room).emit('rejected', { reason });
 }
+
+export function emitCallerApproved(accountId: string): void {
+  if (!ioInstance) return;
+  const room = `account:u:${String(accountId).trim()}`;
+  ioInstance.to(room).emit('approved');
+}
+
+export function emitCallerRejected(accountId: string, reason: string): void {
+  if (!ioInstance) return;
+  const room = `account:u:${String(accountId).trim()}`;
+  ioInstance.to(room).emit('rejected', { reason });
+}

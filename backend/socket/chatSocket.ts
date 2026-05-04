@@ -4,6 +4,7 @@ import jwt from 'jsonwebtoken';
 import mongoose from 'mongoose';
 import ChatMessage, { type ChatMessageDocument } from '../models/ChatMessage';
 import ChatBlock from '../models/ChatBlock';
+import CallSession from '../models/CallSession';
 import User from '../models/User';
 import Receiver from '../models/Receiver';
 import { getPayloadSessionVersion, type AppJwtPayload } from '../utils/authToken';
@@ -801,8 +802,47 @@ export function attachChatSocket(httpServer: HTTPServer): Server {
         unregisterPendingCallInvite(invite.receiverId);
         releaseReceiverReservation(invite.receiverId);
         void syncReceiverQueueState(invite.receiverId);
+        ack?.({ ok: true });
+        return;
       }
-      ack?.({ ok: true });
+
+      void (async () => {
+        try {
+          const session = await CallSession.findOne({ callId, status: 'ongoing' })
+            .select('callerId receiverId')
+            .lean<{ callerId: unknown; receiverId: unknown } | null>();
+          if (!session) {
+            ack?.({ ok: true });
+            return;
+          }
+          const callerId = String(session.callerId);
+          const receiverId = String(session.receiverId);
+          const isParticipant =
+            (endedByType === 'u' && endedById === callerId) ||
+            (endedByType === 'r' && endedById === receiverId);
+          if (!isParticipant) {
+            ack?.({ ok: false, error: 'Forbidden' });
+            return;
+          }
+          io.to(accountRoom('u', callerId)).emit('call:ended', {
+            callId,
+            fromType: endedByType,
+            fromId: endedById,
+          });
+          io.to(accountRoom('r', receiverId)).emit('call:ended', {
+            callId,
+            fromType: endedByType,
+            fromId: endedById,
+          });
+          unregisterPendingCallInvite(receiverId);
+          releaseReceiverReservation(receiverId);
+          void syncReceiverQueueState(receiverId);
+        } catch {
+          ack?.({ ok: false, error: 'Server error' });
+          return;
+        }
+        ack?.({ ok: true });
+      })();
     });
   });
 

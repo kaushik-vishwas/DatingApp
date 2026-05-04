@@ -66,6 +66,8 @@ export interface DiscoverReceiverSummary {
   gender: Gender | null;
   isAvailable: boolean;
   isOnline: boolean;
+  /** True only when receiver is currently occupied on another call. */
+  isBusyOnCall?: boolean;
   ratingAvg: number;
   ratingCount: number;
 }

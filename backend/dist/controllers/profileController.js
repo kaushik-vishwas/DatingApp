@@ -269,7 +269,9 @@ const saveCallerUserAudio = async (req, res) => {
 exports.saveCallerUserAudio = saveCallerUserAudio;
 /**
  * POST /profile/complete-caller
- * App user profile (`users` collection) — sets `accountStatus: approved` and `suspended: true` until admin clears suspension.
+ * App user profile (`users` collection):
+ * - male/other: direct access (`approved`, not suspended)
+ * - female: send for verification (`pending_review`)
  */
 const completeCallerProfile = async (req, res) => {
     try {
@@ -323,6 +325,7 @@ const completeCallerProfile = async (req, res) => {
             res.status(400).json({ message: 'userAudio must be a valid https URL for female profiles' });
             return;
         }
+        const requiresVerification = gender === 'female';
         const updated = await User_1.default.findOneAndUpdate({ _id: authUser._id, accountStatus: 'pending_profile' }, {
             $set: {
                 name: String(name).trim(),
@@ -334,8 +337,8 @@ const completeCallerProfile = async (req, res) => {
                 age: computedAge,
                 state: String(state).trim(),
                 userAudio: voiceUrl ?? null,
-                accountStatus: 'approved',
-                suspended: true,
+                accountStatus: requiresVerification ? 'pending_review' : 'approved',
+                suspended: false,
             },
         }, { new: true, runValidators: true });
         if (!updated) {
@@ -345,7 +348,9 @@ const completeCallerProfile = async (req, res) => {
             return;
         }
         res.status(200).json({
-            message: 'Profile submitted — an admin will enable your access shortly',
+            message: requiresVerification
+                ? 'Profile submitted for verification'
+                : 'Profile completed successfully',
             user: (0, authController_1.toApiUser)(updated),
         });
     }

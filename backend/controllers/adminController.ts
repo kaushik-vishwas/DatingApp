@@ -10,7 +10,12 @@ import WithdrawalRequest from '../models/WithdrawalRequest';
 import { toApiReceiver, toApiUser } from './authController';
 import { sendOtpEmail } from '../config/email';
 import { getConfiguredAdminEmail } from '../services/superAdminSync';
-import { emitReceiverApproved, emitReceiverRejected } from '../socket/socketRegistry';
+import {
+  emitCallerApproved,
+  emitCallerRejected,
+  emitReceiverApproved,
+  emitReceiverRejected,
+} from '../socket/socketRegistry';
 
 type AdminJwtPayload = { adminId: string; typ: 'admin' };
 const OTP_TTL_MS = 5 * 60 * 1000; // 5 minutes
@@ -536,13 +541,7 @@ export const getKycStats = async (_req: Request, res: Response): Promise<void> =
     const start = new Date();
     start.setHours(0, 0, 0, 0);
 
-    const callerAwaitingAccess = {
-      $or: [
-        { suspended: true, accountStatus: 'approved' },
-        { accountStatus: 'pending_review' },
-        { accountStatus: 'rejected', suspended: false },
-      ],
-    };
+    const callerAwaitingAccess = { accountStatus: 'pending_review' };
 
     const [pendingApprovals, pendingCallerApprovals, approvedToday, rejectedToday] = await Promise.all([
       Receiver.countDocuments({ accountStatus: 'pending_review' }),
@@ -669,17 +668,11 @@ export const rejectReceiver = async (
 };
 
 /**
- * GET /admin/users/pending — app users (callers) awaiting approval after voice + profile submit.
+ * GET /admin/users/pending — app users (callers) awaiting verification.
  */
 export const listPendingAppUsers = async (_req: Request, res: Response): Promise<void> => {
   try {
-    const users = await User.find({
-      $or: [
-        { suspended: true, accountStatus: 'approved' },
-        { accountStatus: 'pending_review' },
-        { accountStatus: 'rejected', suspended: false },
-      ],
-    })
+    const users = await User.find({ accountStatus: 'pending_review' })
       .select('-otp -otpExpiry -passwordHash')
       .sort({ updatedAt: -1 });
 
@@ -692,7 +685,7 @@ export const listPendingAppUsers = async (_req: Request, res: Response): Promise
 };
 
 /**
- * PATCH /admin/users/:id/approve — clears caller suspension (access on). Legacy: pending_review/rejected + voice.
+ * PATCH /admin/users/:id/approve — approves caller verification and enables access.
  */
 export const approveAppUser = async (req: Request<{ id: string }>, res: Response): Promise<void> => {
   try {
@@ -707,18 +700,14 @@ export const approveAppUser = async (req: Request<{ id: string }>, res: Response
       return;
     }
 
-    const legacyNeedVoice =
-      user.accountStatus === 'pending_review' || user.accountStatus === 'rejected';
+    const legacyNeedVoice = user.accountStatus === 'pending_review';
     const voice = String(user.userAudio ?? '').trim();
     if (legacyNeedVoice && !voice) {
       res.status(400).json({ message: 'Cannot approve: no voice verification audio on file' });
       return;
     }
 
-    const needsRelease =
-      user.suspended ||
-      user.accountStatus === 'pending_review' ||
-      user.accountStatus === 'rejected';
+    const needsRelease = user.suspended || user.accountStatus === 'pending_review';
     if (!needsRelease) {
       res.status(400).json({ message: 'User access is already active' });
       return;
@@ -727,6 +716,7 @@ export const approveAppUser = async (req: Request<{ id: string }>, res: Response
     user.suspended = false;
     user.accountStatus = 'approved';
     await user.save();
+    emitCallerApproved(String(user._id));
 
     res.status(200).json({
       message: 'Access enabled',
@@ -740,11 +730,12 @@ export const approveAppUser = async (req: Request<{ id: string }>, res: Response
 };
 
 /**
- * PATCH /admin/users/:id/reject — pauses caller access (`suspended: true`); does not use `rejected` status.
+ * PATCH /admin/users/:id/reject — rejects caller verification and keeps dashboard blocked.
  */
 export const rejectAppUser = async (req: Request<{ id: string }>, res: Response): Promise<void> => {
   try {
     const id = req.params.id;
+    const reason = 'Your profile verification was not approved.';
     const user = await User.findById(id);
     if (!user) {
       res.status(404).json({ message: 'User not found' });
@@ -754,17 +745,18 @@ export const rejectAppUser = async (req: Request<{ id: string }>, res: Response)
       res.status(400).json({ message: 'User has not finished onboarding yet' });
       return;
     }
-    if (user.suspended) {
-      res.status(400).json({ message: 'User access is already paused' });
+    if (user.accountStatus !== 'pending_review') {
+      res.status(400).json({ message: 'User is not pending verification' });
       return;
     }
 
-    user.suspended = true;
-    user.accountStatus = 'approved';
+    user.suspended = false;
+    user.accountStatus = 'rejected';
     await user.save();
+    emitCallerRejected(String(user._id), reason);
 
     res.status(200).json({
-      message: 'Access paused',
+      message: 'Verification rejected',
       user: toApiUser(user),
     });
   } catch (err) {

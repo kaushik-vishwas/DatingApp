@@ -133,7 +133,9 @@ export default function ReceiverProfileScreen({ navigation, route }: Props): Rea
           <Text style={styles.lastSeen}>
             {presence.status === 'available'
               ? 'Available'
-              : `Receiver not available • Last seen ${formatLastSeen(receiver.updatedAt)}`}
+              : presence.status === 'busy'
+                ? 'Busy right now'
+                : `Offline • Last seen ${formatLastSeen(receiver.updatedAt)}`}
           </Text>
         </View>
 

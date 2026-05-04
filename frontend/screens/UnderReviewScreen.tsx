@@ -9,6 +9,7 @@ export default function UnderReviewScreen(): React.JSX.Element {
   const { user, signOut, refreshUser } = useAuth();
 
   const isCaller = user?.role === 'caller';
+  const isPendingReview = user?.accountStatus === 'pending_review';
   const isRejected = user?.accountStatus === 'rejected';
   const suspended = Boolean(user?.suspended);
   const [resubmitting, setResubmitting] = React.useState(false);
@@ -31,12 +32,17 @@ export default function UnderReviewScreen(): React.JSX.Element {
         <Text style={styles.icon}>⏳</Text>
         {isCaller ? (
           <>
-            <Text style={styles.title}>Access paused</Text>
-            <Text style={styles.body}>
-              Your account access is turned off until an admin enables it. If you just submitted your profile, please
-              wait for a team member to review it.
+            <Text style={styles.title}>
+              {isRejected ? 'Profile not approved' : isPendingReview ? 'Your profile is under review' : 'Access paused'}
             </Text>
-            <Text style={styles.muted}>Suspended: {suspended ? 'yes' : 'no'}</Text>
+            <Text style={styles.body}>
+              {isRejected
+                ? 'Your verification was not approved. Please contact support or update your profile and try again.'
+                : isPendingReview
+                  ? 'Thanks for submitting your profile. Our team will review it shortly. You will get dashboard access once approved.'
+                  : 'Your account access is turned off until an admin enables it.'}
+            </Text>
+            <Text style={styles.muted}>Status: {user?.accountStatus ?? 'unknown'}</Text>
           </>
         ) : (
           <>

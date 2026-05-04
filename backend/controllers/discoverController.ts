@@ -8,6 +8,7 @@ import Receiver, {
 import ChatBlock from '../models/ChatBlock';
 import ReceiverRating from '../models/ReceiverRating';
 import { blockCallerUntilApproved } from '../utils/accountAccess';
+import { isReceiverBusy } from '../services/callQueue';
 
 function iso(d: Date): string {
   return d.toISOString();
@@ -40,13 +41,15 @@ export type DiscoverReceiverCard = {
   gender: 'male' | 'female' | 'other' | null;
   isAvailable: boolean;
   isOnline: boolean;
+  isBusyOnCall: boolean;
   ratingAvg: number;
   ratingCount: number;
 };
 
 function toCard(
   r: ReceiverDocument,
-  ratingByReceiverId: Map<string, { avg: number; count: number }>
+  ratingByReceiverId: Map<string, { avg: number; count: number }>,
+  busyByReceiverId: Set<string>
 ): DiscoverReceiverCard {
   const o = r.toObject();
   const rating = ratingByReceiverId.get(String(r._id));
@@ -64,6 +67,7 @@ function toCard(
       o.gender === 'male' || o.gender === 'female' || o.gender === 'other' ? o.gender : null,
     isAvailable: Boolean(o.isAvailable),
     isOnline: Boolean(o.isOnline),
+    isBusyOnCall: busyByReceiverId.has(String(r._id)),
     ratingAvg: rating ? Math.round(rating.avg * 10) / 10 : 0,
     ratingCount: rating?.count ?? 0,
   };
@@ -138,9 +142,14 @@ export const listReceiversForCaller = async (req: Request, res: Response): Promi
     const ratingByReceiverId = new Map(
       ratingRows.map((row) => [String(row.receiverId), { avg: row.avg, count: row.count }])
     );
+    const busyByReceiverId = new Set(
+      receivers.map((r) => String(r._id)).filter((id) => isReceiverBusy(id))
+    );
 
     res.status(200).json({
-      receivers: receivers.map((r) => toCard(r as ReceiverDocument, ratingByReceiverId)),
+      receivers: receivers.map((r) =>
+        toCard(r as ReceiverDocument, ratingByReceiverId, busyByReceiverId)
+      ),
     });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);

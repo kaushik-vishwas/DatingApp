@@ -1,6 +1,7 @@
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Image, Modal, Pressable, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { ActivityIndicator, Alert, Image, Modal, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Audio } from 'expo-av';
 import Constants from 'expo-constants';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -71,9 +72,9 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
   const endedSessionResultRef = useRef<{ canRate: boolean } | null>(null);
   const endSessionPromiseRef = useRef<Promise<{ canRate: boolean } | null> | null>(null);
   const callIdRef = useRef(route.params.callId);
-  const liveRatePerMinute = Number.isFinite(route.params.receiverEarningRatePerMinute)
-    ? Math.max(0, route.params.receiverEarningRatePerMinute)
-    : 0;
+  const rawEarnRate = route.params.receiverEarningRatePerMinute;
+  const liveRatePerMinute =
+    typeof rawEarnRate === 'number' && Number.isFinite(rawEarnRate) ? Math.max(0, rawEarnRate) : 0;
   const liveEarning = Math.round(((elapsedSec / 60) * liveRatePerMinute) * 100) / 100;
   const shownLiveEarning = Math.max(liveEarning, liveSettledAmountInr);
   const showLiveEarning = user?.role === 'receiver';
@@ -102,13 +103,11 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
 
   /** Kept in refs so the signaling socket effect does not re-run when duration crosses the rating threshold (that was disconnecting the socket ~55s into the call). */
   const callerCanRateByDurationRef = useRef(callerCanRateByDuration);
-  const callEndedPeerNameRef = useRef(route.params.peerName);
   const userRoleRef = useRef(user?.role);
   useEffect(() => {
     callerCanRateByDurationRef.current = callerCanRateByDuration;
-    callEndedPeerNameRef.current = route.params.peerName;
     userRoleRef.current = user?.role;
-  }, [callerCanRateByDuration, route.params.peerName, user?.role]);
+  }, [callerCanRateByDuration, user?.role]);
 
   const formatHms = (totalSec: number): string => {
     const safe = Math.max(0, Math.floor(totalSec));
@@ -285,15 +284,15 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
         if (endingRef.current) return;
         endingRef.current = true;
         void (async () => {
-          await ensureSessionEnded();
-          await leaveMedia();
           if (userRoleRef.current === 'caller' && callerCanRateByDurationRef.current) {
+            await ensureSessionEnded();
+            await leaveMedia();
             showRatingPrompt();
             return;
           }
-          Alert.alert('Call ended', `${callEndedPeerNameRef.current ?? 'Contact'} ended the call.`, [
-            { text: 'OK', onPress: stopQueueAndExit },
-          ]);
+          void ensureSessionEnded();
+          await leaveMedia();
+          stopQueueAndExit();
         })();
       });
     })();
@@ -364,13 +363,15 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
     } catch {
       // ignore signaling failures
     }
-    await ensureSessionEnded();
-    await leaveMedia();
 
     if (user?.role === 'caller' && callerCanRateByDuration) {
+      await ensureSessionEnded();
+      await leaveMedia();
       showRatingPrompt();
       return;
     }
+    void ensureSessionEnded();
+    await leaveMedia();
     stopQueueAndExit();
   };
 
@@ -485,9 +486,20 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
             <Text style={styles.ratingSubtitle}>How was the call quality?</Text>
             <View style={styles.starRow}>
               {[1, 2, 3, 4, 5].map((n) => (
-                <Pressable key={n} onPress={() => setSelectedRating(n)} hitSlop={8}>
-                  <Text style={[styles.star, n <= selectedRating ? styles.starOn : styles.starOff]}>★</Text>
-                </Pressable>
+                <TouchableOpacity
+                  key={n}
+                  activeOpacity={0.75}
+                  onPress={() => setSelectedRating(n)}
+                  style={styles.starHit}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Rate ${n} out of 5`}
+                >
+                  <Ionicons
+                    name="star"
+                    size={38}
+                    color={n <= selectedRating ? '#fbbf24' : '#d1d5db'}
+                  />
+                </TouchableOpacity>
               ))}
             </View>
             <TouchableOpacity
@@ -657,10 +669,15 @@ const styles = StyleSheet.create({
   },
   ratingTitle: { fontSize: 20, fontWeight: '900', color: '#111' },
   ratingSubtitle: { marginTop: 6, fontSize: 13, color: '#666', fontWeight: '600' },
-  starRow: { marginTop: 18, flexDirection: 'row', gap: 8 },
-  star: { fontSize: 34 },
-  starOn: { color: '#fbbf24' },
-  starOff: { color: '#d1d5db' },
+  starRow: { marginTop: 18, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4 },
+  starHit: {
+    paddingVertical: 6,
+    paddingHorizontal: 4,
+    minWidth: 48,
+    minHeight: 48,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   ratingSubmitBtn: {
     marginTop: 20,
     width: '100%',

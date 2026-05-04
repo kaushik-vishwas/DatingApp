@@ -43,6 +43,7 @@ const Receiver_1 = __importStar(require("../models/Receiver"));
 const ChatBlock_1 = __importDefault(require("../models/ChatBlock"));
 const ReceiverRating_1 = __importDefault(require("../models/ReceiverRating"));
 const accountAccess_1 = require("../utils/accountAccess");
+const callQueue_1 = require("../services/callQueue");
 function iso(d) {
     return d.toISOString();
 }
@@ -61,7 +62,7 @@ function parseIntQuery(val) {
     const n = parseInt(s, 10);
     return Number.isFinite(n) ? n : NaN;
 }
-function toCard(r, ratingByReceiverId) {
+function toCard(r, ratingByReceiverId, busyByReceiverId) {
     const o = r.toObject();
     const rating = ratingByReceiverId.get(String(r._id));
     return {
@@ -77,6 +78,7 @@ function toCard(r, ratingByReceiverId) {
         gender: o.gender === 'male' || o.gender === 'female' || o.gender === 'other' ? o.gender : null,
         isAvailable: Boolean(o.isAvailable),
         isOnline: Boolean(o.isOnline),
+        isBusyOnCall: busyByReceiverId.has(String(r._id)),
         ratingAvg: rating ? Math.round(rating.avg * 10) / 10 : 0,
         ratingCount: rating?.count ?? 0,
     };
@@ -137,8 +139,9 @@ const listReceiversForCaller = async (req, res) => {
                 },
             ]);
         const ratingByReceiverId = new Map(ratingRows.map((row) => [String(row.receiverId), { avg: row.avg, count: row.count }]));
+        const busyByReceiverId = new Set(receivers.map((r) => String(r._id)).filter((id) => (0, callQueue_1.isReceiverBusy)(id)));
         res.status(200).json({
-            receivers: receivers.map((r) => toCard(r, ratingByReceiverId)),
+            receivers: receivers.map((r) => toCard(r, ratingByReceiverId, busyByReceiverId)),
         });
     }
     catch (err) {
