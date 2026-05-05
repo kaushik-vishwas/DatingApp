@@ -162,6 +162,7 @@ export default function CallerDiscoverHome(): React.JSX.Element {
       const MAX_RANDOM_RETRIES = 3;
       const isRetryableRandomInviteError = (message: string): boolean => {
         const msg = message.toLowerCase();
+        if (msg.includes('declined by receiver')) return false;
         return (
           msg.includes('offline') ||
           msg.includes('unavailable') ||

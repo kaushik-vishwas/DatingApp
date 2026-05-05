@@ -1,8 +1,6 @@
 import React, { useState } from 'react';
 import {
   Alert,
-  KeyboardAvoidingView,
-  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -111,10 +109,7 @@ export default function BankDetailsScreen({ navigation }: Props): React.JSX.Elem
 
   return (
     <View style={styles.bg}>
-      <KeyboardAvoidingView
-        style={styles.card}
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      >
+      <View style={styles.card}>
         <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
           <ScreenHeader
             title="Apply for KYC"
@@ -220,7 +215,7 @@ export default function BankDetailsScreen({ navigation }: Props): React.JSX.Elem
             disabled={submitting}
           />
         </ScrollView>
-      </KeyboardAvoidingView>
+      </View>
     </View>
   );
 }

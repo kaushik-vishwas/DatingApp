@@ -495,9 +495,9 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
                   accessibilityLabel={`Rate ${n} out of 5`}
                 >
                   <Ionicons
-                    name="star"
+                    name={n <= selectedRating ? 'star' : 'star-outline'}
                     size={38}
-                    color={n <= selectedRating ? '#fbbf24' : '#d1d5db'}
+                    color={n <= selectedRating ? '#f59e0b' : '#d1d5db'}
                   />
                 </TouchableOpacity>
               ))}

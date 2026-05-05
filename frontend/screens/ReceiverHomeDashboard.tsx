@@ -38,19 +38,8 @@ function formatInr(n: number): string {
 }
 
 function getReceiverPublicPresence(isOnline: boolean, isAvailable: boolean): ReceiverPresenceInfo {
-  // Busy: online but not available (reddish).
-  if (isOnline && !isAvailable) {
-    return {
-      status: 'busy',
-      label: 'Busy',
-      color: '#ef4444',
-      canCall: false,
-      canMessage: true,
-    };
-  }
-
-  // Offline: not online (yellowish).
-  if (!isOnline) {
+  // Offline when logged out or switch is OFF (yellowish).
+  if (!isOnline || !isAvailable) {
     return {
       status: 'offline',
       label: 'Offline',
@@ -389,8 +378,8 @@ export default function ReceiverHomeDashboard(): React.JSX.Element {
                 </View>
                 <View>
                   <Text style={styles.availabilityTitle}>Availability Status</Text>
-                  <Text style={[styles.availabilitySub, { color: available ? '#22c55e' : '#ef4444' }]}>
-                    {available ? 'You are available' : 'You are not available'}
+                  <Text style={[styles.availabilitySub, { color: available ? '#22c55e' : '#f59e0b' }]}>
+                    {available ? 'You are available' : 'You are offline'}
                   </Text>
                 </View>
               </View>

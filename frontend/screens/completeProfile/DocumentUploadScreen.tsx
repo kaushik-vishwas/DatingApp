@@ -3,8 +3,6 @@ import * as ImagePicker from 'expo-image-picker';
 import React from 'react';
 import {
   Alert,
-  KeyboardAvoidingView,
-  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -94,10 +92,7 @@ export default function DocumentUploadScreen({ navigation }: Props): React.JSX.E
 
   return (
     <View style={styles.bg}>
-      <KeyboardAvoidingView
-        style={styles.card}
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      >
+      <View style={styles.card}>
         <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
           <ScreenHeader
             title="Verify your identity"
@@ -170,7 +165,7 @@ export default function DocumentUploadScreen({ navigation }: Props): React.JSX.E
             <Button title="Continue" onPress={onContinue} style={styles.flex} />
           </View>
         </ScrollView>
-      </KeyboardAvoidingView>
+      </View>
     </View>
   );
 }

@@ -39,9 +39,13 @@ type PendingOutgoingCall = {
 };
 
 type InviteOutcomeWaiter = {
-  resolve: (accepted: boolean) => void;
+  resolve: (outcome: InviteOutcome) => void;
   timeout: ReturnType<typeof setTimeout>;
 };
+
+type InviteOutcome =
+  | { accepted: true; reason: 'accepted' }
+  | { accepted: false; reason: 'rejected' | 'ended' | 'timeout' };
 
 export type IncomingCallRequest = {
   callId: string;
@@ -167,17 +171,20 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         pendingOutgoingByCallIdRef.current.delete(data.callId);
         throw new Error(ack.error || 'Could not ring this user.');
       }
-      const accepted = await new Promise<boolean>((resolve) => {
+      const outcome = await new Promise<InviteOutcome>((resolve) => {
         const timeout = setTimeout(() => {
           pendingInviteOutcomeRef.current.delete(data.callId);
-          resolve(false);
+          resolve({ accepted: false, reason: 'timeout' });
         }, 35_000);
         pendingInviteOutcomeRef.current.set(data.callId, { resolve, timeout });
       });
-      if (!accepted) {
+      if (!outcome.accepted) {
         pendingOutgoingByCallIdRef.current.delete(data.callId);
         if (socket.connected) {
           socket.emit('call:end', { callId: data.callId });
+        }
+        if (outcome.reason === 'rejected') {
+          throw new Error('Call was declined by receiver.');
         }
         throw new Error('Receiver is not available right now.');
       }
@@ -329,7 +336,11 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         if (waiter) {
           clearTimeout(waiter.timeout);
           pendingInviteOutcomeRef.current.delete(payload.callId);
-          waiter.resolve(payload.accepted);
+          waiter.resolve(
+            payload.accepted
+              ? { accepted: true, reason: 'accepted' }
+              : { accepted: false, reason: 'rejected' }
+          );
         }
 
         if (!payload.accepted) {
@@ -365,7 +376,7 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         if (waiter) {
           clearTimeout(waiter.timeout);
           pendingInviteOutcomeRef.current.delete(payload.callId);
-          waiter.resolve(false);
+          waiter.resolve({ accepted: false, reason: 'ended' });
         }
       });
     })();

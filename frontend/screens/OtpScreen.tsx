@@ -1,8 +1,6 @@
 import React, { useState } from 'react';
 import {
   Alert,
-  KeyboardAvoidingView,
-  Platform,
   StyleSheet,
   Text,
   TextInput,
@@ -84,10 +82,7 @@ export default function OtpScreen({ navigation, route }: Props) {
 
   return (
     <View style={styles.bg}>
-      <KeyboardAvoidingView
-        style={styles.card}
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      >
+      <View style={styles.card}>
         {navigation.canGoBack() ? (
           <TouchableOpacity style={styles.backRow} onPress={() => navigation.goBack()}>
             <Text style={styles.back}>←</Text>
@@ -130,7 +125,7 @@ export default function OtpScreen({ navigation, route }: Props) {
         <TouchableOpacity onPress={handleResend} disabled={resendLoading}>
           <Text style={styles.resend}>{resendLoading ? 'Sending…' : 'Resend code'}</Text>
         </TouchableOpacity>
-      </KeyboardAvoidingView>
+      </View>
     </View>
   );
 }

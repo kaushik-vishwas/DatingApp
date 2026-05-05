@@ -15,12 +15,12 @@ const STATUS_RED = '#dc2626';
 const STATUS_YELLOW = '#f59e0b';
 
 export function getReceiverPresenceInfo(receiver: DiscoverReceiverSummary): ReceiverPresenceInfo {
-  // Logged out / disconnected should always appear Offline (red).
+  // Logged out / disconnected should always appear Offline (yellow).
   if (!Boolean(receiver.isOnline)) {
     return {
       status: 'offline',
       label: 'Offline',
-      color: STATUS_RED,
+      color: STATUS_YELLOW,
       canCall: false,
       canMessage: true,
     };
@@ -31,18 +31,18 @@ export function getReceiverPresenceInfo(receiver: DiscoverReceiverSummary): Rece
     return {
       status: 'busy',
       label: 'Busy',
-      color: STATUS_YELLOW,
+      color: STATUS_RED,
       canCall: false,
       canMessage: true,
     };
   }
 
-  // Online but manually unavailable (switch OFF) should still read Offline (red).
+  // Online but manually unavailable (switch OFF) should still read Offline (yellow).
   if (!Boolean(receiver.isAvailable)) {
     return {
       status: 'offline',
       label: 'Offline',
-      color: STATUS_RED,
+      color: STATUS_YELLOW,
       canCall: false,
       canMessage: true,
     };

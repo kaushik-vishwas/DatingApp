@@ -2,9 +2,7 @@ import React, { useState } from 'react';
 import {
   Alert,
   Image,
-  KeyboardAvoidingView,
   Modal,
-  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -54,10 +52,7 @@ export default function ProfileInfoScreen({ navigation }: Props): React.JSX.Elem
 
   return (
     <View style={styles.bg}>
-      <KeyboardAvoidingView
-        style={styles.card}
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      >
+      <View style={styles.card}>
         <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
           <ScreenHeader
             title="Complete Your Profile"
@@ -126,7 +121,7 @@ export default function ProfileInfoScreen({ navigation }: Props): React.JSX.Elem
 
           <Button title="Continue" onPress={onNext} />
         </ScrollView>
-      </KeyboardAvoidingView>
+      </View>
 
       <Modal visible={stateModal} transparent animationType="fade">
         <View style={styles.modalOverlay}>
