@@ -21,6 +21,7 @@ type Props = {
   onClear?: () => void;
   hint?: string;
   loading?: boolean;
+  imageShape?: 'circle' | 'rectangle';
 };
 
 export function UploadField({
@@ -32,6 +33,7 @@ export function UploadField({
   onClear,
   hint,
   loading = false,
+  imageShape = 'circle',
 }: Props): React.JSX.Element {
   const isImageUri = (value: string): boolean => {
     const normalized = value.trim().toLowerCase();
@@ -61,7 +63,10 @@ export function UploadField({
         ) : uri ? (
           isImage ? (
             <View style={styles.imagePreviewWrap}>
-              <Image source={{ uri }} style={styles.previewCircle} />
+              <Image
+                source={{ uri }}
+                style={imageShape === 'rectangle' ? styles.previewRect : styles.previewCircle}
+              />
             </View>
           ) : (
             <View style={styles.docPreview}>
@@ -121,6 +126,12 @@ const styles = StyleSheet.create({
     width: 110,
     height: 110,
     borderRadius: 55,
+    resizeMode: 'cover',
+  },
+  previewRect: {
+    width: '100%',
+    height: 180,
+    borderRadius: 0,
     resizeMode: 'cover',
   },
   docPreview: {

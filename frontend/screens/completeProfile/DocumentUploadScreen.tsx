@@ -122,6 +122,7 @@ export default function DocumentUploadScreen({ navigation }: Props): React.JSX.E
             uri={state.aadhaarFront?.uri ?? null}
             mimeType={state.aadhaarFront?.mimeType}
             displayName={state.aadhaarFront?.name}
+            imageShape="rectangle"
             onPick={onPickFront}
             onClear={() => update({ aadhaarFront: null })}
             hint="PNG, JPG or PDF"
@@ -132,6 +133,7 @@ export default function DocumentUploadScreen({ navigation }: Props): React.JSX.E
             uri={state.aadhaarBack?.uri ?? null}
             mimeType={state.aadhaarBack?.mimeType}
             displayName={state.aadhaarBack?.name}
+            imageShape="rectangle"
             onPick={onPickBack}
             onClear={() => update({ aadhaarBack: null })}
             hint="PNG, JPG or PDF"
@@ -155,6 +157,7 @@ export default function DocumentUploadScreen({ navigation }: Props): React.JSX.E
             uri={state.panFront?.uri ?? null}
             mimeType={state.panFront?.mimeType}
             displayName={state.panFront?.name}
+            imageShape="rectangle"
             onPick={async () => {
               await pickAadhaarSide((doc) => update({ panFront: doc }));
             }}

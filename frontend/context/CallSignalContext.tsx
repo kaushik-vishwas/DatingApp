@@ -73,6 +73,7 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   const pendingOutgoingByCallIdRef = useRef<Map<string, PendingOutgoingCall>>(new Map());
   const pendingInviteOutcomeRef = useRef<Map<string, InviteOutcomeWaiter>>(new Map());
   const seenIncomingCallIdsRef = useRef<Map<string, number>>(new Map());
+  const rejectedIncomingCallIdsRef = useRef<Set<string>>(new Set());
   const userRoleRef = useRef(user?.role ?? null);
   const incomingCallHandlerRef = useRef<((req: IncomingCallRequest) => void) | null>(null);
   const queueModeRef = useRef<boolean>(false);
@@ -185,6 +186,8 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   );
 
   const rejectIncomingCall = useCallback((req: IncomingCallRequest) => {
+    // Block only this exact call attempt after receiver rejects.
+    rejectedIncomingCallIdsRef.current.add(req.callId);
     socketRef.current?.emit('call:response', { callId: req.callId, accepted: false });
   }, []);
 
@@ -256,6 +259,10 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
       socket.on('call:incoming', (payload: CallIncomingPayload) => {
         if (payload.fromType === (userRoleRef.current === 'caller' ? 'u' : 'r')) return;
+        if (rejectedIncomingCallIdsRef.current.has(payload.callId)) {
+          socket.emit('call:response', { callId: payload.callId, accepted: false });
+          return;
+        }
         const now = Date.now();
         const seenAt = seenIncomingCallIdsRef.current.get(payload.callId);
         // Prevent duplicate incoming prompts for the same call invite.
@@ -312,7 +319,10 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
       socket.on('call:response', (payload: CallResponsePayload) => {
         if (payload.fromType === (userRoleRef.current === 'caller' ? 'u' : 'r')) return;
-        seenIncomingCallIdsRef.current.delete(payload.callId);
+        if (payload.accepted) {
+          seenIncomingCallIdsRef.current.delete(payload.callId);
+          rejectedIncomingCallIdsRef.current.delete(payload.callId);
+        }
         const pending = pendingOutgoingByCallIdRef.current.get(payload.callId);
         pendingOutgoingByCallIdRef.current.delete(payload.callId);
         const waiter = pendingInviteOutcomeRef.current.get(payload.callId);
@@ -349,6 +359,7 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       socket.on('call:ended', (payload: CallEndedPayload) => {
         if (payload.fromType === (userRoleRef.current === 'caller' ? 'u' : 'r')) return;
         seenIncomingCallIdsRef.current.delete(payload.callId);
+        rejectedIncomingCallIdsRef.current.delete(payload.callId);
         pendingOutgoingByCallIdRef.current.delete(payload.callId);
         const waiter = pendingInviteOutcomeRef.current.get(payload.callId);
         if (waiter) {

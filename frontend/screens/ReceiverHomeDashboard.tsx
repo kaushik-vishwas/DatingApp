@@ -1,5 +1,6 @@
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { Ionicons } from '@expo/vector-icons';
 import React, { useCallback, useState } from 'react';
 import {
   Alert,
@@ -36,16 +37,30 @@ function formatInr(n: number): string {
   return `₹${v.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`;
 }
 
-function getReceiverPublicPresence(_isOnline: boolean, isAvailable: boolean): ReceiverPresenceInfo {
-  if (!isAvailable) {
+function getReceiverPublicPresence(isOnline: boolean, isAvailable: boolean): ReceiverPresenceInfo {
+  // Busy: online but not available (reddish).
+  if (isOnline && !isAvailable) {
     return {
-      status: 'offline',
-      label: 'Offline',
-      color: '#dc2626',
+      status: 'busy',
+      label: 'Busy',
+      color: '#ef4444',
       canCall: false,
       canMessage: true,
     };
   }
+
+  // Offline: not online (yellowish).
+  if (!isOnline) {
+    return {
+      status: 'offline',
+      label: 'Offline',
+      color: '#f59e0b',
+      canCall: false,
+      canMessage: true,
+    };
+  }
+
+  // Available + online (green).
   return {
     status: 'available',
     label: 'Available',
@@ -305,7 +320,7 @@ export default function ReceiverHomeDashboard(): React.JSX.Element {
                       />
                     </View>
                     <View style={styles.publicRatingBelow}>
-                      <Text style={styles.publicStar}>★</Text>
+                      <Ionicons name="star" size={10} color="#fbbf24" />
                       <Text style={styles.publicRatingText}>{callInsights?.receiverRatingAvg ?? 0}</Text>
                       <Text style={styles.publicRatingCount}>({callInsights?.receiverRatingCount ?? 0})</Text>
                     </View>

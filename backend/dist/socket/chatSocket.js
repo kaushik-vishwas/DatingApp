@@ -10,6 +10,7 @@ const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
 const mongoose_1 = __importDefault(require("mongoose"));
 const ChatMessage_1 = __importDefault(require("../models/ChatMessage"));
 const ChatBlock_1 = __importDefault(require("../models/ChatBlock"));
+const CallSession_1 = __importDefault(require("../models/CallSession"));
 const User_1 = __importDefault(require("../models/User"));
 const Receiver_1 = __importDefault(require("../models/Receiver"));
 const authToken_1 = require("../utils/authToken");
@@ -723,8 +724,46 @@ function attachChatSocket(httpServer) {
                 (0, callInviteRegistry_1.unregisterPendingCallInvite)(invite.receiverId);
                 (0, callQueue_1.releaseReceiverReservation)(invite.receiverId);
                 void (0, callQueue_1.syncReceiverQueueState)(invite.receiverId);
+                ack?.({ ok: true });
+                return;
             }
-            ack?.({ ok: true });
+            void (async () => {
+                try {
+                    const session = await CallSession_1.default.findOne({ callId, status: 'ongoing' })
+                        .select('callerId receiverId')
+                        .lean();
+                    if (!session) {
+                        ack?.({ ok: true });
+                        return;
+                    }
+                    const callerId = String(session.callerId);
+                    const receiverId = String(session.receiverId);
+                    const isParticipant = (endedByType === 'u' && endedById === callerId) ||
+                        (endedByType === 'r' && endedById === receiverId);
+                    if (!isParticipant) {
+                        ack?.({ ok: false, error: 'Forbidden' });
+                        return;
+                    }
+                    io.to(accountRoom('u', callerId)).emit('call:ended', {
+                        callId,
+                        fromType: endedByType,
+                        fromId: endedById,
+                    });
+                    io.to(accountRoom('r', receiverId)).emit('call:ended', {
+                        callId,
+                        fromType: endedByType,
+                        fromId: endedById,
+                    });
+                    (0, callInviteRegistry_1.unregisterPendingCallInvite)(receiverId);
+                    (0, callQueue_1.releaseReceiverReservation)(receiverId);
+                    void (0, callQueue_1.syncReceiverQueueState)(receiverId);
+                }
+                catch {
+                    ack?.({ ok: false, error: 'Server error' });
+                    return;
+                }
+                ack?.({ ok: true });
+            })();
         });
     });
     (0, socketRegistry_1.registerSocketIOServer)(io);

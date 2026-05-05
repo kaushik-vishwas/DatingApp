@@ -81,7 +81,6 @@ export default function ChatConversationScreen({ navigation, route }: Props): Re
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [socketError, setSocketError] = useState<string | null>(null);
-  const [sending, setSending] = useState(false);
   const [calling, setCalling] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [reportOpen, setReportOpen] = useState(false);
@@ -311,30 +310,31 @@ export default function ChatConversationScreen({ navigation, route }: Props): Re
 
   const onSend = (): void => {
     const text = input.trim();
-    if (!text || sending) return;
+    if (!text) return;
     const s = socketRef.current;
     if (!s?.connected) {
       setSocketError('Not connected. Check your network.');
       return;
     }
-    setSending(true);
+    const sentText = text;
+    setInput('');
     emitTyping(false);
     if (typingStopTimerRef.current) {
       clearTimeout(typingStopTimerRef.current);
       typingStopTimerRef.current = null;
     }
-    s.emit('chat:message', { text }, (res: ChatSendAck) => {
-      setSending(false);
+    s.emit('chat:message', { text: sentText }, (res: ChatSendAck) => {
       if (res && res.ok === false) {
         if (res.code === 'INSUFFICIENT_WALLET' && isCaller) {
           setContinueOpen(true);
           setSocketError(null);
+          setInput((prev) => (prev.trim().length > 0 ? prev : sentText));
           return;
         }
         setSocketError(res.error || 'Send failed');
+        setInput((prev) => (prev.trim().length > 0 ? prev : sentText));
         return;
       }
-      setInput('');
     });
   };
 
@@ -496,12 +496,12 @@ export default function ChatConversationScreen({ navigation, route }: Props): Re
             placeholderTextColor="#999"
             multiline
             maxLength={2000}
-            editable={!sending}
+            editable
           />
           <TouchableOpacity
-            style={[styles.sendBtn, (!input.trim() || sending) && styles.sendBtnOff]}
+            style={[styles.sendBtn, !input.trim() && styles.sendBtnOff]}
             onPress={onSend}
-            disabled={!input.trim() || sending}
+            disabled={!input.trim()}
           >
             <Text style={styles.sendTxt}>Send</Text>
           </TouchableOpacity>
@@ -677,8 +677,11 @@ const styles = StyleSheet.create({
     borderColor: '#ddd',
     borderRadius: 12,
     paddingHorizontal: 12,
-    paddingVertical: 10,
+    paddingTop: 10,
+    paddingBottom: 10,
     fontSize: 16,
+    lineHeight: 22,
+    textAlignVertical: 'top',
     color: '#111',
     backgroundColor: '#fafafa',
   },
