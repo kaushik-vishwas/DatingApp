@@ -2,6 +2,8 @@ import mongoose, { Schema, type HydratedDocument, type Model } from 'mongoose';
 
 export type WithdrawalStatus = 'verification_pending' | 'pending' | 'approved' | 'rejected';
 
+export type PayoutStatus = 'none' | 'processing' | 'success' | 'failed';
+
 export interface IWithdrawalRequest {
   receiverId: mongoose.Types.ObjectId;
   amount: number;
@@ -15,6 +17,13 @@ export interface IWithdrawalRequest {
   bankName: string;
   accountHolderName: string;
   accountMasked: string;
+  payoutStatus: PayoutStatus;
+  payoutId: string | null;
+  payoutUtr: string | null;
+  payoutError: string | null;
+  payoutReferenceId: string | null;
+  walletRefundedAt: Date | null;
+  walletDebitedAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -40,6 +49,18 @@ const withdrawalRequestSchema = new Schema<IWithdrawalRequest>(
     bankName: { type: String, required: true, trim: true },
     accountHolderName: { type: String, required: true, trim: true },
     accountMasked: { type: String, required: true, trim: true },
+    payoutStatus: {
+      type: String,
+      enum: ['none', 'processing', 'success', 'failed'],
+      default: 'none',
+      index: true,
+    },
+    payoutId: { type: String, default: null, trim: true },
+    payoutUtr: { type: String, default: null, trim: true },
+    payoutError: { type: String, default: null, trim: true, maxlength: 2000 },
+    payoutReferenceId: { type: String, default: null, trim: true, maxlength: 60 },
+    walletRefundedAt: { type: Date, default: null },
+    walletDebitedAt: { type: Date, default: null },
   },
   { timestamps: true }
 );

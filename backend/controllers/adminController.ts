@@ -7,9 +7,13 @@ import Receiver, { type ReceiverDocument } from '../models/Receiver';
 import User, { type UserDocument } from '../models/User';
 import UserReport, { type ReportResolution } from '../models/UserReport';
 import WithdrawalRequest from '../models/WithdrawalRequest';
+import CallSession from '../models/CallSession';
+import ChatMessage from '../models/ChatMessage';
+import AdminSettings from '../models/AdminSettings';
 import { toApiReceiver, toApiUser } from './authController';
 import { sendOtpEmail } from '../config/email';
 import { getConfiguredAdminEmail } from '../services/superAdminSync';
+import { trackAndFinalizeRazorpayXPayout } from '../services/razorpayXPayoutService';
 import {
   emitCallerApproved,
   emitCallerRejected,
@@ -19,6 +23,7 @@ import {
 
 type AdminJwtPayload = { adminId: string; typ: 'admin' };
 const OTP_TTL_MS = 5 * 60 * 1000; // 5 minutes
+const PLATFORM_COMMISSION_RATE = 0.2;
 
 const signAdminToken = (adminId: string): string => {
   const secret = process.env.ADMIN_JWT_SECRET;
@@ -28,6 +33,10 @@ const signAdminToken = (adminId: string): string => {
   const payload: AdminJwtPayload = { adminId, typ: 'admin' };
   return jwt.sign(payload, secret, { expiresIn: '7d' });
 };
+
+function isSuperAdmin(req: Request): boolean {
+  return req.admin?.role === 'super_admin';
+}
 
 /**
  * POST /admin/auth/login — password only; admin identity comes from ADMIN_EMAIL in the backend .env.
@@ -418,9 +427,396 @@ export const adminConfirmEmailChange = async (
   }
 };
 
+/**
+ * GET /admin/settings — notification controls + role management data.
+ */
+export const getAdminSettings = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const settings = await AdminSettings.findOne({});
+    const effective = settings ?? (await AdminSettings.create({}));
+    const admins = await Admin.find({})
+      .select('_id name email role createdAt')
+      .sort({ createdAt: 1 })
+      .lean<{ _id: mongoose.Types.ObjectId; name: string; email: string; role: string; createdAt: Date }[]>();
+
+    res.status(200).json({
+      notificationControls: {
+        kycSubmissionsEmail: Boolean(effective.notificationControls?.kycSubmissionsEmail ?? true),
+        pendingWithdrawalsEmail: Boolean(effective.notificationControls?.pendingWithdrawalsEmail ?? true),
+        dailyRevenueSummaryEmail: Boolean(effective.notificationControls?.dailyRevenueSummaryEmail ?? true),
+      },
+      rolesCatalog: [
+        { id: 'super_admin', label: 'Super Admin', description: 'Full access to all features' },
+        { id: 'support_admin', label: 'Support Admin', description: 'Can manage KYC, users, and reports' },
+        { id: 'finance_admin', label: 'Finance Admin', description: 'Can manage withdrawals and revenue settings' },
+      ],
+      admins: admins.map((a) => ({
+        _id: String(a._id),
+        name: a.name,
+        email: a.email,
+        role: a.role,
+        status: 'active',
+        createdAt: a.createdAt.toISOString(),
+      })),
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error('getAdminSettings error:', msg);
+    res.status(500).json({ message: msg || 'Server error' });
+  }
+};
+
+/**
+ * PATCH /admin/settings/notifications
+ */
+export const updateAdminNotificationControls = async (
+  req: Request<
+    {},
+    {},
+    {
+      kycSubmissionsEmail?: boolean;
+      pendingWithdrawalsEmail?: boolean;
+      dailyRevenueSummaryEmail?: boolean;
+    }
+  >,
+  res: Response
+): Promise<void> => {
+  try {
+    const body = req.body ?? {};
+    if (
+      typeof body.kycSubmissionsEmail !== 'boolean' ||
+      typeof body.pendingWithdrawalsEmail !== 'boolean' ||
+      typeof body.dailyRevenueSummaryEmail !== 'boolean'
+    ) {
+      res.status(400).json({
+        message:
+          'kycSubmissionsEmail, pendingWithdrawalsEmail, and dailyRevenueSummaryEmail booleans are required',
+      });
+      return;
+    }
+
+    const settings = await AdminSettings.findOneAndUpdate(
+      {},
+      {
+        $set: {
+          notificationControls: {
+            kycSubmissionsEmail: body.kycSubmissionsEmail,
+            pendingWithdrawalsEmail: body.pendingWithdrawalsEmail,
+            dailyRevenueSummaryEmail: body.dailyRevenueSummaryEmail,
+          },
+        },
+      },
+      { new: true, upsert: true, setDefaultsOnInsert: true }
+    );
+
+    res.status(200).json({
+      ok: true,
+      notificationControls: settings.notificationControls,
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error('updateAdminNotificationControls error:', msg);
+    res.status(500).json({ message: msg || 'Server error' });
+  }
+};
+
+/**
+ * PATCH /admin/settings/admins/:id/role — super_admin only.
+ */
+export const updateAdminRole = async (
+  req: Request<{ id: string }, {}, { role?: string }>,
+  res: Response
+): Promise<void> => {
+  try {
+    if (!isSuperAdmin(req)) {
+      res.status(403).json({ message: 'Only super admin can change admin roles' });
+      return;
+    }
+
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+      res.status(400).json({ message: 'Invalid admin id' });
+      return;
+    }
+
+    const role = String(req.body.role ?? '').trim();
+    if (role !== 'super_admin' && role !== 'support_admin' && role !== 'finance_admin') {
+      res.status(400).json({ message: 'role must be super_admin, support_admin, or finance_admin' });
+      return;
+    }
+
+    const target = await Admin.findById(req.params.id);
+    if (!target) {
+      res.status(404).json({ message: 'Admin not found' });
+      return;
+    }
+
+    target.role = role;
+    await target.save();
+
+    res.status(200).json({
+      ok: true,
+      admin: {
+        _id: String(target._id),
+        name: target.name,
+        email: target.email,
+        role: target.role,
+        status: 'active',
+      },
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error('updateAdminRole error:', msg);
+    res.status(500).json({ message: msg || 'Server error' });
+  }
+};
+
 function escapeRegex(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
+
+function roundInr(n: number): number {
+  return Math.round(n * 100) / 100;
+}
+
+function toRangeStart(range: string): Date | null {
+  const now = new Date();
+  const start = new Date(now);
+  if (range === '7d') {
+    start.setDate(now.getDate() - 7);
+    start.setHours(0, 0, 0, 0);
+    return start;
+  }
+  if (range === '30d') {
+    start.setDate(now.getDate() - 30);
+    start.setHours(0, 0, 0, 0);
+    return start;
+  }
+  return null;
+}
+
+/**
+ * GET /admin/revenue — dynamic revenue dashboard metrics.
+ */
+export const getRevenueDashboard = async (
+  req: Request<{}, {}, {}, { range?: string }>,
+  res: Response
+): Promise<void> => {
+  try {
+    const range = String(req.query.range ?? '7d').toLowerCase();
+    if (range !== '7d' && range !== '30d' && range !== 'all') {
+      res.status(400).json({ message: 'range must be 7d, 30d, or all' });
+      return;
+    }
+
+    const start = toRangeStart(range);
+
+    const [calls, chats] = await Promise.all([
+      CallSession.find({
+        status: 'completed',
+        ...(start ? { startedAt: { $gte: start } } : {}),
+      })
+        .select('receiverId startedAt settledAmountInr receiverEarnedInr receiverPayoutRatePerMinute durationSec')
+        .lean<
+          {
+            receiverId: mongoose.Types.ObjectId;
+            startedAt: Date;
+            settledAmountInr?: number;
+            receiverEarnedInr?: number;
+            receiverPayoutRatePerMinute?: number;
+            durationSec?: number;
+          }[]
+        >(),
+      ChatMessage.find({
+        senderType: 'u',
+        feeInr: { $gt: 0 },
+        ...(start ? { createdAt: { $gte: start } } : {}),
+      })
+        .select('receiverId createdAt feeInr')
+        .lean<{ receiverId: mongoose.Types.ObjectId; createdAt: Date; feeInr: number }[]>(),
+    ]);
+
+    let grossCalls = 0;
+    let grossChat = 0;
+    const dailyCallsGross = new Map<string, number>();
+    const receiverGross = new Map<string, { gross: number; payout: number; calls: number }>();
+
+    for (const row of calls) {
+      const gross = roundInr(Number(row.settledAmountInr || 0));
+      const payout =
+        typeof row.receiverEarnedInr === 'number' && Number.isFinite(row.receiverEarnedInr)
+          ? roundInr(row.receiverEarnedInr)
+          : roundInr((Number(row.durationSec || 0) / 60) * Number(row.receiverPayoutRatePerMinute || 0));
+      grossCalls += gross;
+
+      const day = new Date(row.startedAt).toISOString().slice(0, 10);
+      dailyCallsGross.set(day, roundInr((dailyCallsGross.get(day) || 0) + gross));
+
+      const rid = String(row.receiverId);
+      const agg = receiverGross.get(rid) || { gross: 0, payout: 0, calls: 0 };
+      agg.gross = roundInr(agg.gross + gross);
+      agg.payout = roundInr(agg.payout + payout);
+      agg.calls += 1;
+      receiverGross.set(rid, agg);
+    }
+
+    for (const row of chats) {
+      const gross = roundInr(Number(row.feeInr || 0));
+      grossChat += gross;
+      const day = new Date(row.createdAt).toISOString().slice(0, 10);
+      dailyCallsGross.set(day, roundInr((dailyCallsGross.get(day) || 0) + gross));
+
+      const rid = String(row.receiverId);
+      const agg = receiverGross.get(rid) || { gross: 0, payout: 0, calls: 0 };
+      agg.gross = roundInr(agg.gross + gross);
+      // Chat credits are receiver payout side for this dashboard.
+      agg.payout = roundInr(agg.payout + gross);
+      receiverGross.set(rid, agg);
+    }
+
+    const grossRevenue = roundInr(grossCalls + grossChat);
+    const platformCommission = roundInr(grossRevenue * PLATFORM_COMMISSION_RATE);
+    const netPayout = roundInr(grossRevenue - platformCommission);
+
+    const dailyBreakdown = [...dailyCallsGross.entries()]
+      .sort((a, b) => (a[0] > b[0] ? -1 : 1))
+      .slice(0, 31)
+      .map(([date, callsRevenue]) => {
+        const commission = roundInr(callsRevenue * PLATFORM_COMMISSION_RATE);
+        return {
+          date,
+          callsRevenue: roundInr(callsRevenue),
+          commission,
+          payout: roundInr(callsRevenue - commission),
+        };
+      });
+
+    const topReceiverIds = [...receiverGross.entries()]
+      .sort((a, b) => b[1].gross - a[1].gross)
+      .slice(0, 10)
+      .map(([rid]) => new mongoose.Types.ObjectId(rid));
+    const receiverRows =
+      topReceiverIds.length > 0
+        ? await Receiver.find({ _id: { $in: topReceiverIds } })
+            .select('_id name')
+            .lean<{ _id: mongoose.Types.ObjectId; name: string }[]>()
+        : [];
+    const receiverNameById = new Map(receiverRows.map((r) => [String(r._id), r.name]));
+
+    const topEarners = [...receiverGross.entries()]
+      .sort((a, b) => b[1].gross - a[1].gross)
+      .slice(0, 5)
+      .map(([rid, v]) => ({
+        receiverId: rid,
+        name: receiverNameById.get(rid) ?? 'Receiver',
+        calls: v.calls,
+        earnings: roundInr(v.gross),
+        payout: roundInr(v.payout),
+      }));
+
+    res.status(200).json({
+      cards: {
+        grossRevenue,
+        platformCommission,
+        netPayout,
+        platformProfit: platformCommission,
+      },
+      dailyBreakdown,
+      topEarners,
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error('getRevenueDashboard error:', msg);
+    res.status(500).json({ message: msg || 'Server error' });
+  }
+};
+
+/**
+ * GET /admin/overview — dynamic top-level dashboard snapshot.
+ */
+export const getOverviewDashboard = async (
+  req: Request<{}, {}, {}, { range?: string }>,
+  res: Response
+): Promise<void> => {
+  try {
+    const range = String(req.query.range ?? '7d').toLowerCase();
+    if (range !== '7d' && range !== '30d' && range !== 'all') {
+      res.status(400).json({ message: 'range must be 7d, 30d, or all' });
+      return;
+    }
+    const start = toRangeStart(range);
+
+    const [calls, chats, activeReceivers, activeUsers, pendingKycApprovals, pendingWithdrawals, flaggedReports] =
+      await Promise.all([
+        CallSession.find({
+          status: 'completed',
+          ...(start ? { startedAt: { $gte: start } } : {}),
+        })
+          .select('startedAt settledAmountInr')
+          .lean<{ startedAt: Date; settledAmountInr?: number }[]>(),
+        ChatMessage.find({
+          senderType: 'u',
+          feeInr: { $gt: 0 },
+          ...(start ? { createdAt: { $gte: start } } : {}),
+        })
+          .select('createdAt feeInr')
+          .lean<{ createdAt: Date; feeInr: number }[]>(),
+        Receiver.countDocuments({ accountStatus: 'approved', suspended: { $ne: true } }),
+        User.countDocuments({ accountStatus: 'approved', suspended: { $ne: true } }),
+        Receiver.countDocuments({ accountStatus: 'pending_review' }),
+        WithdrawalRequest.countDocuments({ status: 'pending' }),
+        UserReport.countDocuments({ status: 'pending' }),
+      ]);
+
+    let totalRevenue = 0;
+    let totalCalls = 0;
+    const trendByDay = new Map<string, number>();
+
+    for (const c of calls) {
+      const gross = roundInr(Number(c.settledAmountInr || 0));
+      totalRevenue += gross;
+      totalCalls += 1;
+      const day = new Date(c.startedAt).toISOString().slice(0, 10);
+      trendByDay.set(day, roundInr((trendByDay.get(day) || 0) + gross));
+    }
+    for (const m of chats) {
+      const gross = roundInr(Number(m.feeInr || 0));
+      totalRevenue += gross;
+      const day = new Date(m.createdAt).toISOString().slice(0, 10);
+      trendByDay.set(day, roundInr((trendByDay.get(day) || 0) + gross));
+    }
+    totalRevenue = roundInr(totalRevenue);
+
+    // For chart, return last 7 buckets ending today.
+    const trend: Array<{ label: string; amount: number }> = [];
+    const now = new Date();
+    for (let i = 6; i >= 0; i -= 1) {
+      const d = new Date(now);
+      d.setDate(now.getDate() - i);
+      const key = d.toISOString().slice(0, 10);
+      const label = new Intl.DateTimeFormat('en-US', { weekday: 'short' }).format(d);
+      trend.push({ label, amount: roundInr(trendByDay.get(key) || 0) });
+    }
+
+    res.status(200).json({
+      cards: {
+        totalRevenue,
+        totalCalls,
+        activeReceivers,
+        activeUsers,
+      },
+      trend,
+      actionRequired: {
+        pendingKycApprovals,
+        pendingWithdrawals,
+        flaggedReports,
+      },
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error('getOverviewDashboard error:', msg);
+    res.status(500).json({ message: msg || 'Server error' });
+  }
+};
 
 /**
  * GET /admin/users — app users (`users` collection) with filters and pagination.
@@ -1088,6 +1484,8 @@ export const listWithdrawals = async (
           status: string;
           bankName: string;
           accountMasked: string;
+          payoutStatus?: string;
+          payoutUtr?: string | null;
           createdAt: Date;
         }[]
       >();
@@ -1118,6 +1516,8 @@ export const listWithdrawals = async (
         accountMasked: row.accountMasked,
         createdAt: row.createdAt.toISOString(),
         status: row.status,
+        payoutStatus: row.payoutStatus && row.payoutStatus !== 'none' ? row.payoutStatus : undefined,
+        payoutUtr: row.payoutUtr,
       })),
       total: totalBase,
       page,
@@ -1148,48 +1548,108 @@ export const resolveWithdrawal = async (
       return;
     }
 
-    const withdrawal = await WithdrawalRequest.findById(req.params.id);
-    if (!withdrawal || withdrawal.status === 'verification_pending') {
-      res.status(404).json({ message: 'Withdrawal not found' });
-      return;
-    }
-
     const nextStatus = action === 'approve' ? 'approved' : 'rejected';
-    const previousStatus = withdrawal.status;
-    if (previousStatus === nextStatus) {
-      res.status(200).json({ ok: true });
-      return;
+    let payoutShouldStart = false;
+
+    const session = await mongoose.startSession();
+    try {
+      await session.withTransaction(async () => {
+        const withdrawal = await WithdrawalRequest.findById(req.params.id).session(session);
+        if (!withdrawal || withdrawal.status === 'verification_pending') {
+          // Throwing to escape transaction cleanly; handled below.
+          throw new Error('WithdrawalNotFound');
+        }
+        if (withdrawal.payoutStatus === 'processing' || withdrawal.payoutStatus === 'success') {
+          throw new Error('WithdrawalAutoManaged');
+        }
+
+        const previousStatus = withdrawal.status;
+        if (previousStatus === nextStatus) {
+          return;
+        }
+
+        const receiver = await Receiver.findById(withdrawal.receiverId).session(session).select('walletBalance');
+        if (!receiver) throw new Error('ReceiverNotFound');
+
+        if (previousStatus === 'pending' && nextStatus === 'approved') {
+          if (receiver.walletBalance < withdrawal.amount) {
+            throw new Error('CannotApprove:InsufficientRefundBalance');
+          }
+          receiver.walletBalance = Math.round((receiver.walletBalance - withdrawal.amount) * 100) / 100;
+          await receiver.save();
+        } else if (previousStatus === 'rejected' && nextStatus === 'approved') {
+          if (receiver.walletBalance < withdrawal.amount) {
+            throw new Error('CannotApprove:InsufficientRefundBalance');
+          }
+          receiver.walletBalance = Math.round((receiver.walletBalance - withdrawal.amount) * 100) / 100;
+          await receiver.save();
+        }
+
+        withdrawal.status = nextStatus;
+        withdrawal.reviewedAt = new Date();
+        withdrawal.reviewedByAdminId = req.admin?._id
+          ? new mongoose.Types.ObjectId(String(req.admin._id))
+          : null;
+        const note = String(req.body.note ?? '').trim();
+        withdrawal.adminNote = note ? note : null;
+
+        if (nextStatus === 'approved') {
+          // Start RazorpayX payout after admin approval.
+          withdrawal.payoutStatus = 'processing';
+          withdrawal.payoutId = null;
+          withdrawal.payoutUtr = null;
+          withdrawal.payoutError = null;
+          withdrawal.walletRefundedAt = null;
+          // Stable per withdrawal record to avoid duplicate payout attempts.
+          withdrawal.payoutReferenceId = `wd_${String(withdrawal._id).slice(-10)}`;
+          payoutShouldStart = true;
+        } else if (previousStatus === 'pending' && nextStatus === 'rejected') {
+          // Rejection from the initial request stage: clear payout fields.
+          withdrawal.payoutStatus = 'none';
+          withdrawal.payoutId = null;
+          withdrawal.payoutUtr = null;
+          withdrawal.payoutError = null;
+          withdrawal.walletRefundedAt = null;
+          withdrawal.payoutReferenceId = null;
+        }
+
+        await withdrawal.save();
+      });
+    } finally {
+      await session.endSession();
     }
 
-    const receiver = await Receiver.findById(withdrawal.receiverId).select('walletBalance');
-    if (!receiver) {
-      res.status(404).json({ message: 'Receiver not found' });
-      return;
+    // Only start payout after DB is updated.
+    if (payoutShouldStart) {
+      void trackAndFinalizeRazorpayXPayout(req.params.id).catch((e: unknown) => {
+        const msg = e instanceof Error ? e.message : String(e);
+        console.error('RazorpayX payout tracker error:', msg);
+      });
     }
 
-    if (previousStatus === 'pending' && nextStatus === 'rejected') {
-      receiver.walletBalance = Math.round((receiver.walletBalance + withdrawal.amount) * 100) / 100;
-      await receiver.save();
-    } else if (previousStatus === 'rejected' && nextStatus === 'approved') {
-      if (receiver.walletBalance < withdrawal.amount) {
-        res.status(400).json({ message: 'Cannot approve now: receiver wallet balance is lower than refund amount' });
-        return;
-      }
-      receiver.walletBalance = Math.round((receiver.walletBalance - withdrawal.amount) * 100) / 100;
-      await receiver.save();
-    }
-
-    withdrawal.status = nextStatus;
-    withdrawal.reviewedAt = new Date();
-    withdrawal.reviewedByAdminId = req.admin?._id ? new mongoose.Types.ObjectId(String(req.admin._id)) : null;
-    const note = String(req.body.note ?? '').trim();
-    withdrawal.adminNote = note ? note : null;
-    await withdrawal.save();
-
+    // Transaction may throw for known errors; map them to responses.
     res.status(200).json({ ok: true });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error('resolveWithdrawal error:', msg);
+    if (msg === 'WithdrawalNotFound') {
+      res.status(404).json({ message: 'Withdrawal not found' });
+      return;
+    }
+    if (msg === 'ReceiverNotFound') {
+      res.status(404).json({ message: 'Receiver not found' });
+      return;
+    }
+    if (msg === 'CannotApprove:InsufficientRefundBalance') {
+      res
+        .status(400)
+        .json({ message: 'Cannot approve now: receiver wallet balance is lower than refund amount' });
+      return;
+    }
+    if (msg === 'WithdrawalAutoManaged') {
+      res.status(400).json({ message: 'This withdrawal is auto-managed by payout flow' });
+      return;
+    }
     res.status(500).json({ message: msg || 'Server error' });
   }
 };

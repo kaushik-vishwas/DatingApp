@@ -14,8 +14,8 @@ export function loadEnv(): void {
   const envPath = path.join(backendRoot, '.env');
 
   if (fs.existsSync(envPath)) {
-    dotenv.config({ path: envPath });
+    dotenv.config({ path: envPath, override: true });
     return;
   }
-  dotenv.config();
+  dotenv.config({ override: true });
 }

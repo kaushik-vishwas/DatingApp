@@ -10,6 +10,9 @@ router.post('/auth/reset-password', adminController_1.adminResetPassword);
 router.get('/auth/me', adminAuth_1.adminProtect, adminController_1.adminMe);
 router.post('/auth/request-email-change', adminAuth_1.adminProtect, adminController_1.adminRequestEmailChange);
 router.post('/auth/confirm-email-change', adminAuth_1.adminProtect, adminController_1.adminConfirmEmailChange);
+router.get('/settings', adminAuth_1.adminProtect, adminController_1.getAdminSettings);
+router.patch('/settings/notifications', adminAuth_1.adminProtect, adminController_1.updateAdminNotificationControls);
+router.patch('/settings/admins/:id/role', adminAuth_1.adminProtect, adminController_1.updateAdminRole);
 router.get('/users', adminAuth_1.adminProtect, adminController_1.listAppUsers);
 router.get('/users/pending', adminAuth_1.adminProtect, adminController_1.listPendingAppUsers);
 router.patch('/users/:id/approve', adminAuth_1.adminProtect, adminController_1.approveAppUser);
@@ -22,6 +25,8 @@ router.patch('/receivers/:id/approve', adminAuth_1.adminProtect, adminController
 router.patch('/receivers/:id/reject', adminAuth_1.adminProtect, adminController_1.rejectReceiver);
 router.get('/reports', adminAuth_1.adminProtect, adminController_1.listModerationReports);
 router.patch('/reports/:id', adminAuth_1.adminProtect, adminController_1.resolveModerationReport);
+router.get('/overview', adminAuth_1.adminProtect, adminController_1.getOverviewDashboard);
+router.get('/revenue', adminAuth_1.adminProtect, adminController_1.getRevenueDashboard);
 router.get('/withdrawals', adminAuth_1.adminProtect, adminController_1.listWithdrawals);
 router.patch('/withdrawals/:id', adminAuth_1.adminProtect, adminController_1.resolveWithdrawal);
 exports.default = router;

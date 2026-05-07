@@ -17,8 +17,8 @@ function loadEnv() {
         : path_1.default.resolve(__dirname, '..');
     const envPath = path_1.default.join(backendRoot, '.env');
     if (fs_1.default.existsSync(envPath)) {
-        dotenv_1.default.config({ path: envPath });
+        dotenv_1.default.config({ path: envPath, override: true });
         return;
     }
-    dotenv_1.default.config();
+    dotenv_1.default.config({ override: true });
 }

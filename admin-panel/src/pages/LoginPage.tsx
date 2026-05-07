@@ -97,9 +97,9 @@ export function LoginPage() {
       <div className="w-full max-w-md rounded-2xl bg-white p-8 shadow-lg shadow-neutral-200/80">
         <div className="mb-8 flex flex-col items-center text-center">
           <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-xl bg-[#ff72d2] text-xl font-black text-white">
-            N
+            S
           </div>
-          <h1 className="text-2xl font-bold text-neutral-900">Nesthama Admin</h1>
+          <h1 className="text-2xl font-bold text-neutral-900">Selecto Admin</h1>
           <p className="mt-1 text-sm text-neutral-500">Sign in with your admin email and password</p>
         </div>
 

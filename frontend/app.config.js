@@ -17,6 +17,8 @@ const cloudNameFromEnv = process.env.EXPO_PUBLIC_CLOUDINARY_CLOUD_NAME?.trim();
 const uploadPresetFromEnv = process.env.EXPO_PUBLIC_CLOUDINARY_UPLOAD_PRESET?.trim();
 const cloudNameFromAppJson = appJson.expo?.extra?.cloudinaryCloudName?.trim();
 const uploadPresetFromAppJson = appJson.expo?.extra?.cloudinaryUploadPreset?.trim();
+const appKindEnv = process.env.EXPO_PUBLIC_APP_KIND?.trim().toLowerCase();
+const appKind = appKindEnv === 'caller' || appKindEnv === 'receiver' ? appKindEnv : null;
 
 function normalizeOrigin(url) {
   if (!url) return url;
@@ -31,10 +33,20 @@ const apiBaseUrl =
   PROD_API;
 const cloudinaryCloudName = cloudNameFromEnv || cloudNameFromAppJson || '';
 const cloudinaryUploadPreset = uploadPresetFromEnv || uploadPresetFromAppJson || '';
+const nameSuffix = appKind ? `-${appKind}` : '';
+const baseName = appJson.expo?.name || 'frontend';
+const baseSlug = appJson.expo?.slug || 'frontend';
+const baseAndroidPackage = appJson.expo?.android?.package || 'com.kaushikvishwas.frontend';
 
 module.exports = {
   expo: {
     ...appJson.expo,
+    name: `${baseName}${nameSuffix}`,
+    slug: `${baseSlug}${nameSuffix}`,
+    android: {
+      ...(appJson.expo.android || {}),
+      package: appKind ? `${baseAndroidPackage}.${appKind}` : baseAndroidPackage,
+    },
     plugins: [
       ...(appJson.expo.plugins || []),
       '@react-native-community/datetimepicker',
@@ -49,6 +61,7 @@ module.exports = {
       apiBaseUrl,
       cloudinaryCloudName,
       cloudinaryUploadPreset,
+      appKind: appKind || undefined,
     },
   },
 };

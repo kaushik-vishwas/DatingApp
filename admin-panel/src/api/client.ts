@@ -122,6 +122,76 @@ export async function adminResetPassword(
   return data;
 }
 
+/** ================= SETTINGS ================= */
+
+export type AdminRole = 'super_admin' | 'support_admin' | 'finance_admin';
+
+export type AdminSettingsResponse = {
+  notificationControls: {
+    kycSubmissionsEmail: boolean;
+    pendingWithdrawalsEmail: boolean;
+    dailyRevenueSummaryEmail: boolean;
+  };
+  rolesCatalog: Array<{ id: AdminRole; label: string; description: string }>;
+  admins: Array<{
+    _id: string;
+    name: string;
+    email: string;
+    role: AdminRole;
+    status: 'active';
+    createdAt: string;
+  }>;
+};
+
+export async function fetchAdminSettings() {
+  const { data } = await api.get<AdminSettingsResponse>('/admin/settings');
+  return data;
+}
+
+export async function updateAdminSettingsNotifications(payload: {
+  kycSubmissionsEmail: boolean;
+  pendingWithdrawalsEmail: boolean;
+  dailyRevenueSummaryEmail: boolean;
+}) {
+  const { data } = await api.patch<{
+    ok: boolean;
+    notificationControls: AdminSettingsResponse['notificationControls'];
+  }>('/admin/settings/notifications', payload);
+  return data;
+}
+
+export async function updateAdminRole(adminId: string, role: AdminRole) {
+  const { data } = await api.patch<{
+    ok: boolean;
+    admin: { _id: string; name: string; email: string; role: AdminRole; status: 'active' };
+  }>(`/admin/settings/admins/${adminId}/role`, { role });
+  return data;
+}
+
+/** ================= OVERVIEW ================= */
+
+export type OverviewDashboardResponse = {
+  cards: {
+    totalRevenue: number;
+    totalCalls: number;
+    activeReceivers: number;
+    activeUsers: number;
+  };
+  trend: Array<{ label: string; amount: number }>;
+  actionRequired: {
+    pendingKycApprovals: number;
+    pendingWithdrawals: number;
+    flaggedReports: number;
+  };
+};
+
+export async function fetchOverviewDashboard(params?: { range?: '7d' | '30d' | 'all' }) {
+  const { data } = await api.get<OverviewDashboardResponse>('/admin/overview', {
+    params: { range: params?.range ?? '7d' },
+  });
+  return data;
+}
+
 /** ================= RECEIVERS ================= */
 
 export async function fetchAllReceivers() {
@@ -252,6 +322,37 @@ export async function resolveModerationReport(
   return data;
 }
 
+/** ================= REVENUE ================= */
+
+export type RevenueDashboardResponse = {
+  cards: {
+    grossRevenue: number;
+    platformCommission: number;
+    netPayout: number;
+    platformProfit: number;
+  };
+  dailyBreakdown: Array<{
+    date: string;
+    callsRevenue: number;
+    commission: number;
+    payout: number;
+  }>;
+  topEarners: Array<{
+    receiverId: string;
+    name: string;
+    calls: number;
+    earnings: number;
+    payout: number;
+  }>;
+};
+
+export async function fetchRevenueDashboard(params?: { range?: '7d' | '30d' | 'all' }) {
+  const { data } = await api.get<RevenueDashboardResponse>('/admin/revenue', {
+    params: { range: params?.range ?? '7d' },
+  });
+  return data;
+}
+
 /** ================= WITHDRAWALS ================= */
 
 export type AdminWithdrawalStatus = 'pending' | 'approved' | 'rejected';
@@ -265,6 +366,8 @@ export type AdminWithdrawalRow = {
   accountMasked: string;
   createdAt: string;
   status: AdminWithdrawalStatus;
+  payoutStatus?: 'processing' | 'success' | 'failed';
+  payoutUtr?: string | null;
 };
 
 export type AdminWithdrawalStats = {

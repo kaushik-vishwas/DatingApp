@@ -7,6 +7,7 @@ import {
   adminConfirmEmailChange,
   adminMe,
   listAllReceivers,
+  getAdminSettings,
   getKycStats,
   listPendingReceivers,
   approveReceiver,
@@ -17,6 +18,10 @@ import {
   approveAppUser,
   rejectAppUser,
   listModerationReports,
+  getOverviewDashboard,
+  getRevenueDashboard,
+  updateAdminNotificationControls,
+  updateAdminRole,
   listWithdrawals,
   resolveModerationReport,
   resolveWithdrawal,
@@ -31,6 +36,9 @@ router.post('/auth/reset-password', adminResetPassword);
 router.get('/auth/me', adminProtect, adminMe);
 router.post('/auth/request-email-change', adminProtect, adminRequestEmailChange);
 router.post('/auth/confirm-email-change', adminProtect, adminConfirmEmailChange);
+router.get('/settings', adminProtect, getAdminSettings);
+router.patch('/settings/notifications', adminProtect, updateAdminNotificationControls);
+router.patch('/settings/admins/:id/role', adminProtect, updateAdminRole);
 
 router.get('/users', adminProtect, listAppUsers);
 router.get('/users/pending', adminProtect, listPendingAppUsers);
@@ -46,6 +54,8 @@ router.patch('/receivers/:id/reject', adminProtect, rejectReceiver);
 
 router.get('/reports', adminProtect, listModerationReports);
 router.patch('/reports/:id', adminProtect, resolveModerationReport);
+router.get('/overview', adminProtect, getOverviewDashboard);
+router.get('/revenue', adminProtect, getRevenueDashboard);
 router.get('/withdrawals', adminProtect, listWithdrawals);
 router.patch('/withdrawals/:id', adminProtect, resolveWithdrawal);
 

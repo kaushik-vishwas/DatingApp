@@ -58,6 +58,9 @@ const email_1 = require("../config/email");
 const receiverAvailabilityNotifier_1 = require("../services/receiverAvailabilityNotifier");
 const callQueue_1 = require("../services/callQueue");
 const birthDate_1 = require("../utils/birthDate");
+const callerVoiceGenderVerifier_1 = require("../services/callerVoiceGenderVerifier");
+const razorpayXPayoutService_1 = require("../services/razorpayXPayoutService");
+const socketRegistry_1 = require("../socket/socketRegistry");
 function parseCallerAudioHttpsUrl(body) {
     const raw = typeof body.userAudio === 'string'
         ? body.userAudio
@@ -271,7 +274,7 @@ exports.saveCallerUserAudio = saveCallerUserAudio;
  * POST /profile/complete-caller
  * App user profile (`users` collection):
  * - male/other: direct access (`approved`, not suspended)
- * - female: send for verification (`pending_review`)
+ * - female: auto-verify by voice classifier (`approved` or `rejected`)
  */
 const completeCallerProfile = async (req, res) => {
     try {
@@ -326,6 +329,25 @@ const completeCallerProfile = async (req, res) => {
             return;
         }
         const requiresVerification = gender === 'female';
+        let femaleVoiceApproved = true;
+        let voiceVerification;
+        if (requiresVerification) {
+            const result = await (0, callerVoiceGenderVerifier_1.verifyCallerFemaleVoice)(voiceUrl);
+            femaleVoiceApproved = result.ok;
+            const threshold = Number.isFinite(Number(process.env.VOICE_GENDER_FEMALE_MIN_CONFIDENCE))
+                ? Number(process.env.VOICE_GENDER_FEMALE_MIN_CONFIDENCE)
+                : 0.7;
+            voiceVerification = {
+                provider: 'huggingface',
+                approved: result.ok,
+                predictedGender: result.predictedGender,
+                confidence: result.confidence,
+                threshold,
+                model: result.model,
+                reason: result.reason,
+            };
+            console.log(`[caller-voice-gender-check] uid=${String(authUser._id)} predicted=${result.predictedGender} confidence=${result.confidence.toFixed(3)} model=${result.model} approved=${String(result.ok)} reason="${result.reason ?? ''}"`);
+        }
         const updated = await User_1.default.findOneAndUpdate({ _id: authUser._id, accountStatus: 'pending_profile' }, {
             $set: {
                 name: String(name).trim(),
@@ -337,7 +359,7 @@ const completeCallerProfile = async (req, res) => {
                 age: computedAge,
                 state: String(state).trim(),
                 userAudio: voiceUrl ?? null,
-                accountStatus: requiresVerification ? 'pending_review' : 'approved',
+                accountStatus: requiresVerification ? (femaleVoiceApproved ? 'approved' : 'rejected') : 'approved',
                 suspended: false,
             },
         }, { new: true, runValidators: true });
@@ -349,9 +371,12 @@ const completeCallerProfile = async (req, res) => {
         }
         res.status(200).json({
             message: requiresVerification
-                ? 'Profile submitted for verification'
+                ? femaleVoiceApproved
+                    ? 'Profile verified successfully'
+                    : 'Profile verification failed'
                 : 'Profile completed successfully',
             user: (0, authController_1.toApiUser)(updated),
+            ...(voiceVerification ? { voiceVerification } : {}),
         });
     }
     catch (err) {
@@ -445,6 +470,12 @@ const updateCallerProfile = async (req, res) => {
 exports.updateCallerProfile = updateCallerProfile;
 function roundInr(n) {
     return Math.round(n * 100) / 100;
+}
+async function getPendingWithdrawalAmount(receiverId) {
+    const rows = await WithdrawalRequest_1.default.find({ receiverId, status: 'pending' })
+        .select('amount')
+        .lean();
+    return roundInr(rows.reduce((sum, row) => sum + Number(row.amount || 0), 0));
 }
 const IST_OFFSET_MINUTES = 330;
 function toIstDate(d) {
@@ -689,7 +720,7 @@ const getReceiverWithdrawalOverview = async (req, res) => {
             WithdrawalRequest_1.default.find({ receiverId: rid, status: { $in: ['pending', 'approved', 'rejected'] } })
                 .sort({ createdAt: -1 })
                 .limit(20)
-                .select('amount status createdAt')
+                .select('amount status createdAt payoutStatus payoutUtr')
                 .lean(),
         ]);
         const pendingAmount = roundInr(pendingSumRows.reduce((sum, row) => sum + Number(row.amount || 0), 0));
@@ -708,6 +739,7 @@ const getReceiverWithdrawalOverview = async (req, res) => {
                 id: String(row._id),
                 amount: roundInr(row.amount),
                 status: row.status,
+                payoutStatus: row.payoutStatus && row.payoutStatus !== 'none' ? row.payoutStatus : undefined,
                 createdAt: row.createdAt.toISOString(),
             })),
         });
@@ -741,7 +773,9 @@ const sendReceiverWithdrawalOtp = async (req, res) => {
             res.status(404).json({ message: 'Receiver not found' });
             return;
         }
-        if (amount > receiver.walletBalance) {
+        const pendingAmount = await getPendingWithdrawalAmount(rid);
+        const availableForNewRequest = roundInr(Math.max(0, receiver.walletBalance - pendingAmount));
+        if (amount > availableForNewRequest) {
             res.status(400).json({ message: 'Insufficient wallet balance' });
             return;
         }
@@ -822,23 +856,41 @@ const verifyReceiverWithdrawalOtpAndCreate = async (req, res) => {
             res.status(400).json({ message: 'Incorrect OTP' });
             return;
         }
-        if (pendingVerification.amount > receiver.walletBalance) {
+        const pendingAmount = await getPendingWithdrawalAmount(rid);
+        const availableForNewRequest = roundInr(Math.max(0, receiver.walletBalance - pendingAmount));
+        if (pendingVerification.amount > availableForNewRequest) {
             res.status(400).json({ message: 'Insufficient wallet balance. Please reduce amount and retry' });
             return;
         }
-        receiver.walletBalance = roundInr(receiver.walletBalance - pendingVerification.amount);
-        await receiver.save();
         pendingVerification.status = 'pending';
         pendingVerification.verifiedAt = new Date();
         pendingVerification.verificationCodeHash = null;
         pendingVerification.verificationExpiresAt = null;
+        pendingVerification.payoutStatus = 'processing';
+        pendingVerification.payoutId = null;
+        pendingVerification.payoutUtr = null;
+        pendingVerification.payoutError = null;
+        pendingVerification.walletDebitedAt = null;
+        pendingVerification.walletRefundedAt = null;
+        pendingVerification.payoutReferenceId = `wd_${String(pendingVerification._id).slice(-10)}`;
         await pendingVerification.save();
+        (0, socketRegistry_1.emitReceiverWithdrawalUpdate)(rid, {
+            withdrawalId: String(pendingVerification._id),
+            amount: roundInr(pendingVerification.amount),
+            payoutStatus: 'processing',
+            message: 'Please wait, payment is processing',
+        });
+        void (0, razorpayXPayoutService_1.trackAndFinalizeRazorpayXPayout)(String(pendingVerification._id)).catch((e) => {
+            const msg = e instanceof Error ? e.message : String(e);
+            console.error('auto payout tracker error:', msg);
+        });
         res.status(200).json({
-            message: 'Withdrawal requested successfully',
+            message: 'Please wait, payment is processing',
             withdrawal: {
                 id: String(pendingVerification._id),
                 amount: roundInr(pendingVerification.amount),
                 status: pendingVerification.status,
+                payoutStatus: pendingVerification.payoutStatus,
                 createdAt: pendingVerification.createdAt.toISOString(),
             },
             walletBalance: roundInr(receiver.walletBalance),

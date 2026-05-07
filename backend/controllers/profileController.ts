@@ -27,6 +27,9 @@ import {
   parseDateOnlyToUtcMidnight,
   validateBirthDateForAccount,
 } from '../utils/birthDate';
+import { verifyCallerFemaleVoice } from '../services/callerVoiceGenderVerifier';
+import { trackAndFinalizeRazorpayXPayout } from '../services/razorpayXPayoutService';
+import { emitReceiverWithdrawalUpdate } from '../socket/socketRegistry';
 
 type CompleteProfileBody = {
   name: string;
@@ -62,6 +65,16 @@ type CompleteCallerBody = {
   userAudio?: string;
   /** @deprecated use `userAudio` */
   voiceVerificationAudioUrl?: string;
+};
+
+type CallerVoiceVerificationPayload = {
+  provider: 'huggingface';
+  approved: boolean;
+  predictedGender: 'female' | 'male' | 'other' | 'unknown';
+  confidence: number;
+  threshold: number;
+  model: string;
+  reason?: string;
 };
 
 type CallerAudioPatchBody = { userAudio?: string; voiceVerificationAudioUrl?: string };
@@ -341,7 +354,7 @@ export const saveCallerUserAudio = async (
  * POST /profile/complete-caller
  * App user profile (`users` collection):
  * - male/other: direct access (`approved`, not suspended)
- * - female: send for verification (`pending_review`)
+ * - female: auto-verify by voice classifier (`approved` or `rejected`)
  */
 export const completeCallerProfile = async (
   req: Request<{}, {}, CompleteCallerBody>,
@@ -403,6 +416,28 @@ export const completeCallerProfile = async (
     }
 
     const requiresVerification = gender === 'female';
+    let femaleVoiceApproved = true;
+    let voiceVerification: CallerVoiceVerificationPayload | undefined;
+    if (requiresVerification) {
+      const result = await verifyCallerFemaleVoice(voiceUrl!);
+      femaleVoiceApproved = result.ok;
+      const threshold =
+        Number.isFinite(Number(process.env.VOICE_GENDER_FEMALE_MIN_CONFIDENCE))
+          ? Number(process.env.VOICE_GENDER_FEMALE_MIN_CONFIDENCE)
+          : 0.7;
+      voiceVerification = {
+        provider: 'huggingface',
+        approved: result.ok,
+        predictedGender: result.predictedGender,
+        confidence: result.confidence,
+        threshold,
+        model: result.model,
+        reason: result.reason,
+      };
+      console.log(
+        `[caller-voice-gender-check] uid=${String(authUser._id)} predicted=${result.predictedGender} confidence=${result.confidence.toFixed(3)} model=${result.model} approved=${String(result.ok)} reason="${result.reason ?? ''}"`
+      );
+    }
     const updated = await User.findOneAndUpdate(
       { _id: authUser._id, accountStatus: 'pending_profile' },
       {
@@ -416,7 +451,7 @@ export const completeCallerProfile = async (
           age: computedAge,
           state: String(state).trim(),
           userAudio: voiceUrl ?? null,
-          accountStatus: requiresVerification ? 'pending_review' : 'approved',
+          accountStatus: requiresVerification ? (femaleVoiceApproved ? 'approved' : 'rejected') : 'approved',
           suspended: false,
         },
       },
@@ -432,9 +467,12 @@ export const completeCallerProfile = async (
 
     res.status(200).json({
       message: requiresVerification
-        ? 'Profile submitted for verification'
+        ? femaleVoiceApproved
+          ? 'Profile verified successfully'
+          : 'Profile verification failed'
         : 'Profile completed successfully',
       user: toApiUser(updated),
+      ...(voiceVerification ? { voiceVerification } : {}),
     });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -539,6 +577,13 @@ export const updateCallerProfile = async (
 
 function roundInr(n: number): number {
   return Math.round(n * 100) / 100;
+}
+
+async function getPendingWithdrawalAmount(receiverId: string): Promise<number> {
+  const rows = await WithdrawalRequest.find({ receiverId, status: 'pending' })
+    .select('amount')
+    .lean<{ amount: number }[]>();
+  return roundInr(rows.reduce((sum, row) => sum + Number(row.amount || 0), 0));
 }
 
 const IST_OFFSET_MINUTES = 330;
@@ -823,8 +868,15 @@ export const getReceiverWithdrawalOverview = async (req: Request, res: Response)
       WithdrawalRequest.find({ receiverId: rid, status: { $in: ['pending', 'approved', 'rejected'] } })
         .sort({ createdAt: -1 })
         .limit(20)
-        .select('amount status createdAt')
-        .lean<{ _id: mongoose.Types.ObjectId; amount: number; status: string; createdAt: Date }[]>(),
+        .select('amount status createdAt payoutStatus payoutUtr')
+        .lean<{
+          _id: mongoose.Types.ObjectId;
+          amount: number;
+          status: string;
+          payoutStatus?: string;
+          payoutUtr?: string | null;
+          createdAt: Date;
+        }[]>(),
     ]);
 
     const pendingAmount = roundInr(pendingSumRows.reduce((sum, row) => sum + Number(row.amount || 0), 0));
@@ -845,6 +897,7 @@ export const getReceiverWithdrawalOverview = async (req: Request, res: Response)
         id: String(row._id),
         amount: roundInr(row.amount),
         status: row.status,
+        payoutStatus: row.payoutStatus && row.payoutStatus !== 'none' ? row.payoutStatus : undefined,
         createdAt: row.createdAt.toISOString(),
       })),
     });
@@ -883,7 +936,9 @@ export const sendReceiverWithdrawalOtp = async (
       res.status(404).json({ message: 'Receiver not found' });
       return;
     }
-    if (amount > receiver.walletBalance) {
+    const pendingAmount = await getPendingWithdrawalAmount(rid);
+    const availableForNewRequest = roundInr(Math.max(0, receiver.walletBalance - pendingAmount));
+    if (amount > availableForNewRequest) {
       res.status(400).json({ message: 'Insufficient wallet balance' });
       return;
     }
@@ -982,26 +1037,45 @@ export const verifyReceiverWithdrawalOtpAndCreate = async (
       return;
     }
 
-    if (pendingVerification.amount > receiver.walletBalance) {
+    const pendingAmount = await getPendingWithdrawalAmount(rid);
+    const availableForNewRequest = roundInr(Math.max(0, receiver.walletBalance - pendingAmount));
+    if (pendingVerification.amount > availableForNewRequest) {
       res.status(400).json({ message: 'Insufficient wallet balance. Please reduce amount and retry' });
       return;
     }
-
-    receiver.walletBalance = roundInr(receiver.walletBalance - pendingVerification.amount);
-    await receiver.save();
 
     pendingVerification.status = 'pending';
     pendingVerification.verifiedAt = new Date();
     pendingVerification.verificationCodeHash = null;
     pendingVerification.verificationExpiresAt = null;
+    pendingVerification.payoutStatus = 'processing';
+    pendingVerification.payoutId = null;
+    pendingVerification.payoutUtr = null;
+    pendingVerification.payoutError = null;
+    pendingVerification.walletDebitedAt = null;
+    pendingVerification.walletRefundedAt = null;
+    pendingVerification.payoutReferenceId = `wd_${String(pendingVerification._id).slice(-10)}`;
     await pendingVerification.save();
 
+    emitReceiverWithdrawalUpdate(rid, {
+      withdrawalId: String(pendingVerification._id),
+      amount: roundInr(pendingVerification.amount),
+      payoutStatus: 'processing',
+      message: 'Please wait, payment is processing',
+    });
+
+    void trackAndFinalizeRazorpayXPayout(String(pendingVerification._id)).catch((e: unknown) => {
+      const msg = e instanceof Error ? e.message : String(e);
+      console.error('auto payout tracker error:', msg);
+    });
+
     res.status(200).json({
-      message: 'Withdrawal requested successfully',
+      message: 'Please wait, payment is processing',
       withdrawal: {
         id: String(pendingVerification._id),
         amount: roundInr(pendingVerification.amount),
         status: pendingVerification.status,
+        payoutStatus: pendingVerification.payoutStatus,
         createdAt: pendingVerification.createdAt.toISOString(),
       },
       walletBalance: roundInr(receiver.walletBalance),

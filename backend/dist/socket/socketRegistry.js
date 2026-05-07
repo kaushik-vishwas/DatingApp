@@ -6,6 +6,7 @@ exports.emitReceiverApproved = emitReceiverApproved;
 exports.emitReceiverRejected = emitReceiverRejected;
 exports.emitCallerApproved = emitCallerApproved;
 exports.emitCallerRejected = emitCallerRejected;
+exports.emitReceiverWithdrawalUpdate = emitReceiverWithdrawalUpdate;
 let ioInstance = null;
 function registerSocketIOServer(io) {
     ioInstance = io;
@@ -39,4 +40,13 @@ function emitCallerRejected(accountId, reason) {
         return;
     const room = `account:u:${String(accountId).trim()}`;
     ioInstance.to(room).emit('rejected', { reason });
+}
+function emitReceiverWithdrawalUpdate(accountId, payload) {
+    if (!ioInstance)
+        return;
+    const room = `account:r:${String(accountId).trim()}`;
+    ioInstance.to(room).emit('withdrawal:update', {
+        ...payload,
+        at: payload.at ?? new Date().toISOString(),
+    });
 }

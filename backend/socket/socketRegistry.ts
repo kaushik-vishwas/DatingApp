@@ -35,3 +35,21 @@ export function emitCallerRejected(accountId: string, reason: string): void {
   const room = `account:u:${String(accountId).trim()}`;
   ioInstance.to(room).emit('rejected', { reason });
 }
+
+export function emitReceiverWithdrawalUpdate(
+  accountId: string,
+  payload: {
+    withdrawalId: string;
+    amount: number;
+    payoutStatus: 'processing' | 'success' | 'failed';
+    message: string;
+    at?: string;
+  }
+): void {
+  if (!ioInstance) return;
+  const room = `account:r:${String(accountId).trim()}`;
+  ioInstance.to(room).emit('withdrawal:update', {
+    ...payload,
+    at: payload.at ?? new Date().toISOString(),
+  });
+}

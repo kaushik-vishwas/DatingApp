@@ -52,6 +52,18 @@ const withdrawalRequestSchema = new mongoose_1.Schema({
     bankName: { type: String, required: true, trim: true },
     accountHolderName: { type: String, required: true, trim: true },
     accountMasked: { type: String, required: true, trim: true },
+    payoutStatus: {
+        type: String,
+        enum: ['none', 'processing', 'success', 'failed'],
+        default: 'none',
+        index: true,
+    },
+    payoutId: { type: String, default: null, trim: true },
+    payoutUtr: { type: String, default: null, trim: true },
+    payoutError: { type: String, default: null, trim: true, maxlength: 2000 },
+    payoutReferenceId: { type: String, default: null, trim: true, maxlength: 60 },
+    walletRefundedAt: { type: Date, default: null },
+    walletDebitedAt: { type: Date, default: null },
 }, { timestamps: true });
 withdrawalRequestSchema.index({ status: 1, createdAt: -1 });
 withdrawalRequestSchema.index({ receiverId: 1, createdAt: -1 });

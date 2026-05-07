@@ -95,7 +95,7 @@ const envCandidates = [
 const envPath = envCandidates.find((candidate) => fs_1.default.existsSync(candidate));
 if (envPath) {
     console.log('Loading .env from:', envPath);
-    const result = dotenv_1.default.config({ path: envPath });
+    const result = dotenv_1.default.config({ path: envPath, override: true });
     if (result.error) {
         console.error('Error loading .env:', result.error);
     }
@@ -108,6 +108,11 @@ else {
     console.warn('⚠️ No .env file found. Continuing with existing process environment variables.');
 }
 console.log('MONGODB_URI:', process.env.MONGODB_URI ? '✅ SET' : '❌ NOT SET');
+console.log('HF_API_TOKEN:', process.env.HF_API_TOKEN && process.env.HF_API_TOKEN.trim()
+    ? `✅ SET (len=${process.env.HF_API_TOKEN.trim().length})`
+    : '❌ NOT SET');
+console.log('HF_VOICE_GENDER_MODEL_ID:', process.env.HF_VOICE_GENDER_MODEL_ID || 'audeering/wav2vec2-large-robust-24-ft-age-gender (default)');
+console.log('VOICE_GENDER_FEMALE_MIN_CONFIDENCE:', process.env.VOICE_GENDER_FEMALE_MIN_CONFIDENCE || '0.70 (default)');
 // Normal imports
 require("./config/bootstrapEnv");
 const http_1 = __importDefault(require("http"));

@@ -19,9 +19,14 @@ const emptyStats: AdminWithdrawalStats = {
 };
 
 const statusClass = (status: string) => {
-  if (status === 'approved') return 'bg-emerald-50 text-emerald-700';
-  if (status === 'rejected') return 'bg-red-50 text-red-700';
+  if (status === 'success' || status === 'approved') return 'bg-emerald-50 text-emerald-700';
+  if (status === 'failed' || status === 'rejected') return 'bg-red-50 text-red-700';
   return 'bg-amber-50 text-amber-700';
+};
+
+const prettyStatus = (row: AdminWithdrawalRow) => {
+  if (row.payoutStatus) return row.payoutStatus[0].toUpperCase() + row.payoutStatus.slice(1);
+  return row.status[0].toUpperCase() + row.status.slice(1);
 };
 
 export function WithdrawalsPage() {
@@ -149,9 +154,10 @@ export function WithdrawalsPage() {
                     {new Date(row.createdAt).toLocaleString()}
                   </td>
                   <td className="px-3 py-2.5">
-                    <span className={`rounded-full px-2 py-1 text-[10px] font-semibold ${statusClass(row.status)}`}>
-                      {row.status[0].toUpperCase() + row.status.slice(1)}
+                    <span className={`rounded-full px-2 py-1 text-[10px] font-semibold ${statusClass(row.payoutStatus ?? row.status)}`}>
+                      {prettyStatus(row)}
                     </span>
+                    {row.payoutUtr ? <p className="mt-1 text-[11px] text-neutral-500">UTR: {row.payoutUtr}</p> : null}
                   </td>
                   <td className="px-3 py-2.5">
                     {row.status === 'pending' ? (

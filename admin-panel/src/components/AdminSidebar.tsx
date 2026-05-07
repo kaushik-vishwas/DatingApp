@@ -40,7 +40,7 @@ export function AdminSidebar() {
           N
         </div>
         <div>
-          <p className="text-xs font-semibold text-neutral-500">Nesthama</p>
+          <p className="text-xs font-semibold text-neutral-500">Selecto</p>
           <p className="text-sm font-bold text-neutral-900">Admin</p>
         </div>
       </div>

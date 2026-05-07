@@ -4,8 +4,14 @@
   "main": "index.ts",
   "scripts": {
     "start": "expo start",
+    "start:caller": "cross-env EXPO_PUBLIC_APP_KIND=caller expo start",
+    "start:receiver": "cross-env EXPO_PUBLIC_APP_KIND=receiver expo start",
     "android": "expo run:android",
+    "android:caller": "cross-env EXPO_PUBLIC_APP_KIND=caller expo run:android",
+    "android:receiver": "cross-env EXPO_PUBLIC_APP_KIND=receiver expo run:android",
     "ios": "expo run:ios",
+    "ios:caller": "cross-env EXPO_PUBLIC_APP_KIND=caller expo run:ios",
+    "ios:receiver": "cross-env EXPO_PUBLIC_APP_KIND=receiver expo run:ios",
     "web": "expo start --web",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
@@ -38,6 +44,7 @@
     "@react-native/metro-config": "^0.85.2",
     "@types/react": "^19.0.0",
     "@types/react-native": "^0.73.0",
+    "cross-env": "^10.1.0",
     "dotenv": "^17.4.1",
     "typescript": "^5.5.4"
   },
