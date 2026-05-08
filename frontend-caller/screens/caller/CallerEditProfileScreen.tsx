@@ -23,12 +23,14 @@ import {
   CALLER_LANGUAGE_OPTIONS,
   INDIAN_STATES,
   getCallerAvatarPresetsByGender,
+  isCallerAvatarPresetId,
 } from '../../constants/userOnboarding';
 import { useAuth } from '../../context/AuthContext';
 import type { CallerStackParamList } from '../../navigation/CallerStackParamList';
 import { getErrorMessage, profileApi } from '../../services/api';
 import type { Gender } from '../../types/user';
 import { ageFromLocalCalendarBirthDate, formatDateOnlyLocal, maxDobDateForMinAge, parseDateOnlyLocalToDate } from '../../utils/birthDateClient';
+import { resolveProfileImageSource } from '../../utils/avatarSource';
 
 const PURPLE = '#7b2cff';
 const MAX_INTERESTS = 3;
@@ -63,10 +65,11 @@ export default function CallerEditProfileScreen({ navigation }: Props): React.JS
   const [stateModal, setStateModal] = useState(false);
   const [interests, setInterests] = useState<string[]>([]);
   const [languages, setLanguages] = useState<string[]>([]);
-  const [imageUri, setImageUri] = useState<string | null>(null);
+  const [profileImageValue, setProfileImageValue] = useState<string | null>(null);
   const [avatarModal, setAvatarModal] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const allowedAvatarPresets = getCallerAvatarPresetsByGender(gender);
+  const allowedAvatarPresetIds = allowedAvatarPresets.map((preset) => preset.id);
 
   useEffect(() => {
     if (!user) return;
@@ -80,14 +83,14 @@ export default function CallerEditProfileScreen({ navigation }: Props): React.JS
     const langs = (user.languages ?? []).filter((l) => CALLER_LANGUAGE_OPTIONS.includes(l)).slice(0, MAX_LANGUAGES);
     setInterests(ints);
     setLanguages(langs);
-    if (user.profileImage) setImageUri(user.profileImage);
+    if (user.profileImage) setProfileImageValue(user.profileImage);
   }, [user]);
 
   useEffect(() => {
-    if (imageUri && !allowedAvatarPresets.includes(imageUri)) {
-      setImageUri(allowedAvatarPresets[0] ?? null);
+    if (isCallerAvatarPresetId(profileImageValue) && !allowedAvatarPresetIds.includes(profileImageValue)) {
+      setProfileImageValue(allowedAvatarPresetIds[0] ?? null);
     }
-  }, [allowedAvatarPresets, imageUri]);
+  }, [allowedAvatarPresetIds, profileImageValue]);
 
   const chip = (label: string, selected: boolean, onPress: () => void) => (
     <TouchableOpacity
@@ -128,11 +131,11 @@ export default function CallerEditProfileScreen({ navigation }: Props): React.JS
       Alert.alert('Validation', `Pick at least one language (up to ${MAX_LANGUAGES}).`);
       return;
     }
-    if (!imageUri) {
+    if (!profileImageValue) {
       Alert.alert('Validation', 'Please choose an avatar.');
       return;
     }
-    if (!allowedAvatarPresets.includes(imageUri)) {
+    if (isCallerAvatarPresetId(profileImageValue) && !allowedAvatarPresetIds.includes(profileImageValue)) {
       Alert.alert('Validation', 'Please choose a valid avatar for the selected gender.');
       return;
     }
@@ -141,7 +144,7 @@ export default function CallerEditProfileScreen({ navigation }: Props): React.JS
     try {
       await profileApi.updateCaller({
         name,
-        profileImage: imageUri.trim(),
+        profileImage: profileImageValue.trim(),
         languages,
         interests,
         gender,
@@ -156,6 +159,8 @@ export default function CallerEditProfileScreen({ navigation }: Props): React.JS
       setSubmitting(false);
     }
   };
+
+  const resolvedProfileImageSource = resolveProfileImageSource(profileImageValue);
 
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'left', 'right']}>
@@ -173,8 +178,8 @@ export default function CallerEditProfileScreen({ navigation }: Props): React.JS
 
         <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
           <TouchableOpacity style={styles.avatarWrap} onPress={() => setAvatarModal(true)} activeOpacity={0.9}>
-            {imageUri ? (
-              <Image source={{ uri: imageUri }} style={styles.avatarImg} />
+            {resolvedProfileImageSource ? (
+              <Image source={resolvedProfileImageSource} style={styles.avatarImg} />
             ) : (
               <View style={styles.avatarPlaceholder}>
                 <Text style={styles.camera}>📷</Text>
@@ -291,19 +296,19 @@ export default function CallerEditProfileScreen({ navigation }: Props): React.JS
             <Text style={styles.modalTitle}>Select Avatar</Text>
             <ScrollView style={styles.modalList} keyboardShouldPersistTaps="handled">
               <View style={styles.avatarGrid}>
-                {allowedAvatarPresets.map((avatarUrl) => {
-                  const active = imageUri === avatarUrl;
+                {allowedAvatarPresets.map((avatarPreset) => {
+                  const active = profileImageValue === avatarPreset.id;
                   return (
                     <TouchableOpacity
-                      key={avatarUrl}
+                      key={avatarPreset.id}
                       style={[styles.avatarCell, active && styles.avatarCellActive]}
                       onPress={() => {
-                        setImageUri(avatarUrl);
+                        setProfileImageValue(avatarPreset.id);
                         setAvatarModal(false);
                       }}
                       activeOpacity={0.85}
                     >
-                      <Image source={{ uri: avatarUrl }} style={styles.avatarThumb} />
+                      <Image source={avatarPreset.source} style={styles.avatarThumb} />
                     </TouchableOpacity>
                   );
                 })}

@@ -354,6 +354,7 @@ export interface CompleteProfilePayload {
   bankAccountNumber: string;
   bankIfsc: string;
   bankName: string;
+  userAudio?: string;
 }
 
 export interface CompleteProfileResponse {

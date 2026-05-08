@@ -12,6 +12,7 @@ import {
   View,
 } from 'react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { authApi, getErrorMessage } from '../services/api';
 import type { RootStackParamList } from '../navigation/RootStackParamList';
@@ -22,6 +23,7 @@ import { isValidEmail, normalizeEmail, validateIndianMobileDigits, validatePassw
 type Props = NativeStackScreenProps<RootStackParamList, 'Register'>;
 
 export default function RegisterScreen({ navigation, route }: Props) {
+  const insets = useSafeAreaInsets();
   const [fullName, setFullName] = useState<string>('');
   const [dob, setDob] = useState<Date | null>(null);
   const [emailAddress, setEmailAddress] = useState<string>(route.params?.email ?? '');
@@ -111,7 +113,10 @@ export default function RegisterScreen({ navigation, route }: Props) {
           ref={(r) => {
             scrollRef.current = r;
           }}
-          contentContainerStyle={styles.content}
+          contentContainerStyle={[
+            styles.content,
+            { paddingTop: Math.max(insets.top, 14) + 12, paddingBottom: Math.max(insets.bottom, 14) + 24 },
+          ]}
           keyboardShouldPersistTaps="handled"
           keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
           onScrollBeginDrag={Keyboard.dismiss}
@@ -208,9 +213,6 @@ export default function RegisterScreen({ navigation, route }: Props) {
             <Text style={styles.linkText}>Already have an account? Log in</Text>
           </TouchableOpacity>
 
-          <TouchableOpacity style={styles.linkAlt} onPress={() => navigation.navigate('UserRegister', undefined)}>
-            <Text style={styles.linkAltText}>Joining as an app user instead?</Text>
-          </TouchableOpacity>
         </ScrollView>
       </KeyboardAvoidingView>
     </View>
@@ -222,16 +224,13 @@ const PURPLE = '#7b2cff';
 const styles = StyleSheet.create({
   bg: {
     flex: 1,
-    backgroundColor: '#262626',
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: 18,
+    backgroundColor: '#fff',
   },
   card: {
     width: '100%',
-    maxWidth: 360,
     backgroundColor: '#fff',
-    borderRadius: 10,
+    borderRadius: 0,
+    flex: 1,
   },
   content: {
     padding: 22,

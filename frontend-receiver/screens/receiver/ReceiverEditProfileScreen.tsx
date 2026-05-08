@@ -33,7 +33,7 @@ export default function ReceiverEditProfileScreen(): React.JSX.Element {
   const [languages, setLanguages] = useState<string[]>(user?.languages ?? []);
   const [interests, setInterests] = useState<string[]>(user?.interests ?? []);
   const [showSuccess, setShowSuccess] = useState(false);
-  const [profileImageUri, setProfileImageUri] = useState<string | null>(user?.profileImage ?? null);
+  const [profileImageUri, setProfileImageUri] = useState<any>(user?.profileImage ?? null);
   const [avatarModal, setAvatarModal] = useState(false);
 
   const onSave = async () => {
@@ -53,7 +53,7 @@ export default function ReceiverEditProfileScreen(): React.JSX.Element {
     try {
       await profileApi.updateReceiverProfile({
         name: name.trim(),
-        profileImage: profileImageUri.trim(),
+        profileImage: profileImageUri,
         state: stateValue.trim(),
         languages,
         interests,
@@ -86,14 +86,21 @@ export default function ReceiverEditProfileScreen(): React.JSX.Element {
         <View style={styles.backBtn} />
       </View>
 
-      <Text style={styles.title}>Edit Your Profile</Text>
+      {/* <Text style={styles.title}>Edit Your Profile</Text> */}
       <Text style={styles.subtitle}>This information will be visible to users who want to call.</Text>
 
       <Text style={styles.fieldLabel}>Profile Avatar</Text>
       <View style={styles.photoWrap}>
         <TouchableOpacity style={styles.photoCircle} onPress={() => setAvatarModal(true)}>
           {profileImageUri ? (
-            <Image source={{ uri: profileImageUri }} style={styles.photoImage} />
+          <Image
+          source={
+            typeof profileImageUri === 'string'
+              ? { uri: profileImageUri }
+              : profileImageUri
+          }
+          style={styles.photoImage}
+        />
           ) : (
             <Text style={styles.photoPlaceholder}>📷</Text>
           )}
@@ -103,8 +110,7 @@ export default function ReceiverEditProfileScreen(): React.JSX.Element {
         </TouchableOpacity>
       </View>
 
-      <Text style={styles.fieldLabel}>Display Name</Text>
-      <Field label="Full Name" value={name} onChangeText={setName} />
+      <Field label="Display Name" value={name} onChangeText={setName} />
       <Field label="State" value={stateValue} onChangeText={setStateValue} />
 
       <Text style={[styles.fieldLabel, { marginTop: 10 }]}>Languages You Speak (select up to 2)</Text>
@@ -162,7 +168,7 @@ export default function ReceiverEditProfileScreen(): React.JSX.Element {
                       }}
                       activeOpacity={0.85}
                     >
-                      <Image source={{ uri: avatarUrl }} style={styles.avatarThumb} />
+                     <Image source={avatarUrl} style={styles.avatarThumb} />
                     </TouchableOpacity>
                   );
                 })}

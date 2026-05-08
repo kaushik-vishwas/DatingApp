@@ -7,6 +7,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useAuth } from '../../context/AuthContext';
 import { useUserOnboarding } from '../../context/UserOnboardingContext';
@@ -18,6 +19,7 @@ const PURPLE = '#7b2cff';
 type Props = NativeStackScreenProps<UserOnboardingStackParamList, 'SelectGender'>;
 
 export default function SelectGenderScreen({ navigation }: Props): React.JSX.Element {
+  const insets = useSafeAreaInsets();
   const { setGender } = useUserOnboarding();
   const { signOut } = useAuth();
   const [selected, setSelected] = useState<Gender | null>(null);
@@ -35,10 +37,6 @@ export default function SelectGenderScreen({ navigation }: Props): React.JSX.Ele
       return;
     }
     setGender(selected);
-    if (selected === 'female') {
-      navigation.navigate('AudioVerification');
-      return;
-    }
     navigation.navigate('ChooseAvatar');
   };
 
@@ -58,7 +56,15 @@ export default function SelectGenderScreen({ navigation }: Props): React.JSX.Ele
   };
 
   return (
-    <View style={styles.bg}>
+    <View
+      style={[
+        styles.bg,
+        {
+          paddingTop: Math.max(insets.top, 14) + 18,
+          paddingBottom: Math.max(insets.bottom, 14) + 18,
+        },
+      ]}
+    >
       <View style={styles.card}>
         <TouchableOpacity style={styles.backWrap} onPress={onLeave}>
           <Text style={styles.back}>←</Text>
@@ -85,14 +91,10 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#f4f4f5',
     paddingHorizontal: 20,
-    paddingTop: 48,
-    paddingBottom: 24,
   },
   card: {
     flex: 1,
-    maxWidth: 400,
     width: '100%',
-    alignSelf: 'center',
   },
   backWrap: {
     marginBottom: 12,

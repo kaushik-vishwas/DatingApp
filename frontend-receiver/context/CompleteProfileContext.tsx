@@ -29,6 +29,7 @@ export type CompleteProfileState = {
   bankConfirmAccountNumber: string;
   bankIfsc: string;
   bankName: string;
+  userAudio: string | null;
 };
 
 const initialState: CompleteProfileState = {
@@ -50,6 +51,7 @@ const initialState: CompleteProfileState = {
   bankConfirmAccountNumber: '',
   bankIfsc: '',
   bankName: '',
+  userAudio: null,
 };
 
 type CompleteProfileContextValue = {

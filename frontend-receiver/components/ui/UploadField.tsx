@@ -39,6 +39,17 @@ export function UploadField({
     const normalized = value.trim().toLowerCase();
     if (!normalized) return false;
     if (normalized.startsWith('data:image/')) return true;
+    if (
+      normalized.startsWith('http://') ||
+      normalized.startsWith('https://') ||
+      normalized.startsWith('file://') ||
+      normalized.startsWith('content://') ||
+      normalized.startsWith('asset:/') ||
+      normalized.startsWith('ph://') ||
+      normalized.startsWith('blob:')
+    ) {
+      return true;
+    }
     return /\.(png|jpe?g|gif|webp|bmp|heic|heif|avif)(\?.*)?$/.test(normalized);
   };
   const isImage = Boolean(

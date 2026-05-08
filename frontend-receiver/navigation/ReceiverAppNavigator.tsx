@@ -5,6 +5,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import ReceiverHomeDashboard from '../screens/ReceiverHomeDashboard';
 import ReceiverChatsScreen from '../screens/receiver/ReceiverChatsScreen';
 import ChatConversationScreen from '../screens/chat/ChatConversationScreen';
+import IncomingCallScreen from '../screens/call/IncomingCallScreen';
 import VoiceCallScreen from '../screens/call/VoiceCallScreen';
 import WithdrawEarningsScreen from '../screens/receiver/WithdrawEarningsScreen';
 import ReceiverCallHistoryScreen from '../screens/receiver/ReceiverCallHistoryScreen';
@@ -50,6 +51,7 @@ export default function ReceiverAppNavigator(): React.JSX.Element {
         component={VoiceCallScreen}
         options={{ contentStyle: { paddingBottom: 0 } }}
       />
+      <Stack.Screen name="IncomingCall" component={IncomingCallScreen} options={{ contentStyle: { paddingBottom: 0 } }} />
     </Stack.Navigator>
   );
 }

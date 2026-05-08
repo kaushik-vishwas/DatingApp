@@ -10,6 +10,7 @@ import {
   View,
 } from 'react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Button } from '../../components/ui/Button';
 import { ScreenHeader } from '../../components/ui/ScreenHeader';
@@ -66,6 +67,7 @@ async function pickAadhaarSide(
 }
 
 export default function DocumentUploadScreen({ navigation }: Props): React.JSX.Element {
+  const insets = useSafeAreaInsets();
   const { state, update } = useCompleteProfile();
 
   const onPickFront = async () => {
@@ -93,7 +95,13 @@ export default function DocumentUploadScreen({ navigation }: Props): React.JSX.E
   return (
     <View style={styles.bg}>
       <View style={styles.card}>
-        <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+        <ScrollView
+          contentContainerStyle={[
+            styles.content,
+            { paddingTop: Math.max(insets.top, 14) + 12, paddingBottom: Math.max(insets.bottom, 14) + 24 },
+          ]}
+          keyboardShouldPersistTaps="handled"
+        >
           <ScreenHeader
             title="Verify your identity"
             subtitle="Step 2 of 3"
@@ -173,18 +181,13 @@ export default function DocumentUploadScreen({ navigation }: Props): React.JSX.E
 const styles = StyleSheet.create({
   bg: {
     flex: 1,
-    backgroundColor: '#262626',
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: 18,
-    paddingVertical: 24,
+    backgroundColor: '#f4f4f5',
   },
   card: {
     width: '100%',
-    maxWidth: 400,
     flex: 1,
     backgroundColor: '#fff',
-    borderRadius: 12,
+    borderRadius: 0,
   },
   content: {
     padding: 20,

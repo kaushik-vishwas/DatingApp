@@ -13,6 +13,7 @@ import {
   TouchableWithoutFeedback,
 } from 'react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { authApi, getErrorMessage, saveJwt } from '../services/api';
 import { useAuth } from '../context/AuthContext';
@@ -31,6 +32,7 @@ function maskEmail(email: string): string {
 }
 
 export default function OtpScreen({ navigation, route }: Props) {
+  const insets = useSafeAreaInsets();
   const { email, accountType } = route.params;
   const { signIn } = useAuth();
   const [otp, setOtp] = useState<string>('');
@@ -98,7 +100,10 @@ export default function OtpScreen({ navigation, route }: Props) {
     >
       <TouchableWithoutFeedback onPress={dismissKeyboard}>
         <ScrollView
-          contentContainerStyle={styles.scrollContainer}
+          contentContainerStyle={[
+            styles.scrollContainer,
+            { paddingTop: Math.max(insets.top, 14), paddingBottom: Math.max(insets.bottom, 14) },
+          ]}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
         >
@@ -172,18 +177,15 @@ const styles = StyleSheet.create({
   },
   bg: {
     flex: 1,
-    backgroundColor: '#262626',
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: 18,
-    minHeight: 500,
+    backgroundColor: '#fff',
+    paddingHorizontal: 0,
   },
   card: {
     width: '100%',
-    maxWidth: 360,
+    flex: 1,
     backgroundColor: '#fff',
     padding: 22,
-    borderRadius: 10,
+    borderRadius: 0,
   },
   backRow: {
     marginBottom: 8,

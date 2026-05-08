@@ -133,7 +133,7 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     pendingOutgoingByCallIdRef.current.clear();
     for (const waiter of pendingInviteOutcomeRef.current.values()) {
       clearTimeout(waiter.timeout);
-      waiter.resolve(false);
+      waiter.resolve({ accepted: false, reason: 'ended' });
     }
     pendingInviteOutcomeRef.current.clear();
   }, []);

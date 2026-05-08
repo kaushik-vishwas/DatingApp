@@ -31,7 +31,7 @@ export default function ReceiverLoginScreen({ navigation, route }: Props): React
       logoLetter="R"
       title="Receiver sign in"
       subtitle="For call receivers — use the email and password you applied with"
-      primaryRegisterLabel="Register as receiver"
+      primaryRegisterLabel="dd"
       onPrimaryRegister={() => navigation.navigate('Register', { email: normalized })}
       switchLoginLabel={isReceiverOnlyApp ? undefined : 'Login as user'}
       onSwitchLogin={isReceiverOnlyApp ? undefined : () => navigation.navigate('UserLogin', { email: normalized })}

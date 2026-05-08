@@ -22,31 +22,43 @@ type Step = {
 
 const STEPS: Step[] = [
   {
-    title: 'How Earnings Work',
-    subtitle: 'Understanding your income on the platform',
+    title: '💰 How You Earn',
+    subtitle: 'Your earnings depend on call duration & timing',
     icon: '📈',
     bullets: [
-      'Call rate is fixed at ₹5 per minute.',
-      'The platform charges a 20% commission.',
-      'Earnings are credited after each call.',
-      'Withdraw when you like — no minimum balance.',
-      'No hidden fees or surprise deductions.',
+      'Calls under 55 seconds = 0 earnings ❌',
+      'Calls 3-10 minutes = 3x score multiplier',
+      'Calls above 10 minutes = 5x score multiplier',
+      'Longer calls = much higher earnings!',
     ],
   },
   {
-    title: 'Commission explained',
-    subtitle: 'What the platform fee covers',
-    icon: '🛡️',
+    title: '⏰ Best Time to Earn',
+    subtitle: 'Extra bonuses during night hours',
+    icon: '🌙',
     bullets: [
-      'Platform maintenance and updates.',
-      'Payment processing and security.',
-      '24/7 customer support.',
-      'Marketing to bring in customers.',
-      'Safety and content moderation.',
+      'Day time (9 AM - 9 PM): 0.5x multiplier',
+      'Night (10 PM - 12 AM): 3x multiplier 🎉',
+      'Late night (12 AM - 2 AM): 10x multiplier 🔥',
+      'Best earning: Take calls after 10 PM!',
     ],
   },
   {
-    title: 'Phone etiquette',
+    title: '🏆 Badge Levels',
+    subtitle: 'Higher badge = higher pay per minute',
+    icon: '🎖️',
+    bullets: [
+      'Bronze (1+ score): ₹1.3/min',
+      'Silver (1648+ score): ₹1.5/min',
+      'Gold (10403+ score): ₹1.7/min',
+      'Pro (16686+ score): ₹1.9/min',
+      'Platinum (below 8000): ₹2.0/min',
+      'Diamond (8000-12000): ₹2.3/min',
+      'Supreme (12000+): ₹2.6/min 👑',
+    ],
+  },
+  {
+    title: '💬 Phone Etiquette',
     subtitle: 'Best practices for great conversations',
     icon: '💬',
     bullets: [
@@ -60,15 +72,15 @@ const STEPS: Step[] = [
     ],
   },
   {
-    title: 'Maximize your earnings',
-    subtitle: 'Tips to increase your income',
-    icon: '⭐',
+    title: '⭐ Pro Tips',
+    subtitle: 'Maximize your daily earnings',
+    icon: '🚀',
     bullets: [
-      'Maintain a high rating (4.5+).',
-      'Be available during peak hours (6 PM – 11 PM).',
-      'Complete your profile with quality photos.',
-      'Respond quickly to incoming calls.',
-      'Build relationships for repeat customers.',
+      'Talk for 10+ minutes to get 5x points',
+      'Be active after 10 PM for bonus multipliers',
+      'Avoid calls shorter than 55 seconds',
+      'Higher score = better badge = more ₹ per minute',
+      'Consistent earnings = reach Supreme level!',
     ],
   },
 ];
@@ -86,7 +98,7 @@ export default function ReceiverEducationScreen({ navigation }: Props): React.JS
   };
 
   const onSkip = () => {
-    Alert.alert('Skip intro?', 'You can always read policies later in settings.', [
+    Alert.alert('Skip intro?', 'You can always read earning policies later in settings.', [
       { text: 'Stay', style: 'cancel' },
       { text: 'Skip', style: 'destructive', onPress: finish },
     ]);

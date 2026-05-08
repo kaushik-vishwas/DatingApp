@@ -139,7 +139,7 @@ function toApiReceiver(receiver) {
         suspended: Boolean(r.suspended),
         walletBalance: typeof r.walletBalance === 'number' && Number.isFinite(r.walletBalance) ? r.walletBalance : 0,
         audioCallRate: Receiver_1.RECEIVER_AUDIO_CALL_RATE_INR_PER_MIN,
-        userAudio: null,
+        userAudio: typeof r.userAudio === 'string' ? r.userAudio : null,
         isAvailable: Boolean(r.isAvailable),
         isOnline: Boolean(r.isOnline),
         rejectionReason: r.rejectionReason ?? null,

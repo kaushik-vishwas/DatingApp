@@ -1,7 +1,6 @@
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import React from 'react';
 
-import AudioVerificationScreen from '../screens/userOnboarding/AudioVerificationScreen';
 import ChooseAvatarScreen from '../screens/userOnboarding/ChooseAvatarScreen';
 import SelectGenderScreen from '../screens/userOnboarding/SelectGenderScreen';
 import UserCompleteProfileScreen from '../screens/userOnboarding/UserCompleteProfileScreen';
@@ -22,7 +21,6 @@ export default function UserOnboardingNavigator(): React.JSX.Element {
       }}
     >
       <Stack.Screen name="SelectGender" component={SelectGenderScreen} />
-      <Stack.Screen name="AudioVerification" component={AudioVerificationScreen} />
       <Stack.Screen name="ChooseAvatar" component={ChooseAvatarScreen} />
       <Stack.Screen name="UserCompleteProfile" component={UserCompleteProfileScreen} />
       <Stack.Screen name="WelcomeOnboard" component={WelcomeOnboardScreen} />

@@ -22,7 +22,16 @@ export default function DobPickerField({ label, value, onChange, fallbackDate }:
 
   const displayDate = value ?? fallbackDate ?? maximumDate;
 
-  const summary = value ? formatDateOnlyLocal(value) : 'Tap to choose';
+  // Format date as DD-MM-YYYY for display
+  const formatDisplayDate = (date: Date | null): string => {
+    if (!date) return 'Tap to choose';
+    const day = date.getDate().toString().padStart(2, '0');
+    const month = (date.getMonth() + 1).toString().padStart(2, '0');
+    const year = date.getFullYear();
+    return `${day}-${month}-${year}`;
+  };
+
+  const summary = value ? formatDisplayDate(value) : 'Tap to choose';
 
   const open = () => {
     setShow(true);

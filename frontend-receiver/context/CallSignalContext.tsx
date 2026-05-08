@@ -78,6 +78,9 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   const pendingInviteOutcomeRef = useRef<Map<string, InviteOutcomeWaiter>>(new Map());
   const seenIncomingCallIdsRef = useRef<Map<string, number>>(new Map());
   const rejectedIncomingCallIdsRef = useRef<Set<string>>(new Set());
+  const activeIncomingCallUiCallIdRef = useRef<string | null>(null);
+  const incomingBootstrapByCallIdRef = useRef<Map<string, VoiceBootstrapResponse>>(new Map());
+  const incomingBootstrapPromiseByCallIdRef = useRef<Map<string, Promise<VoiceBootstrapResponse>>>(new Map());
   const userRoleRef = useRef(user?.role ?? null);
   const incomingCallHandlerRef = useRef<((req: IncomingCallRequest) => void) | null>(null);
   const queueModeRef = useRef<boolean>(false);
@@ -116,6 +119,30 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     []
   );
 
+  const openIncomingCall = useCallback((incoming: IncomingCallRequest) => {
+    const navigate = () => {
+      const nav = navigationRef.current;
+      if (!nav || !nav.isReady()) return false;
+      nav.navigate('Home', {
+        screen: 'IncomingCall',
+        params: {
+          callId: incoming.callId,
+          fromType: incoming.fromType,
+          fromId: incoming.fromId,
+          peerName: incoming.peerName,
+          peerImage: incoming.peerImage ?? null,
+        },
+      });
+      return true;
+    };
+
+    if (navigate()) return;
+    setTimeout(() => {
+      // Best-effort; avoid hard failure if navigation isn't ready yet.
+      void navigate();
+    }, 500);
+  }, []);
+
   const registerPeer = useCallback((peerId: string, peerName: string, peerImage?: string | null) => {
     const id = peerId.trim();
     const name = peerName.trim();
@@ -133,7 +160,7 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     pendingOutgoingByCallIdRef.current.clear();
     for (const waiter of pendingInviteOutcomeRef.current.values()) {
       clearTimeout(waiter.timeout);
-      waiter.resolve(false);
+      waiter.resolve({ accepted: false, reason: 'ended' });
     }
     pendingInviteOutcomeRef.current.clear();
   }, []);
@@ -195,18 +222,42 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   const rejectIncomingCall = useCallback((req: IncomingCallRequest) => {
     // Block only this exact call attempt after receiver rejects.
     rejectedIncomingCallIdsRef.current.add(req.callId);
+    if (activeIncomingCallUiCallIdRef.current === req.callId) {
+      activeIncomingCallUiCallIdRef.current = null;
+    }
+    incomingBootstrapByCallIdRef.current.delete(req.callId);
+    incomingBootstrapPromiseByCallIdRef.current.delete(req.callId);
     socketRef.current?.emit('call:response', { callId: req.callId, accepted: false });
   }, []);
 
   const acceptIncomingCall = useCallback(
     async (req: IncomingCallRequest): Promise<void> => {
+      if (activeIncomingCallUiCallIdRef.current === req.callId) {
+        activeIncomingCallUiCallIdRef.current = null;
+      }
       const socket = socketRef.current;
       if (!socket?.connected) {
         throw new Error('Call signaling is not connected.');
       }
-      const { data } = await callApi.bootstrap(req.fromId, req.callId);
+
+      const cachedBootstrap = incomingBootstrapByCallIdRef.current.get(req.callId) ?? null;
+      if (cachedBootstrap) {
+        incomingBootstrapByCallIdRef.current.delete(req.callId);
+        incomingBootstrapPromiseByCallIdRef.current.delete(req.callId);
+        socket.emit('call:response', { callId: req.callId, accepted: true });
+        openVoiceCall(cachedBootstrap, req.peerName, req.peerImage ?? null);
+        return;
+      }
+
+      const inFlight = incomingBootstrapPromiseByCallIdRef.current.get(req.callId) ?? null;
+      const bootstrapped = inFlight
+        ? await inFlight
+        : (await callApi.bootstrap(req.fromId, req.callId)).data;
+
+      incomingBootstrapByCallIdRef.current.delete(req.callId);
+      incomingBootstrapPromiseByCallIdRef.current.delete(req.callId);
       socket.emit('call:response', { callId: req.callId, accepted: true });
-      openVoiceCall(data, req.peerName, req.peerImage ?? null);
+      openVoiceCall(bootstrapped, req.peerName, req.peerImage ?? null);
     },
     [openVoiceCall]
   );
@@ -300,6 +351,34 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
           return;
         }
 
+        // Replace the system popup with a dedicated "Incoming Call" screen on receiver devices.
+        if (userRoleRef.current === 'receiver') {
+          activeIncomingCallUiCallIdRef.current = incoming.callId;
+
+          // Prefetch the bootstrap as soon as we get the invite, so "Accept" feels instant.
+          if (
+            !incomingBootstrapByCallIdRef.current.has(incoming.callId) &&
+            !incomingBootstrapPromiseByCallIdRef.current.has(incoming.callId)
+          ) {
+            const promise = (async () => {
+              const { data } = await callApi.bootstrap(incoming.fromId, incoming.callId);
+              // Cache only if this call is still the active incoming-call UI.
+              if (activeIncomingCallUiCallIdRef.current === incoming.callId) {
+                incomingBootstrapByCallIdRef.current.set(incoming.callId, data);
+              }
+              return data;
+            })();
+            incomingBootstrapPromiseByCallIdRef.current.set(incoming.callId, promise);
+            void promise.catch(() => {
+              incomingBootstrapByCallIdRef.current.delete(incoming.callId);
+            });
+          }
+
+          openIncomingCall(incoming);
+          return;
+        }
+
+        // Fallback for non-receiver roles (keeps existing behavior).
         Alert.alert(`${peerName} is calling`, 'Accept this voice call request?', [
           {
             text: 'Reject',
@@ -372,6 +451,22 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         seenIncomingCallIdsRef.current.delete(payload.callId);
         rejectedIncomingCallIdsRef.current.delete(payload.callId);
         pendingOutgoingByCallIdRef.current.delete(payload.callId);
+
+        if (userRoleRef.current === 'receiver' && activeIncomingCallUiCallIdRef.current === payload.callId) {
+          activeIncomingCallUiCallIdRef.current = null;
+          incomingBootstrapByCallIdRef.current.delete(payload.callId);
+          incomingBootstrapPromiseByCallIdRef.current.delete(payload.callId);
+          const nav = navigationRef.current;
+          if (nav?.isReady()) {
+            nav.navigate('Home', { screen: 'ReceiverHome' });
+          } else {
+            setTimeout(() => {
+              const n = navigationRef.current;
+              if (n?.isReady()) n.navigate('Home', { screen: 'ReceiverHome' });
+            }, 500);
+          }
+        }
+
         const waiter = pendingInviteOutcomeRef.current.get(payload.callId);
         if (waiter) {
           clearTimeout(waiter.timeout);
@@ -391,7 +486,7 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       clearPendingInvites(false);
       socketRef.current = null;
     };
-  }, [clearPendingInvites, isSignedIn, openVoiceCall, user]);
+  }, [clearPendingInvites, isSignedIn, openVoiceCall, openIncomingCall, user]);
 
   const value = useMemo<CallSignalContextValue>(
     () => ({

@@ -1,10 +1,12 @@
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import React, { useEffect, useState } from 'react';
+import { Image, StyleSheet } from 'react-native';
 
 import { AuthLoginCard } from '../components/auth/AuthLoginCard';
 import { getForcedAppKind } from '../config/appKind';
 import type { RootStackParamList } from '../navigation/RootStackParamList';
 import { normalizeEmail } from '../utils/validation';
+import SelectoLogo from '../assets/SelectoLogo.png';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'UserLogin'>;
 
@@ -28,7 +30,7 @@ export default function UserLoginScreen({ navigation, route }: Props): React.JSX
       navigation={navigation}
       email={email}
       onEmailChange={setEmail}
-      logoLetter="U"
+      customLogo={<Image source={SelectoLogo} style={styles.logo} resizeMode="contain" />}
       title="User sign in"
       subtitle="For app members — use the email and password you registered with"
       primaryRegisterLabel="Create an account"
@@ -40,3 +42,10 @@ export default function UserLoginScreen({ navigation, route }: Props): React.JSX
     />
   );
 }
+
+const styles = StyleSheet.create({
+  logo: {
+    width: 150,
+    height: 50,
+  },
+});

@@ -11,6 +11,7 @@ import {
   View,
 } from 'react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Input';
@@ -33,6 +34,7 @@ const GENDERS: { value: Gender; label: string }[] = [
 ];
 
 export default function ProfileInfoScreen({ navigation }: Props): React.JSX.Element {
+  const insets = useSafeAreaInsets();
   const { state, update } = useCompleteProfile();
   const [stateModal, setStateModal] = useState(false);
   const [avatarModal, setAvatarModal] = useState(false);
@@ -53,7 +55,13 @@ export default function ProfileInfoScreen({ navigation }: Props): React.JSX.Elem
   return (
     <View style={styles.bg}>
       <View style={styles.card}>
-        <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+        <ScrollView
+          contentContainerStyle={[
+            styles.content,
+            { paddingTop: Math.max(insets.top, 14) + 12, paddingBottom: Math.max(insets.bottom, 14) + 24 },
+          ]}
+          keyboardShouldPersistTaps="handled"
+        >
           <ScreenHeader
             title="Complete Your Profile"
             subtitle="Step 1 of 3"
@@ -152,19 +160,19 @@ export default function ProfileInfoScreen({ navigation }: Props): React.JSX.Elem
             <Text style={styles.modalTitle}>Select Avatar</Text>
             <ScrollView style={styles.modalList} keyboardShouldPersistTaps="handled">
               <View style={styles.avatarGrid}>
-                {CALLER_FEMALE_AVATAR_PRESETS.map((avatarUrl) => {
-                  const active = state.profileImageUri === avatarUrl;
+                {CALLER_FEMALE_AVATAR_PRESETS.map((avatarPreset) => {
+                  const active = state.profileImageUri === avatarPreset.id;
                   return (
                     <TouchableOpacity
-                      key={avatarUrl}
+                      key={avatarPreset.id}
                       style={[styles.avatarCell, active && styles.avatarCellActive]}
                       onPress={() => {
-                        update({ profileImageUri: avatarUrl, profileImageMime: null });
+                        update({ profileImageUri: avatarPreset.id, profileImageMime: null });
                         setAvatarModal(false);
                       }}
                       activeOpacity={0.85}
                     >
-                      <Image source={{ uri: avatarUrl }} style={styles.avatarThumb} />
+                      <Image source={avatarPreset.source} style={styles.avatarThumb} />
                     </TouchableOpacity>
                   );
                 })}
@@ -182,18 +190,13 @@ const PURPLE = '#7b2cff';
 const styles = StyleSheet.create({
   bg: {
     flex: 1,
-    backgroundColor: '#262626',
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: 18,
-    paddingVertical: 24,
+    backgroundColor: '#f4f4f5',
   },
   card: {
     width: '100%',
-    maxWidth: 400,
     flex: 1,
     backgroundColor: '#fff',
-    borderRadius: 12,
+    borderRadius: 0,
   },
   content: {
     padding: 20,

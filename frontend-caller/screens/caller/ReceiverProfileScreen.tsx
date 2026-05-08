@@ -17,6 +17,7 @@ import { useAuth } from '../../context/AuthContext';
 import { useCallSignals } from '../../context/CallSignalContext';
 import type { CallerStackParamList } from '../../navigation/CallerStackParamList';
 import { getErrorMessage } from '../../services/api';
+import { resolveProfileImageSource } from '../../utils/avatarSource';
 import { getReceiverPresenceInfo } from '../../utils/receiverStatus';
 
 const PURPLE = '#7b2cff';
@@ -46,6 +47,7 @@ export default function ReceiverProfileScreen({ navigation, route }: Props): Rea
   const wallet = typeof user?.walletBalance === 'number' && Number.isFinite(user.walletBalance) ? user.walletBalance : 0;
   const rate = receiver.audioCallRate;
   const presence = getReceiverPresenceInfo(receiver);
+  const selfProfileImageSource = resolveProfileImageSource(user?.profileImage);
 
   const openWallet = () => {
     setRechargeModal('none');
@@ -92,8 +94,8 @@ export default function ReceiverProfileScreen({ navigation, route }: Props): Rea
         <TouchableOpacity style={styles.topRight} onPress={() => navigation.navigate('Wallet')}>
           <Text style={styles.walletIco}>👛</Text>
           <Text style={styles.walletAmt}>₹{wallet.toLocaleString('en-IN')}</Text>
-          {user?.profileImage ? (
-            <Image source={{ uri: user.profileImage }} style={styles.meAv} />
+          {selfProfileImageSource ? (
+            <Image source={selfProfileImageSource} style={styles.meAv} />
           ) : (
             <View style={[styles.meAv, styles.meAvPh]}>
               <Text style={styles.meAvTxt}>{user?.name?.charAt(0) ?? '?'}</Text>

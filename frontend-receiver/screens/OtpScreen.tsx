@@ -15,6 +15,7 @@ import {
 } from 'react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import LinearGradient from 'react-native-linear-gradient';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { authApi, getErrorMessage, saveJwt } from '../services/api';
 import { useAuth } from '../context/AuthContext';
@@ -33,6 +34,7 @@ function maskEmail(email: string): string {
 }
 
 export default function OtpScreen({ navigation, route }: Props) {
+  const insets = useSafeAreaInsets();
   const { email, accountType } = route.params;
   const { signIn } = useAuth();
   const [otp, setOtp] = useState<string[]>(['', '', '', '', '', '']);
@@ -140,7 +142,10 @@ export default function OtpScreen({ navigation, route }: Props) {
     >
       <TouchableWithoutFeedback onPress={dismissKeyboard}>
         <ScrollView
-          contentContainerStyle={styles.scrollContainer}
+          contentContainerStyle={[
+            styles.scrollContainer,
+            { paddingTop: Math.max(insets.top, 14), paddingBottom: Math.max(insets.bottom, 14) },
+          ]}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
         >
@@ -178,7 +183,9 @@ export default function OtpScreen({ navigation, route }: Props) {
                 {otp.map((digit, index) => (
                   <TextInput
                     key={index}
-                    ref={(ref) => (inputRefs.current[index] = ref)}
+                    ref={(ref) => {
+                      inputRefs.current[index] = ref;
+                    }}
                     style={[
                       styles.otpInput,
                       digit && styles.otpInputFilled,
@@ -254,25 +261,15 @@ const styles = StyleSheet.create({
   },
   bg: {
     flex: 1,
-    backgroundColor: '#262626',
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: 20,
+    backgroundColor: '#fff',
+    paddingHorizontal: 0,
   },
   card: {
     width: '100%',
-    maxWidth: 360,
+    flex: 1,
     backgroundColor: '#fff',
     padding: 24,
-    borderRadius: 24,
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 4,
-    },
-    shadowOpacity: 0.1,
-    shadowRadius: 12,
-    elevation: 5,
+    borderRadius: 0,
   },
   backButton: {
     alignSelf: 'flex-start',

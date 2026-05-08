@@ -12,6 +12,7 @@ import {
   View,
 } from 'react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import DobPickerField from '../components/DobPickerField';
 import { authApi, getErrorMessage } from '../services/api';
@@ -33,6 +34,7 @@ function provisionalNameFromEmail(email: string): string {
 }
 
 export default function UserRegisterScreen({ navigation, route }: Props) {
+  const insets = useSafeAreaInsets();
   const [emailAddress, setEmailAddress] = useState<string>(route.params?.email ?? '');
   const [phone, setPhone] = useState<string>('');
   const [password, setPassword] = useState<string>('');
@@ -118,7 +120,10 @@ export default function UserRegisterScreen({ navigation, route }: Props) {
           ref={(r) => {
             scrollRef.current = r;
           }}
-          contentContainerStyle={styles.content}
+          contentContainerStyle={[
+            styles.content,
+            { paddingTop: Math.max(insets.top, 14) + 12, paddingBottom: Math.max(insets.bottom, 14) + 24 },
+          ]}
           keyboardShouldPersistTaps="handled"
           keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
           onScrollBeginDrag={Keyboard.dismiss}
@@ -215,16 +220,13 @@ const PURPLE = '#7b2cff';
 const styles = StyleSheet.create({
   bg: {
     flex: 1,
-    backgroundColor: '#262626',
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: 18,
+    backgroundColor: '#fff',
   },
   card: {
     width: '100%',
-    maxWidth: 360,
     backgroundColor: '#fff',
-    borderRadius: 10,
+    borderRadius: 0,
+    flex: 1,
   },
   content: {
     padding: 22,

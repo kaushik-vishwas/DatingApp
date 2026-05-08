@@ -13,6 +13,7 @@ export default function RoleGateScreen({ navigation }: Props): React.JSX.Element
     navigation.navigate('UserLogin', undefined);
   };
 
+  
   const goReceiver = () => {
     navigation.navigate('ReceiverEducation', undefined);
   };
@@ -20,7 +21,7 @@ export default function RoleGateScreen({ navigation }: Props): React.JSX.Element
   return (
     <View style={styles.root}>
       <Text style={styles.title}>Welcome</Text>
-      <Text style={styles.subtitle}>How would you like to use Selecto?</Text>
+      <Text style={styles.subtitle}>How would yousss like to use Selecto?</Text>
 
       <TouchableOpacity style={styles.cardPrimary} onPress={goUser} activeOpacity={0.9}>
         <Text style={styles.cardTitle}>Join as an app user</Text>

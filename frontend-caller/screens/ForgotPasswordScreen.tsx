@@ -11,6 +11,7 @@ import {
   View,
 } from 'react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { authApi, getErrorMessage, saveJwt } from '../services/api';
 import { useAuth } from '../context/AuthContext';
@@ -20,6 +21,7 @@ import { isValidEmail, normalizeEmail, validatePasswordStrength } from '../utils
 type Props = NativeStackScreenProps<RootStackParamList, 'ForgotPassword'>;
 
 export default function ForgotPasswordScreen({ navigation, route }: Props): React.JSX.Element {
+  const insets = useSafeAreaInsets();
   const { accountType } = route.params;
   const { signIn } = useAuth();
   const [step, setStep] = useState<1 | 2>(1);
@@ -91,7 +93,13 @@ export default function ForgotPasswordScreen({ navigation, route }: Props): Reac
         style={styles.card}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       >
-        <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+        <ScrollView
+          contentContainerStyle={[
+            styles.content,
+            { paddingTop: Math.max(insets.top, 14) + 12, paddingBottom: Math.max(insets.bottom, 14) + 24 },
+          ]}
+          keyboardShouldPersistTaps="handled"
+        >
           <TouchableOpacity onPress={() => navigation.goBack()}>
             <Text style={styles.back}>{'← Back'}</Text>
           </TouchableOpacity>
@@ -182,17 +190,13 @@ const PURPLE = '#7b2cff';
 const styles = StyleSheet.create({
   bg: {
     flex: 1,
-    backgroundColor: '#262626',
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: 18,
+    backgroundColor: '#fff',
   },
   card: {
     width: '100%',
-    maxWidth: 360,
     backgroundColor: '#fff',
-    borderRadius: 10,
-    maxHeight: '90%',
+    borderRadius: 0,
+    flex: 1,
   },
   content: {
     padding: 22,

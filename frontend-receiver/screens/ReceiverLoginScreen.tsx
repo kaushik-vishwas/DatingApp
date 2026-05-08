@@ -1,10 +1,12 @@
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import React, { useEffect, useState } from 'react';
+import { Image, StyleSheet } from 'react-native';
 
 import { AuthLoginCard } from '../components/auth/AuthLoginCard';
 import { getForcedAppKind } from '../config/appKind';
 import type { RootStackParamList } from '../navigation/RootStackParamList';
 import { normalizeEmail } from '../utils/validation';
+import SelectoLogo from '../assets/SelectoLogo.png';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'ReceiverLogin'>;
 
@@ -28,7 +30,7 @@ export default function ReceiverLoginScreen({ navigation, route }: Props): React
       navigation={navigation}
       email={email}
       onEmailChange={setEmail}
-      logoLetter="R"
+      customLogo={<Image source={SelectoLogo} style={styles.logo} resizeMode="contain" />}
       title="Receiver sign in"
       subtitle="For call receivers — use the email and password you applied with"
       primaryRegisterLabel="Register as receiver"
@@ -40,3 +42,10 @@ export default function ReceiverLoginScreen({ navigation, route }: Props): React
     />
   );
 }
+
+const styles = StyleSheet.create({
+  logo: {
+    width: 150,
+    height: 50,
+  },
+});

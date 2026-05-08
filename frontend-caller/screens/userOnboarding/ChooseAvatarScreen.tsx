@@ -1,13 +1,7 @@
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import React, { useState } from 'react';
-import {
-  FlatList,
-  Image,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
-} from 'react-native';
+import { FlatList, Image, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { getCallerAvatarPresetsByGender } from '../../constants/userOnboarding';
 import { useAuth } from '../../context/AuthContext';
@@ -19,14 +13,16 @@ const PURPLE = '#7b2cff';
 type Props = NativeStackScreenProps<UserOnboardingStackParamList, 'ChooseAvatar'>;
 
 export default function ChooseAvatarScreen({ navigation }: Props): React.JSX.Element {
+  const insets = useSafeAreaInsets();
   const { user } = useAuth();
   const { gender, setCallerAvatarPresetUrl } = useUserOnboarding();
   const avatarPresets = getCallerAvatarPresetsByGender(gender);
-  const [selected, setSelected] = useState<string>(avatarPresets[0]!);
+  const [selected, setSelected] = useState<string>(avatarPresets[0]?.id ?? '');
+  const selectedPreset = avatarPresets.find((preset) => preset.id === selected) ?? avatarPresets[0];
 
   React.useEffect(() => {
-    if (!avatarPresets.includes(selected)) {
-      setSelected(avatarPresets[0]!);
+    if (!avatarPresets.some((preset) => preset.id === selected)) {
+      setSelected(avatarPresets[0]?.id ?? '');
     }
   }, [avatarPresets, selected]);
 
@@ -38,7 +34,12 @@ export default function ChooseAvatarScreen({ navigation }: Props): React.JSX.Ele
   };
 
   return (
-    <View style={styles.root}>
+    <View
+      style={[
+        styles.root,
+        { paddingTop: Math.max(insets.top, 14) + 18, paddingBottom: Math.max(insets.bottom, 14) + 18 },
+      ]}
+    >
       <TouchableOpacity style={styles.backWrap} onPress={() => navigation.goBack()}>
         <Text style={styles.back}>←</Text>
       </TouchableOpacity>
@@ -47,27 +48,27 @@ export default function ChooseAvatarScreen({ navigation }: Props): React.JSX.Ele
       <Text style={styles.subtitle}>Tell us a bit about yourself</Text>
 
       <View style={styles.featured}>
-        <Image source={{ uri: selected }} style={styles.featuredImg} />
+      {selectedPreset ? <Image source={selectedPreset.source} style={styles.featuredImg} /> : null}
         <Text style={styles.featuredName}>{displayLabel}</Text>
       </View>
 
       <View style={styles.listWrap}>
         <FlatList
           data={avatarPresets}
-          keyExtractor={(item) => item}
+          keyExtractor={(item) => item.id}
           numColumns={3}
           columnWrapperStyle={styles.row}
           contentContainerStyle={styles.grid}
           scrollEnabled
           renderItem={({ item }) => {
-            const active = item === selected;
+            const active = item.id === selected;
             return (
               <TouchableOpacity
                 style={[styles.cell, active && styles.cellActive]}
-                onPress={() => setSelected(item)}
+                onPress={() => setSelected(item.id)}
                 activeOpacity={0.85}
               >
-                <Image source={{ uri: item }} style={styles.thumb} />
+               <Image source={item.source} style={styles.thumb} />
               </TouchableOpacity>
             );
           }}
@@ -88,8 +89,6 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#fff',
     paddingHorizontal: 20,
-    paddingTop: 48,
-    paddingBottom: 24,
   },
   backWrap: {
     alignSelf: 'flex-start',

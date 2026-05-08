@@ -91,6 +91,17 @@ export function ReceiverDetailModal({ receiver, onClose }: Props) {
         ) : (
           <p className="mt-6 text-sm text-neutral-500">No document URLs on file.</p>
         )}
+
+        <div className="mt-6">
+          <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">Voice sample</p>
+          {receiver.userAudio ? (
+            <div className="mt-2">
+              <audio controls preload="none" src={receiver.userAudio} className="w-full" />
+            </div>
+          ) : (
+            <p className="mt-2 text-sm text-neutral-500">No voice verification audio on file.</p>
+          )}
+        </div>
       </div>
     </div>
   );

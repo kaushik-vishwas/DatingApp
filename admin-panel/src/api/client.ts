@@ -64,6 +64,7 @@ export type ReceiverRecord = {
   createdAt: string;
   updatedAt: string;
   audioCallRate?: number | null;
+  userAudio?: string | null;
 };
 
 export type AppUserStatusTab = 'all' | 'active' | 'suspended';

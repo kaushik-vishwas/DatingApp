@@ -10,8 +10,10 @@ import {
   TextInput,
   TouchableOpacity,
   View,
+  Modal,
 } from 'react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { authApi, getErrorMessage } from '../services/api';
 import type { RootStackParamList } from '../navigation/RootStackParamList';
@@ -22,14 +24,17 @@ import { isValidEmail, normalizeEmail, validateIndianMobileDigits, validatePassw
 type Props = NativeStackScreenProps<RootStackParamList, 'Register'>;
 
 export default function RegisterScreen({ navigation, route }: Props) {
+  const insets = useSafeAreaInsets();
   const [fullName, setFullName] = useState<string>('');
   const [dob, setDob] = useState<Date | null>(null);
   const [emailAddress, setEmailAddress] = useState<string>(route.params?.email ?? '');
   const [phone, setPhone] = useState<string>('');
   const [password, setPassword] = useState<string>('');
   const [confirmPassword, setConfirmPassword] = useState<string>('');
-  const [agreeTerms, setAgreeTerms] = useState<boolean>(false);
+  const [agreedToPolicies, setAgreedToPolicies] = useState<boolean>(false);
   const [loading, setLoading] = useState<boolean>(false);
+  const [showTermsModal, setShowTermsModal] = useState<boolean>(false);
+  const [showPrivacyModal, setShowPrivacyModal] = useState<boolean>(false);
   const scrollRef = useRef<ScrollView | null>(null);
 
   const scrollToFocusedInput = useCallback(() => {
@@ -37,7 +42,6 @@ export default function RegisterScreen({ navigation, route }: Props) {
       setTimeout(() => {
         const responder = TextInput.State.currentlyFocusedInput?.();
         if (!responder || !scrollRef.current) return;
-        // @ts-expect-error: RN types don't expose `scrollResponderScrollNativeHandleToKeyboard` on ref
         scrollRef.current.getScrollResponder()?.scrollResponderScrollNativeHandleToKeyboard(responder, 120, true);
       }, 30);
     });
@@ -63,7 +67,7 @@ export default function RegisterScreen({ navigation, route }: Props) {
     if (pwErr) return pwErr;
     if (password !== confirmPassword) return 'Passwords do not match';
 
-    if (!agreeTerms) return 'Please agree to the Terms & Conditions';
+    if (!agreedToPolicies) return 'You must agree to the Terms & Conditions and Privacy Policy';
 
     return null;
   };
@@ -111,7 +115,10 @@ export default function RegisterScreen({ navigation, route }: Props) {
           ref={(r) => {
             scrollRef.current = r;
           }}
-          contentContainerStyle={styles.content}
+          contentContainerStyle={[
+            styles.content,
+            { paddingTop: Math.max(insets.top, 14) + 12, paddingBottom: Math.max(insets.bottom, 14) + 24 },
+          ]}
           keyboardShouldPersistTaps="handled"
           keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
           onScrollBeginDrag={Keyboard.dismiss}
@@ -189,11 +196,21 @@ export default function RegisterScreen({ navigation, route }: Props) {
             onFocus={scrollToFocusedInput}
           />
 
-          <TouchableOpacity style={styles.termsRow} onPress={() => setAgreeTerms((v) => !v)}>
-            <View style={[styles.checkbox, agreeTerms && styles.checkboxChecked]}>
-              {agreeTerms ? <Text style={styles.checkboxMark}>✓</Text> : null}
+          {/* Single Checkbox for both policies */}
+          <TouchableOpacity style={styles.termsRow} onPress={() => setAgreedToPolicies((v) => !v)}>
+            <View style={[styles.checkbox, agreedToPolicies && styles.checkboxChecked]}>
+              {agreedToPolicies ? <Text style={styles.checkboxMark}>✓</Text> : null}
             </View>
-            <Text style={styles.termsText}>I agree to the Terms & Conditions</Text>
+            <Text style={styles.termsText}>
+              I agree to the{' '}
+              <Text style={styles.linkText} onPress={() => setShowTermsModal(true)}>
+                Terms & Conditions
+              </Text>
+              {' and '}
+              <Text style={styles.linkText} onPress={() => setShowPrivacyModal(true)}>
+                Privacy Policy
+              </Text>
+            </Text>
           </TouchableOpacity>
 
           <TouchableOpacity
@@ -208,11 +225,155 @@ export default function RegisterScreen({ navigation, route }: Props) {
             <Text style={styles.linkText}>Already have an account? Log in</Text>
           </TouchableOpacity>
 
-          <TouchableOpacity style={styles.linkAlt} onPress={() => navigation.navigate('UserRegister', undefined)}>
-            <Text style={styles.linkAltText}>Joining as an app user instead?</Text>
-          </TouchableOpacity>
         </ScrollView>
       </KeyboardAvoidingView>
+
+      {/* Terms & Conditions Modal */}
+      <Modal
+        visible={showTermsModal}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setShowTermsModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContainer}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Terms & Conditions</Text>
+              <TouchableOpacity onPress={() => setShowTermsModal(false)}>
+                <Text style={styles.modalClose}>✕</Text>
+              </TouchableOpacity>
+            </View>
+            <ScrollView 
+              showsVerticalScrollIndicator={false}
+              contentContainerStyle={styles.modalContent}
+            >
+              <Text style={styles.modalSectionTitle}>1. Acceptance of Terms</Text>
+              <Text style={styles.modalText}>
+                By creating an account and using this application, you agree to be bound by these Terms & Conditions. If you do not agree to these terms, please do not use the app.
+              </Text>
+
+              <Text style={styles.modalSectionTitle}>2. Eligibility</Text>
+              <Text style={styles.modalText}>
+                You must be at least 18 years old to register and use this service. By registering, you confirm that you meet this age requirement.
+              </Text>
+
+              <Text style={styles.modalSectionTitle}>3. Account Responsibility</Text>
+              <Text style={styles.modalText}>
+                You are responsible for maintaining the confidentiality of your account credentials and for all activities that occur under your account.
+              </Text>
+
+              <Text style={styles.modalSectionTitle}>4. Prohibited Conduct</Text>
+              <Text style={styles.modalText}>
+                You agree not to use the app for any unlawful purpose, to harass others, to share inappropriate content, or to violate any applicable laws or regulations.
+              </Text>
+
+              <Text style={styles.modalSectionTitle}>5. Termination</Text>
+              <Text style={styles.modalText}>
+                We reserve the right to suspend or terminate your account at our sole discretion, without notice, for conduct that violates these terms or is harmful to other users.
+              </Text>
+
+              <Text style={styles.modalSectionTitle}>6. Limitation of Liability</Text>
+              <Text style={styles.modalText}>
+                The app is provided "as is" without warranties of any kind. We shall not be liable for any indirect, incidental, or consequential damages arising from your use of the app.
+              </Text>
+
+              <Text style={styles.modalSectionTitle}>7. Changes to Terms</Text>
+              <Text style={styles.modalText}>
+                We may modify these terms at any time. Continued use of the app after changes constitutes acceptance of the new terms.
+              </Text>
+
+              <Text style={styles.modalFooterText}>
+                Last updated: {new Date().toLocaleDateString()}
+              </Text>
+            </ScrollView>
+            <TouchableOpacity style={styles.modalButton} onPress={() => setShowTermsModal(false)}>
+              <Text style={styles.modalButtonText}>Close</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Privacy Policy Modal */}
+      <Modal
+        visible={showPrivacyModal}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setShowPrivacyModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContainer}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Privacy Policy</Text>
+              <TouchableOpacity onPress={() => setShowPrivacyModal(false)}>
+                <Text style={styles.modalClose}>✕</Text>
+              </TouchableOpacity>
+            </View>
+            <ScrollView 
+              showsVerticalScrollIndicator={false}
+              contentContainerStyle={styles.modalContent}
+            >
+              <Text style={styles.modalSectionTitle}>1. Information We Collect</Text>
+              <Text style={styles.modalText}>
+                We collect the following personal information when you register:
+                {'\n\n'}• Full Name
+                {'\n'}• Email Address
+                {'\n'}• Phone Number
+                {'\n'}• Date of Birth
+                {'\n'}• Password (encrypted)
+              </Text>
+
+              <Text style={styles.modalSectionTitle}>2. How We Use Your Information</Text>
+              <Text style={styles.modalText}>
+                We use your information to:
+                {'\n\n'}• Create and manage your account
+                {'\n'}• Verify your identity and age
+                {'\n'}• Communicate with you about the service
+                {'\n'}• Improve our app and user experience
+                {'\n'}• Comply with legal obligations
+              </Text>
+
+              <Text style={styles.modalSectionTitle}>3. Data Sharing</Text>
+              <Text style={styles.modalText}>
+                We do not sell your personal information. We may share your data with:
+                {'\n\n'}• Service providers who assist in app operations
+                {'\n'}• Law enforcement when required by law
+                {'\n'}• With your explicit consent
+              </Text>
+
+              <Text style={styles.modalSectionTitle}>4. Data Security</Text>
+              <Text style={styles.modalText}>
+                We implement industry-standard security measures to protect your personal information, including encryption, secure servers, and regular security audits.
+              </Text>
+
+              <Text style={styles.modalSectionTitle}>5. Your Rights</Text>
+              <Text style={styles.modalText}>
+                You have the right to:
+                {'\n\n'}• Access your personal data
+                {'\n'}• Correct inaccurate data
+                {'\n'}• Request deletion of your data
+                {'\n'}• Withdraw consent at any time
+              </Text>
+
+              <Text style={styles.modalSectionTitle}>6. Data Retention</Text>
+              <Text style={styles.modalText}>
+                We retain your personal information for as long as your account is active or as needed to provide services. You may request account deletion at any time.
+              </Text>
+
+              <Text style={styles.modalSectionTitle}>7. Contact Us</Text>
+              <Text style={styles.modalText}>
+                If you have questions about this Privacy Policy, please contact us at: privacy@yourapp.com
+              </Text>
+
+              <Text style={styles.modalFooterText}>
+                Last updated: {new Date().toLocaleDateString()}
+              </Text>
+            </ScrollView>
+            <TouchableOpacity style={styles.modalButton} onPress={() => setShowPrivacyModal(false)}>
+              <Text style={styles.modalButtonText}>Close</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -222,16 +383,13 @@ const PURPLE = '#7b2cff';
 const styles = StyleSheet.create({
   bg: {
     flex: 1,
-    backgroundColor: '#262626',
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: 18,
+    backgroundColor: '#fff',
   },
   card: {
     width: '100%',
-    maxWidth: 360,
     backgroundColor: '#fff',
-    borderRadius: 10,
+    borderRadius: 0,
+    flex: 1,
   },
   content: {
     padding: 22,
@@ -332,5 +490,75 @@ const styles = StyleSheet.create({
     color: '#666',
     fontSize: 12,
     fontWeight: '600',
+  },
+  // Modal styles with proper spacing
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalContainer: {
+    backgroundColor: '#fff',
+    borderRadius: 20,
+    width: '90%',
+    maxHeight: '85%',
+    overflow: 'hidden',
+    marginVertical: 40,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e5e5e5',
+    backgroundColor: '#fff',
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: '#333',
+  },
+  modalClose: {
+    fontSize: 24,
+    color: '#666',
+    fontWeight: '600',
+  },
+  modalContent: {
+    padding: 20,
+    paddingBottom: 30,
+  },
+  modalSectionTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: PURPLE,
+    marginTop: 16,
+    marginBottom: 8,
+  },
+  modalText: {
+    fontSize: 14,
+    color: '#444',
+    lineHeight: 22,
+    marginBottom: 8,
+  },
+  modalFooterText: {
+    fontSize: 12,
+    color: '#888',
+    textAlign: 'center',
+    marginTop: 20,
+    marginBottom: 10,
+  },
+  modalButton: {
+    backgroundColor: PURPLE,
+    paddingVertical: 14,
+    borderRadius: 10,
+    alignItems: 'center',
+    margin: 16,
+  },
+  modalButtonText: {
+    color: '#fff',
+    fontSize: 15,
+    fontWeight: '800',
   },
 });

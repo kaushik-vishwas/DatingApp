@@ -1,6 +1,7 @@
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import React, { useState } from 'react';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useAuth } from '../../context/AuthContext';
 import type { UserOnboardingStackParamList } from '../../navigation/UserOnboardingStackParamList';
@@ -10,6 +11,7 @@ const PURPLE = '#7b2cff';
 type Props = NativeStackScreenProps<UserOnboardingStackParamList, 'WelcomeOnboard'>;
 
 export default function WelcomeOnboardScreen({ route }: Props): React.JSX.Element {
+  const insets = useSafeAreaInsets();
   const { displayName } = route.params;
   const { refreshUser } = useAuth();
   const [busy, setBusy] = useState(false);
@@ -27,7 +29,12 @@ export default function WelcomeOnboardScreen({ route }: Props): React.JSX.Elemen
   };
 
   return (
-    <View style={styles.root}>
+    <View
+      style={[
+        styles.root,
+        { paddingTop: Math.max(insets.top, 14) + 22, paddingBottom: Math.max(insets.bottom, 14) + 22 },
+      ]}
+    >
       <View style={styles.art}>
         <View style={styles.scooterCard}>
           <Text style={styles.artEmoji} accessibilityLabel="Welcome illustration">
@@ -60,8 +67,6 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#fff',
     paddingHorizontal: 28,
-    paddingTop: 56,
-    paddingBottom: 32,
     alignItems: 'center',
   },
   art: {

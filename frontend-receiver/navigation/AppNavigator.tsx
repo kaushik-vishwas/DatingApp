@@ -29,7 +29,9 @@ const Stack = createNativeStackNavigator<RootStackParamList>();
 function SignedOutNavigator(): React.JSX.Element {
   const forcedAppKind = getForcedAppKind();
   const [ready, setReady] = useState(false);
-  const [initialRoute, setInitialRoute] = useState<'Splash' | 'RoleGate' | 'UserLogin' | 'ReceiverLogin'>('Splash');
+  const [initialRoute, setInitialRoute] = useState<
+    'Splash' | 'RoleGate' | 'UserLogin' | 'ReceiverLogin' | 'ReceiverEducation'
+  >('Splash');
 
   useEffect(() => {
     let cancelled = false;
@@ -39,7 +41,8 @@ function SignedOutNavigator(): React.JSX.Element {
         if (forcedAppKind === 'caller') {
           setInitialRoute('UserLogin');
         } else if (forcedAppKind === 'receiver') {
-          setInitialRoute('ReceiverLogin');
+          // Receiver-only app starts with receiver onboarding welcome flow.
+          setInitialRoute('ReceiverEducation');
         } else {
           setInitialRoute(seen ? 'RoleGate' : 'Splash');
         }
@@ -145,12 +148,9 @@ export default function AppNavigator(): React.JSX.Element {
           )
         ) : accountStatus === 'pending_profile' ? (
           <Stack.Screen name="CompleteProfileFlow" component={CompleteProfileFlow} />
-        ) : user.isVerified && accountStatus === 'approved' ? (
-          <Stack.Screen name="Home" component={ReceiverAppNavigator} />
-        ) : !user.isVerified || accountStatus === 'pending_review' || accountStatus === 'rejected' ? (
-          <Stack.Screen name="UnderReview" component={UnderReviewScreen} />
         ) : (
-          <Stack.Screen name="UnderReview" component={UnderReviewScreen} />
+          // Receivers can use the app immediately after completing profile (no admin approval gating).
+          <Stack.Screen name="Home" component={ReceiverAppNavigator} />
         )}
       </Stack.Navigator>
     </NavigationContainer>

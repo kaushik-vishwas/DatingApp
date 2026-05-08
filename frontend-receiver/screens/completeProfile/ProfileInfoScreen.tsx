@@ -7,10 +7,12 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
 } from 'react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Input';
@@ -19,7 +21,12 @@ import { ToggleGroup } from '../../components/ui/ToggleGroup';
 import { UploadField } from '../../components/ui/UploadField';
 import { useCompleteProfile } from '../../context/CompleteProfileContext';
 import { INTEREST_OPTIONS, LANGUAGE_OPTIONS } from '../../constants/profileOptions';
-import { CALLER_FEMALE_AVATAR_PRESETS, INDIAN_STATES } from '../../constants/userOnboarding';
+import {
+  CALLER_FEMALE_AVATAR_PRESETS,
+  INDIAN_STATES,
+  toAvatarImageSource,
+  toAvatarUri,
+} from '../../constants/userOnboarding';
 import type { CompleteProfileStackParamList } from '../../navigation/CompleteProfileStackParamList';
 import type { Gender } from '../../types/user';
 import { validateProfileInfo } from '../../utils/completeProfileSteps';
@@ -33,12 +40,38 @@ const GENDERS: { value: Gender; label: string }[] = [
 ];
 
 export default function ProfileInfoScreen({ navigation }: Props): React.JSX.Element {
+  const insets = useSafeAreaInsets();
   const { state, update } = useCompleteProfile();
-  const [stateModal, setStateModal] = useState(false);
   const [avatarModal, setAvatarModal] = useState(false);
+  const [showStateSuggestions, setShowStateSuggestions] = useState(false);
+  const [stateInput, setStateInput] = useState(state.state || '');
+
+  const filteredStates = INDIAN_STATES.filter(s =>
+    s.toLowerCase().includes(stateInput.toLowerCase())
+  );
 
   const pickProfileImage = () => {
     setAvatarModal(true);
+  };
+
+  const handleStateInputChange = (text: string) => {
+    setStateInput(text);
+    update({ state: text });
+    setShowStateSuggestions(text.length > 0);
+  };
+
+  const selectState = (selectedState: string) => {
+    setStateInput(selectedState);
+    update({ state: selectedState });
+    setShowStateSuggestions(false);
+  };
+
+  const handleInterestsChange = (interests: string[]) => {
+    if (interests.length <= 2) {
+      update({ interests });
+    } else {
+      Alert.alert('Maximum Selection', 'You can select up to 2 interests only');
+    }
   };
 
   const onNext = () => {
@@ -53,7 +86,13 @@ export default function ProfileInfoScreen({ navigation }: Props): React.JSX.Elem
   return (
     <View style={styles.bg}>
       <View style={styles.card}>
-        <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+        <ScrollView
+          contentContainerStyle={[
+            styles.content,
+            { paddingTop: Math.max(insets.top, 14) + 12, paddingBottom: Math.max(insets.bottom, 14) + 24 },
+          ]}
+          keyboardShouldPersistTaps="handled"
+        >
           <ScreenHeader
             title="Complete Your Profile"
             subtitle="Step 1 of 3"
@@ -97,13 +136,37 @@ export default function ProfileInfoScreen({ navigation }: Props): React.JSX.Elem
             ))}
           </View>
 
-          <Text style={styles.fieldLabel}>State *</Text>
-          <TouchableOpacity style={styles.stateSelect} onPress={() => setStateModal(true)} activeOpacity={0.85}>
-            <Text style={state.state.trim() ? styles.stateSelectText : styles.stateSelectPh}>
-              {state.state.trim() || 'Tap to select state'}
-            </Text>
-            <Text style={styles.stateChev}>▼</Text>
-          </TouchableOpacity>
+          {/* State Input with Autocomplete */}
+          <View style={styles.stateInputContainer}>
+            <Text style={styles.fieldLabel}>State *</Text>
+            <TextInput
+              style={styles.stateInput}
+              placeholder="Type your state name"
+              value={stateInput}
+              onChangeText={handleStateInputChange}
+              onFocus={() => setShowStateSuggestions(stateInput.length > 0)}
+              autoCapitalize="words"
+            />
+            {showStateSuggestions && filteredStates.length > 0 && (
+              <View style={styles.suggestionsContainer}>
+                <ScrollView 
+                  style={styles.suggestionsList}
+                  keyboardShouldPersistTaps="handled"
+                  nestedScrollEnabled
+                >
+                  {filteredStates.map((s) => (
+                    <TouchableOpacity
+                      key={s}
+                      style={styles.suggestionItem}
+                      onPress={() => selectState(s)}
+                    >
+                      <Text style={styles.suggestionText}>{s}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              </View>
+            )}
+          </View>
 
           <ToggleGroup
             label="Languages *"
@@ -113,38 +176,16 @@ export default function ProfileInfoScreen({ navigation }: Props): React.JSX.Elem
           />
 
           <ToggleGroup
-            label="Interests *"
+            label="Interests * (Max 2)"
             options={INTEREST_OPTIONS}
             selected={state.interests}
-            onChange={(interests) => update({ interests })}
+            onChange={handleInterestsChange}
           />
 
           <Button title="Continue" onPress={onNext} />
         </ScrollView>
       </View>
 
-      <Modal visible={stateModal} transparent animationType="fade">
-        <View style={styles.modalOverlay}>
-          <Pressable style={styles.modalDismiss} onPress={() => setStateModal(false)} />
-          <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>Select State</Text>
-            <ScrollView style={styles.modalList} keyboardShouldPersistTaps="handled">
-              {INDIAN_STATES.map((s) => (
-                <TouchableOpacity
-                  key={s}
-                  style={[styles.stateRow, s === state.state && styles.stateRowActive]}
-                  onPress={() => {
-                    update({ state: s });
-                    setStateModal(false);
-                  }}
-                >
-                  <Text style={[styles.stateRowText, s === state.state && styles.stateRowTextActive]}>{s}</Text>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-          </View>
-        </View>
-      </Modal>
       <Modal visible={avatarModal} transparent animationType="fade">
         <View style={styles.modalOverlay}>
           <Pressable style={styles.modalDismiss} onPress={() => setAvatarModal(false)} />
@@ -153,18 +194,19 @@ export default function ProfileInfoScreen({ navigation }: Props): React.JSX.Elem
             <ScrollView style={styles.modalList} keyboardShouldPersistTaps="handled">
               <View style={styles.avatarGrid}>
                 {CALLER_FEMALE_AVATAR_PRESETS.map((avatarUrl) => {
-                  const active = state.profileImageUri === avatarUrl;
+                  const avatarUri = toAvatarUri(avatarUrl);
+                  const active = state.profileImageUri === avatarUri;
                   return (
                     <TouchableOpacity
-                      key={avatarUrl}
+                      key={avatarUri}
                       style={[styles.avatarCell, active && styles.avatarCellActive]}
                       onPress={() => {
-                        update({ profileImageUri: avatarUrl, profileImageMime: null });
+                        update({ profileImageUri: avatarUri, profileImageMime: 'image/png' });
                         setAvatarModal(false);
                       }}
                       activeOpacity={0.85}
                     >
-                      <Image source={{ uri: avatarUrl }} style={styles.avatarThumb} />
+                    <Image source={toAvatarImageSource(avatarUrl)} style={styles.avatarThumb} />
                     </TouchableOpacity>
                   );
                 })}
@@ -182,18 +224,13 @@ const PURPLE = '#7b2cff';
 const styles = StyleSheet.create({
   bg: {
     flex: 1,
-    backgroundColor: '#262626',
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: 18,
-    paddingVertical: 24,
+    backgroundColor: '#f4f4f5',
   },
   card: {
     width: '100%',
-    maxWidth: 400,
     flex: 1,
     backgroundColor: '#fff',
-    borderRadius: 12,
+    borderRadius: 0,
   },
   content: {
     padding: 20,
@@ -235,6 +272,50 @@ const styles = StyleSheet.create({
   },
   segmentTextActive: {
     color: PURPLE,
+  },
+  stateInputContainer: {
+    marginBottom: 18,
+    position: 'relative',
+    zIndex: 1,
+  },
+  stateInput: {
+    borderWidth: 1,
+    borderColor: '#e5e5e5',
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+    fontSize: 15,
+    backgroundColor: '#fff',
+  },
+  suggestionsContainer: {
+    position: 'absolute',
+    top: 72,
+    left: 0,
+    right: 0,
+    backgroundColor: '#fff',
+    borderWidth: 1,
+    borderColor: '#e5e5e5',
+    borderRadius: 10,
+    maxHeight: 200,
+    zIndex: 1000,
+    elevation: 5,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+  },
+  suggestionsList: {
+    maxHeight: 200,
+  },
+  suggestionItem: {
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
+  },
+  suggestionText: {
+    fontSize: 14,
+    color: '#333',
   },
   stateSelect: {
     flexDirection: 'row',

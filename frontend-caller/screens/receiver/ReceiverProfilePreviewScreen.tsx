@@ -6,6 +6,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '../../context/AuthContext';
 import type { ReceiverStackParamList } from '../../navigation/ReceiverStackParamList';
 import { getErrorMessage, profileApi } from '../../services/api';
+import { resolveProfileImageSource } from '../../utils/avatarSource';
 
 type Nav = NativeStackNavigationProp<ReceiverStackParamList, 'ReceiverProfilePreview'>;
 
@@ -57,6 +58,7 @@ export default function ReceiverProfilePreviewScreen(): React.JSX.Element {
       : '₹5/min';
   const displayedLanguages = (user?.languages ?? []).slice(0, 2).map((lang) => lang.substring(0, 3));
   const remainingCount = Math.max(0, (user?.languages?.length ?? 0) - 2);
+  const profileImageSource = resolveProfileImageSource(user?.profileImage);
 
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'left', 'right']}>
@@ -78,8 +80,8 @@ export default function ReceiverProfilePreviewScreen(): React.JSX.Element {
           <View style={styles.cardRow}>
             <View style={styles.leftColumn}>
               <View style={[styles.avatarWrapper, { borderColor: '#22c55e' }]}>
-                {user?.profileImage ? (
-                  <Image source={{ uri: user.profileImage }} style={styles.avatar} />
+                {profileImageSource ? (
+                  <Image source={profileImageSource} style={styles.avatar} />
                 ) : (
                   <View style={[styles.avatar, styles.avatarPlaceholder]}>
                     <Text style={styles.avatarGlyph}>👤</Text>

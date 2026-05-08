@@ -15,12 +15,14 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import {
   CALLER_INTEREST_OPTIONS,
   CALLER_LANGUAGE_OPTIONS,
   INDIAN_STATES,
   getCallerAvatarPresetsByGender,
+  toAvatarUri,
 } from '../../constants/userOnboarding';
 import { useAuth } from '../../context/AuthContext';
 import { useUserOnboarding } from '../../context/UserOnboardingContext';
@@ -37,9 +39,14 @@ function toggleInList(list: string[], item: string): string[] {
 }
 
 export default function UserCompleteProfileScreen({ navigation }: Props): React.JSX.Element {
+  const insets = useSafeAreaInsets();
   const { gender, callerAvatarPresetUrl, userAudio, setUserAudio } = useUserOnboarding();
   const { user, refreshUser, applyServerUser } = useAuth();
   const allowedAvatarPresets = getCallerAvatarPresetsByGender(gender);
+  const allowedAvatarPresetUris = React.useMemo(
+    () => allowedAvatarPresets.map((preset) => toAvatarUri(preset)).filter(Boolean),
+    [allowedAvatarPresets]
+  );
 
   const [fullName, setFullName] = useState('');
   const [state, setState] = useState('Karnataka');
@@ -103,7 +110,7 @@ export default function UserCompleteProfileScreen({ navigation }: Props): React.
       Alert.alert('Validation', 'Please choose an avatar.');
       return;
     }
-    if (!allowedAvatarPresets.includes(imageUri)) {
+    if (!allowedAvatarPresetUris.includes(imageUri)) {
       Alert.alert('Validation', 'Please choose a valid avatar for the selected gender.');
       return;
     }
@@ -146,7 +153,7 @@ export default function UserCompleteProfileScreen({ navigation }: Props): React.
     interests,
     languages,
     imageUri,
-    allowedAvatarPresets,
+    allowedAvatarPresetUris,
     userAudio,
     refreshUser,
     applyServerUser,
@@ -169,7 +176,13 @@ export default function UserCompleteProfileScreen({ navigation }: Props): React.
         style={styles.flex}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       >
-        <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
+        <ScrollView
+          contentContainerStyle={[
+            styles.scroll,
+            { paddingTop: Math.max(insets.top, 14) + 18, paddingBottom: Math.max(insets.bottom, 14) + 140 },
+          ]}
+          keyboardShouldPersistTaps="handled"
+        >
           <TouchableOpacity style={styles.backWrap} onPress={() => navigation.goBack()}>
             <Text style={styles.back}>←</Text>
           </TouchableOpacity>
@@ -271,13 +284,10 @@ const styles = StyleSheet.create({
   },
   flex: {
     flex: 1,
-    maxWidth: 440,
     width: '100%',
-    alignSelf: 'center',
   },
   scroll: {
     paddingHorizontal: 20,
-    paddingTop: 48,
     paddingBottom: 120,
   },
   backWrap: {
@@ -413,8 +423,6 @@ const styles = StyleSheet.create({
     left: 20,
     right: 20,
     bottom: 24,
-    maxWidth: 400,
-    alignSelf: 'center',
     backgroundColor: PURPLE,
     paddingVertical: 16,
     borderRadius: 12,

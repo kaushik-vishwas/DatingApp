@@ -8,6 +8,7 @@ import {
   View,
 } from 'react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Input';
@@ -24,6 +25,7 @@ type Props = NativeStackScreenProps<CompleteProfileStackParamList, 'BankDetails'
 const PURPLE = '#7b2cff';
 
 export default function BankDetailsScreen({ navigation }: Props): React.JSX.Element {
+  const insets = useSafeAreaInsets();
   const { state, update } = useCompleteProfile();
   const { user, refreshUser, applyServerUser } = useAuth();
   const [submitting, setSubmitting] = useState(false);
@@ -110,7 +112,13 @@ export default function BankDetailsScreen({ navigation }: Props): React.JSX.Elem
   return (
     <View style={styles.bg}>
       <View style={styles.card}>
-        <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+        <ScrollView
+          contentContainerStyle={[
+            styles.content,
+            { paddingTop: Math.max(insets.top, 14) + 12, paddingBottom: Math.max(insets.bottom, 14) + 24 },
+          ]}
+          keyboardShouldPersistTaps="handled"
+        >
           <ScreenHeader
             title="Apply for KYC"
             subtitle="Step 3 of 3"
@@ -223,18 +231,13 @@ export default function BankDetailsScreen({ navigation }: Props): React.JSX.Elem
 const styles = StyleSheet.create({
   bg: {
     flex: 1,
-    backgroundColor: '#262626',
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: 18,
-    paddingVertical: 24,
+    backgroundColor: '#f4f4f5',
   },
   card: {
     width: '100%',
-    maxWidth: 400,
     flex: 1,
     backgroundColor: '#fff',
-    borderRadius: 12,
+    borderRadius: 0,
   },
   content: {
     padding: 20,

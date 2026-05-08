@@ -39,6 +39,8 @@ export interface IReceiver {
   passwordHash: string | null;
   /** Audio call rate in INR per minute (set during profile setup). */
   audioCallRate: number | null;
+  /** HTTPS URL of voice sample captured during receiver onboarding. */
+  userAudio: string | null;
   /** Earnings wallet in INR (e.g. per-message chat credits). */
   walletBalance: number;
   /** Admin moderation: blocks receiver app access when true (like caller `suspended`). */
@@ -107,6 +109,7 @@ const receiverSchema = new Schema<IReceiver>(
     state: { type: String, default: null, trim: true },
     passwordHash: { type: String, default: null, select: false },
     audioCallRate: { type: Number, default: RECEIVER_AUDIO_CALL_RATE_INR_PER_MIN },
+    userAudio: { type: String, default: null },
     walletBalance: { type: Number, default: 0 },
     suspended: { type: Boolean, default: false },
     isAvailable: { type: Boolean, default: true },

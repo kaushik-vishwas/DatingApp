@@ -5,7 +5,7 @@ import type { Gender } from '../types/user';
 type UserOnboardingContextValue = {
   gender: Gender | null;
   setGender: (g: Gender) => void;
-  /** Preset avatar URL chosen before complete profile (https). */
+  /** Preset avatar id chosen before complete profile (e.g. preset:female:3). */
   callerAvatarPresetUrl: string | null;
   setCallerAvatarPresetUrl: (url: string | null) => void;
   /** HTTPS URL after Cloudinary upload (also persisted on server as `userAudio`). */

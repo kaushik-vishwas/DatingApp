@@ -1,6 +1,7 @@
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import React from 'react';
 import { Alert, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import VoiceVerificationRecorder from '../../components/VoiceVerificationRecorder';
 import { CALLER_AUDIO_VERIFICATION_SCRIPT } from '../../constants/userOnboarding';
@@ -14,6 +15,7 @@ const PURPLE = '#7b2cff';
 type Props = NativeStackScreenProps<UserOnboardingStackParamList, 'AudioVerification'>;
 
 export default function AudioVerificationScreen({ navigation }: Props): React.JSX.Element {
+  const insets = useSafeAreaInsets();
   const { gender, userAudio, setUserAudio } = useUserOnboarding();
   const { applyServerUser } = useAuth();
 
@@ -44,7 +46,12 @@ export default function AudioVerificationScreen({ navigation }: Props): React.JS
   };
 
   return (
-    <View style={styles.root}>
+    <View
+      style={[
+        styles.root,
+        { paddingTop: Math.max(insets.top, 14) + 12, paddingBottom: Math.max(insets.bottom, 14) + 18 },
+      ]}
+    >
       <View style={styles.header}>
         <TouchableOpacity style={styles.headerBtn} onPress={() => navigation.goBack()} hitSlop={12}>
           <Text style={styles.back}>←</Text>
@@ -79,8 +86,6 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#fff',
     paddingHorizontal: 22,
-    paddingTop: 12,
-    paddingBottom: 24,
   },
   header: {
     flexDirection: 'row',

@@ -1,4 +1,6 @@
 import type { Gender } from '../types/user';
+import { Image } from 'react-native';
+import type { ImageSourcePropType } from 'react-native';
 
 /** Indian states / UTs for caller profile (subset; extend as needed) */
 export const INDIAN_STATES: string[] = [
@@ -100,48 +102,56 @@ export const CALLER_MALE_AVATAR_PRESETS: string[] = [
   'https://randomuser.me/api/portraits/men/30.jpg',
 ];
 
-export const CALLER_FEMALE_AVATAR_PRESETS: string[] = [
-  'https://randomuser.me/api/portraits/women/1.jpg',
-  'https://randomuser.me/api/portraits/women/2.jpg',
-  'https://randomuser.me/api/portraits/women/3.jpg',
-  'https://randomuser.me/api/portraits/women/4.jpg',
-  'https://randomuser.me/api/portraits/women/5.jpg',
-  'https://randomuser.me/api/portraits/women/6.jpg',
-  'https://randomuser.me/api/portraits/women/7.jpg',
-  'https://randomuser.me/api/portraits/women/8.jpg',
-  'https://randomuser.me/api/portraits/women/9.jpg',
-  'https://randomuser.me/api/portraits/women/10.jpg',
-  'https://randomuser.me/api/portraits/women/11.jpg',
-  'https://randomuser.me/api/portraits/women/12.jpg',
-  'https://randomuser.me/api/portraits/women/13.jpg',
-  'https://randomuser.me/api/portraits/women/14.jpg',
-  'https://randomuser.me/api/portraits/women/15.jpg',
-  'https://randomuser.me/api/portraits/women/16.jpg',
-  'https://randomuser.me/api/portraits/women/17.jpg',
-  'https://randomuser.me/api/portraits/women/18.jpg',
-  'https://randomuser.me/api/portraits/women/19.jpg',
-  'https://randomuser.me/api/portraits/women/20.jpg',
-  'https://randomuser.me/api/portraits/women/21.jpg',
-  'https://randomuser.me/api/portraits/women/22.jpg',
-  'https://randomuser.me/api/portraits/women/23.jpg',
-  'https://randomuser.me/api/portraits/women/24.jpg',
-  'https://randomuser.me/api/portraits/women/25.jpg',
-  'https://randomuser.me/api/portraits/women/26.jpg',
-  'https://randomuser.me/api/portraits/women/27.jpg',
-  'https://randomuser.me/api/portraits/women/28.jpg',
-  'https://randomuser.me/api/portraits/women/29.jpg',
-  'https://randomuser.me/api/portraits/women/30.jpg',
+export type AvatarPreset = string | number;
+
+export const CALLER_FEMALE_AVATAR_PRESETS: AvatarPreset[] = [
+  require('../assets/girlavt/girlavt1.png'),
+  require('../assets/girlavt/girlavt2.png'),
+  require('../assets/girlavt/girlavt3.png'),
+  require('../assets/girlavt/girlavt4.png'),
+  require('../assets/girlavt/girlavt5.png'),
+  require('../assets/girlavt/girlavt6.png'),
+  require('../assets/girlavt/girlavt7.png'),
+  require('../assets/girlavt/girlavt8.png'),
+  require('../assets/girlavt/girlavt9.png'),
+  require('../assets/girlavt/girlavt10.png'),
+  require('../assets/girlavt/girlavt11.png'),
+  require('../assets/girlavt/girlavt12.png'),
+  require('../assets/girlavt/girlavt13.png'),
+  require('../assets/girlavt/girlavt14.png'),
+  require('../assets/girlavt/girlavt15.png'),
+  require('../assets/girlavt/girlavt16.png'),
+  require('../assets/girlavt/girlavt17.png'),
+  require('../assets/girlavt/girlavt18.png'),
+  require('../assets/girlavt/girlavt19.png'),
+  require('../assets/girlavt/girlavt20.png'),
+  require('../assets/girlavt/girlavt21.png'),
+  require('../assets/girlavt/girlavt22.png'),
+  require('../assets/girlavt/girlavt23.png'),
+  require('../assets/girlavt/girlavt24.png'),
+  require('../assets/girlavt/girlavt25.png'),
+  require('../assets/girlavt/girlavt26.png'),
+  require('../assets/girlavt/girlavt27.png'),
 ];
 
-export const CALLER_AVATAR_PRESETS: string[] = [
+export const CALLER_AVATAR_PRESETS: AvatarPreset[] = [
   ...CALLER_MALE_AVATAR_PRESETS,
   ...CALLER_FEMALE_AVATAR_PRESETS,
 ];
 
-export function getCallerAvatarPresetsByGender(gender: Gender | null | undefined): string[] {
+export function getCallerAvatarPresetsByGender(gender: Gender | null | undefined): AvatarPreset[] {
   if (gender === 'male') return CALLER_MALE_AVATAR_PRESETS;
   if (gender === 'female') return CALLER_FEMALE_AVATAR_PRESETS;
   return CALLER_AVATAR_PRESETS;
+}
+
+export function toAvatarImageSource(preset: AvatarPreset): ImageSourcePropType {
+  return typeof preset === 'string' ? { uri: preset } : preset;
+}
+
+export function toAvatarUri(preset: AvatarPreset): string {
+  if (typeof preset === 'string') return preset;
+  return Image.resolveAssetSource(preset)?.uri ?? '';
 }
 
 export const CALLER_AUDIO_VERIFICATION_SCRIPT =

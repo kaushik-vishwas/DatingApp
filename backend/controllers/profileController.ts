@@ -27,7 +27,6 @@ import {
   parseDateOnlyToUtcMidnight,
   validateBirthDateForAccount,
 } from '../utils/birthDate';
-import { verifyCallerFemaleVoice } from '../services/callerVoiceGenderVerifier';
 import { trackAndFinalizeRazorpayXPayout } from '../services/razorpayXPayoutService';
 import { emitReceiverWithdrawalUpdate } from '../socket/socketRegistry';
 
@@ -50,6 +49,8 @@ type CompleteProfileBody = {
   bankAccountNumber: string;
   bankIfsc: string;
   bankName: string;
+  /** HTTPS URL of recorded voice sample (required for female receivers). */
+  userAudio?: string;
 };
 
 type CompleteCallerBody = {
@@ -130,7 +131,7 @@ function filterAllowlisted(
 
 /**
  * POST /profile/complete
- * Saves profile URLs and marks account pending_review (receivers only).
+ * Saves receiver profile and activates account immediately (no admin approval gate).
  */
 export const completeProfile = async (
   req: Request<{}, {}, CompleteProfileBody>,
@@ -166,6 +167,7 @@ export const completeProfile = async (
       bankAccountNumber,
       bankIfsc,
       bankName,
+      userAudio,
     } = req.body;
 
     if (!name || !String(name).trim()) {
@@ -247,6 +249,14 @@ export const completeProfile = async (
       res.status(400).json({ message: 'bankName is required' });
       return;
     }
+    const receiverVoiceUrl =
+      typeof userAudio === 'string' && /^https?:\/\//i.test(userAudio.trim())
+        ? userAudio.trim()
+        : null;
+    if (gender === 'female' && !receiverVoiceUrl) {
+      res.status(400).json({ message: 'userAudio must be a valid https URL for female profiles' });
+      return;
+    }
     const receiver = await Receiver.findById(authReceiver._id);
     if (!receiver) {
       res.status(404).json({ message: 'Receiver not found' });
@@ -284,12 +294,13 @@ export const completeProfile = async (
     receiver.bankIfsc = String(bankIfsc).trim().toUpperCase();
     receiver.bankName = String(bankName).trim();
     receiver.audioCallRate = RECEIVER_AUDIO_CALL_RATE_INR_PER_MIN;
-    receiver.accountStatus = 'pending_review';
+    receiver.userAudio = receiverVoiceUrl ?? null;
+    receiver.accountStatus = 'approved';
 
     await receiver.save();
 
     res.status(200).json({
-      message: 'Profile submitted for review',
+      message: 'Profile completed successfully',
       user: toApiReceiver(receiver),
     });
   } catch (err) {
@@ -410,34 +421,8 @@ export const completeCallerProfile = async (
       return;
     }
     const voiceUrl = parseCallerAudioHttpsUrl(req.body);
-    if (gender === 'female' && !voiceUrl) {
-      res.status(400).json({ message: 'userAudio must be a valid https URL for female profiles' });
-      return;
-    }
-
-    const requiresVerification = gender === 'female';
-    let femaleVoiceApproved = true;
-    let voiceVerification: CallerVoiceVerificationPayload | undefined;
-    if (requiresVerification) {
-      const result = await verifyCallerFemaleVoice(voiceUrl!);
-      femaleVoiceApproved = result.ok;
-      const threshold =
-        Number.isFinite(Number(process.env.VOICE_GENDER_FEMALE_MIN_CONFIDENCE))
-          ? Number(process.env.VOICE_GENDER_FEMALE_MIN_CONFIDENCE)
-          : 0.7;
-      voiceVerification = {
-        provider: 'huggingface',
-        approved: result.ok,
-        predictedGender: result.predictedGender,
-        confidence: result.confidence,
-        threshold,
-        model: result.model,
-        reason: result.reason,
-      };
-      console.log(
-        `[caller-voice-gender-check] uid=${String(authUser._id)} predicted=${result.predictedGender} confidence=${result.confidence.toFixed(3)} model=${result.model} approved=${String(result.ok)} reason="${result.reason ?? ''}"`
-      );
-    }
+    const requiresVerification = false;
+    const voiceVerification: CallerVoiceVerificationPayload | undefined = undefined;
     const updated = await User.findOneAndUpdate(
       { _id: authUser._id, accountStatus: 'pending_profile' },
       {
@@ -451,7 +436,7 @@ export const completeCallerProfile = async (
           age: computedAge,
           state: String(state).trim(),
           userAudio: voiceUrl ?? null,
-          accountStatus: requiresVerification ? (femaleVoiceApproved ? 'approved' : 'rejected') : 'approved',
+          accountStatus: 'approved',
           suspended: false,
         },
       },
@@ -466,11 +451,7 @@ export const completeCallerProfile = async (
     }
 
     res.status(200).json({
-      message: requiresVerification
-        ? femaleVoiceApproved
-          ? 'Profile verified successfully'
-          : 'Profile verification failed'
-        : 'Profile completed successfully',
+      message: 'Profile completed successfully',
       user: toApiUser(updated),
       ...(voiceVerification ? { voiceVerification } : {}),
     });

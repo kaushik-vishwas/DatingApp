@@ -15,11 +15,13 @@ import { sendOtpEmail } from '../config/email';
 import { getConfiguredAdminEmail } from '../services/superAdminSync';
 import { trackAndFinalizeRazorpayXPayout } from '../services/razorpayXPayoutService';
 import {
+  emitAuthSessionSuperseded,
   emitCallerApproved,
   emitCallerRejected,
   emitReceiverApproved,
   emitReceiverRejected,
 } from '../socket/socketRegistry';
+import { bumpReceiverAuthSession } from '../services/authSessionService';
 
 type AdminJwtPayload = { adminId: string; typ: 'admin' };
 const OTP_TTL_MS = 5 * 60 * 1000; // 5 minutes
@@ -999,7 +1001,8 @@ export const approveReceiver = async (req: Request<{ id: string }>, res: Respons
     }
     const canApprove =
       receiver.accountStatus === 'pending_review' ||
-      (receiver.accountStatus === 'approved' && !receiver.isVerified);
+      receiver.accountStatus === 'rejected' ||
+      receiver.accountStatus === 'approved';
     if (!canApprove) {
       res.status(400).json({ message: 'Receiver is not pending approval' });
       return;
@@ -1007,6 +1010,7 @@ export const approveReceiver = async (req: Request<{ id: string }>, res: Respons
 
     receiver.accountStatus = 'approved';
     receiver.isVerified = true;
+    receiver.suspended = false;
     receiver.rejectionReason = null;
     await receiver.save();
     emitReceiverApproved(String(receiver._id));
@@ -1038,9 +1042,7 @@ export const rejectReceiver = async (
       res.status(404).json({ message: 'Receiver not found' });
       return;
     }
-    const canReject =
-      receiver.accountStatus === 'pending_review' ||
-      (receiver.accountStatus === 'approved' && !receiver.isVerified);
+    const canReject = receiver.accountStatus === 'pending_review' || receiver.accountStatus === 'approved';
     if (!canReject) {
       res.status(400).json({ message: 'Receiver is not pending approval' });
       return;
@@ -1048,8 +1050,11 @@ export const rejectReceiver = async (
 
     receiver.accountStatus = 'rejected';
     receiver.isVerified = false;
+    receiver.suspended = true;
     receiver.rejectionReason = reason;
     await receiver.save();
+    const sessionVersion = await bumpReceiverAuthSession(String(receiver._id));
+    emitAuthSessionSuperseded('r', String(receiver._id), sessionVersion);
     emitReceiverRejected(String(receiver._id), reason);
 
     res.status(200).json({

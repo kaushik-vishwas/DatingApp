@@ -20,6 +20,7 @@ const email_1 = require("../config/email");
 const superAdminSync_1 = require("../services/superAdminSync");
 const razorpayXPayoutService_1 = require("../services/razorpayXPayoutService");
 const socketRegistry_1 = require("../socket/socketRegistry");
+const authSessionService_1 = require("../services/authSessionService");
 const OTP_TTL_MS = 5 * 60 * 1000; // 5 minutes
 const PLATFORM_COMMISSION_RATE = 0.2;
 const signAdminToken = (adminId) => {
@@ -873,13 +874,15 @@ const approveReceiver = async (req, res) => {
             return;
         }
         const canApprove = receiver.accountStatus === 'pending_review' ||
-            (receiver.accountStatus === 'approved' && !receiver.isVerified);
+            receiver.accountStatus === 'rejected' ||
+            receiver.accountStatus === 'approved';
         if (!canApprove) {
             res.status(400).json({ message: 'Receiver is not pending approval' });
             return;
         }
         receiver.accountStatus = 'approved';
         receiver.isVerified = true;
+        receiver.suspended = false;
         receiver.rejectionReason = null;
         await receiver.save();
         (0, socketRegistry_1.emitReceiverApproved)(String(receiver._id));
@@ -908,16 +911,18 @@ const rejectReceiver = async (req, res) => {
             res.status(404).json({ message: 'Receiver not found' });
             return;
         }
-        const canReject = receiver.accountStatus === 'pending_review' ||
-            (receiver.accountStatus === 'approved' && !receiver.isVerified);
+        const canReject = receiver.accountStatus === 'pending_review' || receiver.accountStatus === 'approved';
         if (!canReject) {
             res.status(400).json({ message: 'Receiver is not pending approval' });
             return;
         }
         receiver.accountStatus = 'rejected';
         receiver.isVerified = false;
+        receiver.suspended = true;
         receiver.rejectionReason = reason;
         await receiver.save();
+        const sessionVersion = await (0, authSessionService_1.bumpReceiverAuthSession)(String(receiver._id));
+        (0, socketRegistry_1.emitAuthSessionSuperseded)('r', String(receiver._id), sessionVersion);
         (0, socketRegistry_1.emitReceiverRejected)(String(receiver._id), reason);
         res.status(200).json({
             message: 'Receiver rejected',

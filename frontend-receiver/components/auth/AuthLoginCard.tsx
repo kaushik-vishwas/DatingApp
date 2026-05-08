@@ -11,19 +11,22 @@ import {
   TextInput,
   TouchableOpacity,
   View,
+  Image,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useAuth } from '../../context/AuthContext';
 import type { RootStackParamList } from '../../navigation/RootStackParamList';
 import { authApi, getErrorMessage, saveJwt } from '../../services/api';
 import type { AuthAccountType } from '../../types/api';
 import { isValidEmail, normalizeEmail, validatePasswordStrength } from '../../utils/validation';
+import SelectoLogo from '../../assets/SelectoLogo.png';
 
 export type AuthLoginCardProps = {
   navigation: NativeStackNavigationProp<RootStackParamList>;
   email: string;
   onEmailChange: (value: string) => void;
-  logoLetter: string;
+  logoLetter?: string; // Made optional
   title: string;
   subtitle: string;
   primaryRegisterLabel: string;
@@ -36,6 +39,8 @@ export type AuthLoginCardProps = {
   onChooseAccountType?: () => void;
   /** Backend auth table: `users` vs `receivers` */
   authAccountType: AuthAccountType;
+  /** Optional custom logo component */
+  customLogo?: React.ReactNode;
 };
 
 export function AuthLoginCard({
@@ -53,7 +58,9 @@ export function AuthLoginCard({
   onSwitchLogin,
   onChooseAccountType,
   authAccountType,
+  customLogo,
 }: AuthLoginCardProps): React.JSX.Element {
+  const insets = useSafeAreaInsets();
   const showSecondaryRegister = Boolean(secondaryRegisterLabel && onSecondaryRegister);
   const showSwitchLogin = Boolean(switchLoginLabel && onSwitchLogin);
   const { signIn } = useAuth();
@@ -113,15 +120,25 @@ export function AuthLoginCard({
           ref={(r) => {
             scrollRef.current = r;
           }}
-          contentContainerStyle={styles.scrollContent}
+          contentContainerStyle={[
+            styles.scrollContent,
+            {
+              paddingTop: Math.max(insets.top, 14) + 18,
+              paddingBottom: Math.max(insets.bottom, 14) + 24,
+            },
+          ]}
           keyboardShouldPersistTaps="handled"
           keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
           onScrollBeginDrag={Keyboard.dismiss}
         >
           <View style={styles.card}>
-            <View style={styles.logoCircle}>
-              <Text style={styles.logoLetter}>{logoLetter}</Text>
-            </View>
+            {customLogo ? (
+              <View style={styles.logoContainer}>{customLogo}</View>
+            ) : logoLetter ? (
+              <View style={styles.logoCircle}>
+                <Text style={styles.logoLetter}>{logoLetter}</Text>
+              </View>
+            ) : null}
             <Text style={styles.title}>{title}</Text>
             <Text style={styles.subtitle}>{subtitle}</Text>
 
@@ -199,24 +216,24 @@ const PURPLE = '#7b2cff';
 const styles = StyleSheet.create({
   bg: {
     flex: 1,
-    backgroundColor: '#262626',
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: 18,
+    backgroundColor: '#fff',
   },
   scrollContent: {
     flexGrow: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
     paddingVertical: 24,
-    paddingBottom: 180,
+    paddingHorizontal: 20,
+    paddingBottom: 40,
   },
   card: {
     width: '100%',
-    maxWidth: 360,
     backgroundColor: '#fff',
     padding: 22,
-    borderRadius: 10,
+    borderRadius: 0,
+  },
+  logoContainer: {
+    alignItems: 'flex-start',  // Changed to left align
+    justifyContent: 'center',
+    marginBottom: 10,
   },
   logoCircle: {
     width: 44,

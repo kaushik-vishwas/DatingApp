@@ -49,6 +49,14 @@ function isPendingVerification(r: ReceiverRecord): boolean {
   return r.accountStatus === 'pending_review' || (r.accountStatus === 'approved' && !r.isVerified);
 }
 
+function canApproveReceiver(r: ReceiverRecord): boolean {
+  return r.accountStatus === 'pending_review' || r.accountStatus === 'rejected' || r.accountStatus === 'approved';
+}
+
+function canRejectReceiver(r: ReceiverRecord): boolean {
+  return r.accountStatus === 'pending_review' || r.accountStatus === 'approved';
+}
+
 function activityIso(r: ReceiverRecord): string {
   return r.updatedAt || r.createdAt;
 }
@@ -292,7 +300,8 @@ export function KycApprovalsPage() {
                     r.accountStatus === 'approved' && !r.isVerified
                       ? { label: 'Pending verification', className: 'bg-amber-100 text-amber-800' }
                       : statusBadge(r.accountStatus);
-                  const pending = isPendingVerification(r);
+                  const canApprove = canApproveReceiver(r);
+                  const canReject = canRejectReceiver(r);
                   const activity = activityIso(r);
                   const documentUrls = (r.documents ?? []).filter(
                     (x): x is string => typeof x === 'string' && x.trim().length > 0
@@ -362,26 +371,30 @@ export function KycApprovalsPage() {
                           >
                             <Eye className="h-5 w-5" />
                           </button>
-                          {pending ? (
+                          {canApprove || canReject ? (
                             <>
-                              <button
-                                type="button"
-                                disabled={busyId === r._id}
-                                onClick={() => void onApprove(r._id)}
-                                className="rounded-lg p-2 text-emerald-600 hover:bg-emerald-50 disabled:opacity-50"
-                                title="Approve"
-                              >
-                                <Check className="h-5 w-5" />
-                              </button>
-                              <button
-                                type="button"
-                                disabled={busyId === r._id}
-                                onClick={() => void onReject(r._id)}
-                                className="rounded-lg p-2 text-red-600 hover:bg-red-50 disabled:opacity-50"
-                                title="Reject"
-                              >
-                                <X className="h-5 w-5" />
-                              </button>
+                              {canApprove ? (
+                                <button
+                                  type="button"
+                                  disabled={busyId === r._id}
+                                  onClick={() => void onApprove(r._id)}
+                                  className="rounded-lg p-2 text-emerald-600 hover:bg-emerald-50 disabled:opacity-50"
+                                  title="Approve"
+                                >
+                                  <Check className="h-5 w-5" />
+                                </button>
+                              ) : null}
+                              {canReject ? (
+                                <button
+                                  type="button"
+                                  disabled={busyId === r._id}
+                                  onClick={() => void onReject(r._id)}
+                                  className="rounded-lg p-2 text-red-600 hover:bg-red-50 disabled:opacity-50"
+                                  title="Reject"
+                                >
+                                  <X className="h-5 w-5" />
+                                </button>
+                              ) : null}
                             </>
                           ) : null}
                         </div>

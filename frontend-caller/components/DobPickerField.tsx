@@ -14,6 +14,14 @@ type Props = {
   fallbackDate?: Date;
 };
 
+// Helper function to format date as DD-MM-YYYY for display
+function formatDisplayDate(date: Date): string {
+  const day = String(date.getDate()).padStart(2, '0');
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const year = date.getFullYear();
+  return `${day}-${month}-${year}`;
+}
+
 export default function DobPickerField({ label, value, onChange, fallbackDate }: Props): React.JSX.Element {
   const [show, setShow] = useState(false);
 
@@ -22,7 +30,8 @@ export default function DobPickerField({ label, value, onChange, fallbackDate }:
 
   const displayDate = value ?? fallbackDate ?? maximumDate;
 
-  const summary = value ? formatDateOnlyLocal(value) : 'Tap to choose';
+  // Display format: DD-MM-YYYY for user, API format: YYYY-MM-DD for backend
+  const summary = value ? formatDisplayDate(value) : 'Tap to choose';
 
   const open = () => {
     setShow(true);

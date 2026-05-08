@@ -55,7 +55,7 @@ export default function ProfileInfoScreen({ navigation }: Props): React.JSX.Elem
       <View style={styles.card}>
         <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
           <ScreenHeader
-            title="Complete Your Profile"
+            title="Complete Yoaaur Profile"
             subtitle="Step 1 of 3"
             navigation={navigation}
             showBack

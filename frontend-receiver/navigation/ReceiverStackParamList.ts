@@ -1,5 +1,13 @@
 import type { VoiceBootstrapResponse } from '../types/api';
 
+export type IncomingCallParams = {
+  callId: string;
+  fromType: 'u' | 'r';
+  fromId: string;
+  peerName: string;
+  peerImage?: string | null;
+};
+
 export type ReceiverStackParamList = {
   ReceiverHome: undefined;
   ReceiverSettings: undefined;
@@ -14,5 +22,6 @@ export type ReceiverStackParamList = {
   ReceiverCallHistory: undefined;
   ReceiverChats: undefined;
   ReceiverChat: { userId: string; userName: string; userImage?: string | null };
+  IncomingCall: IncomingCallParams;
   VoiceCall: VoiceBootstrapResponse & { peerName: string; peerImage?: string | null };
 };

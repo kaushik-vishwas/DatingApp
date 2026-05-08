@@ -16,10 +16,11 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { CALLER_FEMALE_AVATAR_PRESETS } from '../../constants/userOnboarding';
+import { CALLER_FEMALE_AVATAR_PRESETS, isCallerAvatarPresetId } from '../../constants/userOnboarding';
 import { useAuth } from '../../context/AuthContext';
 import type { ReceiverStackParamList } from '../../navigation/ReceiverStackParamList';
 import { getErrorMessage, profileApi } from '../../services/api';
+import { resolveProfileImageSource } from '../../utils/avatarSource';
 
 type Nav = NativeStackNavigationProp<ReceiverStackParamList, 'ReceiverEditProfile'>;
 
@@ -36,6 +37,9 @@ export default function ReceiverEditProfileScreen(): React.JSX.Element {
   const [profileImageUri, setProfileImageUri] = useState<string | null>(user?.profileImage ?? null);
   const [avatarModal, setAvatarModal] = useState(false);
 
+  const allowedFemaleAvatarIds = CALLER_FEMALE_AVATAR_PRESETS.map((preset) => preset.id);
+  const profileImageSource = resolveProfileImageSource(profileImageUri);
+
   const onSave = async () => {
     if (!name.trim()) {
       Alert.alert('Validation', 'Name is required.');
@@ -45,7 +49,7 @@ export default function ReceiverEditProfileScreen(): React.JSX.Element {
       Alert.alert('Validation', 'Please select an avatar.');
       return;
     }
-    if (!CALLER_FEMALE_AVATAR_PRESETS.includes(profileImageUri)) {
+    if (isCallerAvatarPresetId(profileImageUri) && !allowedFemaleAvatarIds.includes(profileImageUri)) {
       Alert.alert('Validation', 'Please select one avatar from the available list.');
       return;
     }
@@ -93,7 +97,7 @@ export default function ReceiverEditProfileScreen(): React.JSX.Element {
       <View style={styles.photoWrap}>
         <TouchableOpacity style={styles.photoCircle} onPress={() => setAvatarModal(true)}>
           {profileImageUri ? (
-            <Image source={{ uri: profileImageUri }} style={styles.photoImage} />
+            profileImageSource ? <Image source={profileImageSource} style={styles.photoImage} /> : <Text style={styles.photoPlaceholder}>📷</Text>
           ) : (
             <Text style={styles.photoPlaceholder}>📷</Text>
           )}
@@ -150,19 +154,19 @@ export default function ReceiverEditProfileScreen(): React.JSX.Element {
             <Text style={styles.modalTitle}>Select Avatar</Text>
             <ScrollView style={styles.modalList} keyboardShouldPersistTaps="handled">
               <View style={styles.avatarGrid}>
-                {CALLER_FEMALE_AVATAR_PRESETS.map((avatarUrl) => {
-                  const active = profileImageUri === avatarUrl;
+                {CALLER_FEMALE_AVATAR_PRESETS.map((avatarPreset) => {
+                  const active = profileImageUri === avatarPreset.id;
                   return (
                     <TouchableOpacity
-                      key={avatarUrl}
+                      key={avatarPreset.id}
                       style={[styles.avatarCell, active && styles.avatarCellActive]}
                       onPress={() => {
-                        setProfileImageUri(avatarUrl);
+                        setProfileImageUri(avatarPreset.id);
                         setAvatarModal(false);
                       }}
                       activeOpacity={0.85}
                     >
-                      <Image source={{ uri: avatarUrl }} style={styles.avatarThumb} />
+                      <Image source={avatarPreset.source} style={styles.avatarThumb} />
                     </TouchableOpacity>
                   );
                 })}

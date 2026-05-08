@@ -8,8 +8,10 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { getCallerAvatarPresetsByGender } from '../../constants/userOnboarding';
+import { toAvatarImageSource, toAvatarUri } from '../../constants/userOnboarding';
 import { useAuth } from '../../context/AuthContext';
 import { useUserOnboarding } from '../../context/UserOnboardingContext';
 import type { UserOnboardingStackParamList } from '../../navigation/UserOnboardingStackParamList';
@@ -19,10 +21,11 @@ const PURPLE = '#7b2cff';
 type Props = NativeStackScreenProps<UserOnboardingStackParamList, 'ChooseAvatar'>;
 
 export default function ChooseAvatarScreen({ navigation }: Props): React.JSX.Element {
+  const insets = useSafeAreaInsets();
   const { user } = useAuth();
   const { gender, setCallerAvatarPresetUrl } = useUserOnboarding();
   const avatarPresets = getCallerAvatarPresetsByGender(gender);
-  const [selected, setSelected] = useState<string>(avatarPresets[0]!);
+  const [selected, setSelected] = useState(avatarPresets[0]!);
 
   React.useEffect(() => {
     if (!avatarPresets.includes(selected)) {
@@ -33,12 +36,17 @@ export default function ChooseAvatarScreen({ navigation }: Props): React.JSX.Ele
   const displayLabel = user?.name?.trim() || 'You';
 
   const onProceed = () => {
-    setCallerAvatarPresetUrl(selected);
+    setCallerAvatarPresetUrl(toAvatarUri(selected));
     navigation.navigate('UserCompleteProfile');
   };
 
   return (
-    <View style={styles.root}>
+    <View
+      style={[
+        styles.root,
+        { paddingTop: Math.max(insets.top, 14) + 18, paddingBottom: Math.max(insets.bottom, 14) + 18 },
+      ]}
+    >
       <TouchableOpacity style={styles.backWrap} onPress={() => navigation.goBack()}>
         <Text style={styles.back}>←</Text>
       </TouchableOpacity>
@@ -47,14 +55,14 @@ export default function ChooseAvatarScreen({ navigation }: Props): React.JSX.Ele
       <Text style={styles.subtitle}>Tell us a bit about yourself</Text>
 
       <View style={styles.featured}>
-        <Image source={{ uri: selected }} style={styles.featuredImg} />
+        <Image source={toAvatarImageSource(selected)} style={styles.featuredImg} />
         <Text style={styles.featuredName}>{displayLabel}</Text>
       </View>
 
       <View style={styles.listWrap}>
         <FlatList
           data={avatarPresets}
-          keyExtractor={(item) => item}
+          keyExtractor={(item, index) => `${typeof item}-${String(item)}-${index}`}
           numColumns={3}
           columnWrapperStyle={styles.row}
           contentContainerStyle={styles.grid}
@@ -67,7 +75,7 @@ export default function ChooseAvatarScreen({ navigation }: Props): React.JSX.Ele
                 onPress={() => setSelected(item)}
                 activeOpacity={0.85}
               >
-                <Image source={{ uri: item }} style={styles.thumb} />
+                <Image source={toAvatarImageSource(item)} style={styles.thumb} />
               </TouchableOpacity>
             );
           }}
@@ -88,8 +96,6 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#fff',
     paddingHorizontal: 20,
-    paddingTop: 48,
-    paddingBottom: 24,
   },
   backWrap: {
     alignSelf: 'flex-start',
