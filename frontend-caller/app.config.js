@@ -40,6 +40,7 @@ const baseAndroidPackage = appJson.expo?.android?.package || 'com.kaushikvishwas
 module.exports = {
   expo: {
     ...appJson.expo,
+    owner: "kaushik-vishwas", 
     name: `${baseName}${nameSuffix}`,
     slug: `${baseSlug}${nameSuffix}`,
     android: {
@@ -55,7 +56,8 @@ module.exports = {
       ...(appJson.expo.extra || {}),
       eas: {
         ...((appJson.expo.extra && appJson.expo.extra.eas) || {}),
-        projectId: '0ca964b8-cc50-4b02-b4f1-63e66b6b10c0',
+         "projectId": "08d5c5e0-6c0a-48ba-8d31-e91d50ead4af"
+        // projectId: '0ca964b8-cc50-4b02-b4f1-63e66b6b10c0',
       },
       apiBaseUrl,
       cloudinaryCloudName,
