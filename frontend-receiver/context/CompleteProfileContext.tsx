@@ -30,6 +30,8 @@ export type CompleteProfileState = {
   bankIfsc: string;
   bankName: string;
   userAudio: string | null;
+  /** Survives screen unmount (e.g. native stack) so KYC terms stay accepted after Audio step. */
+  kycTermsAccepted: boolean;
 };
 
 const initialState: CompleteProfileState = {
@@ -52,6 +54,7 @@ const initialState: CompleteProfileState = {
   bankIfsc: '',
   bankName: '',
   userAudio: null,
+  kycTermsAccepted: false,
 };
 
 type CompleteProfileContextValue = {

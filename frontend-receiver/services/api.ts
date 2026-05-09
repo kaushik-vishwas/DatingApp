@@ -228,7 +228,7 @@ export const authApi = {
 
 export const profileApi = {
   complete: (payload: CompleteProfilePayload) =>
-    api.post<CompleteProfileResponse>('/profile/complete', payload),
+    api.post<CompleteProfileResponse>('/profile/complete', payload, { timeout: 90_000 }),
 
   saveCallerUserAudio: (payload: SaveCallerUserAudioPayload) =>
     api.patch<SaveCallerUserAudioResponse>('/profile/caller-audio', payload),

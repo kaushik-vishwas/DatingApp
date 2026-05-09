@@ -14,11 +14,20 @@ import { validateCompleteProfile } from '../../utils/completeProfileSteps';
 
 type Props = NativeStackScreenProps<CompleteProfileStackParamList, 'AudioVerification'>;
 
-export default function AudioVerificationScreen({ navigation }: Props): React.JSX.Element {
+export default function AudioVerificationScreen({ navigation, route }: Props): React.JSX.Element {
   const insets = useSafeAreaInsets();
   const { state, update } = useCompleteProfile();
   const { user, refreshUser, applyServerUser } = useAuth();
   const [submitting, setSubmitting] = React.useState(false);
+
+  React.useEffect(() => {
+    if (route.params?.agreedToPolicies && !state.kycTermsAccepted) {
+      update({ kycTermsAccepted: true });
+    }
+  }, [route.params?.agreedToPolicies, state.kycTermsAccepted, update]);
+
+  const goBackToBankDetails = () =>
+    navigation.navigate('BankDetails', { agreedToPolicies: true });
 
   const onUploadComplete = (url: string) => {
     update({ userAudio: url });
@@ -32,12 +41,12 @@ export default function AudioVerificationScreen({ navigation }: Props): React.JS
     const err = validateCompleteProfile(state);
     if (err) {
       Alert.alert('Validation', err);
-      navigation.navigate('BankDetails');
+      goBackToBankDetails();
       return;
     }
     if (!state.profileImageUri || !state.aadhaarFront || !state.aadhaarBack || !state.panFront) {
       Alert.alert('Validation', 'Missing required files');
-      navigation.navigate('BankDetails');
+      goBackToBankDetails();
       return;
     }
     const dobStr = user?.dateOfBirth?.trim();

@@ -31,15 +31,16 @@ export default function BankDetailsScreen({ navigation, route }: Props): React.J
   const { state, update } = useCompleteProfile();
   const { user, refreshUser, applyServerUser } = useAuth();
   const [submitting, setSubmitting] = useState(false);
-  const [agreedToPolicies, setAgreedToPolicies] = useState(false);
   const [showTermsModal, setShowTermsModal] = useState(false);
   const [showPrivacyModal, setShowPrivacyModal] = useState(false);
 
+  const agreedToPolicies = state.kycTermsAccepted;
+
   React.useEffect(() => {
-    if (route.params?.agreedToPolicies && !agreedToPolicies) {
-      setAgreedToPolicies(true);
+    if (route.params?.agreedToPolicies && !state.kycTermsAccepted) {
+      update({ kycTermsAccepted: true });
     }
-  }, [route.params?.agreedToPolicies, agreedToPolicies]);
+  }, [route.params?.agreedToPolicies, state.kycTermsAccepted, update]);
 
   React.useEffect(() => {
     if (route.params?.autoSubmit && !submitting && agreedToPolicies) {
@@ -75,7 +76,7 @@ export default function BankDetailsScreen({ navigation, route }: Props): React.J
       return;
     }
     if (state.gender === 'female' && !state.userAudio?.trim()) {
-      navigation.navigate('AudioVerification', { agreedToPolicies });
+      navigation.navigate('AudioVerification', { agreedToPolicies: true });
       return;
     }
 
@@ -266,7 +267,10 @@ export default function BankDetailsScreen({ navigation, route }: Props): React.J
           </View>
 
           {/* Terms & Conditions and Privacy Policy Checkbox */}
-          <TouchableOpacity style={styles.termsRow} onPress={() => setAgreedToPolicies((v) => !v)}>
+          <TouchableOpacity
+            style={styles.termsRow}
+            onPress={() => update({ kycTermsAccepted: !state.kycTermsAccepted })}
+          >
             <View style={[styles.checkbox, agreedToPolicies && styles.checkboxChecked]}>
               {agreedToPolicies ? <Text style={styles.checkboxMark}>✓</Text> : null}
             </View>
