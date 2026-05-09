@@ -28,7 +28,7 @@ function sleep(ms: number): Promise<void> {
   });
 }
 
-type SettledCallSnapshot = {
+export type SettledCallSnapshot = {
   durationSec: number;
   settledAmountInr: number;
   receiverEarnedInr: number;
@@ -39,7 +39,7 @@ type SettledCallSnapshot = {
   justCompleted: boolean;
 };
 
-async function settleCallSession(
+export async function settleCallSession(
   callId: string,
   complete: boolean
 ): Promise<SettledCallSnapshot> {
@@ -125,7 +125,7 @@ async function settleCallSession(
 }
 
 /** Live calls hit sessionSync every ~5s, which bumps updatedAt. No updates for this long ⇒ abandoned. */
-const DEFAULT_STALE_ONGOING_MS = 15 * 60 * 1000;
+const DEFAULT_STALE_ONGOING_MS = 90 * 1000;
 
 /**
  * Ongoing CallSession rows persist in MongoDB; orphan "ongoing" blocks bootstrap forever.

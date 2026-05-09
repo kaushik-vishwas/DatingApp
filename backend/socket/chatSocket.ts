@@ -10,9 +10,10 @@ import Receiver from '../models/Receiver';
 import { getPayloadSessionVersion, type AppJwtPayload } from '../utils/authToken';
 import { registerSocketIOServer } from './socketRegistry';
 import { CHAT_TEXT_FEE_INR } from '../constants/chatPricing';
-import { finalizeReceiverOnlineSession } from '../services/receiverScore';
+import { finalizeReceiverOnlineSession, recordReceiverCallScore } from '../services/receiverScore';
 import { scheduleReceiverAvailabilityNotifications } from '../services/receiverAvailabilityNotifier';
 import { registerPendingCallInvite, unregisterPendingCallInvite } from '../services/callInviteRegistry';
+import { settleCallSession } from '../controllers/callController';
 import {
   isReceiverBusy,
   releaseIfStaleReceiverBusy,
@@ -75,6 +76,30 @@ export function attachChatSocket(httpServer: HTTPServer): Server {
   const queueKey = (typ: AccountType, accountId: string): string => `${typ}:${String(accountId).trim()}`;
   const hasActiveSocketForAccount = (typ: AccountType, accountId: string): boolean =>
     (io.sockets.adapter.rooms.get(accountRoom(typ, accountId))?.size ?? 0) > 0;
+  const settleAndReleaseCall = async (callId: string, receiverId: string): Promise<void> => {
+    try {
+      const settled = await settleCallSession(callId, true);
+      if (settled.justCompleted) {
+        void recordReceiverCallScore({
+          callId,
+          receiverId: settled.receiverId,
+          callerId: settled.callerId,
+          startedAt: settled.startedAt,
+          durationSec: settled.durationSec,
+        }).catch((e: unknown) => {
+          const msg = e instanceof Error ? e.message : String(e);
+          console.error('receiver call score record error (socket):', msg);
+        });
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      console.error('socket settleAndReleaseCall error:', msg);
+    } finally {
+      unregisterPendingCallInvite(receiverId);
+      releaseReceiverReservation(receiverId);
+      await syncReceiverQueueState(receiverId);
+    }
+  };
   const cancelPendingInvitesFor = (typ: AccountType, accountId: string): void => {
     for (const [callId, invite] of activeCallInvites) {
       const isTarget = invite.targetType === typ && invite.targetId === accountId;
@@ -85,9 +110,7 @@ export function attachChatSocket(httpServer: HTTPServer): Server {
         invite.timeoutHandle = null;
       }
       activeCallInvites.delete(callId);
-      unregisterPendingCallInvite(invite.receiverId);
-      releaseReceiverReservation(invite.receiverId);
-      void syncReceiverQueueState(invite.receiverId);
+      void settleAndReleaseCall(callId, invite.receiverId);
       io.to(accountRoom(invite.inviterType, invite.inviterId)).emit('call:ended', {
         callId,
         fromType: typ,
@@ -799,9 +822,7 @@ export function attachChatSocket(httpServer: HTTPServer): Server {
           fromId: endedById,
         });
         activeCallInvites.delete(callId);
-        unregisterPendingCallInvite(invite.receiverId);
-        releaseReceiverReservation(invite.receiverId);
-        void syncReceiverQueueState(invite.receiverId);
+        void settleAndReleaseCall(callId, invite.receiverId);
         ack?.({ ok: true });
         return;
       }

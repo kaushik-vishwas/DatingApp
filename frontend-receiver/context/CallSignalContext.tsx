@@ -5,6 +5,7 @@ import { useAuth } from './AuthContext';
 import { callApi, getJwt, getResolvedApiBaseUrl } from '../services/api';
 import type { VoiceBootstrapResponse } from '../types/api';
 import { navigationRef } from '../navigation/navigationRef';
+import { startOutgoingCallTone } from '../utils/callSounds';
 
 type CallIncomingPayload = {
   callId: string;
@@ -179,41 +180,46 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         throw new Error('Call signaling is not connected. Check your network and try again.');
       }
 
-      const { data } = await callApi.bootstrap(id);
-      pendingOutgoingByCallIdRef.current.set(data.callId, {
-        callId: data.callId,
-        peerId: id,
-        peerName: name,
-        peerImage: peerImage ?? null,
-        bootstrap: data,
-      });
-
-      const ack = await new Promise<CallInviteAck>((resolve) => {
-        socket.emit('call:invite', { callId: data.callId, targetId: id }, (res: CallInviteAck) => {
-          resolve(res ?? {});
+      const stopTone = await startOutgoingCallTone();
+      try {
+        const { data } = await callApi.bootstrap(id);
+        pendingOutgoingByCallIdRef.current.set(data.callId, {
+          callId: data.callId,
+          peerId: id,
+          peerName: name,
+          peerImage: peerImage ?? null,
+          bootstrap: data,
         });
-      });
 
-      if (ack.ok === false) {
-        pendingOutgoingByCallIdRef.current.delete(data.callId);
-        throw new Error(ack.error || 'Could not ring this user.');
-      }
-      const outcome = await new Promise<InviteOutcome>((resolve) => {
-        const timeout = setTimeout(() => {
-          pendingInviteOutcomeRef.current.delete(data.callId);
-          resolve({ accepted: false, reason: 'timeout' });
-        }, 35_000);
-        pendingInviteOutcomeRef.current.set(data.callId, { resolve, timeout });
-      });
-      if (!outcome.accepted) {
-        pendingOutgoingByCallIdRef.current.delete(data.callId);
-        if (socket.connected) {
-          socket.emit('call:end', { callId: data.callId });
+        const ack = await new Promise<CallInviteAck>((resolve) => {
+          socket.emit('call:invite', { callId: data.callId, targetId: id }, (res: CallInviteAck) => {
+            resolve(res ?? {});
+          });
+        });
+
+        if (ack.ok === false) {
+          pendingOutgoingByCallIdRef.current.delete(data.callId);
+          throw new Error(ack.error || 'Could not ring this user.');
         }
-        if (outcome.reason === 'rejected') {
-          throw new Error('Call was declined by receiver.');
+        const outcome = await new Promise<InviteOutcome>((resolve) => {
+          const timeout = setTimeout(() => {
+            pendingInviteOutcomeRef.current.delete(data.callId);
+            resolve({ accepted: false, reason: 'timeout' });
+          }, 35_000);
+          pendingInviteOutcomeRef.current.set(data.callId, { resolve, timeout });
+        });
+        if (!outcome.accepted) {
+          pendingOutgoingByCallIdRef.current.delete(data.callId);
+          if (socket.connected) {
+            socket.emit('call:end', { callId: data.callId });
+          }
+          if (outcome.reason === 'rejected') {
+            throw new Error('Call was declined by receiver.');
+          }
+          throw new Error('Receiver is not available right now.');
         }
-        throw new Error('Receiver is not available right now.');
+      } finally {
+        await stopTone();
       }
     },
     [registerPeer]
@@ -239,24 +245,29 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       if (!socket?.connected) {
         throw new Error('Call signaling is not connected.');
       }
+      socket.emit('call:response', { callId: req.callId, accepted: true });
 
       const cachedBootstrap = incomingBootstrapByCallIdRef.current.get(req.callId) ?? null;
       if (cachedBootstrap) {
         incomingBootstrapByCallIdRef.current.delete(req.callId);
         incomingBootstrapPromiseByCallIdRef.current.delete(req.callId);
-        socket.emit('call:response', { callId: req.callId, accepted: true });
         openVoiceCall(cachedBootstrap, req.peerName, req.peerImage ?? null);
         return;
       }
 
-      const inFlight = incomingBootstrapPromiseByCallIdRef.current.get(req.callId) ?? null;
-      const bootstrapped = inFlight
-        ? await inFlight
-        : (await callApi.bootstrap(req.fromId, req.callId)).data;
+      let bootstrapped: VoiceBootstrapResponse;
+      try {
+        const inFlight = incomingBootstrapPromiseByCallIdRef.current.get(req.callId) ?? null;
+        bootstrapped = inFlight
+          ? await inFlight
+          : (await callApi.bootstrap(req.fromId, req.callId)).data;
+      } catch (e) {
+        socket.emit('call:end', { callId: req.callId });
+        throw e;
+      }
 
       incomingBootstrapByCallIdRef.current.delete(req.callId);
       incomingBootstrapPromiseByCallIdRef.current.delete(req.callId);
-      socket.emit('call:response', { callId: req.callId, accepted: true });
       openVoiceCall(bootstrapped, req.peerName, req.peerImage ?? null);
     },
     [openVoiceCall]

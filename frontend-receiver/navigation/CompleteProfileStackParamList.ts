@@ -1,6 +1,6 @@
 export type CompleteProfileStackParamList = {
   ProfileInfo: undefined;
   DocumentUpload: undefined;
-  BankDetails: { autoSubmit?: boolean } | undefined;
-  AudioVerification: undefined;
+  BankDetails: { autoSubmit?: boolean; agreedToPolicies?: boolean } | undefined;
+  AudioVerification: { agreedToPolicies?: boolean } | undefined;
 };

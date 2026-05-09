@@ -335,6 +335,11 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
           ) {
             setLiveSettledAmountInr((prev) => (data.receiverEarnedInr > prev ? data.receiverEarnedInr : prev));
           }
+          if (data.status === 'completed' && !endingRef.current) {
+            endingRef.current = true;
+            await leaveMedia();
+            stopQueueAndExit();
+          }
         } catch {
           // Best-effort live settlement sync.
         }

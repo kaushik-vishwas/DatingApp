@@ -6,10 +6,12 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useCallSignals, type IncomingCallRequest } from '../../context/CallSignalContext';
 import type { ReceiverStackParamList } from '../../navigation/ReceiverStackParamList';
+import { startIncomingRingtone } from '../../utils/callSounds';
 
 type Props = NativeStackScreenProps<ReceiverStackParamList, 'IncomingCall'>;
 
 const INCOMING_CALL_UI_TIMEOUT_MS = 35_000;
+const AUTO_ACCEPT_MS = 5_000;
 
 export default function IncomingCallScreen({ navigation, route }: Props): React.JSX.Element {
   const insets = useSafeAreaInsets();
@@ -23,6 +25,31 @@ export default function IncomingCallScreen({ navigation, route }: Props): React.
 
   const [responding, setResponding] = useState(false);
   const respondedRef = useRef(false);
+  const stopRingtoneRef = useRef<(() => Promise<void>) | null>(null);
+
+  useEffect(() => {
+    let mounted = true;
+    void (async () => {
+      try {
+        const stop = await startIncomingRingtone();
+        if (!mounted) {
+          await stop();
+          return;
+        }
+        stopRingtoneRef.current = stop;
+      } catch {
+        // Keep the incoming-call UI even if ringtone could not be played.
+      }
+    })();
+    return () => {
+      mounted = false;
+      const stop = stopRingtoneRef.current;
+      stopRingtoneRef.current = null;
+      if (stop) {
+        void stop();
+      }
+    };
+  }, []);
 
   const [secondsLeft, setSecondsLeft] = useState(Math.ceil(INCOMING_CALL_UI_TIMEOUT_MS / 1000));
 
@@ -65,6 +92,11 @@ export default function IncomingCallScreen({ navigation, route }: Props): React.
     respondedRef.current = true;
     setResponding(true);
     try {
+      const stop = stopRingtoneRef.current;
+      stopRingtoneRef.current = null;
+      if (stop) {
+        await stop();
+      }
       rejectIncomingCall(req);
     } finally {
       navigation.goBack();
@@ -76,6 +108,11 @@ export default function IncomingCallScreen({ navigation, route }: Props): React.
     respondedRef.current = true;
     setResponding(true);
     try {
+      const stop = stopRingtoneRef.current;
+      stopRingtoneRef.current = null;
+      if (stop) {
+        await stop();
+      }
       await acceptIncomingCall(req);
     } catch {
       setResponding(false);
@@ -90,6 +127,17 @@ export default function IncomingCallScreen({ navigation, route }: Props): React.
         void onReject();
       }
     }, INCOMING_CALL_UI_TIMEOUT_MS);
+    return () => clearTimeout(timeout);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [responding]);
+
+  // Auto-accept if receiver does not act within 5 seconds.
+  useEffect(() => {
+    const timeout = setTimeout(() => {
+      if (!responding && !respondedRef.current) {
+        void onAccept();
+      }
+    }, AUTO_ACCEPT_MS);
     return () => clearTimeout(timeout);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [responding]);

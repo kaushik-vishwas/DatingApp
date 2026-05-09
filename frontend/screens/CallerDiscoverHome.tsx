@@ -32,6 +32,7 @@ import { useCallSignals } from '../context/CallSignalContext';
 import { callApi, discoverApi, getErrorMessage } from '../services/api';
 import type { DiscoverReceiverSummary } from '../types/api';
 import { getReceiverPresenceInfo } from '../utils/receiverStatus';
+import { resolveProfileImageSource } from '../utils/avatarSource';
 import SelectoLogo from '../assets/SelectoLogo.png'
 
 const PURPLE = '#7b2cff';
@@ -135,6 +136,7 @@ export default function CallerDiscoverHome(): React.JSX.Element {
   }, [fetchList, refreshUser]);
 
   const wallet = typeof user?.walletBalance === 'number' && Number.isFinite(user.walletBalance) ? user.walletBalance : 0;
+  const currentUserProfileImageSource = resolveProfileImageSource(user?.profileImage);
 
   const onCall = (item: DiscoverReceiverSummary) => {
     const rate = item.audioCallRate;
@@ -343,9 +345,9 @@ export default function CallerDiscoverHome(): React.JSX.Element {
             </TouchableOpacity>
             
             {/* Enhanced Avatar with Border */}
-            {user?.profileImage ? (
+            {currentUserProfileImageSource ? (
               <View style={styles.avatarCapsule}>
-                <Image source={{ uri: user.profileImage }} style={styles.meAvatar} />
+                <Image source={currentUserProfileImageSource} style={styles.meAvatar} />
               </View>
             ) : (
               <View style={[styles.avatarCapsule, styles.meAvatarPh]}>

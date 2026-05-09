@@ -19,6 +19,7 @@ const chatPricing_1 = require("../constants/chatPricing");
 const receiverScore_1 = require("../services/receiverScore");
 const receiverAvailabilityNotifier_1 = require("../services/receiverAvailabilityNotifier");
 const callInviteRegistry_1 = require("../services/callInviteRegistry");
+const callController_1 = require("../controllers/callController");
 const callQueue_1 = require("../services/callQueue");
 function roomKey(userId, receiverId) {
     return `chat:${userId}:${receiverId}`;
@@ -53,6 +54,32 @@ function attachChatSocket(httpServer) {
     const DISCONNECT_GRACE_MS = 5000;
     const queueKey = (typ, accountId) => `${typ}:${String(accountId).trim()}`;
     const hasActiveSocketForAccount = (typ, accountId) => (io.sockets.adapter.rooms.get(accountRoom(typ, accountId))?.size ?? 0) > 0;
+    const settleAndReleaseCall = async (callId, receiverId) => {
+        try {
+            const settled = await (0, callController_1.settleCallSession)(callId, true);
+            if (settled.justCompleted) {
+                void (0, receiverScore_1.recordReceiverCallScore)({
+                    callId,
+                    receiverId: settled.receiverId,
+                    callerId: settled.callerId,
+                    startedAt: settled.startedAt,
+                    durationSec: settled.durationSec,
+                }).catch((e) => {
+                    const msg = e instanceof Error ? e.message : String(e);
+                    console.error('receiver call score record error (socket):', msg);
+                });
+            }
+        }
+        catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            console.error('socket settleAndReleaseCall error:', msg);
+        }
+        finally {
+            (0, callInviteRegistry_1.unregisterPendingCallInvite)(receiverId);
+            (0, callQueue_1.releaseReceiverReservation)(receiverId);
+            await (0, callQueue_1.syncReceiverQueueState)(receiverId);
+        }
+    };
     const cancelPendingInvitesFor = (typ, accountId) => {
         for (const [callId, invite] of activeCallInvites) {
             const isTarget = invite.targetType === typ && invite.targetId === accountId;
@@ -64,9 +91,7 @@ function attachChatSocket(httpServer) {
                 invite.timeoutHandle = null;
             }
             activeCallInvites.delete(callId);
-            (0, callInviteRegistry_1.unregisterPendingCallInvite)(invite.receiverId);
-            (0, callQueue_1.releaseReceiverReservation)(invite.receiverId);
-            void (0, callQueue_1.syncReceiverQueueState)(invite.receiverId);
+            void settleAndReleaseCall(callId, invite.receiverId);
             io.to(accountRoom(invite.inviterType, invite.inviterId)).emit('call:ended', {
                 callId,
                 fromType: typ,
@@ -721,9 +746,7 @@ function attachChatSocket(httpServer) {
                     fromId: endedById,
                 });
                 activeCallInvites.delete(callId);
-                (0, callInviteRegistry_1.unregisterPendingCallInvite)(invite.receiverId);
-                (0, callQueue_1.releaseReceiverReservation)(invite.receiverId);
-                void (0, callQueue_1.syncReceiverQueueState)(invite.receiverId);
+                void settleAndReleaseCall(callId, invite.receiverId);
                 ack?.({ ok: true });
                 return;
             }

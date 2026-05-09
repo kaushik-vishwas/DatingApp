@@ -10,6 +10,7 @@ import type { CallerStackParamList } from '../../navigation/CallerStackParamList
 import type { ReceiverStackParamList } from '../../navigation/ReceiverStackParamList';
 import { useAuth } from '../../context/AuthContext';
 import { callApi, getErrorMessage, getJwt, getResolvedApiBaseUrl } from '../../services/api';
+import { resolveProfileImageSource } from '../../utils/avatarSource';
 
 type Props =
   | NativeStackScreenProps<CallerStackParamList, 'VoiceCall'>
@@ -100,6 +101,8 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
     [route.params.peerName]
   );
   const callerCanRateByDuration = user?.role === 'caller' && elapsedSec >= MIN_RATING_SECONDS;
+  const selfAvatarSource = resolveProfileImageSource(user?.profileImage);
+  const peerAvatarSource = resolveProfileImageSource(route.params.peerImage ?? null);
 
   /** Kept in refs so the signaling socket effect does not re-run when duration crosses the rating threshold (that was disconnecting the socket ~55s into the call). */
   const callerCanRateByDurationRef = useRef(callerCanRateByDuration);
@@ -333,6 +336,11 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
           ) {
             setLiveSettledAmountInr((prev) => (data.receiverEarnedInr > prev ? data.receiverEarnedInr : prev));
           }
+          if (data.status === 'completed' && !endingRef.current) {
+            endingRef.current = true;
+            await leaveMedia();
+            stopQueueAndExit();
+          }
         } catch {
           // Best-effort live settlement sync.
         }
@@ -416,8 +424,8 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
             <View style={styles.avatarRow}>
               <View style={styles.avatarCol}>
                 <View style={styles.avatarWrap}>
-                  {route.params.peerImage ? (
-                    <Image source={{ uri: route.params.peerImage }} style={styles.avatar} />
+                  {peerAvatarSource ? (
+                    <Image source={peerAvatarSource} style={styles.avatar} />
                   ) : (
                     <View style={[styles.avatar, styles.avatarPlaceholder]}>
                       <Text style={styles.avatarInitial}>
@@ -432,8 +440,8 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
               </View>
               <View style={styles.avatarCol}>
                 <View style={styles.avatarWrap}>
-                  {user?.profileImage ? (
-                    <Image source={{ uri: user.profileImage }} style={styles.avatar} />
+                  {selfAvatarSource ? (
+                    <Image source={selfAvatarSource} style={styles.avatar} />
                   ) : (
                     <View style={[styles.avatar, styles.avatarPlaceholder]}>
                       <Text style={styles.avatarInitial}>

@@ -36,11 +36,18 @@ export default function BankDetailsScreen({ navigation, route }: Props): React.J
   const [showPrivacyModal, setShowPrivacyModal] = useState(false);
 
   React.useEffect(() => {
-    if (route.params?.autoSubmit && !submitting) {
+    if (route.params?.agreedToPolicies && !agreedToPolicies) {
+      setAgreedToPolicies(true);
+    }
+  }, [route.params?.agreedToPolicies, agreedToPolicies]);
+
+  React.useEffect(() => {
+    if (route.params?.autoSubmit && !submitting && agreedToPolicies) {
+      navigation.setParams({ autoSubmit: undefined });
       void onSubmit();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [route.params?.autoSubmit]);
+  }, [route.params?.autoSubmit, agreedToPolicies, submitting, navigation]);
 
   const setAccountType = (t: BankAccountType) => update({ bankAccountType: t });
 
@@ -68,7 +75,7 @@ export default function BankDetailsScreen({ navigation, route }: Props): React.J
       return;
     }
     if (state.gender === 'female' && !state.userAudio?.trim()) {
-      navigation.navigate('AudioVerification');
+      navigation.navigate('AudioVerification', { agreedToPolicies });
       return;
     }
 

@@ -37,6 +37,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.rateVoiceSession = exports.syncVoiceSession = exports.endVoiceSession = exports.startVoiceSession = exports.getVoiceBootstrap = exports.getRandomQueuedReceiver = void 0;
+exports.settleCallSession = settleCallSession;
 const mongoose_1 = __importDefault(require("mongoose"));
 const ChatBlock_1 = __importDefault(require("../models/ChatBlock"));
 const User_1 = __importDefault(require("../models/User"));
@@ -130,7 +131,7 @@ async function settleCallSession(callId, complete) {
     return snapshot;
 }
 /** Live calls hit sessionSync every ~5s, which bumps updatedAt. No updates for this long ⇒ abandoned. */
-const DEFAULT_STALE_ONGOING_MS = 15 * 60 * 1000;
+const DEFAULT_STALE_ONGOING_MS = 90 * 1000;
 /**
  * Ongoing CallSession rows persist in MongoDB; orphan "ongoing" blocks bootstrap forever.
  * - Same caller+receiver as the DB row → allow (reconnect / second bootstrap for same call).

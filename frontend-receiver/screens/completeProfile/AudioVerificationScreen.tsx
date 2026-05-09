@@ -23,7 +23,10 @@ export default function AudioVerificationScreen({ navigation }: Props): React.JS
       Alert.alert('Voice verification required', 'Please record and upload your voice sample first.');
       return;
     }
-    navigation.navigate('BankDetails', { autoSubmit: true });
+    navigation.navigate('BankDetails', {
+      autoSubmit: true,
+      agreedToPolicies: true,
+    });
   };
 
   return (
