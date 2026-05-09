@@ -360,6 +360,8 @@ export interface CompleteProfilePayload {
 export interface CompleteProfileResponse {
   message: string;
   user: UserProfile;
+  /** Present on all POST /profile/complete responses once backend tracing is deployed. */
+  traceId?: string;
 }
 
 export interface UpdateReceiverProfilePayload {

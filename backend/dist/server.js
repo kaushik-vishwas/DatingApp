@@ -129,6 +129,7 @@ const walletRoutes_1 = __importDefault(require("./routes/walletRoutes"));
 const chatRoutes_1 = __importDefault(require("./routes/chatRoutes"));
 const callRoutes_1 = __importDefault(require("./routes/callRoutes"));
 const chatSocket_1 = require("./socket/chatSocket");
+const apiTraceLog_1 = require("./utils/apiTraceLog");
 const app = (0, express_1.default)();
 const PORT = process.env.PORT ? Number(process.env.PORT) : 5000;
 app.use((0, cors_1.default)({
@@ -161,10 +162,21 @@ app.use((_req, res) => {
     res.status(404).json({ message: 'Not found' });
 });
 // Error handler
-app.use((err, _req, res, _next) => {
+app.use((err, req, res, _next) => {
+    const traceId = (0, apiTraceLog_1.reuseOrCreateApiTrace)(res);
     const msg = err instanceof Error ? err.message : String(err);
-    console.error(err);
-    res.status(500).json({ message: msg || 'Internal server error' });
+    console.error('[api:unhandled_route_error]', JSON.stringify({
+        traceId,
+        method: req.method,
+        path: req.originalUrl ?? req.url,
+        errMessage: msg,
+        stack: err instanceof Error ? err.stack : undefined,
+    }));
+    res.status(500).json({
+        traceId,
+        message: msg || 'Internal server error',
+        error: 'UNHANDLED_ROUTE_ERROR',
+    });
 });
 const start = async () => {
     try {

@@ -150,6 +150,7 @@ import walletRoutes from './routes/walletRoutes';
 import chatRoutes from './routes/chatRoutes';
 import callRoutes from './routes/callRoutes';
 import { attachChatSocket } from './socket/chatSocket';
+import { reuseOrCreateApiTrace } from './utils/apiTraceLog';
 
 const app = express();
 const PORT = process.env.PORT ? Number(process.env.PORT) : 5000;
@@ -191,10 +192,24 @@ app.use((_req, res) => {
 });
 
 // Error handler
-app.use((err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+app.use((err: unknown, req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  const traceId = reuseOrCreateApiTrace(res);
   const msg = err instanceof Error ? err.message : String(err);
-  console.error(err);
-  res.status(500).json({ message: msg || 'Internal server error' });
+  console.error(
+    '[api:unhandled_route_error]',
+    JSON.stringify({
+      traceId,
+      method: req.method,
+      path: req.originalUrl ?? req.url,
+      errMessage: msg,
+      stack: err instanceof Error ? err.stack : undefined,
+    })
+  );
+  res.status(500).json({
+    traceId,
+    message: msg || 'Internal server error',
+    error: 'UNHANDLED_ROUTE_ERROR',
+  });
 });
 
 const start = async (): Promise<void> => {

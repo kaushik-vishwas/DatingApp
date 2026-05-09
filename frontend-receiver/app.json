@@ -1,7 +1,7 @@
 {
   "expo": {
-"name": "frontendreceivernew",
-"slug": "frontendreceivernew",
+    "name": "frontendreceivernew",
+    "slug": "frontendreceivernew",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/SelectoLogo.png",
@@ -22,7 +22,9 @@
     },
     "android": {
       "package": "com.kaushikvishwas.frontend",
-      "permissions": ["android.permission.RECORD_AUDIO"],
+      "permissions": [
+        "android.permission.RECORD_AUDIO"
+      ],
       "adaptiveIcon": {
         "foregroundImage": "./assets/SelectoLogo.png",
         "backgroundColor": "#ffffff"

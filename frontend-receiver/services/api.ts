@@ -158,21 +158,37 @@ api.interceptors.request.use(async (config) => {
   return config;
 });
 
+type ApiErrBody = {
+  message?: unknown;
+  error?: unknown;
+  errorCode?: unknown;
+  traceId?: unknown;
+};
+
 /** Error handler */
 export const getErrorMessage = (error: unknown): string => {
   if (axios.isAxiosError(error)) {
-    const err = error as AxiosError<{ message?: unknown; error?: unknown; errorCode?: unknown }>;
-    const msg = err.response?.data?.message;
-    const namedError = err.response?.data?.error;
-    const errorCode = err.response?.data?.errorCode;
+    const err = error as AxiosError<ApiErrBody>;
+    const data = err.response?.data;
+    const msg = data?.message;
+    const namedError = data?.error;
+    const errorCode = data?.errorCode;
+    const traceSuffix =
+      typeof data?.traceId === 'string' && data.traceId.trim()
+        ? ` (support ref: traceId=${data.traceId.trim()})`
+        : '';
 
-    if (typeof msg === 'string') return msg;
-    if (typeof errorCode === 'string') return errorCode;
-    if (typeof namedError === 'string') return namedError;
-    if (Array.isArray(msg)) return msg.join(', ');
-    if (!err.response) return 'NETWORK_REQUEST_FAILED';
+    if (typeof msg === 'string' && msg.trim()) return `${msg.trim()}${traceSuffix}`;
+    if (typeof errorCode === 'string' && errorCode.trim()) return `${errorCode.trim()}${traceSuffix}`;
+    if (typeof namedError === 'string' && namedError.trim()) return `${namedError.trim()}${traceSuffix}`;
+    if (Array.isArray(msg)) return `${msg.join(', ')}${traceSuffix}`;
+    if (!err.response) {
+      const code = typeof err.code === 'string' && err.code ? err.code : 'NO_TRANSPORT_CODE';
+      return `NETWORK_OR_TRANSPORT_FAILED (code=${code}, ${err.message || 'unknown'})`;
+    }
 
-    return err.message || `HTTP_${err.response.status}_REQUEST_FAILED`;
+    const fallback = err.message || `HTTP_${err.response.status}_REQUEST_FAILED`;
+    return `${fallback}${traceSuffix}`;
   }
 
   if (error instanceof Error) return error.message;
@@ -227,8 +243,45 @@ export const authApi = {
 };
 
 export const profileApi = {
-  complete: (payload: CompleteProfilePayload) =>
-    api.post<CompleteProfileResponse>('/profile/complete', payload, { timeout: 90_000 }),
+  complete: async (payload: CompleteProfilePayload) => {
+    const resolvedBase = getResolvedApiBaseUrl();
+    const endpoint = `${resolvedBase.replace(/\/+$/, '')}/profile/complete`;
+    try {
+      return await api.post<CompleteProfileResponse>('/profile/complete', payload, { timeout: 90_000 });
+    } catch (e: unknown) {
+      const ax = axios.isAxiosError(e) ? (e as AxiosError<ApiErrBody>) : null;
+      if (ax) {
+        const h = ax.response?.headers ?? {};
+        const traceHeader =
+          (typeof h['x-complete-profile-trace-id'] === 'string' && h['x-complete-profile-trace-id']) ||
+          (typeof h['X-Complete-Profile-Trace-Id'] === 'string' && h['X-Complete-Profile-Trace-Id']) ||
+          undefined;
+        const bodyTrace =
+          typeof ax.response?.data === 'object' &&
+          ax.response?.data !== null &&
+          typeof (ax.response.data as ApiErrBody).traceId === 'string'
+            ? (ax.response.data as ApiErrBody).traceId
+            : undefined;
+        console.error(
+          '[profile/complete]',
+          JSON.stringify({
+            endpoint,
+            method: 'POST',
+            timeoutMs: 90_000,
+            axiosCode: ax.code ?? null,
+            axiosMessage: ax.message,
+            httpStatus: ax.response?.status ?? null,
+            traceHeader: traceHeader ?? null,
+            bodyTraceId: bodyTrace ?? null,
+            responseBody: ax.response?.data ?? null,
+          })
+        );
+      } else {
+        console.error('[profile/complete]', JSON.stringify({ endpoint, error: String(e) }));
+      }
+      throw e;
+    }
+  },
 
   saveCallerUserAudio: (payload: SaveCallerUserAudioPayload) =>
     api.patch<SaveCallerUserAudioResponse>('/profile/caller-audio', payload),

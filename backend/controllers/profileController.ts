@@ -29,6 +29,7 @@ import {
 } from '../utils/birthDate';
 import { trackAndFinalizeRazorpayXPayout } from '../services/razorpayXPayoutService';
 import { emitReceiverWithdrawalUpdate } from '../socket/socketRegistry';
+import { beginApiTrace, mongoErrCode, reuseOrCreateApiTrace } from '../utils/apiTraceLog';
 
 type CompleteProfileBody = {
   name: string;
@@ -130,35 +131,69 @@ function filterAllowlisted(
 }
 
 /**
- * POST /profile/complete
+ * POST /profile/complete — receiver KYC finalize (mounted at `{API_ORIGIN}/profile/complete`).
+ *
+ * Headers: `Authorization: Bearer <receiver JWT>` (`typ: r`), `Content-Type: application/json`
+ *
+ * JSON body (`CompleteProfileBody`):
+ * - `name`, `profileImage`, `aadhaarFront`, `aadhaarBack`, `aadhaarNumber`, `panNumber`, `panFront` (URLs for images/docs)
+ * - `languages: string[]`, `interests: string[]`
+ * - `gender`: `male` | `female` | `other`
+ * - `dateOfBirth`: `YYYY-MM-DD`
+ * - `state`, `bankAccountHolderName`, `bankAccountType`: `savings` | `current`, `bankAccountNumber`, `bankIfsc`, `bankName`
+ * - `userAudio` (optional HTTPS URL; required when `gender` is `female`)
+ *
+ * Response header: `X-Complete-Profile-Trace-Id` mirrors `traceId` in JSON for log correlation.
+ *
  * Saves receiver profile and activates account immediately (no admin approval gate).
  */
 export const completeProfile = async (
   req: Request<{}, {}, CompleteProfileBody>,
   res: Response
 ): Promise<void> => {
-  const traceId = crypto.randomUUID();
+  const traceId = reuseOrCreateApiTrace(res);
+  res.set('X-Complete-Profile-Trace-Id', traceId);
   const log = (stage: string, details?: Record<string, unknown>) => {
     console.log('[completeProfile]', JSON.stringify({ traceId, stage, ...(details ?? {}) }));
   };
   const warn = (stage: string, details?: Record<string, unknown>) => {
     console.warn('[completeProfile]', JSON.stringify({ traceId, stage, ...(details ?? {}) }));
   };
+  /** JSON body fields are listed in README-style comment above this handler — never log raw IDs or URLs at info level here. */
+  const reply = (status: number, body: Record<string, unknown>): void => {
+    res.status(status).json({ traceId, ...body });
+  };
   try {
     log('start', {
       accountKind: req.accountKind,
       receiverId: req.receiver?._id ? String(req.receiver._id) : null,
     });
+    log('request_outline', {
+      httpMethod: req.method,
+      path: req.originalUrl ?? req.url,
+      contentLengthHeader: req.get('content-length') ?? null,
+      fields:
+        typeof req.body === 'object' && req.body && !Array.isArray(req.body)
+          ? Object.keys(req.body as object).sort()
+          : [],
+      authPresent: typeof req.headers.authorization === 'string' && req.headers.authorization.length > 10,
+      userAgent: typeof req.headers['user-agent'] === 'string'
+        ? (req.headers['user-agent'] as string).slice(0, 180)
+        : null,
+    });
     if (req.accountKind !== 'receiver') {
       warn('forbidden_account_kind', { accountKind: req.accountKind });
-      res.status(403).json({ message: 'This endpoint is only for receiver accounts' });
+      reply(403, {
+        message: 'This endpoint is only for receiver accounts',
+        error: 'COMPLETE_PROFILE_ACCOUNT_KIND_RECEIVER_REQUIRED',
+      });
       return;
     }
 
     const authReceiver = req.receiver as ReceiverDocument | undefined;
     if (!authReceiver?._id) {
       warn('unauthorized_missing_receiver');
-      res.status(401).json({ message: 'Not authorized' });
+      reply(401, { message: 'Not authorized', error: 'COMPLETE_PROFILE_UNAUTHORIZED' });
       return;
     }
 
@@ -185,27 +220,30 @@ export const completeProfile = async (
 
     if (!name || !String(name).trim()) {
       warn('validation_failed_name');
-      res.status(400).json({ message: 'name is required' });
+      reply(400, { message: 'name is required', error: 'COMPLETE_PROFILE_MISSING_NAME' });
       return;
     }
     if (!profileImage || typeof profileImage !== 'string') {
       warn('validation_failed_profile_image');
-      res.status(400).json({ message: 'profileImage URL is required' });
+      reply(400, { message: 'profileImage URL is required', error: 'COMPLETE_PROFILE_MISSING_PROFILE_IMAGE' });
       return;
     }
     if (!aadhaarFront || typeof aadhaarFront !== 'string') {
       warn('validation_failed_aadhaar_front');
-      res.status(400).json({ message: 'aadhaarFront URL is required' });
+      reply(400, { message: 'aadhaarFront URL is required', error: 'COMPLETE_PROFILE_MISSING_AADHAAR_FRONT' });
       return;
     }
     if (!aadhaarBack || typeof aadhaarBack !== 'string') {
       warn('validation_failed_aadhaar_back');
-      res.status(400).json({ message: 'aadhaarBack URL is required' });
+      reply(400, { message: 'aadhaarBack URL is required', error: 'COMPLETE_PROFILE_MISSING_AADHAAR_BACK' });
       return;
     }
     if (!aadhaarNumber || typeof aadhaarNumber !== 'string' || !/^\d{12}$/.test(aadhaarNumber.trim())) {
       warn('validation_failed_aadhaar_number');
-      res.status(400).json({ message: 'aadhaarNumber must be a valid 12-digit number' });
+      reply(400, {
+        message: 'aadhaarNumber must be a valid 12-digit number',
+        error: 'COMPLETE_PROFILE_INVALID_AADHAAR_NUMBER',
+      });
       return;
     }
     if (
@@ -214,70 +252,82 @@ export const completeProfile = async (
       !/^[A-Z]{5}[0-9]{4}[A-Z]$/i.test(panNumber.trim())
     ) {
       warn('validation_failed_pan_number');
-      res.status(400).json({ message: 'panNumber must be valid (e.g. ABCDE1234F)' });
+      reply(400, {
+        message: 'panNumber must be valid (e.g. ABCDE1234F)',
+        error: 'COMPLETE_PROFILE_INVALID_PAN_NUMBER',
+      });
       return;
     }
     if (!panFront || typeof panFront !== 'string') {
       warn('validation_failed_pan_front');
-      res.status(400).json({ message: 'panFront URL is required' });
+      reply(400, { message: 'panFront URL is required', error: 'COMPLETE_PROFILE_MISSING_PAN_FRONT' });
       return;
     }
     if (!Array.isArray(languages) || languages.length === 0) {
       warn('validation_failed_languages');
-      res.status(400).json({ message: 'At least one language is required' });
+      reply(400, { message: 'At least one language is required', error: 'COMPLETE_PROFILE_MISSING_LANGUAGES' });
       return;
     }
     if (!Array.isArray(interests) || interests.length === 0) {
       warn('validation_failed_interests');
-      res.status(400).json({ message: 'At least one interest is required' });
+      reply(400, { message: 'At least one interest is required', error: 'COMPLETE_PROFILE_MISSING_INTERESTS' });
       return;
     }
     if (gender !== 'male' && gender !== 'female' && gender !== 'other') {
       warn('validation_failed_gender');
-      res.status(400).json({ message: 'gender must be male, female, or other' });
+      reply(400, { message: 'gender must be male, female, or other', error: 'COMPLETE_PROFILE_INVALID_GENDER' });
       return;
     }
     const dob = parseDateOnlyToUtcMidnight(dateOfBirth);
     if (!dob) {
       warn('validation_failed_dob_format');
-      res.status(400).json({ message: 'dateOfBirth is required (YYYY-MM-DD)' });
+      reply(400, {
+        message: 'dateOfBirth is required (YYYY-MM-DD)',
+        error: 'COMPLETE_PROFILE_INVALID_DOB_FORMAT',
+      });
       return;
     }
     const dobErr = validateBirthDateForAccount(dob);
     if (dobErr) {
       warn('validation_failed_dob_rules', { message: dobErr });
-      res.status(400).json({ message: dobErr });
+      reply(400, { message: dobErr, error: 'COMPLETE_PROFILE_DOB_RULES_REJECTED' });
       return;
     }
     const computedAge = calculateAgeFromBirthDateUtc(dob);
     if (!state || !String(state).trim()) {
       warn('validation_failed_state');
-      res.status(400).json({ message: 'state is required' });
+      reply(400, { message: 'state is required', error: 'COMPLETE_PROFILE_MISSING_STATE' });
       return;
     }
     if (!bankAccountHolderName || !String(bankAccountHolderName).trim()) {
       warn('validation_failed_bank_holder');
-      res.status(400).json({ message: 'bankAccountHolderName is required' });
+      reply(400, {
+        message: 'bankAccountHolderName is required',
+        error: 'COMPLETE_PROFILE_MISSING_BANK_HOLDER',
+      });
       return;
     }
     if (bankAccountType !== 'savings' && bankAccountType !== 'current') {
       warn('validation_failed_bank_type');
-      res.status(400).json({ message: 'bankAccountType must be savings or current' });
+      reply(400, {
+        message: 'bankAccountType must be savings or current',
+        error: 'COMPLETE_PROFILE_INVALID_BANK_TYPE',
+      });
       return;
     }
     if (!bankAccountNumber || !String(bankAccountNumber).trim()) {
       warn('validation_failed_bank_number');
-      res.status(400).json({ message: 'bankAccountNumber is required' });
+      reply(400, { message: 'bankAccountNumber is required', error: 'COMPLETE_PROFILE_MISSING_BANK_NUMBER' });
       return;
     }
     if (!bankIfsc || !String(bankIfsc).trim()) {
       warn('validation_failed_ifsc');
-      res.status(400).json({ message: 'bankIfsc is required' });
+      reply(400, { message: 'bankIfsc is required', error: 'COMPLETE_PROFILE_MISSING_IFSC' });
       return;
     }
     if (!bankName || !String(bankName).trim()) {
       warn('validation_failed_bank_name');
-      res.status(400).json({ message: 'bankName is required' });
+      reply(400, { message: 'bankName is required', error: 'COMPLETE_PROFILE_MISSING_BANK_NAME' });
       return;
     }
     const receiverVoiceUrl =
@@ -286,7 +336,10 @@ export const completeProfile = async (
         : null;
     if (gender === 'female' && !receiverVoiceUrl) {
       warn('validation_failed_user_audio_required');
-      res.status(400).json({ message: 'userAudio must be a valid https URL for female profiles' });
+      reply(400, {
+        message: 'userAudio must be a valid https URL for female profiles',
+        error: 'COMPLETE_PROFILE_VOICE_URL_REQUIRED_FOR_FEMALE',
+      });
       return;
     }
     log('validation_passed', {
@@ -297,14 +350,16 @@ export const completeProfile = async (
     const receiver = await Receiver.findById(authReceiver._id);
     if (!receiver) {
       warn('receiver_not_found', { receiverId: String(authReceiver._id) });
-      res.status(404).json({ message: 'Receiver not found' });
+      reply(404, { message: 'Receiver not found', error: 'COMPLETE_PROFILE_RECEIVER_ROW_MISSING' });
       return;
     }
 
     if (receiver.accountStatus !== 'pending_profile') {
       warn('invalid_account_status', { accountStatus: receiver.accountStatus });
-      res.status(400).json({
+      reply(400, {
         message: 'Profile already submitted or cannot be edited this way',
+        error: 'COMPLETE_PROFILE_WRONG_ACCOUNT_STATUS',
+        accountStatus: receiver.accountStatus,
       });
       return;
     }
@@ -340,7 +395,7 @@ export const completeProfile = async (
     await receiver.save();
     log('save_success', { receiverId: String(receiver._id) });
 
-    res.status(200).json({
+    reply(200, {
       message: 'Profile completed successfully',
       user: toApiReceiver(receiver),
     });
@@ -350,10 +405,20 @@ export const completeProfile = async (
       traceId,
       message: msg,
       stack: err instanceof Error ? err.stack : undefined,
+      name: err instanceof Error ? err.name : undefined,
+      code:
+        typeof err === 'object' &&
+        err &&
+        err !== null &&
+        'code' in err &&
+        typeof (err as { code?: unknown }).code !== 'undefined'
+          ? String((err as { code?: unknown }).code)
+          : undefined,
     });
-    res.status(500).json({
+    reply(500, {
       message: msg || 'Server error',
       error: 'COMPLETE_PROFILE_FAILED',
+      ...(err instanceof mongoose.Error.ValidationError ? { errorHint: 'MONGOOSE_VALIDATION' as const } : {}),
     });
   }
 };
@@ -367,21 +432,28 @@ export const saveCallerUserAudio = async (
   req: Request<{}, {}, CallerAudioPatchBody>,
   res: Response
 ): Promise<void> => {
+  const t = beginApiTrace('PATCH /profile/caller-audio', req, res);
   try {
     if (req.accountKind !== 'user') {
-      res.status(403).json({ message: 'This endpoint is only for app user accounts' });
+      t.warn('caller_audio_account_kind');
+      t.json(403, {
+        message: 'This endpoint is only for app user accounts',
+        error: 'CALLER_AUDIO_ACCOUNT_KIND_USER_REQUIRED',
+      });
       return;
     }
 
     const authUser = req.user as UserDocument | undefined;
     if (!authUser?._id) {
-      res.status(401).json({ message: 'Not authorized' });
+      t.warn('caller_audio_unauthorized');
+      t.json(401, { message: 'Not authorized', error: 'CALLER_AUDIO_UNAUTHORIZED' });
       return;
     }
 
     const voiceUrl = parseCallerAudioHttpsUrl(req.body);
     if (!voiceUrl) {
-      res.status(400).json({ message: 'userAudio must be a valid https URL' });
+      t.warn('caller_audio_invalid_url');
+      t.json(400, { message: 'userAudio must be a valid https URL', error: 'CALLER_AUDIO_INVALID_URL' });
       return;
     }
 
@@ -392,20 +464,23 @@ export const saveCallerUserAudio = async (
     );
 
     if (!updated) {
-      res.status(400).json({
+      t.warn('caller_audio_wrong_status_or_row');
+      t.json(400, {
         message: 'Voice can only be saved while your profile is still in progress',
+        error: 'CALLER_AUDIO_NOT_PENDING_PROFILE',
       });
       return;
     }
 
-    res.status(200).json({
+    t.log('caller_audio_saved');
+    t.json(200, {
       message: 'Voice sample saved',
       user: toApiUser(updated),
     });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    console.error('saveCallerUserAudio error:', msg);
-    res.status(500).json({ message: msg || 'Server error' });
+    t.logFullError('caller_audio_unhandled', err, { mongoCode: mongoErrCode(err) });
+    t.json(500, { message: msg || 'Server error', error: 'CALLER_AUDIO_SAVE_FAILED' });
   }
 };
 
@@ -419,53 +494,76 @@ export const completeCallerProfile = async (
   req: Request<{}, {}, CompleteCallerBody>,
   res: Response
 ): Promise<void> => {
+  const t = beginApiTrace('POST /profile/complete-caller', req, res);
   try {
     if (req.accountKind !== 'user') {
-      res.status(403).json({ message: 'This endpoint is only for app user accounts' });
+      t.warn('complete_caller_account_kind');
+      t.json(403, {
+        message: 'This endpoint is only for app user accounts',
+        error: 'COMPLETE_CALLER_ACCOUNT_KIND_USER_REQUIRED',
+      });
       return;
     }
 
     const authUser = req.user as UserDocument | undefined;
     if (!authUser?._id) {
-      res.status(401).json({ message: 'Not authorized' });
+      t.warn('complete_caller_unauthorized');
+      t.json(401, { message: 'Not authorized', error: 'COMPLETE_CALLER_UNAUTHORIZED' });
       return;
     }
 
     const { name, profileImage, languages, interests, gender, dateOfBirth, state } = req.body;
 
     if (!name || !String(name).trim()) {
-      res.status(400).json({ message: 'name is required' });
+      t.warn('complete_caller_validation_name');
+      t.json(400, { message: 'name is required', error: 'COMPLETE_CALLER_MISSING_NAME' });
       return;
     }
     if (!profileImage || typeof profileImage !== 'string') {
-      res.status(400).json({ message: 'profileImage URL is required' });
+      t.warn('complete_caller_validation_profile_image');
+      t.json(400, {
+        message: 'profileImage URL is required',
+        error: 'COMPLETE_CALLER_MISSING_PROFILE_IMAGE',
+      });
       return;
     }
     if (gender !== 'male' && gender !== 'female' && gender !== 'other') {
-      res.status(400).json({ message: 'gender must be male, female, or other' });
+      t.warn('complete_caller_validation_gender');
+      t.json(400, { message: 'gender must be male, female, or other', error: 'COMPLETE_CALLER_INVALID_GENDER' });
       return;
     }
     const dob = parseDateOnlyToUtcMidnight(dateOfBirth);
     if (!dob) {
-      res.status(400).json({ message: 'dateOfBirth is required (YYYY-MM-DD)' });
+      t.warn('complete_caller_validation_dob');
+      t.json(400, {
+        message: 'dateOfBirth is required (YYYY-MM-DD)',
+        error: 'COMPLETE_CALLER_INVALID_DOB_FORMAT',
+      });
       return;
     }
     const dobErr = validateBirthDateForAccount(dob);
     if (dobErr) {
-      res.status(400).json({ message: dobErr });
+      t.warn('complete_caller_validation_dob_rules', { message: dobErr });
+      t.json(400, { message: dobErr, error: 'COMPLETE_CALLER_DOB_REJECTED' });
       return;
     }
     const computedAge = calculateAgeFromBirthDateUtc(dob);
     if (!state || !String(state).trim()) {
-      res.status(400).json({ message: 'state is required' });
+      t.warn('complete_caller_validation_state');
+      t.json(400, { message: 'state is required', error: 'COMPLETE_CALLER_MISSING_STATE' });
       return;
     }
     if (!Array.isArray(languages) || languages.length === 0) {
-      res.status(400).json({ message: 'At least one language is required' });
+      t.warn('complete_caller_validation_languages');
+      t.json(400, { message: 'At least one language is required', error: 'COMPLETE_CALLER_MISSING_LANGUAGES' });
       return;
     }
     if (!Array.isArray(interests) || interests.length === 0) {
-      res.status(400).json({ message: 'At least one interest is required' });
+      t.warn('complete_caller_validation_interests');
+      t.json(400, {
+        message: 'At least one interest is required',
+        error: 'COMPLETE_CALLER_MISSING_INTERESTS',
+      });
       return;
     }
     const voiceUrl = parseCallerAudioHttpsUrl(req.body);
@@ -492,21 +590,24 @@ export const completeCallerProfile = async (
     );
 
     if (!updated) {
-      res.status(400).json({
+      t.warn('complete_caller_bad_account_status_or_row');
+      t.json(400, {
         message: 'Profile already submitted or cannot be edited this way',
+        error: 'COMPLETE_CALLER_WRONG_ACCOUNT_STATE',
       });
       return;
     }
 
-    res.status(200).json({
+    t.log('complete_caller_ok');
+    t.json(200, {
       message: 'Profile completed successfully',
       user: toApiUser(updated),
       ...(voiceVerification ? { voiceVerification } : {}),
     });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    console.error('completeCallerProfile error:', msg);
-    res.status(500).json({ message: msg || 'Server error' });
+    t.logFullError('complete_caller_unhandled', err, { mongoCode: mongoErrCode(err) });
+    t.json(500, { message: msg || 'Server error', error: 'COMPLETE_CALLER_PROFILE_FAILED' });
   }
 };
 
