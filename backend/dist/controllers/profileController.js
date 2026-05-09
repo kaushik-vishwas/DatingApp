@@ -93,91 +93,122 @@ function filterAllowlisted(arr, allow, max) {
  * Saves receiver profile and activates account immediately (no admin approval gate).
  */
 const completeProfile = async (req, res) => {
+    const traceId = crypto_1.default.randomUUID();
+    const log = (stage, details) => {
+        console.log('[completeProfile]', JSON.stringify({ traceId, stage, ...(details ?? {}) }));
+    };
+    const warn = (stage, details) => {
+        console.warn('[completeProfile]', JSON.stringify({ traceId, stage, ...(details ?? {}) }));
+    };
     try {
+        log('start', {
+            accountKind: req.accountKind,
+            receiverId: req.receiver?._id ? String(req.receiver._id) : null,
+        });
         if (req.accountKind !== 'receiver') {
+            warn('forbidden_account_kind', { accountKind: req.accountKind });
             res.status(403).json({ message: 'This endpoint is only for receiver accounts' });
             return;
         }
         const authReceiver = req.receiver;
         if (!authReceiver?._id) {
+            warn('unauthorized_missing_receiver');
             res.status(401).json({ message: 'Not authorized' });
             return;
         }
         const { name, profileImage, aadhaarFront, aadhaarBack, aadhaarNumber, panNumber, panFront, languages, interests, gender, dateOfBirth, state, bankAccountHolderName, bankAccountType, bankAccountNumber, bankIfsc, bankName, userAudio, } = req.body;
         if (!name || !String(name).trim()) {
+            warn('validation_failed_name');
             res.status(400).json({ message: 'name is required' });
             return;
         }
         if (!profileImage || typeof profileImage !== 'string') {
+            warn('validation_failed_profile_image');
             res.status(400).json({ message: 'profileImage URL is required' });
             return;
         }
         if (!aadhaarFront || typeof aadhaarFront !== 'string') {
+            warn('validation_failed_aadhaar_front');
             res.status(400).json({ message: 'aadhaarFront URL is required' });
             return;
         }
         if (!aadhaarBack || typeof aadhaarBack !== 'string') {
+            warn('validation_failed_aadhaar_back');
             res.status(400).json({ message: 'aadhaarBack URL is required' });
             return;
         }
         if (!aadhaarNumber || typeof aadhaarNumber !== 'string' || !/^\d{12}$/.test(aadhaarNumber.trim())) {
+            warn('validation_failed_aadhaar_number');
             res.status(400).json({ message: 'aadhaarNumber must be a valid 12-digit number' });
             return;
         }
         if (!panNumber ||
             typeof panNumber !== 'string' ||
             !/^[A-Z]{5}[0-9]{4}[A-Z]$/i.test(panNumber.trim())) {
+            warn('validation_failed_pan_number');
             res.status(400).json({ message: 'panNumber must be valid (e.g. ABCDE1234F)' });
             return;
         }
         if (!panFront || typeof panFront !== 'string') {
+            warn('validation_failed_pan_front');
             res.status(400).json({ message: 'panFront URL is required' });
             return;
         }
         if (!Array.isArray(languages) || languages.length === 0) {
+            warn('validation_failed_languages');
             res.status(400).json({ message: 'At least one language is required' });
             return;
         }
         if (!Array.isArray(interests) || interests.length === 0) {
+            warn('validation_failed_interests');
             res.status(400).json({ message: 'At least one interest is required' });
             return;
         }
         if (gender !== 'male' && gender !== 'female' && gender !== 'other') {
+            warn('validation_failed_gender');
             res.status(400).json({ message: 'gender must be male, female, or other' });
             return;
         }
         const dob = (0, birthDate_1.parseDateOnlyToUtcMidnight)(dateOfBirth);
         if (!dob) {
+            warn('validation_failed_dob_format');
             res.status(400).json({ message: 'dateOfBirth is required (YYYY-MM-DD)' });
             return;
         }
         const dobErr = (0, birthDate_1.validateBirthDateForAccount)(dob);
         if (dobErr) {
+            warn('validation_failed_dob_rules', { message: dobErr });
             res.status(400).json({ message: dobErr });
             return;
         }
         const computedAge = (0, birthDate_1.calculateAgeFromBirthDateUtc)(dob);
         if (!state || !String(state).trim()) {
+            warn('validation_failed_state');
             res.status(400).json({ message: 'state is required' });
             return;
         }
         if (!bankAccountHolderName || !String(bankAccountHolderName).trim()) {
+            warn('validation_failed_bank_holder');
             res.status(400).json({ message: 'bankAccountHolderName is required' });
             return;
         }
         if (bankAccountType !== 'savings' && bankAccountType !== 'current') {
+            warn('validation_failed_bank_type');
             res.status(400).json({ message: 'bankAccountType must be savings or current' });
             return;
         }
         if (!bankAccountNumber || !String(bankAccountNumber).trim()) {
+            warn('validation_failed_bank_number');
             res.status(400).json({ message: 'bankAccountNumber is required' });
             return;
         }
         if (!bankIfsc || !String(bankIfsc).trim()) {
+            warn('validation_failed_ifsc');
             res.status(400).json({ message: 'bankIfsc is required' });
             return;
         }
         if (!bankName || !String(bankName).trim()) {
+            warn('validation_failed_bank_name');
             res.status(400).json({ message: 'bankName is required' });
             return;
         }
@@ -185,15 +216,23 @@ const completeProfile = async (req, res) => {
             ? userAudio.trim()
             : null;
         if (gender === 'female' && !receiverVoiceUrl) {
+            warn('validation_failed_user_audio_required');
             res.status(400).json({ message: 'userAudio must be a valid https URL for female profiles' });
             return;
         }
+        log('validation_passed', {
+            hasUserAudio: Boolean(receiverVoiceUrl),
+            languagesCount: Array.isArray(languages) ? languages.length : 0,
+            interestsCount: Array.isArray(interests) ? interests.length : 0,
+        });
         const receiver = await Receiver_1.default.findById(authReceiver._id);
         if (!receiver) {
+            warn('receiver_not_found', { receiverId: String(authReceiver._id) });
             res.status(404).json({ message: 'Receiver not found' });
             return;
         }
         if (receiver.accountStatus !== 'pending_profile') {
+            warn('invalid_account_status', { accountStatus: receiver.accountStatus });
             res.status(400).json({
                 message: 'Profile already submitted or cannot be edited this way',
             });
@@ -224,7 +263,9 @@ const completeProfile = async (req, res) => {
         receiver.audioCallRate = Receiver_1.RECEIVER_AUDIO_CALL_RATE_INR_PER_MIN;
         receiver.userAudio = receiverVoiceUrl ?? null;
         receiver.accountStatus = 'approved';
+        log('before_save', { receiverId: String(receiver._id), nextAccountStatus: 'approved' });
         await receiver.save();
+        log('save_success', { receiverId: String(receiver._id) });
         res.status(200).json({
             message: 'Profile completed successfully',
             user: (0, authController_1.toApiReceiver)(receiver),
@@ -232,8 +273,15 @@ const completeProfile = async (req, res) => {
     }
     catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
-        console.error('completeProfile error:', msg);
-        res.status(500).json({ message: msg || 'Server error' });
+        console.error('completeProfile error:', {
+            traceId,
+            message: msg,
+            stack: err instanceof Error ? err.stack : undefined,
+        });
+        res.status(500).json({
+            message: msg || 'Server error',
+            error: 'COMPLETE_PROFILE_FAILED',
+        });
     }
 };
 exports.completeProfile = completeProfile;
