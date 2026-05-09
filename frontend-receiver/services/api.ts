@@ -143,10 +143,12 @@ api.interceptors.request.use(async (config) => {
   const base = getBaseURL();
   config.baseURL = base;
 
+  const path = typeof config.url === 'string' ? config.url : '';
+  const full = `${base.replace(/\/$/, '')}${path.startsWith('/') ? '' : '/'}${path}`;
   if (__DEV__) {
-    const path = typeof config.url === 'string' ? config.url : '';
-    const full = `${base.replace(/\/$/, '')}${path.startsWith('/') ? '' : '/'}${path}`;
     console.log(`[API] ${String(config.method).toUpperCase()} → ${full}`);
+  } else if (path === '/profile/complete') {
+    console.warn(`[API] POST /profile/complete → ${full}`);
   }
 
   const token = await AsyncStorage.getItem(JWT_KEY);
@@ -255,6 +257,8 @@ export const profileApi = {
         const traceHeader =
           (typeof h['x-complete-profile-trace-id'] === 'string' && h['x-complete-profile-trace-id']) ||
           (typeof h['X-Complete-Profile-Trace-Id'] === 'string' && h['X-Complete-Profile-Trace-Id']) ||
+          (typeof h['x-api-trace-id'] === 'string' && h['x-api-trace-id']) ||
+          (typeof h['X-Api-Trace-Id'] === 'string' && h['X-Api-Trace-Id']) ||
           undefined;
         const bodyTrace =
           typeof ax.response?.data === 'object' &&

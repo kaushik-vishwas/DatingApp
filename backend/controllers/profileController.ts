@@ -50,7 +50,7 @@ type CompleteProfileBody = {
   bankAccountNumber: string;
   bankIfsc: string;
   bankName: string;
-  /** HTTPS URL of recorded voice sample (required for female receivers). */
+  /** Optional HTTPS URL of recorded voice sample (omit when UI-only flow). */
   userAudio?: string;
 };
 
@@ -141,7 +141,7 @@ function filterAllowlisted(
  * - `gender`: `male` | `female` | `other`
  * - `dateOfBirth`: `YYYY-MM-DD`
  * - `state`, `bankAccountHolderName`, `bankAccountType`: `savings` | `current`, `bankAccountNumber`, `bankIfsc`, `bankName`
- * - `userAudio` (optional HTTPS URL; required when `gender` is `female`)
+ * - `userAudio` (optional HTTPS URL — voice capture may be UI-only without upload)
  *
  * Response header: `X-Complete-Profile-Trace-Id` mirrors `traceId` in JSON for log correlation.
  *
@@ -334,14 +334,6 @@ export const completeProfile = async (
       typeof userAudio === 'string' && /^https?:\/\//i.test(userAudio.trim())
         ? userAudio.trim()
         : null;
-    if (gender === 'female' && !receiverVoiceUrl) {
-      warn('validation_failed_user_audio_required');
-      reply(400, {
-        message: 'userAudio must be a valid https URL for female profiles',
-        error: 'COMPLETE_PROFILE_VOICE_URL_REQUIRED_FOR_FEMALE',
-      });
-      return;
-    }
     log('validation_passed', {
       hasUserAudio: Boolean(receiverVoiceUrl),
       languagesCount: Array.isArray(languages) ? languages.length : 0,

@@ -16,10 +16,19 @@ const PURPLE = '#7b2cff';
 
 type Props = {
   scriptText: string;
-  onUploadComplete: (url: string) => void;
+  /** Default: upload recording to Cloudinary and call `onUploadComplete`. */
+  mode?: 'upload' | 'localOnly';
+  onUploadComplete?: (url: string) => void;
+  /** When `mode` is `localOnly`, called after stop (no network upload). */
+  onLocalVerificationComplete?: () => void;
 };
 
-export default function VoiceVerificationRecorder({ scriptText, onUploadComplete }: Props): React.JSX.Element {
+export default function VoiceVerificationRecorder({
+  scriptText,
+  mode = 'upload',
+  onUploadComplete,
+  onLocalVerificationComplete,
+}: Props): React.JSX.Element {
   const recordingRef = useRef<Audio.Recording | null>(null);
   const [isRecording, setIsRecording] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -92,6 +101,15 @@ export default function VoiceVerificationRecorder({ scriptText, onUploadComplete
         Alert.alert('Recording', 'No audio file was produced. Try again.');
         return;
       }
+      if (mode === 'localOnly') {
+        onLocalVerificationComplete?.();
+        setStatusLine('Recording saved. You can submit your profile.');
+        return;
+      }
+      if (!onUploadComplete) {
+        Alert.alert('Voice verification', 'Missing upload handler.');
+        return;
+      }
       const mimeType = inferMimeFromLocalRecording(uri);
       setStatusLine('Uploading…');
       const { secure_url } = await uploadToCloudinary(uri, {
@@ -107,7 +125,7 @@ export default function VoiceVerificationRecorder({ scriptText, onUploadComplete
     } finally {
       setBusy(false);
     }
-  }, [onUploadComplete]);
+  }, [mode, onUploadComplete, onLocalVerificationComplete]);
 
   const onMicPress = () => {
     if (busy) return;
@@ -144,7 +162,13 @@ export default function VoiceVerificationRecorder({ scriptText, onUploadComplete
           )}
         </TouchableOpacity>
         <Text style={styles.micHint}>
-          {busy && isRecording ? 'Saving…' : isRecording ? 'Tap to stop & upload' : 'Tap to record'}
+          {busy && isRecording
+            ? 'Saving…'
+            : isRecording
+              ? mode === 'localOnly'
+                ? 'Tap to stop & continue'
+                : 'Tap to stop & upload'
+              : 'Tap to record'}
         </Text>
         {statusLine ? <Text style={styles.status}>{statusLine}</Text> : null}
       </View>

@@ -75,7 +75,7 @@ export default function BankDetailsScreen({ navigation, route }: Props): React.J
       );
       return;
     }
-    if (state.gender === 'female' && !state.userAudio?.trim()) {
+    if (state.gender === 'female' && !state.receiverVoiceUiDone) {
       navigation.navigate('AudioVerification', { agreedToPolicies: true });
       return;
     }
@@ -109,7 +109,8 @@ export default function BankDetailsScreen({ navigation, route }: Props): React.J
         fileName: state.panFront.name,
       });
 
-      const { data } = await profileApi.complete({
+      const trimmedAudio = state.userAudio?.trim() ?? '';
+      const payload = {
         name: state.displayName.trim(),
         profileImage: profileImageUrl,
         aadhaarFront: frontRes.secure_url,
@@ -127,8 +128,10 @@ export default function BankDetailsScreen({ navigation, route }: Props): React.J
         bankAccountNumber: state.bankAccountNumber.trim(),
         bankIfsc: state.bankIfsc.trim().toUpperCase(),
         bankName: state.bankName.trim(),
-        userAudio: state.userAudio?.trim() || undefined,
-      });
+        ...(trimmedAudio && /^https?:\/\//i.test(trimmedAudio) ? { userAudio: trimmedAudio } : {}),
+      };
+
+      const { data } = await profileApi.complete(payload);
 
       applyServerUser(data.user);
       await refreshUser();

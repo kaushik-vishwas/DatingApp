@@ -29,13 +29,13 @@ export default function AudioVerificationScreen({ navigation, route }: Props): R
   const goBackToBankDetails = () =>
     navigation.navigate('BankDetails', { agreedToPolicies: true });
 
-  const onUploadComplete = (url: string) => {
-    update({ userAudio: url });
+  const onLocalVerificationComplete = () => {
+    update({ receiverVoiceUiDone: true });
   };
 
   const onContinue = async () => {
-    if (!state.userAudio?.trim()) {
-      Alert.alert('Voice verification required', 'Please record and upload your voice sample first.');
+    if (!state.receiverVoiceUiDone) {
+      Alert.alert('Voice verification required', 'Please tap record, speak the phrase, then stop to continue.');
       return;
     }
     const err = validateCompleteProfile(state);
@@ -87,7 +87,8 @@ export default function AudioVerificationScreen({ navigation, route }: Props): R
         fileName: state.panFront.name,
       });
 
-      const { data } = await profileApi.complete({
+      const trimmedAudio = state.userAudio?.trim() ?? '';
+      const payload = {
         name: state.displayName.trim(),
         profileImage: profileImageUrl,
         aadhaarFront: frontRes.secure_url,
@@ -105,8 +106,10 @@ export default function AudioVerificationScreen({ navigation, route }: Props): R
         bankAccountNumber: state.bankAccountNumber.trim(),
         bankIfsc: state.bankIfsc.trim().toUpperCase(),
         bankName: state.bankName.trim(),
-        userAudio: state.userAudio?.trim() || undefined,
-      });
+        ...(trimmedAudio && /^https?:\/\//i.test(trimmedAudio) ? { userAudio: trimmedAudio } : {}),
+      };
+
+      const { data } = await profileApi.complete(payload);
 
       applyServerUser(data.user);
       await refreshUser();
@@ -130,18 +133,19 @@ export default function AudioVerificationScreen({ navigation, route }: Props): R
 
       <Text style={styles.title}>Audio verification</Text>
       <Text style={styles.subtitle}>
-        Final step before submission. Record your voice sample so your profile can be reviewed.
+        Final step: read the phrase aloud in your voice. Recording stays on device—no upload is required for submission.
       </Text>
 
       <VoiceVerificationRecorder
+        mode="localOnly"
         scriptText={CALLER_AUDIO_VERIFICATION_SCRIPT}
-        onUploadComplete={onUploadComplete}
+        onLocalVerificationComplete={onLocalVerificationComplete}
       />
 
       <TouchableOpacity
-        style={[styles.cta, (!state.userAudio || submitting) && styles.ctaDisabled]}
+        style={[styles.cta, (!state.receiverVoiceUiDone || submitting) && styles.ctaDisabled]}
         onPress={() => void onContinue()}
-        disabled={!state.userAudio || submitting}
+        disabled={!state.receiverVoiceUiDone || submitting}
         activeOpacity={0.9}
       >
         <Text style={styles.ctaText}>{submitting ? 'Submitting…' : 'Submit profile'}</Text>
