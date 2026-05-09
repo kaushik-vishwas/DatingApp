@@ -174,7 +174,7 @@ export default function UserCompleteProfileScreen({ navigation }: Props): React.
             <Text style={styles.back}>←</Text>
           </TouchableOpacity>
 
-          <Text style={styles.title}>sssS</Text>
+          <Text style={styles.title}>Complete Your Profile</Text>
           <Text style={styles.subtitle}>Tell us a bit about yourself</Text>
 
           <TouchableOpacity

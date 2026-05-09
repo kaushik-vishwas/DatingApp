@@ -234,8 +234,8 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   logoCircle: {
-    width: 150,
-    height: 50,
+    width: 44,
+    height: 44,
     borderRadius: 22,
     backgroundColor: PURPLE,
     alignItems: 'center',
