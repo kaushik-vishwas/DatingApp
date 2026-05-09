@@ -1,7 +1,7 @@
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import React, { useState } from 'react';
 import { Alert, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { WALLET_PACKAGES, creditForPackage, type WalletPackage } from '../../constants/walletPackages';
 import { useAuth } from '../../context/AuthContext';
@@ -12,6 +12,7 @@ const PURPLE = '#7b2cff';
 type Props = NativeStackScreenProps<CallerStackParamList, 'Wallet'>;
 
 export default function WalletScreen({ navigation }: Props): React.JSX.Element {
+  const insets = useSafeAreaInsets();
   const { user } = useAuth();
   const [selected, setSelected] = useState<WalletPackage | null>(null);
 
@@ -53,48 +54,61 @@ export default function WalletScreen({ navigation }: Props): React.JSX.Element {
 
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'left', 'right']}>
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.back}>
-          <Text style={styles.backTxt}>←</Text>
-        </TouchableOpacity>
-        <Text style={styles.title}>Wallet</Text>
-        <TouchableOpacity onPress={() => Alert.alert('Transactions', 'History coming soon.')}>
-          <Text style={styles.txLink}>View Transactions</Text>
-        </TouchableOpacity>
-      </View>
+      <ScrollView
+        contentContainerStyle={[
+          styles.content,
+          {
+            paddingTop: 8,
+            paddingBottom: Math.max(insets.bottom, 16) + 18,
+          },
+        ]}
+        showsVerticalScrollIndicator={false}
+      >
+        <View style={styles.header}>
+          <TouchableOpacity onPress={() => navigation.goBack()} style={styles.back}>
+            <Text style={styles.backTxt}>←</Text>
+          </TouchableOpacity>
+          <Text style={styles.title}>Wallet</Text>
+          <TouchableOpacity onPress={() => Alert.alert('Transactions', 'History coming soon.')}>
+            <Text style={styles.txLink}>View Transactions</Text>
+          </TouchableOpacity>
+        </View>
 
-      <View style={styles.balanceCard}>
-        <Text style={styles.balanceLbl}>My Balance</Text>
-        <Text style={styles.balanceAmt}>₹ {bal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</Text>
-      </View>
+        <View style={styles.balanceCard}>
+          <Text style={styles.balanceLbl}>My Balance</Text>
+          <Text style={styles.balanceAmt}>₹ {bal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</Text>
+        </View>
 
-      <Text style={styles.section}>Add Balance to Wallet</Text>
-      <ScrollView scrollEnabled={false} showsVerticalScrollIndicator={false}>
-        {Array.from({ length: Math.ceil(WALLET_PACKAGES.length / 2) }, (_, row) => (
-          <View key={row} style={styles.row}>
-            {WALLET_PACKAGES.slice(row * 2, row * 2 + 2).map((p) => (
-              <View key={`${p.pay}-${p.bonus}`} style={styles.pkgCell}>
-                {renderPkg({ item: p })}
-              </View>
-            ))}
-          </View>
-        ))}
+        <Text style={styles.section}>Add Balance to Wallet</Text>
+        <View>
+          {Array.from({ length: Math.ceil(WALLET_PACKAGES.length / 2) }, (_, row) => (
+            <View key={row} style={styles.row}>
+              {WALLET_PACKAGES.slice(row * 2, row * 2 + 2).map((p) => (
+                <View key={`${p.pay}-${p.bonus}`} style={styles.pkgCell}>
+                  {renderPkg({ item: p })}
+                </View>
+              ))}
+              {WALLET_PACKAGES.slice(row * 2, row * 2 + 2).length === 1 ? <View style={styles.pkgCell} /> : null}
+            </View>
+          ))}
+        </View>
+
+        <View style={styles.secureRow}>
+          <Text style={styles.lock}>🔒</Text>
+          <Text style={styles.secureTxt}>100% Secure Payment</Text>
+        </View>
+
+        <TouchableOpacity style={styles.cta} onPress={onProceed} activeOpacity={0.9}>
+          <Text style={styles.ctaTxt}>Proceed to Pay</Text>
+        </TouchableOpacity>
       </ScrollView>
-
-      <View style={styles.secureRow}>
-        <Text style={styles.lock}>🔒</Text>
-        <Text style={styles.secureTxt}>100% Secure Payment</Text>
-      </View>
-
-      <TouchableOpacity style={styles.cta} onPress={onProceed} activeOpacity={0.9}>
-        <Text style={styles.ctaTxt}>Proceed to Pay</Text>
-      </TouchableOpacity>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: '#f6f6f7', paddingHorizontal: 16 },
+  safe: { flex: 1, backgroundColor: '#f6f6f7' },
+  content: { flexGrow: 1, paddingHorizontal: 16 },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -116,7 +130,7 @@ const styles = StyleSheet.create({
   balanceLbl: { fontSize: 12, color: '#666', fontWeight: '700', marginBottom: 6 },
   balanceAmt: { fontSize: 28, fontWeight: '900', color: '#111' },
   section: { fontSize: 15, fontWeight: '900', color: '#111', marginBottom: 12 },
-  row: { gap: 10, marginBottom: 10 },
+  row: { flexDirection: 'row', gap: 10, marginBottom: 10 },
   pkgCell: { flex: 1, minWidth: 0 },
   pkg: {
     flex: 1,
@@ -146,7 +160,7 @@ const styles = StyleSheet.create({
   secureTxt: { fontSize: 12, color: '#666', fontWeight: '700' },
   cta: {
     marginTop: 'auto',
-    marginBottom: 24,
+    marginBottom: 0,
     backgroundColor: PURPLE,
     paddingVertical: 16,
     borderRadius: 14,

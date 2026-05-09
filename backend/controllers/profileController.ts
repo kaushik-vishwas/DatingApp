@@ -306,7 +306,10 @@ export const completeProfile = async (
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error('completeProfile error:', msg);
-    res.status(500).json({ message: msg || 'Server error' });
+    res.status(500).json({
+      message: msg || 'Server error',
+      error: 'COMPLETE_PROFILE_FAILED',
+    });
   }
 };
 

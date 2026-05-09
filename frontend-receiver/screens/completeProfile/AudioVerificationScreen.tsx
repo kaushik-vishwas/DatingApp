@@ -5,28 +5,107 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import VoiceVerificationRecorder from '../../components/VoiceVerificationRecorder';
 import { CALLER_AUDIO_VERIFICATION_SCRIPT } from '../../constants/userOnboarding';
+import { useAuth } from '../../context/AuthContext';
 import { useCompleteProfile } from '../../context/CompleteProfileContext';
+import { inferResourceType, uploadToCloudinary } from '../../lib/cloudinary';
 import type { CompleteProfileStackParamList } from '../../navigation/CompleteProfileStackParamList';
+import { getErrorMessage, profileApi } from '../../services/api';
+import { validateCompleteProfile } from '../../utils/completeProfileSteps';
 
 type Props = NativeStackScreenProps<CompleteProfileStackParamList, 'AudioVerification'>;
 
 export default function AudioVerificationScreen({ navigation }: Props): React.JSX.Element {
   const insets = useSafeAreaInsets();
   const { state, update } = useCompleteProfile();
+  const { user, refreshUser, applyServerUser } = useAuth();
+  const [submitting, setSubmitting] = React.useState(false);
 
   const onUploadComplete = (url: string) => {
     update({ userAudio: url });
   };
 
-  const onContinue = () => {
+  const onContinue = async () => {
     if (!state.userAudio?.trim()) {
       Alert.alert('Voice verification required', 'Please record and upload your voice sample first.');
       return;
     }
-    navigation.navigate('BankDetails', {
-      autoSubmit: true,
-      agreedToPolicies: true,
-    });
+    const err = validateCompleteProfile(state);
+    if (err) {
+      Alert.alert('Validation', err);
+      navigation.navigate('BankDetails');
+      return;
+    }
+    if (!state.profileImageUri || !state.aadhaarFront || !state.aadhaarBack || !state.panFront) {
+      Alert.alert('Validation', 'Missing required files');
+      navigation.navigate('BankDetails');
+      return;
+    }
+    const dobStr = user?.dateOfBirth?.trim();
+    if (!dobStr) {
+      Alert.alert(
+        'Date of birth required',
+        'Your account is missing a date of birth. Please sign out and register again, or contact support.'
+      );
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      const profileImageUrl = /^https?:\/\//i.test(state.profileImageUri)
+        ? state.profileImageUri.trim()
+        : (
+            await uploadToCloudinary(state.profileImageUri, {
+              mimeType: state.profileImageMime ?? 'image/jpeg',
+              resourceType: 'image',
+              fileName: 'profile.jpg',
+            })
+          ).secure_url;
+
+      const frontRes = await uploadToCloudinary(state.aadhaarFront.uri, {
+        mimeType: state.aadhaarFront.mimeType,
+        resourceType: inferResourceType(state.aadhaarFront.mimeType),
+        fileName: state.aadhaarFront.name,
+      });
+
+      const backRes = await uploadToCloudinary(state.aadhaarBack.uri, {
+        mimeType: state.aadhaarBack.mimeType,
+        resourceType: inferResourceType(state.aadhaarBack.mimeType),
+        fileName: state.aadhaarBack.name,
+      });
+      const panFrontRes = await uploadToCloudinary(state.panFront.uri, {
+        mimeType: state.panFront.mimeType,
+        resourceType: inferResourceType(state.panFront.mimeType),
+        fileName: state.panFront.name,
+      });
+
+      const { data } = await profileApi.complete({
+        name: state.displayName.trim(),
+        profileImage: profileImageUrl,
+        aadhaarFront: frontRes.secure_url,
+        aadhaarBack: backRes.secure_url,
+        aadhaarNumber: state.aadhaarNumber.trim(),
+        panNumber: state.panNumber.trim().toUpperCase(),
+        panFront: panFrontRes.secure_url,
+        languages: state.languages,
+        interests: state.interests,
+        gender: state.gender!,
+        dateOfBirth: dobStr,
+        state: state.state.trim(),
+        bankAccountHolderName: state.bankAccountHolderName.trim(),
+        bankAccountType: state.bankAccountType,
+        bankAccountNumber: state.bankAccountNumber.trim(),
+        bankIfsc: state.bankIfsc.trim().toUpperCase(),
+        bankName: state.bankName.trim(),
+        userAudio: state.userAudio?.trim() || undefined,
+      });
+
+      applyServerUser(data.user);
+      await refreshUser();
+    } catch (e: unknown) {
+      Alert.alert('Error', getErrorMessage(e));
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
@@ -51,12 +130,12 @@ export default function AudioVerificationScreen({ navigation }: Props): React.JS
       />
 
       <TouchableOpacity
-        style={[styles.cta, !state.userAudio && styles.ctaDisabled]}
-        onPress={onContinue}
-        disabled={!state.userAudio}
+        style={[styles.cta, (!state.userAudio || submitting) && styles.ctaDisabled]}
+        onPress={() => void onContinue()}
+        disabled={!state.userAudio || submitting}
         activeOpacity={0.9}
       >
-        <Text style={styles.ctaText}>Submit profile</Text>
+        <Text style={styles.ctaText}>{submitting ? 'Submitting…' : 'Submit profile'}</Text>
       </TouchableOpacity>
     </View>
   );

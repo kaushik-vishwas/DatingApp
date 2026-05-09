@@ -4,12 +4,13 @@ import {
   ActivityIndicator,
   Alert,
   Modal,
+  ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
   View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { WebView } from 'react-native-webview';
 
 import { useAuth } from '../../context/AuthContext';
@@ -23,6 +24,7 @@ const PURPLE = '#7b2cff';
 type Props = NativeStackScreenProps<CallerStackParamList, 'PaymentMethod'>;
 
 export default function PaymentMethodScreen({ navigation, route }: Props): React.JSX.Element {
+  const insets = useSafeAreaInsets();
   const { payAmount, bonusPercent, creditAmount } = route.params;
   const { refreshUser } = useAuth();
   const [busy, setBusy] = useState(false);
@@ -104,37 +106,49 @@ export default function PaymentMethodScreen({ navigation, route }: Props): React
 
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'left', 'right']}>
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.back}>
-          <Text style={styles.backTxt}>←</Text>
-        </TouchableOpacity>
-        <Text style={styles.title}>Select Payment Method</Text>
-        <View style={{ width: 32 }} />
-      </View>
-
-      <Text style={styles.summary}>
-        Pay ₹{payAmount.toLocaleString('en-IN')} · Credit ₹{creditAmount.toLocaleString('en-IN')}
-      </Text>
-
-      <View style={styles.opt}>
-        <Text style={styles.optTitle}>Payment options</Text>
-        <Text style={styles.optSub}>
-          The secure Razorpay window supports UPI, cards, and net banking. In test mode, use Razorpay test
-          cards from the dashboard; UPI apps may not complete inside the in-app browser.
-        </Text>
-      </View>
-
-      <TouchableOpacity
-        style={[styles.cta, (busy || checkoutOpen) && styles.ctaDis]}
-        onPress={() => void onConfirm()}
-        disabled={busy || checkoutOpen}
+      <ScrollView
+        contentContainerStyle={[
+          styles.content,
+          {
+            paddingTop: 8,
+            paddingBottom: Math.max(insets.bottom, 16) + 18,
+          },
+        ]}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
       >
-        {busy && !checkoutOpen ? (
-          <ActivityIndicator color="#fff" />
-        ) : (
-          <Text style={styles.ctaTxt}>Pay with Razorpay</Text>
-        )}
-      </TouchableOpacity>
+        <View style={styles.header}>
+          <TouchableOpacity onPress={() => navigation.goBack()} style={styles.back}>
+            <Text style={styles.backTxt}>←</Text>
+          </TouchableOpacity>
+          <Text style={styles.title}>Select Payment Method</Text>
+          <View style={{ width: 32 }} />
+        </View>
+
+        <Text style={styles.summary}>
+          Pay ₹{payAmount.toLocaleString('en-IN')} · Credit ₹{creditAmount.toLocaleString('en-IN')}
+        </Text>
+
+        <View style={styles.opt}>
+          <Text style={styles.optTitle}>Payment options</Text>
+          <Text style={styles.optSub}>
+            The secure Razorpay window supports UPI, cards, and net banking. In test mode, use Razorpay
+            test cards from the dashboard; UPI apps may not complete inside the in-app browser.
+          </Text>
+        </View>
+
+        <TouchableOpacity
+          style={[styles.cta, (busy || checkoutOpen) && styles.ctaDis]}
+          onPress={() => void onConfirm()}
+          disabled={busy || checkoutOpen}
+        >
+          {busy && !checkoutOpen ? (
+            <ActivityIndicator color="#fff" />
+          ) : (
+            <Text style={styles.ctaTxt}>Pay with Razorpay</Text>
+          )}
+        </TouchableOpacity>
+      </ScrollView>
 
       <Modal
         visible={checkoutOpen && Boolean(checkoutHtml)}
@@ -143,7 +157,7 @@ export default function PaymentMethodScreen({ navigation, route }: Props): React
           if (!checkoutHandledRef.current) closeCheckout();
         }}
       >
-        <View style={styles.modalRoot}>
+        <SafeAreaView style={styles.modalRoot} edges={['top', 'left', 'right', 'bottom']}>
           <View style={styles.modalBar}>
             <Text style={styles.modalTitle}>Secure payment</Text>
             <TouchableOpacity
@@ -177,14 +191,15 @@ export default function PaymentMethodScreen({ navigation, route }: Props): React
               )}
             />
           ) : null}
-        </View>
+        </SafeAreaView>
       </Modal>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: '#f6f6f7', paddingHorizontal: 16 },
+  safe: { flex: 1, backgroundColor: '#f6f6f7' },
+  content: { flexGrow: 1, paddingHorizontal: 16 },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -208,7 +223,7 @@ const styles = StyleSheet.create({
   optSub: { fontSize: 12, color: '#666', marginTop: 4, fontWeight: '600' },
   cta: {
     marginTop: 'auto',
-    marginBottom: 28,
+    marginBottom: 0,
     backgroundColor: PURPLE,
     paddingVertical: 16,
     borderRadius: 14,

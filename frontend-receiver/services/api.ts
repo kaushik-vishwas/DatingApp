@@ -58,7 +58,16 @@ function normalizeApiOrigin(raw: string): string {
 function getConfiguredApiBase(): string | undefined {
   const c = Constants as any;
   const raw = c.expoConfig?.extra?.apiBaseUrl || c.manifest?.extra?.apiBaseUrl;
-  return typeof raw === 'string' && raw.trim() ? normalizeApiOrigin(raw) : undefined;
+  if (typeof raw !== 'string' || !raw.trim()) return undefined;
+  const normalized = normalizeApiOrigin(raw);
+  try {
+    const parsed = new URL(normalized);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return undefined;
+    return normalized;
+  } catch {
+    // Broken app/env config should not brick networking; fall back to auto/prod selection.
+    return undefined;
+  }
 }
 
 /** Local backend for dev: LAN IP from Expo, emulator loopback, or machine localhost. */
@@ -152,14 +161,18 @@ api.interceptors.request.use(async (config) => {
 /** Error handler */
 export const getErrorMessage = (error: unknown): string => {
   if (axios.isAxiosError(error)) {
-    const err = error as AxiosError<{ message?: unknown }>;
+    const err = error as AxiosError<{ message?: unknown; error?: unknown; errorCode?: unknown }>;
     const msg = err.response?.data?.message;
+    const namedError = err.response?.data?.error;
+    const errorCode = err.response?.data?.errorCode;
 
     if (typeof msg === 'string') return msg;
+    if (typeof errorCode === 'string') return errorCode;
+    if (typeof namedError === 'string') return namedError;
     if (Array.isArray(msg)) return msg.join(', ');
-    if (!err.response) return 'Network error. Check backend connection';
+    if (!err.response) return 'NETWORK_REQUEST_FAILED';
 
-    return err.message || 'Request failed';
+    return err.message || `HTTP_${err.response.status}_REQUEST_FAILED`;
   }
 
   if (error instanceof Error) return error.message;

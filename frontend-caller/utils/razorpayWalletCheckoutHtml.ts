@@ -29,6 +29,36 @@ export function buildRazorpayWalletCheckoutHtml(order: RazorpayOrderResponse): s
     description: 'Wallet recharge',
     order_id: order.orderId,
     theme: { color: '#7b2cff' },
+    method: {
+      upi: true,
+      card: true,
+      netbanking: true,
+      wallet: true,
+      emi: true,
+      paylater: true,
+    },
+    config: {
+      display: {
+        blocks: {
+          upi: {
+            name: 'Pay using UPI',
+            instruments: [{ method: 'upi' }],
+          },
+          cards: {
+            name: 'Pay using Card',
+            instruments: [{ method: 'card' }],
+          },
+          netbanking: {
+            name: 'Netbanking',
+            instruments: [{ method: 'netbanking' }],
+          },
+        },
+        sequence: ['block.upi', 'block.cards', 'block.netbanking'],
+        preferences: {
+          show_default_blocks: true,
+        },
+      },
+    },
   };
   if (Object.keys(prefill).length > 0) staticPart.prefill = prefill;
 
