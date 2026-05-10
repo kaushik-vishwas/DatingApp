@@ -17,9 +17,8 @@ import { Input } from '../../components/ui/Input';
 import { ScreenHeader } from '../../components/ui/ScreenHeader';
 import { useAuth } from '../../context/AuthContext';
 import { useCompleteProfile, type BankAccountType } from '../../context/CompleteProfileContext';
-import { inferResourceType, uploadToCloudinary } from '../../lib/cloudinary';
 import type { CompleteProfileStackParamList } from '../../navigation/CompleteProfileStackParamList';
-import { getErrorMessage, profileApi } from '../../services/api';
+import { formatApiErrorForAlert, profileApi } from '../../services/api';
 import { validateCompleteProfile } from '../../utils/completeProfileSteps';
 
 type Props = NativeStackScreenProps<CompleteProfileStackParamList, 'BankDetails'>;
@@ -75,68 +74,20 @@ export default function BankDetailsScreen({ navigation, route }: Props): React.J
       );
       return;
     }
-    if (state.gender === 'female' && !state.receiverVoiceUiDone) {
-      navigation.navigate('AudioVerification', { agreedToPolicies: true });
-      return;
-    }
-
     setSubmitting(true);
     try {
-      const profileImageUrl = /^https?:\/\//i.test(state.profileImageUri)
-        ? state.profileImageUri.trim()
-        : (
-            await uploadToCloudinary(state.profileImageUri, {
-              mimeType: state.profileImageMime ?? 'image/jpeg',
-              resourceType: 'image',
-              fileName: 'profile.jpg',
-            })
-          ).secure_url;
-
-      const frontRes = await uploadToCloudinary(state.aadhaarFront.uri, {
-        mimeType: state.aadhaarFront.mimeType,
-        resourceType: inferResourceType(state.aadhaarFront.mimeType),
-        fileName: state.aadhaarFront.name,
-      });
-
-      const backRes = await uploadToCloudinary(state.aadhaarBack.uri, {
-        mimeType: state.aadhaarBack.mimeType,
-        resourceType: inferResourceType(state.aadhaarBack.mimeType),
-        fileName: state.aadhaarBack.name,
-      });
-      const panFrontRes = await uploadToCloudinary(state.panFront.uri, {
-        mimeType: state.panFront.mimeType,
-        resourceType: inferResourceType(state.panFront.mimeType),
-        fileName: state.panFront.name,
-      });
-
-      const trimmedAudio = state.userAudio?.trim() ?? '';
-      const payload = {
-        name: state.displayName.trim(),
-        profileImage: profileImageUrl,
-        aadhaarFront: frontRes.secure_url,
-        aadhaarBack: backRes.secure_url,
-        aadhaarNumber: state.aadhaarNumber.trim(),
-        panNumber: state.panNumber.trim().toUpperCase(),
-        panFront: panFrontRes.secure_url,
-        languages: state.languages,
-        interests: state.interests,
-        gender: state.gender!,
-        dateOfBirth: dobStr,
-        state: state.state.trim(),
+      const { data } = await profileApi.saveReceiverKycBankFinalize({
         bankAccountHolderName: state.bankAccountHolderName.trim(),
         bankAccountType: state.bankAccountType,
         bankAccountNumber: state.bankAccountNumber.trim(),
         bankIfsc: state.bankIfsc.trim().toUpperCase(),
         bankName: state.bankName.trim(),
-        ...(trimmedAudio && /^https?:\/\//i.test(trimmedAudio) ? { userAudio: trimmedAudio } : {}),
-      };
-
-      const { data } = await profileApi.complete(payload);
+      });
 
       applyServerUser(data.user);
       await refreshUser();
     } catch (e: unknown) {
-      Alert.alert('Error', getErrorMessage(e));
+      Alert.alert('Could not submit KYC', formatApiErrorForAlert(e));
     } finally {
       setSubmitting(false);
     }

@@ -15,6 +15,9 @@ router.post('/withdrawals/verify', auth_1.protect, profileController_1.verifyRec
 router.get('/receiver-call-insights', auth_1.protect, profileController_1.getReceiverCallInsights);
 router.get('/receiver-notify-candidates', auth_1.protect, profileController_1.getReceiverNotifyCandidates);
 router.post('/receiver-notify-user', auth_1.protect, profileController_1.notifyReceiverRecentUser);
+router.patch('/receiver/kyc/profile-info', auth_1.protect, profileController_1.saveReceiverKycProfileInfo);
+router.patch('/receiver/kyc/documents', auth_1.protect, profileController_1.saveReceiverKycDocuments);
+router.patch('/receiver/kyc/bank', auth_1.protect, profileController_1.saveReceiverKycBankFinalize);
 router.patch('/receiver', auth_1.protect, profileController_1.updateReceiverProfile);
 router.post('/receiver/reopen-kyc', auth_1.protect, profileController_1.reopenRejectedReceiverKyc);
 router.delete('/receiver', auth_1.protect, profileController_1.deleteReceiverAccount);

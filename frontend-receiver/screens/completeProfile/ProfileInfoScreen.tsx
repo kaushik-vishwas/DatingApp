@@ -19,7 +19,9 @@ import { Input } from '../../components/ui/Input';
 import { ScreenHeader } from '../../components/ui/ScreenHeader';
 import { ToggleGroup } from '../../components/ui/ToggleGroup';
 import { UploadField } from '../../components/ui/UploadField';
+import { useAuth } from '../../context/AuthContext';
 import { useCompleteProfile } from '../../context/CompleteProfileContext';
+import { uploadToCloudinary } from '../../lib/cloudinary';
 import { INTEREST_OPTIONS, LANGUAGE_OPTIONS } from '../../constants/profileOptions';
 import {
   CALLER_FEMALE_AVATAR_PRESETS,
@@ -28,6 +30,7 @@ import {
   toAvatarUri,
 } from '../../constants/userOnboarding';
 import type { CompleteProfileStackParamList } from '../../navigation/CompleteProfileStackParamList';
+import { formatApiErrorForAlert, profileApi } from '../../services/api';
 import type { Gender } from '../../types/user';
 import { validateProfileInfo } from '../../utils/completeProfileSteps';
 
@@ -42,6 +45,8 @@ const GENDERS: { value: Gender; label: string }[] = [
 export default function ProfileInfoScreen({ navigation }: Props): React.JSX.Element {
   const insets = useSafeAreaInsets();
   const { state, update } = useCompleteProfile();
+  const { applyServerUser, refreshUser } = useAuth();
+  const [submitting, setSubmitting] = useState(false);
   const [avatarModal, setAvatarModal] = useState(false);
   const [showStateSuggestions, setShowStateSuggestions] = useState(false);
   const [stateInput, setStateInput] = useState(state.state || '');
@@ -74,13 +79,44 @@ export default function ProfileInfoScreen({ navigation }: Props): React.JSX.Elem
     }
   };
 
-  const onNext = () => {
+  const onNext = async () => {
     const err = validateProfileInfo(state);
     if (err) {
       Alert.alert('Validation', err);
       return;
     }
-    navigation.navigate('DocumentUpload');
+    if (!state.profileImageUri) {
+      Alert.alert('Validation', 'Please add a profile picture');
+      return;
+    }
+    setSubmitting(true);
+    try {
+      const profileImageUrl = /^https?:\/\//i.test(state.profileImageUri)
+        ? state.profileImageUri.trim()
+        : (
+            await uploadToCloudinary(state.profileImageUri, {
+              mimeType: state.profileImageMime ?? 'image/jpeg',
+              resourceType: 'image',
+              fileName: 'profile.jpg',
+            })
+          ).secure_url;
+
+      const { data } = await profileApi.saveReceiverKycProfileInfo({
+        name: state.displayName.trim(),
+        profileImage: profileImageUrl,
+        languages: state.languages,
+        interests: state.interests,
+        gender: state.gender!,
+        state: state.state.trim(),
+      });
+      applyServerUser(data.user);
+      await refreshUser();
+      navigation.navigate('DocumentUpload');
+    } catch (e: unknown) {
+      Alert.alert('Could not save step 1', formatApiErrorForAlert(e));
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
@@ -182,7 +218,7 @@ export default function ProfileInfoScreen({ navigation }: Props): React.JSX.Elem
             onChange={handleInterestsChange}
           />
 
-          <Button title="Continue" onPress={onNext} />
+          <Button title="Continue" onPress={() => void onNext()} loading={submitting} disabled={submitting} />
         </ScrollView>
       </View>
 

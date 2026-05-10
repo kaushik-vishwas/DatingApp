@@ -19,6 +19,9 @@ import {
   getReceiverNotifyCandidates,
   notifyReceiverRecentUser,
   reopenRejectedReceiverKyc,
+  saveReceiverKycBankFinalize,
+  saveReceiverKycDocuments,
+  saveReceiverKycProfileInfo,
 } from '../controllers/profileController';
 import { protect } from '../middleware/auth';
 
@@ -35,6 +38,9 @@ router.post('/withdrawals/verify', protect, verifyReceiverWithdrawalOtpAndCreate
 router.get('/receiver-call-insights', protect, getReceiverCallInsights);
 router.get('/receiver-notify-candidates', protect, getReceiverNotifyCandidates);
 router.post('/receiver-notify-user', protect, notifyReceiverRecentUser);
+router.patch('/receiver/kyc/profile-info', protect, saveReceiverKycProfileInfo);
+router.patch('/receiver/kyc/documents', protect, saveReceiverKycDocuments);
+router.patch('/receiver/kyc/bank', protect, saveReceiverKycBankFinalize);
 router.patch('/receiver', protect, updateReceiverProfile);
 router.post('/receiver/reopen-kyc', protect, reopenRejectedReceiverKyc);
 router.delete('/receiver', protect, deleteReceiverAccount);

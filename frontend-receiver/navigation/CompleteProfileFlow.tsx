@@ -1,14 +1,31 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useRef } from 'react';
 
+import { useAuth } from '../context/AuthContext';
 import { CompleteProfileProvider, useCompleteProfile } from '../context/CompleteProfileContext';
+import { receiverKycHydrationPatch } from '../utils/receiverKycHydration';
 import CompleteProfileNavigator from './CompleteProfileNavigator';
 
-function ResetOnMount({ children }: { children: React.ReactNode }): React.JSX.Element {
-  const { reset } = useCompleteProfile();
+/** Load partial KYC already stored on the server (after step 1 / 2) into wizard state once. */
+function HydrateReceiverKycFromServer(): React.JSX.Element | null {
+  const { user } = useAuth();
+  const { update } = useCompleteProfile();
+  const hydratedRef = useRef(false);
+
   useEffect(() => {
-    reset();
-  }, [reset]);
-  return <>{children}</>;
+    if (hydratedRef.current) return;
+    if (!user) return;
+    if (user.role !== 'receiver' || user.accountStatus !== 'pending_profile') {
+      hydratedRef.current = true;
+      return;
+    }
+    const patch = receiverKycHydrationPatch(user);
+    if (Object.keys(patch).length > 0) {
+      update(patch);
+    }
+    hydratedRef.current = true;
+  }, [user, update]);
+
+  return null;
 }
 
 /**
@@ -17,9 +34,8 @@ function ResetOnMount({ children }: { children: React.ReactNode }): React.JSX.El
 export default function CompleteProfileFlow(): React.JSX.Element {
   return (
     <CompleteProfileProvider>
-      <ResetOnMount>
-        <CompleteProfileNavigator />
-      </ResetOnMount>
+      <HydrateReceiverKycFromServer />
+      <CompleteProfileNavigator />
     </CompleteProfileProvider>
   );
 }

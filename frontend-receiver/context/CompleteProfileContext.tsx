@@ -29,10 +29,7 @@ export type CompleteProfileState = {
   bankConfirmAccountNumber: string;
   bankIfsc: string;
   bankName: string;
-  userAudio: string | null;
-  /** Female KYC: set after recorder UI completes (voice is not uploaded; avoids extra network). */
-  receiverVoiceUiDone: boolean;
-  /** Survives screen unmount (e.g. native stack) so KYC terms stay accepted after Audio step. */
+  /** Survives screen unmount so KYC terms stay accepted across steps. */
   kycTermsAccepted: boolean;
 };
 
@@ -55,8 +52,6 @@ const initialState: CompleteProfileState = {
   bankConfirmAccountNumber: '',
   bankIfsc: '',
   bankName: '',
-  userAudio: null,
-  receiverVoiceUiDone: false,
   kycTermsAccepted: false,
 };
 

@@ -1,6 +1,6 @@
 import * as DocumentPicker from 'expo-document-picker';
 import * as ImagePicker from 'expo-image-picker';
-import React from 'react';
+import React, { useState } from 'react';
 import {
   Alert,
   ScrollView,
@@ -15,8 +15,11 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Button } from '../../components/ui/Button';
 import { ScreenHeader } from '../../components/ui/ScreenHeader';
 import { UploadField } from '../../components/ui/UploadField';
+import { useAuth } from '../../context/AuthContext';
 import { useCompleteProfile, type PickedDocument } from '../../context/CompleteProfileContext';
+import { inferResourceType, uploadToCloudinary } from '../../lib/cloudinary';
 import type { CompleteProfileStackParamList } from '../../navigation/CompleteProfileStackParamList';
+import { formatApiErrorForAlert, profileApi } from '../../services/api';
 import { validateAadhaarDocuments, validateProfileInfo } from '../../utils/completeProfileSteps';
 
 type Props = NativeStackScreenProps<CompleteProfileStackParamList, 'DocumentUpload'>;
@@ -66,9 +69,26 @@ async function pickAadhaarSide(
   ]);
 }
 
+async function ensureUploadedUrl(
+  doc: PickedDocument,
+  fileName: string
+): Promise<string> {
+  if (/^https?:\/\//i.test(doc.uri)) {
+    return doc.uri.trim();
+  }
+  const res = await uploadToCloudinary(doc.uri, {
+    mimeType: doc.mimeType,
+    resourceType: inferResourceType(doc.mimeType),
+    fileName: doc.name || fileName,
+  });
+  return res.secure_url;
+}
+
 export default function DocumentUploadScreen({ navigation }: Props): React.JSX.Element {
   const insets = useSafeAreaInsets();
   const { state, update } = useCompleteProfile();
+  const { applyServerUser, refreshUser } = useAuth();
+  const [submitting, setSubmitting] = useState(false);
 
   const onPickFront = async () => {
     await pickAadhaarSide((doc) => {
@@ -82,14 +102,39 @@ export default function DocumentUploadScreen({ navigation }: Props): React.JSX.E
     });
   };
 
-  const onContinue = () => {
-    const err =
-      validateProfileInfo(state) || validateAadhaarDocuments(state);
+  const onContinue = async () => {
+    const err = validateProfileInfo(state) || validateAadhaarDocuments(state);
     if (err) {
       Alert.alert('Validation', err);
       return;
     }
-    navigation.navigate('BankDetails');
+    if (!state.aadhaarFront || !state.aadhaarBack || !state.panFront) {
+      Alert.alert('Validation', 'Missing required documents');
+      return;
+    }
+    setSubmitting(true);
+    try {
+      const [aadhaarFront, aadhaarBack, panFront] = await Promise.all([
+        ensureUploadedUrl(state.aadhaarFront, 'aadhaar-front'),
+        ensureUploadedUrl(state.aadhaarBack, 'aadhaar-back'),
+        ensureUploadedUrl(state.panFront, 'pan-front'),
+      ]);
+
+      const { data } = await profileApi.saveReceiverKycDocuments({
+        aadhaarFront,
+        aadhaarBack,
+        aadhaarNumber: state.aadhaarNumber.trim(),
+        panNumber: state.panNumber.trim().toUpperCase(),
+        panFront,
+      });
+      applyServerUser(data.user);
+      await refreshUser();
+      navigation.navigate('BankDetails');
+    } catch (e: unknown) {
+      Alert.alert('Could not save step 2', formatApiErrorForAlert(e));
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
@@ -169,8 +214,20 @@ export default function DocumentUploadScreen({ navigation }: Props): React.JSX.E
           />
 
           <View style={styles.row}>
-            <Button title="Back" variant="outline" onPress={() => navigation.goBack()} style={styles.flex} />
-            <Button title="Continue" onPress={onContinue} style={styles.flex} />
+            <Button
+              title="Back"
+              variant="outline"
+              onPress={() => navigation.goBack()}
+              style={styles.flex}
+              disabled={submitting}
+            />
+            <Button
+              title="Continue"
+              onPress={() => void onContinue()}
+              style={styles.flex}
+              loading={submitting}
+              disabled={submitting}
+            />
           </View>
         </ScrollView>
       </View>

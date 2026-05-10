@@ -38,6 +38,9 @@ import type {
   ReceiverEarningsBreakdownResponse,
   ReceiverNotifyCandidatesResponse,
   ReceiverNotifyUserResponse,
+  ReceiverKycBankPayload,
+  ReceiverKycDocumentsPayload,
+  ReceiverKycProfileInfoPayload,
 } from '../types/api';
 
 const JWT_KEY = 'jwt';
@@ -197,6 +200,55 @@ export const getErrorMessage = (error: unknown): string => {
   return 'Something went wrong';
 };
 
+/**
+ * Multi-line message for `Alert.alert` on device (shows axios code, HTTP status, traceId, truncated stack).
+ */
+export function formatApiErrorForAlert(error: unknown): string {
+  const lines: string[] = [getErrorMessage(error)];
+
+  if (axios.isAxiosError(error)) {
+    const ax = error as AxiosError<ApiErrBody>;
+    lines.push('');
+    lines.push('--- Technical (for debugging) ---');
+    lines.push(`axios.code: ${ax.code ?? 'none'}`);
+    lines.push(`axios.message: ${ax.message}`);
+    const base = ax.config?.baseURL ?? '';
+    const path = ax.config?.url ?? '';
+    if (base || path) {
+      const joined = `${String(base).replace(/\/$/, '')}${path.startsWith('/') ? '' : '/'}${path}`;
+      lines.push(`request: ${joined}`);
+    }
+    if (ax.config?.timeout != null) {
+      lines.push(`timeout(ms): ${String(ax.config.timeout)}`);
+    }
+    if (ax.response) {
+      lines.push(`HTTP: ${ax.response.status} ${ax.response.statusText ?? ''}`);
+      const d = ax.response.data as ApiErrBody | undefined;
+      if (d && typeof d === 'object') {
+        if (typeof d.traceId === 'string' && d.traceId.trim()) {
+          lines.push(`traceId: ${d.traceId.trim()}`);
+        }
+        if (typeof d.error === 'string' && d.error.trim()) {
+          lines.push(`error: ${d.error.trim()}`);
+        }
+      }
+    } else {
+      lines.push('No HTTP response (timeout, TLS, DNS, or network blocked).');
+    }
+    const st = ax.stack ?? (error instanceof Error ? error.stack : undefined);
+    if (st) {
+      lines.push(`stack: ${st.slice(0, 600)}`);
+    }
+  } else if (error instanceof Error) {
+    lines.push(`${error.name}: ${error.message}`);
+    if (error.stack) {
+      lines.push(error.stack.slice(0, 600));
+    }
+  }
+
+  return lines.join('\n');
+}
+
 /** JWT helpers */
 export const saveJwt = async (token: string) => {
   await AsyncStorage.setItem(JWT_KEY, token);
@@ -209,6 +261,128 @@ export const getJwt = async () => {
 export const clearJwt = async () => {
   await AsyncStorage.removeItem(JWT_KEY);
 };
+
+/** Log helper: detect http:// asset URLs in JSON body (cleartext / mixed-content hints). */
+function auditCompleteProfilePayloadUrls(payload: CompleteProfilePayload): {
+  urlFields: Record<string, { scheme: 'https' | 'http'; charLength: number }>;
+  hasCleartextAssetUrls: boolean;
+} {
+  const urlFields: Record<string, { scheme: 'https' | 'http'; charLength: number }> = {};
+  let hasCleartextAssetUrls = false;
+  for (const [key, val] of Object.entries(payload as unknown as Record<string, unknown>)) {
+    if (typeof val !== 'string') continue;
+    const s = val.trim();
+    if (!/^https?:\/\//i.test(s)) continue;
+    const scheme = s.toLowerCase().startsWith('https://') ? 'https' : 'http';
+    if (scheme === 'http') hasCleartextAssetUrls = true;
+    urlFields[key] = { scheme, charLength: s.length };
+  }
+  return { urlFields, hasCleartextAssetUrls };
+}
+
+function logProfileCompleteFailure(
+  endpoint: string,
+  resolvedApiBase: string,
+  payload: CompleteProfilePayload,
+  e: unknown
+): void {
+  const payloadAudit = auditCompleteProfilePayloadUrls(payload);
+  const safeStringify = (obj: unknown): string => {
+    try {
+      return JSON.stringify(obj);
+    } catch {
+      return '[log stringify failed]';
+    }
+  };
+
+  if (axios.isAxiosError(e)) {
+    const ax = e as AxiosError<ApiErrBody> & { stack?: string };
+    const h = ax.response?.headers ?? {};
+    const traceHeader =
+      (typeof h['x-complete-profile-trace-id'] === 'string' && h['x-complete-profile-trace-id']) ||
+      (typeof h['X-Complete-Profile-Trace-Id'] === 'string' && h['X-Complete-Profile-Trace-Id']) ||
+      (typeof h['x-api-trace-id'] === 'string' && h['x-api-trace-id']) ||
+      (typeof h['X-Api-Trace-Id'] === 'string' && h['X-Api-Trace-Id']) ||
+      undefined;
+    const bodyTrace =
+      typeof ax.response?.data === 'object' &&
+      ax.response?.data !== null &&
+      typeof (ax.response.data as ApiErrBody).traceId === 'string'
+        ? (ax.response.data as ApiErrBody).traceId
+        : undefined;
+
+    let axiosToJson: unknown = undefined;
+    try {
+      axiosToJson = typeof (ax as { toJSON?: () => unknown }).toJSON === 'function'
+        ? (ax as { toJSON: () => unknown }).toJSON()
+        : undefined;
+    } catch {
+      axiosToJson = undefined;
+    }
+
+    const detail = {
+      tag: '[profile/complete]',
+      endpoint,
+      resolvedApiBase,
+      payloadUrlAudit: payloadAudit,
+      axios: {
+        name: ax.name,
+        code: ax.code ?? null,
+        message: ax.message,
+        stack: ax.stack ?? null,
+        isAxiosError: true,
+        hasResponse: Boolean(ax.response),
+        httpStatus: ax.response?.status ?? null,
+        httpStatusText: ax.response?.statusText ?? null,
+        responseHeadersContentType:
+          typeof ax.response?.headers?.['content-type'] === 'string'
+            ? ax.response.headers['content-type']
+            : null,
+        traceHeader: traceHeader ?? null,
+        bodyTraceId: bodyTrace ?? null,
+        responseBody: ax.response?.data ?? null,
+        requestConfig: ax.config
+          ? {
+              baseURL: ax.config.baseURL ?? null,
+              url: ax.config.url ?? null,
+              method: ax.config.method ?? null,
+              timeout: ax.config.timeout ?? null,
+            }
+          : null,
+        axiosSerialized: axiosToJson,
+      },
+    };
+    console.error(safeStringify(detail));
+    return;
+  }
+
+  if (e instanceof Error) {
+    console.error(
+      safeStringify({
+        tag: '[profile/complete]',
+        endpoint,
+        resolvedApiBase,
+        payloadUrlAudit: payloadAudit,
+        error: {
+          name: e.name,
+          message: e.message,
+          stack: e.stack ?? null,
+        },
+      })
+    );
+    return;
+  }
+
+  console.error(
+    safeStringify({
+      tag: '[profile/complete]',
+      endpoint,
+      resolvedApiBase,
+      payloadUrlAudit: payloadAudit,
+      error: { raw: String(e) },
+    })
+  );
+}
 
 /** APIs */
 
@@ -249,43 +423,25 @@ export const profileApi = {
     const resolvedBase = getResolvedApiBaseUrl();
     const endpoint = `${resolvedBase.replace(/\/+$/, '')}/profile/complete`;
     try {
-      return await api.post<CompleteProfileResponse>('/profile/complete', payload, { timeout: 90_000 });
+      return await api.post<CompleteProfileResponse>('/profile/complete', payload, {
+        timeout: 180000,
+        maxContentLength: 50 * 1024 * 1024,
+        maxBodyLength: 50 * 1024 * 1024,
+      });
     } catch (e: unknown) {
-      const ax = axios.isAxiosError(e) ? (e as AxiosError<ApiErrBody>) : null;
-      if (ax) {
-        const h = ax.response?.headers ?? {};
-        const traceHeader =
-          (typeof h['x-complete-profile-trace-id'] === 'string' && h['x-complete-profile-trace-id']) ||
-          (typeof h['X-Complete-Profile-Trace-Id'] === 'string' && h['X-Complete-Profile-Trace-Id']) ||
-          (typeof h['x-api-trace-id'] === 'string' && h['x-api-trace-id']) ||
-          (typeof h['X-Api-Trace-Id'] === 'string' && h['X-Api-Trace-Id']) ||
-          undefined;
-        const bodyTrace =
-          typeof ax.response?.data === 'object' &&
-          ax.response?.data !== null &&
-          typeof (ax.response.data as ApiErrBody).traceId === 'string'
-            ? (ax.response.data as ApiErrBody).traceId
-            : undefined;
-        console.error(
-          '[profile/complete]',
-          JSON.stringify({
-            endpoint,
-            method: 'POST',
-            timeoutMs: 90_000,
-            axiosCode: ax.code ?? null,
-            axiosMessage: ax.message,
-            httpStatus: ax.response?.status ?? null,
-            traceHeader: traceHeader ?? null,
-            bodyTraceId: bodyTrace ?? null,
-            responseBody: ax.response?.data ?? null,
-          })
-        );
-      } else {
-        console.error('[profile/complete]', JSON.stringify({ endpoint, error: String(e) }));
-      }
+      logProfileCompleteFailure(endpoint, resolvedBase, payload, e);
       throw e;
     }
   },
+
+  saveReceiverKycProfileInfo: (payload: ReceiverKycProfileInfoPayload) =>
+    api.patch<CompleteProfileResponse>('/profile/receiver/kyc/profile-info', payload, { timeout: 120_000 }),
+
+  saveReceiverKycDocuments: (payload: ReceiverKycDocumentsPayload) =>
+    api.patch<CompleteProfileResponse>('/profile/receiver/kyc/documents', payload, { timeout: 120_000 }),
+
+  saveReceiverKycBankFinalize: (payload: ReceiverKycBankPayload) =>
+    api.patch<CompleteProfileResponse>('/profile/receiver/kyc/bank', payload, { timeout: 90_000 }),
 
   saveCallerUserAudio: (payload: SaveCallerUserAudioPayload) =>
     api.patch<SaveCallerUserAudioResponse>('/profile/caller-audio', payload),

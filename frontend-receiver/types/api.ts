@@ -357,6 +357,34 @@ export interface CompleteProfilePayload {
   userAudio?: string;
 }
 
+/** PATCH /profile/receiver/kyc/profile-info — step 1 */
+export interface ReceiverKycProfileInfoPayload {
+  name: string;
+  profileImage: string;
+  languages: string[];
+  interests: string[];
+  gender: Gender;
+  state: string;
+}
+
+/** PATCH /profile/receiver/kyc/documents — step 2 */
+export interface ReceiverKycDocumentsPayload {
+  aadhaarFront: string;
+  aadhaarBack: string;
+  aadhaarNumber: string;
+  panNumber: string;
+  panFront: string;
+}
+
+/** PATCH /profile/receiver/kyc/bank — step 3 */
+export interface ReceiverKycBankPayload {
+  bankAccountHolderName: string;
+  bankAccountType: 'savings' | 'current';
+  bankAccountNumber: string;
+  bankIfsc: string;
+  bankName: string;
+}
+
 export interface CompleteProfileResponse {
   message: string;
   user: UserProfile;

@@ -54,6 +54,34 @@ type CompleteProfileBody = {
   userAudio?: string;
 };
 
+/** PATCH /profile/receiver/kyc/profile-info — step 1 (incremental save). */
+type ReceiverKycProfileInfoBody = {
+  name: string;
+  profileImage: string;
+  languages: string[];
+  interests: string[];
+  gender: Gender;
+  state: string;
+};
+
+/** PATCH /profile/receiver/kyc/documents — step 2 (incremental save). */
+type ReceiverKycDocumentsBody = {
+  aadhaarFront: string;
+  aadhaarBack: string;
+  aadhaarNumber: string;
+  panNumber: string;
+  panFront: string;
+};
+
+/** PATCH /profile/receiver/kyc/bank — step 3 (bank only; marks KYC approved). */
+type ReceiverKycBankBody = {
+  bankAccountHolderName: string;
+  bankAccountType: 'savings' | 'current';
+  bankAccountNumber: string;
+  bankIfsc: string;
+  bankName: string;
+};
+
 type CompleteCallerBody = {
   name: string;
   profileImage: string;
@@ -412,6 +440,314 @@ export const completeProfile = async (
       error: 'COMPLETE_PROFILE_FAILED',
       ...(err instanceof mongoose.Error.ValidationError ? { errorHint: 'MONGOOSE_VALIDATION' as const } : {}),
     });
+  }
+};
+
+/**
+ * PATCH /profile/receiver/kyc/profile-info — receiver KYC step 1 (name, photo URL, languages, etc.).
+ */
+export const saveReceiverKycProfileInfo = async (
+  req: Request<{}, {}, ReceiverKycProfileInfoBody>,
+  res: Response
+): Promise<void> => {
+  const t = beginApiTrace('PATCH /profile/receiver/kyc/profile-info', req, res);
+  try {
+    if (req.accountKind !== 'receiver') {
+      t.warn('kyc_profile_info_account_kind');
+      t.json(403, {
+        message: 'This endpoint is only for receiver accounts',
+        error: 'KYC_PROFILE_INFO_RECEIVER_ONLY',
+      });
+      return;
+    }
+    const authReceiver = req.receiver as ReceiverDocument | undefined;
+    if (!authReceiver?._id) {
+      t.json(401, { message: 'Not authorized', error: 'KYC_PROFILE_INFO_UNAUTHORIZED' });
+      return;
+    }
+
+    const { name, profileImage, languages, interests, gender, state } = req.body;
+    if (!name || !String(name).trim()) {
+      t.json(400, { message: 'name is required', error: 'KYC_PROFILE_INFO_MISSING_NAME' });
+      return;
+    }
+    if (!profileImage || typeof profileImage !== 'string' || !/^https?:\/\//i.test(profileImage.trim())) {
+      t.json(400, {
+        message: 'profileImage must be a valid http(s) URL',
+        error: 'KYC_PROFILE_INFO_BAD_PROFILE_IMAGE',
+      });
+      return;
+    }
+    if (!Array.isArray(languages) || languages.length === 0) {
+      t.json(400, {
+        message: 'At least one language is required',
+        error: 'KYC_PROFILE_INFO_MISSING_LANGUAGES',
+      });
+      return;
+    }
+    if (!Array.isArray(interests) || interests.length === 0) {
+      t.json(400, {
+        message: 'At least one interest is required',
+        error: 'KYC_PROFILE_INFO_MISSING_INTERESTS',
+      });
+      return;
+    }
+    if (gender !== 'male' && gender !== 'female' && gender !== 'other') {
+      t.json(400, { message: 'gender must be male, female, or other', error: 'KYC_PROFILE_INFO_INVALID_GENDER' });
+      return;
+    }
+    if (!state || !String(state).trim()) {
+      t.json(400, { message: 'state is required', error: 'KYC_PROFILE_INFO_MISSING_STATE' });
+      return;
+    }
+
+    const receiver = await Receiver.findById(authReceiver._id);
+    if (!receiver) {
+      t.json(404, { message: 'Receiver not found', error: 'KYC_PROFILE_INFO_NOT_FOUND' });
+      return;
+    }
+    if (receiver.accountStatus !== 'pending_profile') {
+      t.json(400, {
+        message: 'Profile already submitted or cannot be edited this way',
+        error: 'KYC_PROFILE_INFO_WRONG_STATUS',
+        accountStatus: receiver.accountStatus,
+      });
+      return;
+    }
+
+    receiver.name = String(name).trim();
+    receiver.profileImage = String(profileImage).trim();
+    receiver.languages = languages.map((l) => String(l).trim()).filter(Boolean);
+    receiver.interests = interests.map((i) => String(i).trim()).filter(Boolean);
+    receiver.gender = gender;
+    receiver.state = String(state).trim();
+    await receiver.save();
+
+    t.log('kyc_profile_info_ok');
+    t.json(200, { message: 'Profile info saved', user: toApiReceiver(receiver) });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    t.logFullError('kyc_profile_info_unhandled', err, { mongoCode: mongoErrCode(err) });
+    t.json(500, { message: msg || 'Server error', error: 'KYC_PROFILE_INFO_FAILED' });
+  }
+};
+
+/**
+ * PATCH /profile/receiver/kyc/documents — receiver KYC step 2 (ID document URLs + numbers).
+ */
+export const saveReceiverKycDocuments = async (
+  req: Request<{}, {}, ReceiverKycDocumentsBody>,
+  res: Response
+): Promise<void> => {
+  const t = beginApiTrace('PATCH /profile/receiver/kyc/documents', req, res);
+  try {
+    if (req.accountKind !== 'receiver') {
+      t.json(403, {
+        message: 'This endpoint is only for receiver accounts',
+        error: 'KYC_DOCS_RECEIVER_ONLY',
+      });
+      return;
+    }
+    const authReceiver = req.receiver as ReceiverDocument | undefined;
+    if (!authReceiver?._id) {
+      t.json(401, { message: 'Not authorized', error: 'KYC_DOCS_UNAUTHORIZED' });
+      return;
+    }
+
+    const { aadhaarFront, aadhaarBack, aadhaarNumber, panNumber, panFront } = req.body;
+    if (!aadhaarFront || typeof aadhaarFront !== 'string' || !/^https?:\/\//i.test(aadhaarFront.trim())) {
+      t.json(400, { message: 'aadhaarFront URL is required', error: 'KYC_DOCS_MISSING_AADHAAR_FRONT' });
+      return;
+    }
+    if (!aadhaarBack || typeof aadhaarBack !== 'string' || !/^https?:\/\//i.test(aadhaarBack.trim())) {
+      t.json(400, { message: 'aadhaarBack URL is required', error: 'KYC_DOCS_MISSING_AADHAAR_BACK' });
+      return;
+    }
+    if (!aadhaarNumber || typeof aadhaarNumber !== 'string' || !/^\d{12}$/.test(aadhaarNumber.trim())) {
+      t.json(400, {
+        message: 'aadhaarNumber must be a valid 12-digit number',
+        error: 'KYC_DOCS_INVALID_AADHAAR_NUMBER',
+      });
+      return;
+    }
+    if (
+      !panNumber ||
+      typeof panNumber !== 'string' ||
+      !/^[A-Z]{5}[0-9]{4}[A-Z]$/i.test(panNumber.trim())
+    ) {
+      t.json(400, {
+        message: 'panNumber must be valid (e.g. ABCDE1234F)',
+        error: 'KYC_DOCS_INVALID_PAN_NUMBER',
+      });
+      return;
+    }
+    if (!panFront || typeof panFront !== 'string' || !/^https?:\/\//i.test(panFront.trim())) {
+      t.json(400, { message: 'panFront URL is required', error: 'KYC_DOCS_MISSING_PAN_FRONT' });
+      return;
+    }
+
+    const receiver = await Receiver.findById(authReceiver._id);
+    if (!receiver) {
+      t.json(404, { message: 'Receiver not found', error: 'KYC_DOCS_NOT_FOUND' });
+      return;
+    }
+    if (receiver.accountStatus !== 'pending_profile') {
+      t.json(400, {
+        message: 'Profile already submitted or cannot be edited this way',
+        error: 'KYC_DOCS_WRONG_STATUS',
+        accountStatus: receiver.accountStatus,
+      });
+      return;
+    }
+    if (!receiver.profileImage || !String(receiver.profileImage).trim()) {
+      t.json(400, {
+        message: 'Complete step 1 (profile info) before uploading documents',
+        error: 'KYC_DOCS_STEP1_REQUIRED',
+      });
+      return;
+    }
+
+    const front = String(aadhaarFront).trim();
+    const back = String(aadhaarBack).trim();
+    const panFrontUrl = String(panFront).trim();
+
+    receiver.aadhaarFront = front;
+    receiver.aadhaarBack = back;
+    receiver.aadhaarNumber = String(aadhaarNumber).trim();
+    receiver.panNumber = String(panNumber).trim().toUpperCase();
+    receiver.panFront = panFrontUrl;
+    receiver.documents = [front, back, panFrontUrl];
+    await receiver.save();
+
+    t.log('kyc_documents_ok');
+    t.json(200, { message: 'Documents saved', user: toApiReceiver(receiver) });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    t.logFullError('kyc_documents_unhandled', err, { mongoCode: mongoErrCode(err) });
+    t.json(500, { message: msg || 'Server error', error: 'KYC_DOCS_FAILED' });
+  }
+};
+
+/**
+ * PATCH /profile/receiver/kyc/bank — receiver KYC step 3 (bank only; approves account like POST /profile/complete).
+ */
+export const saveReceiverKycBankFinalize = async (
+  req: Request<{}, {}, ReceiverKycBankBody>,
+  res: Response
+): Promise<void> => {
+  const t = beginApiTrace('PATCH /profile/receiver/kyc/bank', req, res);
+  try {
+    if (req.accountKind !== 'receiver') {
+      t.json(403, {
+        message: 'This endpoint is only for receiver accounts',
+        error: 'KYC_BANK_RECEIVER_ONLY',
+      });
+      return;
+    }
+    const authReceiver = req.receiver as ReceiverDocument | undefined;
+    if (!authReceiver?._id) {
+      t.json(401, { message: 'Not authorized', error: 'KYC_BANK_UNAUTHORIZED' });
+      return;
+    }
+
+    const { bankAccountHolderName, bankAccountType, bankAccountNumber, bankIfsc, bankName } = req.body;
+    if (!bankAccountHolderName || !String(bankAccountHolderName).trim()) {
+      t.json(400, {
+        message: 'bankAccountHolderName is required',
+        error: 'KYC_BANK_MISSING_HOLDER',
+      });
+      return;
+    }
+    if (bankAccountType !== 'savings' && bankAccountType !== 'current') {
+      t.json(400, {
+        message: 'bankAccountType must be savings or current',
+        error: 'KYC_BANK_INVALID_TYPE',
+      });
+      return;
+    }
+    if (!bankAccountNumber || !String(bankAccountNumber).trim()) {
+      t.json(400, { message: 'bankAccountNumber is required', error: 'KYC_BANK_MISSING_NUMBER' });
+      return;
+    }
+    if (!bankIfsc || !String(bankIfsc).trim()) {
+      t.json(400, { message: 'bankIfsc is required', error: 'KYC_BANK_MISSING_IFSC' });
+      return;
+    }
+    if (!bankName || !String(bankName).trim()) {
+      t.json(400, { message: 'bankName is required', error: 'KYC_BANK_MISSING_BANK_NAME' });
+      return;
+    }
+
+    const receiver = await Receiver.findById(authReceiver._id);
+    if (!receiver) {
+      t.json(404, { message: 'Receiver not found', error: 'KYC_BANK_NOT_FOUND' });
+      return;
+    }
+    if (receiver.accountStatus !== 'pending_profile') {
+      t.json(400, {
+        message: 'Profile already submitted or cannot be edited this way',
+        error: 'KYC_BANK_WRONG_STATUS',
+        accountStatus: receiver.accountStatus,
+      });
+      return;
+    }
+
+    if (!receiver.profileImage?.trim()) {
+      t.json(400, { message: 'Complete step 1 first', error: 'KYC_BANK_STEP1_REQUIRED' });
+      return;
+    }
+    if (!receiver.aadhaarFront?.trim() || !receiver.aadhaarBack?.trim() || !receiver.panFront?.trim()) {
+      t.json(400, { message: 'Complete step 2 (documents) first', error: 'KYC_BANK_STEP2_REQUIRED' });
+      return;
+    }
+    if (!receiver.aadhaarNumber?.trim() || !receiver.panNumber?.trim()) {
+      t.json(400, { message: 'Complete step 2 (documents) first', error: 'KYC_BANK_STEP2_NUMBERS_REQUIRED' });
+      return;
+    }
+    if (!receiver.languages?.length || !receiver.interests?.length || !receiver.gender) {
+      t.json(400, { message: 'Complete step 1 (profile info) first', error: 'KYC_BANK_PROFILE_INCOMPLETE' });
+      return;
+    }
+    if (!receiver.state?.trim()) {
+      t.json(400, { message: 'Complete step 1 (profile info) first', error: 'KYC_BANK_STATE_REQUIRED' });
+      return;
+    }
+    const dob = receiver.dateOfBirth;
+    if (!dob) {
+      t.json(400, {
+        message: 'Account is missing date of birth — re-register or contact support',
+        error: 'KYC_BANK_MISSING_DOB',
+      });
+      return;
+    }
+    const dobErr = validateBirthDateForAccount(dob);
+    if (dobErr) {
+      t.json(400, { message: dobErr, error: 'KYC_BANK_DOB_RULES' });
+      return;
+    }
+
+    const front = String(receiver.aadhaarFront).trim();
+    const back = String(receiver.aadhaarBack).trim();
+    const panFrontUrl = String(receiver.panFront).trim();
+    receiver.documents = [front, back, panFrontUrl];
+
+    receiver.bankAccountHolderName = String(bankAccountHolderName).trim();
+    receiver.bankAccountType = bankAccountType;
+    receiver.bankAccountNumber = String(bankAccountNumber).trim();
+    receiver.bankIfsc = String(bankIfsc).trim().toUpperCase();
+    receiver.bankName = String(bankName).trim();
+    receiver.age = calculateAgeFromBirthDateUtc(dob);
+    receiver.audioCallRate = RECEIVER_AUDIO_CALL_RATE_INR_PER_MIN;
+    receiver.accountStatus = 'approved';
+
+    await receiver.save();
+
+    t.log('kyc_bank_finalize_ok');
+    t.json(200, { message: 'Profile completed successfully', user: toApiReceiver(receiver) });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    t.logFullError('kyc_bank_unhandled', err, { mongoCode: mongoErrCode(err) });
+    t.json(500, { message: msg || 'Server error', error: 'KYC_BANK_FAILED' });
   }
 };
 
