@@ -30,8 +30,9 @@ import {
   toAvatarUri,
 } from '../../constants/userOnboarding';
 import type { CompleteProfileStackParamList } from '../../navigation/CompleteProfileStackParamList';
-import { formatApiErrorForAlert, profileApi } from '../../services/api';
+import { formatApiErrorForAlert, getResolvedApiBaseUrl, profileApi } from '../../services/api';
 import type { Gender } from '../../types/user';
+import { shouldUploadProfileImageToCloudinary } from '../../utils/profileImageUrl';
 import { validateProfileInfo } from '../../utils/completeProfileSteps';
 
 type Props = NativeStackScreenProps<CompleteProfileStackParamList, 'ProfileInfo'>;
@@ -91,15 +92,27 @@ export default function ProfileInfoScreen({ navigation }: Props): React.JSX.Elem
     }
     setSubmitting(true);
     try {
-      const profileImageUrl = /^https?:\/\//i.test(state.profileImageUri)
-        ? state.profileImageUri.trim()
-        : (
+      let profileImageUrl: string;
+      // Metro turns require() avatars into http://192.168.x:8081/... — must upload, not save as-is.
+      if (!shouldUploadProfileImageToCloudinary(state.profileImageUri)) {
+        profileImageUrl = state.profileImageUri.trim();
+      } else {
+        try {
+          profileImageUrl = (
             await uploadToCloudinary(state.profileImageUri, {
               mimeType: state.profileImageMime ?? 'image/jpeg',
               resourceType: 'image',
               fileName: 'profile.jpg',
             })
           ).secure_url;
+        } catch (uploadErr: unknown) {
+          Alert.alert(
+            'Photo upload failed',
+            `${formatApiErrorForAlert(uploadErr)}\n\nUploads go to Cloudinary (api.cloudinary.com). Preset photos are bundled in the app but still upload from the device — same as a gallery pick. Try Wi‑Fi, disable VPN, or check firewall to Cloudinary.`
+          );
+          return;
+        }
+      }
 
       const { data } = await profileApi.saveReceiverKycProfileInfo({
         name: state.displayName.trim(),
@@ -113,7 +126,11 @@ export default function ProfileInfoScreen({ navigation }: Props): React.JSX.Elem
       await refreshUser();
       navigation.navigate('DocumentUpload');
     } catch (e: unknown) {
-      Alert.alert('Could not save step 1', formatApiErrorForAlert(e));
+      const apiBase = getResolvedApiBaseUrl();
+      Alert.alert(
+        'Could not save step 1 (server)',
+        `${formatApiErrorForAlert(e)}\n\nAPI base in this build:\n${apiBase}\n\nPATCH: /profile/receiver/kyc/profile-info\n\nIf login works but this fails, deploy the latest backend (KYC step routes). "Network request failed" with no HTTP status usually means the phone never reached the server (DNS, firewall, SSL, or wrong API URL in the release build).`
+      );
     } finally {
       setSubmitting(false);
     }

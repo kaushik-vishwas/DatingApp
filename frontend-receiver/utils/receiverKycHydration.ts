@@ -1,5 +1,6 @@
 import type { CompleteProfileState } from '../context/CompleteProfileContext';
 import type { UserProfile } from '../types/user';
+import { shouldUploadProfileImageToCloudinary } from './profileImageUrl';
 
 /** Merge server-saved KYC into wizard state when (re)opening the flow. */
 export function receiverKycHydrationPatch(user: UserProfile): Partial<CompleteProfileState> {
@@ -9,7 +10,8 @@ export function receiverKycHydrationPatch(user: UserProfile): Partial<CompletePr
   const patch: Partial<CompleteProfileState> = {};
 
   if (user.name?.trim()) patch.displayName = user.name.trim();
-  if (user.profileImage?.trim()) {
+  /** Skip dev-only Metro URLs mistakenly stored in DB — user must re-pick / re-upload. */
+  if (user.profileImage?.trim() && !shouldUploadProfileImageToCloudinary(user.profileImage.trim())) {
     patch.profileImageUri = user.profileImage.trim();
     patch.profileImageMime = 'image/jpeg';
   }
@@ -21,21 +23,21 @@ export function receiverKycHydrationPatch(user: UserProfile): Partial<CompletePr
   if (user.aadhaarNumber?.trim()) patch.aadhaarNumber = user.aadhaarNumber.replace(/\D/g, '').slice(0, 12);
   if (user.panNumber?.trim()) patch.panNumber = user.panNumber.trim().toUpperCase();
 
-  if (user.aadhaarFront?.trim()) {
+  if (user.aadhaarFront?.trim() && !shouldUploadProfileImageToCloudinary(user.aadhaarFront.trim())) {
     patch.aadhaarFront = {
       uri: user.aadhaarFront.trim(),
       name: 'aadhaar-front',
       mimeType: 'image/jpeg',
     };
   }
-  if (user.aadhaarBack?.trim()) {
+  if (user.aadhaarBack?.trim() && !shouldUploadProfileImageToCloudinary(user.aadhaarBack.trim())) {
     patch.aadhaarBack = {
       uri: user.aadhaarBack.trim(),
       name: 'aadhaar-back',
       mimeType: 'image/jpeg',
     };
   }
-  if (user.panFront?.trim()) {
+  if (user.panFront?.trim() && !shouldUploadProfileImageToCloudinary(user.panFront.trim())) {
     patch.panFront = {
       uri: user.panFront.trim(),
       name: 'pan-front',

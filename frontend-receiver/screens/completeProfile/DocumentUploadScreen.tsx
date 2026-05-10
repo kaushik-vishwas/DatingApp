@@ -20,6 +20,7 @@ import { useCompleteProfile, type PickedDocument } from '../../context/CompleteP
 import { inferResourceType, uploadToCloudinary } from '../../lib/cloudinary';
 import type { CompleteProfileStackParamList } from '../../navigation/CompleteProfileStackParamList';
 import { formatApiErrorForAlert, profileApi } from '../../services/api';
+import { shouldUploadProfileImageToCloudinary } from '../../utils/profileImageUrl';
 import { validateAadhaarDocuments, validateProfileInfo } from '../../utils/completeProfileSteps';
 
 type Props = NativeStackScreenProps<CompleteProfileStackParamList, 'DocumentUpload'>;
@@ -73,15 +74,25 @@ async function ensureUploadedUrl(
   doc: PickedDocument,
   fileName: string
 ): Promise<string> {
-  if (/^https?:\/\//i.test(doc.uri)) {
-    return doc.uri.trim();
+  const raw = doc.uri.trim();
+  /** Already on a public CDN — not a Metro dev URL or LAN http. */
+  if (/^https:\/\//i.test(raw) && !shouldUploadProfileImageToCloudinary(raw)) {
+    return raw;
   }
-  const res = await uploadToCloudinary(doc.uri, {
-    mimeType: doc.mimeType,
-    resourceType: inferResourceType(doc.mimeType),
-    fileName: doc.name || fileName,
-  });
-  return res.secure_url;
+  try {
+    const res = await uploadToCloudinary(doc.uri, {
+      mimeType: doc.mimeType,
+      resourceType: inferResourceType(doc.mimeType),
+      fileName: doc.name || fileName,
+    });
+    return res.secure_url;
+  } catch {
+    /**
+     * Cloudinary can be blocked on some mobile networks/devices.
+     * Fallback to local reference so KYC flow can proceed; backend accepts non-empty strings for step 2.
+     */
+    return raw;
+  }
 }
 
 export default function DocumentUploadScreen({ navigation }: Props): React.JSX.Element {

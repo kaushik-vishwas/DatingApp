@@ -234,6 +234,11 @@ export function formatApiErrorForAlert(error: unknown): string {
       }
     } else {
       lines.push('No HTTP response (timeout, TLS, DNS, or network blocked).');
+      if (ax.code === 'ERR_NETWORK' || /network request failed/i.test(String(ax.message))) {
+        lines.push(
+          'Hint: request failed before HTTP — check API URL in this build, deploy backend for PATCH /profile/receiver/kyc/*, try Wi‑Fi.'
+        );
+      }
     }
     const st = ax.stack ?? (error instanceof Error ? error.stack : undefined);
     if (st) {
@@ -241,6 +246,11 @@ export function formatApiErrorForAlert(error: unknown): string {
     }
   } else if (error instanceof Error) {
     lines.push(`${error.name}: ${error.message}`);
+    if (/network request failed/i.test(error.message)) {
+      lines.push(
+        'Hint: often Cloudinary (fetch) or device network — try preset avatar to skip upload, or another network.'
+      );
+    }
     if (error.stack) {
       lines.push(error.stack.slice(0, 600));
     }

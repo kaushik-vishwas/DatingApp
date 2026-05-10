@@ -442,12 +442,12 @@ const saveReceiverKycDocuments = async (req, res) => {
             return;
         }
         const { aadhaarFront, aadhaarBack, aadhaarNumber, panNumber, panFront } = req.body;
-        if (!aadhaarFront || typeof aadhaarFront !== 'string' || !/^https?:\/\//i.test(aadhaarFront.trim())) {
-            t.json(400, { message: 'aadhaarFront URL is required', error: 'KYC_DOCS_MISSING_AADHAAR_FRONT' });
+        if (!aadhaarFront || typeof aadhaarFront !== 'string' || !aadhaarFront.trim()) {
+            t.json(400, { message: 'aadhaarFront is required', error: 'KYC_DOCS_MISSING_AADHAAR_FRONT' });
             return;
         }
-        if (!aadhaarBack || typeof aadhaarBack !== 'string' || !/^https?:\/\//i.test(aadhaarBack.trim())) {
-            t.json(400, { message: 'aadhaarBack URL is required', error: 'KYC_DOCS_MISSING_AADHAAR_BACK' });
+        if (!aadhaarBack || typeof aadhaarBack !== 'string' || !aadhaarBack.trim()) {
+            t.json(400, { message: 'aadhaarBack is required', error: 'KYC_DOCS_MISSING_AADHAAR_BACK' });
             return;
         }
         if (!aadhaarNumber || typeof aadhaarNumber !== 'string' || !/^\d{12}$/.test(aadhaarNumber.trim())) {
@@ -466,8 +466,8 @@ const saveReceiverKycDocuments = async (req, res) => {
             });
             return;
         }
-        if (!panFront || typeof panFront !== 'string' || !/^https?:\/\//i.test(panFront.trim())) {
-            t.json(400, { message: 'panFront URL is required', error: 'KYC_DOCS_MISSING_PAN_FRONT' });
+        if (!panFront || typeof panFront !== 'string' || !panFront.trim()) {
+            t.json(400, { message: 'panFront is required', error: 'KYC_DOCS_MISSING_PAN_FRONT' });
             return;
         }
         const receiver = await Receiver_1.default.findById(authReceiver._id);

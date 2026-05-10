@@ -1,3 +1,4 @@
+import axios, { isAxiosError } from 'axios';
 import Constants from 'expo-constants';
 
 export type CloudinaryResourceType = 'image' | 'raw' | 'video' | 'auto';
@@ -89,29 +90,36 @@ export async function uploadToCloudinary(
         { uri: fileUri, type: mime, name } as unknown as Parameters<FormData['append']>[1]
       );
 
-      const res = await fetch(endpoint, {
-        method: 'POST',
-        body: form,
-      });
-
-      const json = (await res.json()) as {
+      /**
+       * Use axios (XMLHttpRequest on RN) instead of fetch — many Android release builds fail
+       * multipart uploads to api.cloudinary.com with fetch("Network request failed") while XHR works.
+       * Do not set Content-Type manually (axios sets multipart boundary).
+       */
+      const res = await axios.post<{
         secure_url?: string;
         public_id?: string;
         error?: { message?: string };
-      };
+      }>(endpoint, form, {
+        timeout: 120_000,
+        headers: { Accept: 'application/json' },
+      });
 
-      if (!res.ok) {
-        const msg = json?.error?.message || res.statusText || 'Upload failed';
+      const json = res.data;
+      if (!json?.secure_url) {
+        const msg = json?.error?.message || 'Cloudinary response missing secure_url';
         throw new Error(msg);
-      }
-
-      if (!json.secure_url) {
-        throw new Error('Cloudinary response missing secure_url');
       }
 
       return { secure_url: json.secure_url, public_id: json.public_id };
     } catch (e) {
       lastError = e;
+      if (isAxiosError(e) && e.response?.data && typeof e.response.data === 'object') {
+        const body = e.response.data as { error?: { message?: string } };
+        const apiMsg = body.error?.message;
+        if (apiMsg) {
+          lastError = new Error(apiMsg);
+        }
+      }
       if (attempt < 3) {
         await wait(500 * attempt);
         continue;
