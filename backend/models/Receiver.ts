@@ -11,6 +11,8 @@ export type ReceiverBadgeLevel = 'platinum' | 'diamond' | 'supreme';
 /** Call receivers — KYC, bank, commission-related profile (collection: `receivers`) */
 export interface IReceiver {
   name: string;
+  /** Optional legacy field; phone is the primary auth identifier. */
+  email: string | null;
   phone: string;
   isVerified: boolean;
   otp: string | null;
@@ -78,6 +80,7 @@ export type ReceiverDocument = HydratedDocument<IReceiver>;
 const receiverSchema = new Schema<IReceiver>(
   {
     name: { type: String, required: true, trim: true },
+    email: { type: String, required: false, lowercase: true, trim: true, default: null },
     phone: { type: String, required: true, trim: true, unique: true },
     isVerified: { type: Boolean, default: false },
     otp: { type: String, default: null },

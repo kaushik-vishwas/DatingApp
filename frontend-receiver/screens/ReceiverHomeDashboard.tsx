@@ -280,7 +280,7 @@ export default function ReceiverHomeDashboard(): React.JSX.Element {
         {user ? (
           <>
             <View style={styles.section}>
-              <Text style={styles.sectionTitle}>Public Previkkew</Text>
+              <Text style={styles.sectionTitle}>Public Preview</Text>
               <View style={styles.publicCard}>
                 <View style={styles.publicCardRow}>
                   <View style={styles.publicLeftColumn}>

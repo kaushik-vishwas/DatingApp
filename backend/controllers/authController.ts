@@ -255,10 +255,13 @@ export const register = async (
     const userRole: LegacyRegisterRole = role && allowed.includes(role) ? role : 'receiver';
     const resolvedName =
       typeof name === 'string' && name.trim() ? String(name).trim() : `Member ${phoneDigits.slice(-4)}`;
+    // Keep email optional for old flows/indices; generate unique placeholder when absent.
+    const resolvedEmail = `m_${phoneDigits}@mobile.local`;
 
     if (userRole === 'caller') {
       const user = await User.create({
         name: resolvedName,
+        email: resolvedEmail,
         phone: phoneDigits,
         isVerified: false,
         passwordHash: null,
@@ -275,6 +278,7 @@ export const register = async (
 
     const receiver = await Receiver.create({
       name: resolvedName,
+      email: resolvedEmail,
       phone: phoneDigits,
       isVerified: false,
       passwordHash: null,
