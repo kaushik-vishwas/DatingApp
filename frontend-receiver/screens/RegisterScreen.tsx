@@ -14,6 +14,9 @@ import {
 } from 'react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import Icon from 'react-native-vector-icons/Feather';
+
+import { LinearGradient } from 'expo-linear-gradient';
 
 import { authApi, getErrorMessage } from '../services/api';
 import {
@@ -109,7 +112,7 @@ export default function RegisterScreen({ navigation, route }: Props) {
   return (
     <View style={styles.bg}>
       <KeyboardAvoidingView
-        style={styles.card}
+        style={styles.keyboardView}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         enabled={Platform.OS === 'ios'}
       >
@@ -119,76 +122,90 @@ export default function RegisterScreen({ navigation, route }: Props) {
           }}
           contentContainerStyle={[
             styles.content,
-            { paddingTop: Math.max(insets.top, 14) + 12, paddingBottom: Math.max(insets.bottom, 14) + 24 },
+            { 
+              paddingTop: Math.max(insets.top, 14) + 12, 
+              paddingBottom: Math.max(insets.bottom, 14) + 24,
+            },
           ]}
           keyboardShouldPersistTaps="handled"
           keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
           onScrollBeginDrag={Keyboard.dismiss}
+          showsVerticalScrollIndicator={false}
         >
-          <TouchableOpacity onPress={() => navigation.goBack()}>
-            <Text style={styles.back}>{'← Back'}</Text>
+          <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
+            <Icon name="chevron-left" size={24} color={PURPLE} />
           </TouchableOpacity>
 
-          <Text style={styles.title}>Sign up as a Receiver</Text>
-          <Text style={styles.subtitle}>Fill in details to start receiving calls</Text>
+          <View style={styles.centeredContent}>
+            <Text style={styles.title}>Sign up as a Receiver</Text>
+            <Text style={styles.subtitle}>Fill in details to start receiving calls</Text>
 
-          <Text style={styles.label}>Full Name</Text>
-          <TextInput
-            style={styles.input}
-            placeholder="Full Name"
-            placeholderTextColor="#999"
-            value={fullName}
-            onChangeText={setFullName}
-            onFocus={scrollToFocusedInput}
-          />
+            <Text style={styles.label}>Full Name *</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="Full Name"
+              placeholderTextColor="#999"
+              value={fullName}
+              onChangeText={setFullName}
+              onFocus={scrollToFocusedInput}
+            />
 
-          <DobPickerField
-            label="Date of Birth *"
-            value={dob}
-            onChange={setDob}
-            fallbackDate={maxDobDateForMinAge(25)}
-          />
+            <DobPickerField
+              label="Date of Birth *"
+              value={dob}
+              onChange={setDob}
+              fallbackDate={maxDobDateForMinAge(25)}
+            />
 
-          <Text style={styles.label}>Phone Number</Text>
-          <TextInput
-            style={styles.input}
-            placeholder="10-digit mobile"
-            placeholderTextColor="#999"
-            keyboardType="phone-pad"
-            value={phone}
-            onChangeText={setPhone}
-            onFocus={scrollToFocusedInput}
-          />
+            <Text style={styles.label}>Phone Number *</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="10-digit mobile"
+              placeholderTextColor="#999"
+              keyboardType="phone-pad"
+              value={phone}
+              onChangeText={setPhone}
+              onFocus={scrollToFocusedInput}
+            />
 
-          {/* Single Checkbox for both policies */}
-          <TouchableOpacity style={styles.termsRow} onPress={() => setAgreedToPolicies((v) => !v)}>
-            <View style={[styles.checkbox, agreedToPolicies && styles.checkboxChecked]}>
-              {agreedToPolicies ? <Text style={styles.checkboxMark}>✓</Text> : null}
-            </View>
-            <Text style={styles.termsText}>
-              I agree to the{' '}
-              <Text style={styles.linkText} onPress={() => setShowTermsModal(true)}>
-                Terms & Conditions
+            {/* Single Checkbox for both policies */}
+            <TouchableOpacity style={styles.termsRow} onPress={() => setAgreedToPolicies((v) => !v)}>
+              <View style={[styles.checkbox, agreedToPolicies && styles.checkboxChecked]}>
+                {agreedToPolicies ? <Text style={styles.checkboxMark}>✓</Text> : null}
+              </View>
+              <Text style={styles.termsText}>
+                I agree to the{' '}
+                <Text style={styles.linkText} onPress={() => setShowTermsModal(true)}>
+                  Terms & Conditions
+                </Text>
+                {' and '}
+                <Text style={styles.linkText} onPress={() => setShowPrivacyModal(true)}>
+                  Privacy Policy
+                </Text>
               </Text>
-              {' and '}
-              <Text style={styles.linkText} onPress={() => setShowPrivacyModal(true)}>
-                Privacy Policy
-              </Text>
-            </Text>
-          </TouchableOpacity>
+            </TouchableOpacity>
 
-          <TouchableOpacity
-            style={[styles.button, loading && styles.buttonDisabled]}
-            onPress={() => void handleRegister()}
-            disabled={loading}
-          >
-            <Text style={styles.buttonText}>{loading ? 'Creating…' : 'Create account'}</Text>
-          </TouchableOpacity>
+            <TouchableOpacity
+  style={loading && styles.buttonDisabled}
+  onPress={() => void handleRegister()}
+  disabled={loading}
+>
+  <LinearGradient
+    colors={['#7F00FF', '#A855F7', '#E100FF']}
+    start={{ x: 0, y: 0 }}
+    end={{ x: 1, y: 0 }}
+    style={styles.button}
+  >
+    <Text style={styles.buttonText}>
+      {loading ? 'Creating…' : 'Create account'}
+    </Text>
+  </LinearGradient>
+</TouchableOpacity>
 
-          <TouchableOpacity style={styles.link} onPress={() => navigation.navigate('ReceiverLogin', undefined)}>
-            <Text style={styles.linkText}>Already have an account? Log in</Text>
-          </TouchableOpacity>
-
+            <TouchableOpacity style={styles.link} onPress={() => navigation.navigate('ReceiverLogin', undefined)}>
+              <Text style={styles.linkText}>Already have an account? Log in</Text>
+            </TouchableOpacity>
+          </View>
         </ScrollView>
       </KeyboardAvoidingView>
 
@@ -347,21 +364,21 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#fff',
   },
-  card: {
-    width: '100%',
-    backgroundColor: '#fff',
-    borderRadius: 0,
+  keyboardView: {
     flex: 1,
   },
   content: {
-    padding: 22,
-    paddingTop: 12,
-    paddingBottom: 180,
+    flexGrow: 1,
+    paddingHorizontal: 22,
   },
-  back: {
-    color: PURPLE,
-    fontWeight: '700',
+  backButton: {
     marginBottom: 12,
+    alignSelf: 'flex-start',
+    zIndex: 1,
+  },
+  centeredContent: {
+    flex: 1,
+    justifyContent: 'center',
   },
   title: {
     fontSize: 18,
@@ -421,9 +438,8 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   button: {
-    backgroundColor: PURPLE,
     paddingVertical: 14,
-    borderRadius: 10,
+    borderRadius: 12,
     alignItems: 'center',
     marginTop: 14,
   },

@@ -280,7 +280,7 @@ export default function ReceiverHomeDashboard(): React.JSX.Element {
         {user ? (
           <>
             <View style={styles.section}>
-              <Text style={styles.sectionTitle}>Public Preview</Text>
+              {/* <Text style={styles.sectionTitle}>Public Preview</Text> */}
               <View style={styles.publicCard}>
                 <View style={styles.publicCardRow}>
                   <View style={styles.publicLeftColumn}>
@@ -425,7 +425,7 @@ export default function ReceiverHomeDashboard(): React.JSX.Element {
 
               <View style={styles.smallEarningsRow}>
                 <View style={styles.smallEarningsCard}>
-                  <Text style={styles.smallEarningsLabel}>Calls today</Text>
+                  <Text style={styles.smallEarningsLabel}>Earned today</Text>
                   <Text style={styles.smallEarningsText}>
                     {walletSummary
                       ? formatInr(
@@ -437,7 +437,7 @@ export default function ReceiverHomeDashboard(): React.JSX.Element {
                   </Text>
                 </View>
                 <View style={styles.smallEarningsCard}>
-                  <Text style={styles.smallEarningsLabel}>Calls (7 days)</Text>
+                  <Text style={styles.smallEarningsLabel}>Earned in 7 days</Text>
                   <Text style={[styles.smallEarningsText, { color: '#2563eb' }]}>
                     {walletSummary
                       ? formatInr(

@@ -534,6 +534,11 @@ const verifyOtp = async (req, res) => {
                 doc.isVerified = true;
                 doc.otp = null;
                 doc.otpExpiry = null;
+                if (accountType === 'receiver' && doc.accountStatus === 'pending_profile') {
+                    // Check if profile is complete (has name, profileImage, etc.)
+                    const hasName = doc.name && doc.name.trim();
+                    const hasProfileImage = doc.profileImage && doc.profileImage.trim();
+                }
                 await doc.save();
                 await respondVerified(doc);
                 return;

@@ -18,6 +18,8 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { LinearGradient } from 'expo-linear-gradient';
+import Icon from 'react-native-vector-icons/Feather';
 import {
   CALLER_FEMALE_AVATAR_PRESETS,
   toAvatarImageSource,
@@ -121,9 +123,23 @@ export default function ReceiverEditProfileScreen(): React.JSX.Element {
   const [avatarModal, setAvatarModal] = useState(false);
   const isWithdrawKycMode = fromWithdrawKyc;
 
+  // Check if all required fields are filled (non-KYC mode only)
+  const isProfileComplete = () => {
+    if (isWithdrawKycMode) return true;
+    
+    const hasName = name && name.trim().length > 0;
+    const hasState = stateValue && stateValue.trim().length > 0;
+    const hasLanguages = languages.length > 0;
+    const hasInterests = interests.length > 0;
+    const hasAvatar = profileImageUri && profileImageUri.trim().length > 0;
+    
+    return hasName && hasState && hasLanguages && hasInterests && hasAvatar;
+  };
+
   const onSave = async () => {
     const aadhaarDigits = aadhaarNumber.replace(/\D/g, '');
     const pan = panNumber.trim().toUpperCase();
+    
     if (isWithdrawKycMode) {
       if (!/^\d{12}$/.test(aadhaarDigits)) {
         Alert.alert('Validation', 'Please enter a valid 12-digit Aadhaar number.');
@@ -138,8 +154,21 @@ export default function ReceiverEditProfileScreen(): React.JSX.Element {
         return;
       }
     } else {
+      // Validate all fields are filled
       if (!name.trim()) {
-        Alert.alert('Validation', 'Name is required.');
+        Alert.alert('Validation', 'Please enter your display name.');
+        return;
+      }
+      if (!stateValue.trim()) {
+        Alert.alert('Validation', 'Please enter your state.');
+        return;
+      }
+      if (languages.length === 0) {
+        Alert.alert('Validation', 'Please select at least one language.');
+        return;
+      }
+      if (interests.length === 0) {
+        Alert.alert('Validation', 'Please select at least one interest.');
         return;
       }
       if (!profileImageUri) {
@@ -153,6 +182,7 @@ export default function ReceiverEditProfileScreen(): React.JSX.Element {
         return;
       }
     }
+    
     setSaving(true);
     try {
       const aadhaarFrontUrl =
@@ -188,154 +218,211 @@ export default function ReceiverEditProfileScreen(): React.JSX.Element {
         style={styles.screen}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       >
-      <ScrollView
-        style={styles.screen}
-        contentContainerStyle={styles.content}
-        keyboardShouldPersistTaps="handled"
-      >
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
-          <Text style={styles.backText}>←</Text>
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>{isWithdrawKycMode ? 'Verify your identity' : 'Complete Your Profile'}</Text>
-        <View style={styles.backBtn} />
-      </View>
-
-      <Text style={styles.subtitle}>
-        {isWithdrawKycMode
-          ? 'Upload your identity documents for withdrawal KYC.'
-          : 'This information will be visible to users who want to call.'}
-      </Text>
-
-      {isWithdrawKycMode ? (
-        <>
-          <Field
-            label="Aadhaar Number"
-            value={aadhaarNumber}
-            onChangeText={(v) => setAadhaarNumber(v.replace(/\D/g, '').slice(0, 12))}
-            keyboardType="numeric"
-          />
-          <Field
-            label="PAN Number"
-            value={panNumber}
-            onChangeText={(v) => setPanNumber(v.toUpperCase())}
-          />
-          <UploadField
-            label="Aadhaar — front *"
-            uri={aadhaarFront?.uri ?? null}
-            mimeType={aadhaarFront?.mimeType}
-            displayName={aadhaarFront?.name}
-            imageShape="rectangle"
-            onPick={() => void pickKycDocument(setAadhaarFront)}
-            onClear={() => setAadhaarFront(null)}
-            hint="PNG, JPG or PDF"
-          />
-          <UploadField
-            label="Aadhaar — back *"
-            uri={aadhaarBack?.uri ?? null}
-            mimeType={aadhaarBack?.mimeType}
-            displayName={aadhaarBack?.name}
-            imageShape="rectangle"
-            onPick={() => void pickKycDocument(setAadhaarBack)}
-            onClear={() => setAadhaarBack(null)}
-            hint="PNG, JPG or PDF"
-          />
-          <UploadField
-            label="PAN — front *"
-            uri={panFront?.uri ?? null}
-            mimeType={panFront?.mimeType}
-            displayName={panFront?.name}
-            imageShape="rectangle"
-            onPick={() => void pickKycDocument(setPanFront)}
-            onClear={() => setPanFront(null)}
-            hint="PNG, JPG or PDF"
-          />
-        </>
-      ) : (
-        <>
-          <Text style={styles.fieldLabel}>Profile Avatar</Text>
-          <View style={styles.photoWrap}>
-            <TouchableOpacity style={styles.photoCircle} onPress={() => setAvatarModal(true)}>
-              {profileImageUri ? (
-              <Image
-              source={resolveProfileImageSource(profileImageUri) ?? { uri: profileImageUri }}
-              style={styles.photoImage}
-            />
-              ) : (
-                <Text style={styles.photoPlaceholder}>📷</Text>
-              )}
+        <ScrollView
+          style={styles.screen}
+          contentContainerStyle={styles.content}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
+          {/* Header */}
+          <View style={styles.header}>
+            <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
+              <Icon name="chevron-left" size={26} color="#1a1a1a" />
             </TouchableOpacity>
-            <TouchableOpacity onPress={() => setAvatarModal(true)}>
-              <Text style={styles.photoAction}>Choose one of 30 girl avatars</Text>
-            </TouchableOpacity>
-          </View>
-
-          <Field label="Display Name" value={name} onChangeText={setName} />
-          <Field label="State" value={stateValue} onChangeText={setStateValue} />
-
-          <Text style={[styles.fieldLabel, { marginTop: 10 }]}>Languages You Speak (select up to 2)</Text>
-          <ChipGroup
-            options={['English', 'Hindi', 'Tamil', 'Telugu', 'Malayalam', 'Kannada', 'Bengali', 'Marathi']}
-            selected={languages}
-            max={2}
-            onChange={setLanguages}
-          />
-
-          <Text style={[styles.fieldLabel, { marginTop: 10 }]}>Your interests (select up to 3)</Text>
-          <ChipGroup
-            options={['Technology', 'Movies', 'Music', 'Travel', 'Cooking', 'Sports', 'Books', 'Gaming', 'Art', 'Fashion']}
-            selected={interests}
-            max={3}
-            onChange={setInterests}
-          />
-        </>
-      )}
-
-      <TouchableOpacity style={[styles.saveBtn, saving && styles.saveBtnDisabled]} disabled={saving} onPress={onSave}>
-        <Text style={styles.saveText}>{saving ? 'Saving...' : 'Continue'}</Text>
-      </TouchableOpacity>
-
-      {showSuccess ? (
-        <View style={styles.successOverlay}>
-          <View style={styles.successCard}>
-            <Text style={styles.successTitle}>Congratulations</Text>
-            <Text style={styles.successSub}>
-              {fromWithdrawKyc ? 'Your identity details are saved.' : 'Your Profile is Updated!'}
+            <Text style={styles.headerTitle}>
+              {isWithdrawKycMode ? 'Verify Identity' : 'Complete Profile'}
             </Text>
-            <TouchableOpacity
-              style={styles.successBtn}
-              onPress={() => {
-                if (fromWithdrawKyc) {
-                  navigation.replace('ReceiverBankDetails');
-                } else {
-                  if (user?.accountStatus === 'pending_profile') {
-                    navigation.replace('ReceiverAutoVerification');
-                  } else if (navigation.canGoBack()) {
-                    navigation.goBack();
-                  } else {
-                    navigation.replace('ReceiverHome');
-                  }
-                }
-              }}
-            >
-              <Text style={styles.successBtnText}>{fromWithdrawKyc ? 'Continue' : 'Next'}</Text>
-            </TouchableOpacity>
-            {fromWithdrawKyc ? (
-              <TouchableOpacity onPress={() => navigation.navigate('ReceiverProfilePreview')}>
-                <Text style={styles.previewLink}>View Preview</Text>
-              </TouchableOpacity>
-            ) : null}
+            <View style={styles.backBtn} />
           </View>
-        </View>
-      ) : null}
-      </ScrollView>
+
+          {/* Subtitle */}
+          <Text style={styles.subtitle}>
+            {isWithdrawKycMode
+              ? 'Upload your identity documents for withdrawal verification'
+              : 'All fields are required to complete your profile'}
+          </Text>
+
+          {isWithdrawKycMode ? (
+            /* KYC Mode Fields */
+            <View style={styles.formSection}>
+              <Field
+                label="Aadhaar Number"
+                value={aadhaarNumber}
+                onChangeText={(v) => setAadhaarNumber(v.replace(/\D/g, '').slice(0, 12))}
+                keyboardType="numeric"
+                placeholder="Enter 12-digit Aadhaar number"
+                required
+              />
+              <Field
+                label="PAN Number"
+                value={panNumber}
+                onChangeText={(v) => setPanNumber(v.toUpperCase())}
+                placeholder="Enter PAN number (e.g., ABCDE1234F)"
+                required
+              />
+              <UploadField
+                label="Aadhaar (Front)"
+                uri={aadhaarFront?.uri ?? null}
+                mimeType={aadhaarFront?.mimeType}
+                displayName={aadhaarFront?.name}
+                imageShape="rectangle"
+                onPick={() => void pickKycDocument(setAadhaarFront)}
+                onClear={() => setAadhaarFront(null)}
+                hint="PNG, JPG or PDF"
+              />
+              <UploadField
+                label="Aadhaar (Back)"
+                uri={aadhaarBack?.uri ?? null}
+                mimeType={aadhaarBack?.mimeType}
+                displayName={aadhaarBack?.name}
+                imageShape="rectangle"
+                onPick={() => void pickKycDocument(setAadhaarBack)}
+                onClear={() => setAadhaarBack(null)}
+                hint="PNG, JPG or PDF"
+              />
+              <UploadField
+                label="PAN Card (Front)"
+                uri={panFront?.uri ?? null}
+                mimeType={panFront?.mimeType}
+                displayName={panFront?.name}
+                imageShape="rectangle"
+                onPick={() => void pickKycDocument(setPanFront)}
+                onClear={() => setPanFront(null)}
+                hint="PNG, JPG or PDF"
+              />
+            </View>
+          ) : (
+            /* Profile Mode Fields */
+            <View style={styles.formSection}>
+              {/* Avatar Selection */}
+              <Text style={styles.fieldLabel}>Profile Avatar <Text style={styles.requiredStar}>*</Text></Text>
+              <View style={styles.photoWrap}>
+                <TouchableOpacity style={styles.photoCircle} onPress={() => setAvatarModal(true)} activeOpacity={0.8}>
+                  {profileImageUri ? (
+                    <Image
+                      source={resolveProfileImageSource(profileImageUri) ?? { uri: profileImageUri }}
+                      style={styles.photoImage}
+                    />
+                  ) : (
+                    <Icon name="camera" size={32} color="#A855F7" />
+                  )}
+                </TouchableOpacity>
+                <TouchableOpacity onPress={() => setAvatarModal(true)} activeOpacity={0.7}>
+                  <Text style={styles.photoAction}>Choose Avatar</Text>
+                </TouchableOpacity>
+              </View>
+
+              <Field 
+                label="Display Name" 
+                value={name} 
+                onChangeText={setName} 
+                placeholder="Enter your display name"
+                required
+              />
+              
+              <Field 
+                label="State" 
+                value={stateValue} 
+                onChangeText={setStateValue} 
+                placeholder="Enter your state"
+                required
+              />
+
+              {/* Languages */}
+              <Text style={styles.fieldLabel}>Languages <Text style={styles.requiredStar}>*</Text> (max 4)</Text>
+              <ChipGroup
+                options={['English', 'Hindi', 'Tamil', 'Telugu', 'Malayalam', 'Kannada', 'Bengali', 'Marathi']}
+                selected={languages}
+                max={4}
+                onChange={setLanguages}
+              />
+
+              {/* Interests */}
+              <Text style={styles.fieldLabel}>Interests <Text style={styles.requiredStar}>*</Text> (max 3)</Text>
+              <ChipGroup
+                options={['Technology', 'Movies', 'Music', 'Travel', 'Cooking', 'Sports', 'Books', 'Gaming', 'Art', 'Fashion']}
+                selected={interests}
+                max={3}
+                onChange={setInterests}
+              />
+            </View>
+          )}
+
+          {/* Save/Continue Button */}
+          <TouchableOpacity
+            style={[
+              styles.saveBtnWrapper, 
+              (saving || (!isWithdrawKycMode && !isProfileComplete())) && styles.saveBtnDisabled
+            ]}
+            disabled={saving || (!isWithdrawKycMode && !isProfileComplete())}
+            onPress={onSave}
+            activeOpacity={0.8}
+          >
+            <LinearGradient
+              colors={['#7F00FF', '#A855F7', '#E100FF']}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 0 }}
+              style={styles.saveBtn}
+            >
+              <Text style={styles.saveText}>
+                {saving ? 'Saving...' : (isWithdrawKycMode ? 'Verify & Continue' : 'Continue')}
+              </Text>
+            </LinearGradient>
+          </TouchableOpacity>
+
+          {/* Success Modal */}
+          {showSuccess ? (
+            <View style={styles.successOverlay}>
+              <View style={styles.successCard}>
+                <View style={styles.successIconContainer}>
+                  <Text style={styles.successIcon}>✓</Text>
+                </View>
+                <Text style={styles.successTitle}>Success!</Text>
+                <Text style={styles.successSub}>
+                  {isWithdrawKycMode ? 'Identity verified successfully' : 'Profile updated successfully'}
+                </Text>
+                <TouchableOpacity
+                  style={styles.successBtn}
+                  onPress={() => {
+                    if (fromWithdrawKyc) {
+                      navigation.replace('ReceiverBankDetails');
+                    } else {
+                      if (navigation.canGoBack()) {
+                        navigation.goBack();
+                      } else {
+                        navigation.replace('ReceiverHome');
+                      }
+                    }
+                  }}
+                  activeOpacity={0.8}
+                >
+                  <LinearGradient
+                    colors={['#7F00FF', '#A855F7', '#E100FF']}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 0 }}
+                    style={styles.successBtnGradient}
+                  >
+                    <Text style={styles.successBtnText}>{fromWithdrawKyc ? 'Continue to Bank' : 'Done'}</Text>
+                  </LinearGradient>
+                </TouchableOpacity>
+              </View>
+            </View>
+          ) : null}
+        </ScrollView>
       </KeyboardAvoidingView>
+
+      {/* Avatar Modal */}
       <Modal visible={avatarModal} transparent animationType="fade">
         <View style={styles.modalOverlay}>
           <Pressable style={styles.modalDismiss} onPress={() => setAvatarModal(false)} />
           <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>Select Avatar</Text>
-            <ScrollView style={styles.modalList} keyboardShouldPersistTaps="handled">
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Choose Avatar</Text>
+              <TouchableOpacity onPress={() => setAvatarModal(false)} style={styles.closeBtn} activeOpacity={0.7}>
+                <Icon name="x" size={20} color="#666" />
+              </TouchableOpacity>
+            </View>
+            <ScrollView style={styles.modalList} showsVerticalScrollIndicator={false}>
               <View style={styles.avatarGrid}>
                 {CALLER_FEMALE_AVATAR_PRESETS.map((preset) => {
                   const presetUri = toAvatarUri(preset);
@@ -350,7 +437,7 @@ export default function ReceiverEditProfileScreen(): React.JSX.Element {
                       }}
                       activeOpacity={0.85}
                     >
-                     <Image source={toAvatarImageSource(preset)} style={styles.avatarThumb} />
+                      <Image source={toAvatarImageSource(preset)} style={styles.avatarThumb} />
                     </TouchableOpacity>
                   );
                 })}
@@ -368,22 +455,26 @@ function Field({
   value,
   onChangeText,
   keyboardType,
+  placeholder,
+  required,
 }: {
   label: string;
   value: string;
   onChangeText: (v: string) => void;
   keyboardType?: 'default' | 'numeric';
+  placeholder?: string;
+  required?: boolean;
 }) {
   return (
     <View style={styles.fieldWrap}>
-      <Text style={styles.fieldLabel}>{label}</Text>
+      <Text style={styles.fieldLabel}>{label}{required && <Text style={styles.requiredStar}> *</Text>}</Text>
       <TextInput
         style={styles.input}
         value={value}
         onChangeText={onChangeText}
         keyboardType={keyboardType ?? 'default'}
-        placeholder={label}
-        placeholderTextColor="#aaa"
+        placeholder={placeholder || label}
+        placeholderTextColor="#999"
       />
     </View>
   );
@@ -416,6 +507,7 @@ function ChipGroup({
               if (selected.length >= max) return;
               onChange([...selected, opt]);
             }}
+            activeOpacity={0.7}
           >
             <Text style={[styles.chipText, active && styles.chipTextActive]}>{opt}</Text>
           </TouchableOpacity>
@@ -426,139 +518,288 @@ function ChipGroup({
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: '#f7f7f8' },
-  screen: { flex: 1, backgroundColor: '#f7f7f8' },
-  content: { padding: 16, paddingBottom: 36 },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 },
-  backBtn: { width: 28, height: 28, alignItems: 'center', justifyContent: 'center' },
-  backText: { fontSize: 20, color: '#111', fontWeight: '700' },
-  headerTitle: { fontSize: 16, color: '#111', fontWeight: '900' },
-  title: { fontSize: 24, color: '#111', fontWeight: '900', marginBottom: 6 },
-  subtitle: { fontSize: 12, color: '#888', fontWeight: '600', marginBottom: 12 },
-  fieldWrap: { marginBottom: 10 },
-  fieldLabel: { fontSize: 12, color: '#666', fontWeight: '700', marginBottom: 6 },
+  safe: { flex: 1, backgroundColor: '#F8F9FA' },
+  screen: { flex: 1, backgroundColor: '#F8F9FA' },
+  content: { paddingHorizontal: 20, paddingBottom: 40, paddingTop: 8 },
+  
+  header: { 
+    flexDirection: 'row', 
+    alignItems: 'center', 
+    justifyContent: 'space-between', 
+    marginBottom: 20,
+    paddingVertical: 8,
+  },
+  backBtn: { 
+    width: 40, 
+    height: 40, 
+    alignItems: 'center', 
+    justifyContent: 'center',
+    borderRadius: 20,
+    backgroundColor: '#FFF',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  headerTitle: { 
+    fontSize: 18, 
+    color: '#1a1a1a', 
+    fontWeight: '700',
+    letterSpacing: -0.3,
+  },
+  subtitle: { 
+    fontSize: 13, 
+    color: '#888', 
+    marginBottom: 24,
+    lineHeight: 18,
+    letterSpacing: -0.2,
+  },
+  
+  formSection: {
+    marginBottom: 8,
+  },
+  
+  fieldWrap: { 
+    marginBottom: 16,
+  },
+  fieldLabel: { 
+    fontSize: 13, 
+    color: '#444', 
+    fontWeight: '600', 
+    marginBottom: 8,
+    letterSpacing: -0.2,
+  },
+  requiredStar: {
+    color: '#E53935',
+    fontSize: 13,
+  },
   input: {
-    backgroundColor: '#fff',
+    backgroundColor: '#FFFFFF',
     borderWidth: 1,
-    borderColor: '#e7e7e7',
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
+    borderColor: '#E8E8E8',
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
     fontSize: 14,
-    color: '#111',
-    fontWeight: '600',
+    color: '#1a1a1a',
+    fontWeight: '500',
+  },
+  
+  saveBtnWrapper: {
+    marginTop: 24,
+    borderRadius: 12,
+    overflow: 'hidden',
+    shadowColor: '#7F00FF',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+    elevation: 4,
   },
   saveBtn: {
-    marginTop: 12,
-    borderRadius: 10,
-    backgroundColor: '#7b2cff',
-    paddingVertical: 13,
+    paddingVertical: 14,
     alignItems: 'center',
   },
-  saveBtnDisabled: { opacity: 0.6 },
-  saveText: { color: '#fff', fontSize: 14, fontWeight: '800' },
-  chipWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  saveBtnDisabled: { 
+    opacity: 0.6,
+  },
+  saveText: { 
+    color: '#FFFFFF', 
+    fontSize: 15, 
+    fontWeight: '700',
+    letterSpacing: 0.3,
+  },
+  
+  chipWrap: { 
+    flexDirection: 'row', 
+    flexWrap: 'wrap', 
+    gap: 10,
+    marginTop: 4,
+    marginBottom: 16,
+  },
   chip: {
     borderWidth: 1,
-    borderColor: '#ddd',
-    borderRadius: 14,
-    backgroundColor: '#fff',
-    paddingHorizontal: 10,
-    paddingVertical: 6,
+    borderColor: '#E0E0E0',
+    borderRadius: 20,
+    backgroundColor: '#FFFFFF',
+    paddingHorizontal: 14,
+    paddingVertical: 8,
   },
-  chipActive: { borderColor: '#7b2cff', backgroundColor: '#f5ecff' },
-  chipText: { fontSize: 11, color: '#666', fontWeight: '700' },
-  chipTextActive: { color: '#7b2cff' },
-  photoWrap: { alignItems: 'center', marginBottom: 10 },
+  chipActive: { 
+    borderColor: '#A855F7', 
+    backgroundColor: '#F3E8FF',
+  },
+  chipText: { 
+    fontSize: 12, 
+    color: '#666', 
+    fontWeight: '600',
+  },
+  chipTextActive: { 
+    color: '#A855F7',
+  },
+  
+  photoWrap: { 
+    alignItems: 'center', 
+    marginBottom: 24,
+  },
   photoCircle: {
-    width: 92,
-    height: 92,
-    borderRadius: 46,
-    backgroundColor: '#fff',
-    borderWidth: 1,
-    borderColor: '#e6e6e6',
+    width: 100,
+    height: 100,
+    borderRadius: 50,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 2,
+    borderColor: '#E8E8E8',
     alignItems: 'center',
     justifyContent: 'center',
     overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 2,
   },
-  photoImage: { width: '100%', height: '100%' },
-  photoPlaceholder: { fontSize: 24, color: '#7b2cff' },
-  photoAction: { marginTop: 6, fontSize: 11, color: '#999', fontWeight: '600' },
+  photoImage: { 
+    width: '100%', 
+    height: '100%' 
+  },
+  photoAction: { 
+    marginTop: 10, 
+    fontSize: 12, 
+    color: '#A855F7', 
+    fontWeight: '600',
+  },
+  
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.45)',
+    backgroundColor: 'rgba(0,0,0,0.5)',
     justifyContent: 'center',
-    padding: 24,
+    padding: 20,
   },
-  modalDismiss: { ...StyleSheet.absoluteFillObject },
+  modalDismiss: { 
+    ...StyleSheet.absoluteFillObject 
+  },
   modalCard: {
-    backgroundColor: '#fff',
-    borderRadius: 14,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 20,
     maxHeight: '70%',
-    paddingVertical: 12,
-    zIndex: 1,
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
+    elevation: 8,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F0F0F0',
   },
   modalTitle: {
-    fontSize: 17,
-    fontWeight: '800',
-    paddingHorizontal: 18,
-    paddingBottom: 10,
-    color: '#111',
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#1a1a1a',
   },
-  modalList: { paddingHorizontal: 8 },
+  closeBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#F5F5F5',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modalList: { 
+    padding: 16,
+  },
   avatarGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     justifyContent: 'space-between',
-    gap: 10,
-    paddingBottom: 8,
+    gap: 12,
   },
   avatarCell: {
-    width: 72,
-    height: 72,
-    borderRadius: 36,
+    width: 74,
+    height: 74,
+    borderRadius: 37,
     overflow: 'hidden',
     borderWidth: 2,
-    borderColor: '#e5e5e5',
+    borderColor: '#F0F0F0',
   },
   avatarCellActive: {
-    borderColor: '#7b2cff',
+    borderColor: '#A855F7',
     borderWidth: 3,
   },
   avatarThumb: {
     width: '100%',
     height: '100%',
   },
+  
   successOverlay: {
     position: 'absolute',
     left: 0,
     right: 0,
     top: 0,
     bottom: 0,
-    backgroundColor: 'rgba(0,0,0,0.3)',
+    backgroundColor: 'rgba(0,0,0,0.5)',
     alignItems: 'center',
     justifyContent: 'center',
     padding: 20,
   },
   successCard: {
     width: '100%',
-    maxWidth: 300,
-    borderRadius: 14,
-    backgroundColor: '#fff',
-    borderWidth: 1,
-    borderColor: '#ececec',
-    padding: 16,
+    maxWidth: 280,
+    borderRadius: 20,
+    backgroundColor: '#FFFFFF',
+    padding: 24,
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
+    elevation: 8,
+  },
+  successIconContainer: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    backgroundColor: '#4CAF50',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 16,
+  },
+  successIcon: {
+    fontSize: 32,
+    color: '#FFFFFF',
+    fontWeight: '700',
+  },
+  successTitle: { 
+    fontSize: 20, 
+    color: '#1a1a1a', 
+    fontWeight: '800',
+    marginBottom: 8,
+  },
+  successSub: { 
+    fontSize: 13, 
+    color: '#666', 
+    textAlign: 'center',
+    marginBottom: 20,
+    lineHeight: 18,
+  },
+  successBtn: {
+    borderRadius: 12,
+    overflow: 'hidden',
+    width: '100%',
+  },
+  successBtnGradient: {
+    paddingVertical: 12,
     alignItems: 'center',
   },
-  successTitle: { fontSize: 18, color: '#111', fontWeight: '900' },
-  successSub: { marginTop: 8, fontSize: 12, color: '#666', fontWeight: '600' },
-  successBtn: {
-    marginTop: 12,
-    backgroundColor: '#7b2cff',
-    borderRadius: 8,
-    paddingVertical: 9,
-    paddingHorizontal: 24,
+  successBtnText: { 
+    color: '#FFFFFF', 
+    fontSize: 14, 
+    fontWeight: '700',
   },
-  successBtnText: { color: '#fff', fontSize: 12, fontWeight: '800' },
-  previewLink: { marginTop: 8, color: '#7b2cff', fontSize: 12, fontWeight: '700' },
 });

@@ -13,6 +13,7 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { LinearGradient } from 'expo-linear-gradient';
 
 import { useAuth } from '../../context/AuthContext';
 import type { RootStackParamList } from '../../navigation/RootStackParamList';
@@ -129,7 +130,11 @@ export function AuthLoginCard({
 
   return (
     <View style={styles.bg}>
-      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} enabled={Platform.OS === 'ios'}>
+      <KeyboardAvoidingView 
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined} 
+        style={styles.keyboardView}
+        enabled={Platform.OS === 'ios'}
+      >
         <ScrollView
           ref={(r) => {
             scrollRef.current = r;
@@ -144,6 +149,7 @@ export function AuthLoginCard({
           keyboardShouldPersistTaps="handled"
           keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
           onScrollBeginDrag={Keyboard.dismiss}
+          showsVerticalScrollIndicator={false}
         >
           <View style={styles.card}>
             {customLogo ? (
@@ -191,15 +197,22 @@ export function AuthLoginCard({
               </>
             ) : null}
 
-            <TouchableOpacity
-              style={[styles.button, loading && styles.buttonDisabled]}
-              onPress={() => void (step === 'mobile' ? onSendOtp() : onVerifyOtpAndLogin())}
-              disabled={loading}
-            >
-              <Text style={styles.buttonText}>
-                {loading ? 'Signing in…' : step === 'mobile' ? 'Send OTP' : 'Log in'}
-              </Text>
-            </TouchableOpacity>
+<TouchableOpacity
+  style={loading && styles.buttonDisabled}
+  onPress={() => void (step === 'mobile' ? onSendOtp() : onVerifyOtpAndLogin())}
+  disabled={loading}
+>
+  <LinearGradient
+    colors={['#7F00FF', '#A855F7', '#E100FF']}
+    start={{ x: 0, y: 0 }}
+    end={{ x: 1, y: 0 }}
+    style={styles.button}
+  >
+    <Text style={styles.buttonText}>
+      {loading ? 'Signing in…' : step === 'mobile' ? 'Send OTP' : 'Log in'}
+    </Text>
+  </LinearGradient>
+</TouchableOpacity>
 
             <TouchableOpacity style={styles.footer} onPress={onPrimaryRegister}>
               <Text style={styles.footerText}>{primaryRegisterLabel}</Text>
@@ -239,11 +252,13 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#fff',
   },
+  keyboardView: {
+    flex: 1,
+  },
   scrollContent: {
     flexGrow: 1,
-    paddingVertical: 24,
-    paddingHorizontal: 20,
-    paddingBottom: 40,
+    justifyContent: 'center',
+    paddingHorizontal: 7,
   },
   card: {
     width: '100%',
@@ -309,9 +324,8 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   button: {
-    backgroundColor: PURPLE,
     paddingVertical: 14,
-    borderRadius: 10,
+    borderRadius: 12,
     alignItems: 'center',
     marginTop: 6,
   },
@@ -367,4 +381,4 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '600',
   },
-});
+}); 

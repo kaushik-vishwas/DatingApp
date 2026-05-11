@@ -14,11 +14,13 @@ import {
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { LinearGradient } from 'expo-linear-gradient';
 import { io, type Socket } from 'socket.io-client';
 import { useAuth } from '../../context/AuthContext';
 import { getErrorMessage, getJwt, getResolvedApiBaseUrl, profileApi } from '../../services/api';
 import type { ReceiverStackParamList } from '../../navigation/ReceiverStackParamList';
 import type { ReceiverWithdrawalOverviewResponse } from '../../types/api';
+import Icon from 'react-native-vector-icons/Ionicons';
 
 type WithdrawNav = NativeStackNavigationProp<ReceiverStackParamList, 'WithdrawEarnings'>;
 type Step = 'amount' | 'otp' | 'processing' | 'success' | 'failed';
@@ -81,10 +83,10 @@ export default function WithdrawEarningsScreen(): React.JSX.Element {
     const pan = String(user.panNumber ?? '').trim().toUpperCase();
     return Boolean(
       user.aadhaarFront?.trim() &&
-        user.aadhaarBack?.trim() &&
-        user.panFront?.trim() &&
-        /^\d{12}$/.test(aadhaarDigits) &&
-        /^[A-Z]{5}[0-9]{4}[A-Z]$/.test(pan),
+      user.aadhaarBack?.trim() &&
+      user.panFront?.trim() &&
+      /^\d{12}$/.test(aadhaarDigits) &&
+      /^[A-Z]{5}[0-9]{4}[A-Z]$/.test(pan),
     );
   }, [user]);
 
@@ -92,25 +94,20 @@ export default function WithdrawEarningsScreen(): React.JSX.Element {
     if (!overview) return false;
     return Boolean(
       overview.bank.bankName?.trim() &&
-        overview.bank.accountHolderName?.trim() &&
-        overview.bank.accountMasked?.trim(),
+      overview.bank.accountHolderName?.trim() &&
+      overview.bank.accountMasked?.trim(),
     );
   }, [overview]);
 
-  const getWithdrawKycAction = useCallback(() => {
+  // Single function that handles both KYC and bank details intelligently
+  const handleCompleteRequiredDetails = useCallback(() => {
     if (!isIdentityComplete) {
-      return {
-        title: 'Complete KYC',
-        subtitle: 'First complete Aadhaar/PAN details and documents.',
-        onPress: () => navigation.navigate('ReceiverEditProfile', { fromWithdrawKyc: true }),
-      };
+      navigation.navigate('ReceiverEditProfile', { fromWithdrawKyc: true });
+    } else if (!isBankDetailsComplete) {
+      navigation.navigate('ReceiverBankDetails');
     }
-    return {
-      title: 'Complete KYC',
-      subtitle: 'Now complete your bank account details.',
-      onPress: () => navigation.navigate('ReceiverBankDetails'),
-    };
-  }, [isIdentityComplete, navigation]);
+    // If both are complete, do nothing or optionally show a success message
+  }, [isIdentityComplete, isBankDetailsComplete, navigation]);
 
   const ensureWithdrawKycReady = useCallback((): boolean => {
     if (!isIdentityComplete) {
@@ -153,7 +150,7 @@ export default function WithdrawEarningsScreen(): React.JSX.Element {
 
   const onVerifyOtp = async () => {
     if (!/^\d{6}$/.test(otp.trim())) {
-      Alert.alert('Invalid OTP', 'Please enter the 6-digit OTP sent to your mobile.');
+      Alert.alert('Invalid OTP', 'Please enter the 6dd-digit OTP sent to your mobile.');
       return;
     }
     setBusy(true);
@@ -247,6 +244,44 @@ export default function WithdrawEarningsScreen(): React.JSX.Element {
     );
   }
 
+  // If KYC or bank details are incomplete, show only the centered action card
+  if (!isIdentityComplete || !isBankDetailsComplete) {
+    return (
+      <SafeAreaView style={styles.safe} edges={['top', 'left', 'right']}>
+        <View style={styles.centeredContainer}>
+          <View style={styles.topRow}>
+            <TouchableOpacity onPress={() => navigation.goBack()}>
+              <Icon name="chevron-back" size={28} color="#111" />
+            </TouchableOpacity>
+            <Text style={styles.title}>Withdraw Earnings</Text>
+            <View style={{ width: 14 }} />
+          </View>
+
+
+          <View style={styles.centeredCard}>
+            {/* <Text style={styles.actionIcon}>⚠️</Text> */}
+            <Text style={styles.centeredTitle}>Action Required</Text>
+            <Text style={styles.centeredSubtitle}>
+              {!isIdentityComplete
+                ? 'Please complete your identity verification with Aadhaar and PAN details first.'
+                : 'Please add your bank account details to proceed with withdrawals.'}
+            </Text>
+            <TouchableOpacity onPress={handleCompleteRequiredDetails} activeOpacity={0.8}>
+              <LinearGradient
+                colors={['#7F00FF', '#A855F7', '#E100FF']}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 0 }}
+                style={styles.actionButton}
+              >
+                <Text style={styles.actionButtonText}>Complete Your KYC</Text>
+              </LinearGradient>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'left', 'right']}>
       <KeyboardAvoidingView
@@ -258,195 +293,223 @@ export default function WithdrawEarningsScreen(): React.JSX.Element {
           contentContainerStyle={styles.content}
           keyboardShouldPersistTaps="handled"
         >
-      <View style={styles.topRow}>
-        <TouchableOpacity onPress={() => navigation.goBack()}>
-          <Text style={styles.back}>←</Text>
-        </TouchableOpacity>
-        <Text style={styles.title}>Withdraw Earnings</Text>
-        <View style={{ width: 14 }} />
-      </View>
-
-      {(!isIdentityComplete || !isBankDetailsComplete) ? (
-        <View style={styles.infoCard}>
-          <Text style={styles.infoTitle}>Action Required</Text>
-          <Text style={styles.infoText}>{getWithdrawKycAction().subtitle}</Text>
-          <TouchableOpacity style={styles.infoBtn} onPress={getWithdrawKycAction().onPress}>
-            <Text style={styles.infoBtnText}>Complete KYC</Text>
-          </TouchableOpacity>
-        </View>
-      ) : error ? (
-        <Text style={styles.error}>{error}</Text>
-      ) : null}
-
-      {overview ? (
-        <>
-          <View style={styles.balanceCard}>
-            <Text style={styles.balanceLabel}>Available Balance</Text>
-            <Text style={styles.balanceAmount}>{formatInr(overview.walletBalance)}</Text>
-            <Text style={styles.balanceSub}>Withdraw your earnings to your bank account</Text>
-          </View>
-
-          <Text style={styles.sectionLabel}>Enter Withdrawal Amount</Text>
-          <View style={styles.inputWrap}>
-            <Text style={styles.currency}>₹</Text>
-            <TextInput
-              style={styles.input}
-              keyboardType="numeric"
-              value={amount}
-              onChangeText={setAmount}
-              placeholder="0"
-              placeholderTextColor="#aaa"
-              editable={!busy && step !== 'success' && step !== 'processing'}
-            />
-          </View>
-          {/* <Text style={styles.deductNote}>+ 18% GST will be deducted</Text> */}
-
-          <Text style={styles.sectionLabel}>Quick Select</Text>
-          <View style={styles.quickRow}>
-            {[500, 1000, 2000, 5000].map((v) => (
-              <TouchableOpacity key={v} style={styles.quickBtn} onPress={() => setAmount(String(v))}>
-                <Text style={styles.quickText}>{formatInr(v)}</Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-
-          <View style={styles.bankCard}>
-            <View style={styles.bankRow}>
-              <Text style={styles.bankTitle}>Withdrawal will be sent to</Text>
-              <View />
-            </View>
-            <Text style={styles.bankName}>{overview.bank.bankName}</Text>
-            <Text style={styles.bankAcc}>{overview.bank.accountMasked}</Text>
-            <Text style={styles.bankHolder}>{overview.bank.accountHolderName}</Text>
-          </View>
-
-          {step === 'amount' ? (
-            <TouchableOpacity
-              style={[styles.primaryBtn, (busy || !amount.trim()) && styles.primaryBtnDisabled]}
-              onPress={onSendOtp}
-              disabled={busy || !amount.trim()}
-            >
-              <Text style={styles.primaryText}>{busy ? 'Sending OTP...' : 'Continue'}</Text>
+          <View style={styles.topRow}>
+            <TouchableOpacity onPress={() => navigation.goBack()}>
+              <Icon name="arrow-back" size={24} color="#111" />
             </TouchableOpacity>
-          ) : null}
-
-          {step === 'otp' ? (
-            <View style={styles.otpCard}>
-              <Text style={styles.otpTitle}>Enter Verification Code</Text>
-              <Text style={styles.otpSub}>We sent a 6-digit OTP to {maskedMobile}</Text>
-              <TextInput
-                style={styles.otpInput}
-                keyboardType="number-pad"
-                maxLength={6}
-                value={otp}
-                onChangeText={setOtp}
-                placeholder="------"
-                placeholderTextColor="#bbb"
-                editable={!busy}
-              />
-              <View style={styles.otpActions}>
-                <TouchableOpacity
-                  onPress={async () => {
-                    setBusy(true);
-                    setError(null);
-                    try {
-                      await profileApi.sendReceiverWithdrawalOtp(parsedAmount);
-                    } catch (e) {
-                      setError(getErrorMessage(e));
-                    } finally {
-                      setBusy(false);
-                    }
-                  }}
-                  disabled={busy}
-                >
-                  <Text style={styles.resendText}>Resend code</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={[styles.primaryBtn, busy && styles.primaryBtnDisabled]} onPress={onVerifyOtp} disabled={busy}>
-                  <Text style={styles.primaryText}>{busy ? 'Verifying...' : 'Verify & Continue'}</Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-          ) : null}
-
-          {step === 'processing' ? (
-            <View style={styles.successCard}>
-              <ActivityIndicator size="large" color="#7b2cff" />
-              <Text style={styles.successTitle}>Please wait...</Text>
-              <Text style={styles.successSub}>Payment is processing.</Text>
-            </View>
-          ) : null}
-
-          {step === 'success' ? (
-            <View style={styles.successCard}>
-              <Text style={styles.successTitle}>Payment Successful!</Text>
-              <Text style={styles.successSub}>Amount credited to your bank account.</Text>
-              <TouchableOpacity
-                style={styles.primaryBtn}
-                onPress={() => {
-                  setStep('amount');
-                  setAmount('');
-                  setOtp('');
-                  setCurrentWithdrawalId(null);
-                }}
-              >
-                <Text style={styles.primaryText}>Go Back</Text>
-              </TouchableOpacity>
-            </View>
-          ) : null}
-
-          {step === 'failed' ? (
-            <View style={styles.successCard}>
-              <Text style={styles.successTitle}>Payment Failed</Text>
-              <Text style={styles.successSub}>No money was deducted. Please try again.</Text>
-              <TouchableOpacity
-                style={styles.primaryBtn}
-                onPress={() => {
-                  setStep('amount');
-                  setAmount('');
-                  setOtp('');
-                  setCurrentWithdrawalId(null);
-                }}
-              >
-                <Text style={styles.primaryText}>Try Again</Text>
-              </TouchableOpacity>
-            </View>
-          ) : null}
-
-          <View style={styles.historyWrap}>
-            <Text style={styles.sectionLabel}>Recent Withdrawals</Text>
-            {overview.recent.length === 0 ? (
-              <Text style={styles.emptyHistory}>No withdrawals yet.</Text>
-            ) : (
-              overview.recent.slice(0, 5).map((row) => (
-                <View key={row.id} style={styles.historyRow}>
-                  <View>
-                    <Text style={styles.historyAmount}>{formatInr(row.amount)}</Text>
-                    <Text style={styles.historyDate}>{formatDate(row.createdAt)}</Text>
-                  </View>
-                  <Text style={styles.historyStatus}>
-                    {row.payoutStatus
-                      ? row.payoutStatus[0].toUpperCase() + row.payoutStatus.slice(1)
-                      : row.status}
-                  </Text>
-                </View>
-              ))
-            )}
+            <Text style={styles.title}>Withdraw Earnings</Text>
+            <View style={{ width: 14 }} />
           </View>
-        </>
-      ) : (
-        <View style={styles.emptyStateCard}>
-          <Text style={styles.emptyStateTitle}>Withdraw Earnings</Text>
-          <Text style={styles.emptyStateSub}>
-            Complete your required details to continue the withdrawal flow.
-          </Text>
-          <TouchableOpacity style={styles.primaryBtn} onPress={getWithdrawKycAction().onPress}>
-            <Text style={styles.primaryText}>Complete Required Details</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.secondaryBtn} onPress={() => void loadOverview()}>
-            <Text style={styles.secondaryBtnText}>Refresh</Text>
-          </TouchableOpacity>
-        </View>
-      )}
+
+          {error && <Text style={styles.error}>{error}</Text>}
+
+          {overview ? (
+            <>
+              <View style={styles.balanceCard}>
+                <Text style={styles.balanceLabel}>Available Balance</Text>
+                <Text style={styles.balanceAmount}>{formatInr(overview.walletBalance)}</Text>
+                <Text style={styles.balanceSub}>Withdraw your earnings to your bank account</Text>
+              </View>
+
+              <Text style={styles.sectionLabel}>Enter Withdrawal Amount</Text>
+              <View style={styles.inputWrap}>
+                <Text style={styles.currency}>₹</Text>
+                <TextInput
+                  style={styles.input}
+                  keyboardType="numeric"
+                  value={amount}
+                  onChangeText={setAmount}
+                  placeholder="0"
+                  placeholderTextColor="#aaa"
+                  editable={!busy && step !== 'success' && step !== 'processing'}
+                />
+              </View>
+
+              <Text style={styles.sectionLabel}>Quick Select</Text>
+              <View style={styles.quickRow}>
+                {[500, 1000, 2000, 5000].map((v) => (
+                  <TouchableOpacity key={v} style={styles.quickBtn} onPress={() => setAmount(String(v))}>
+                    <Text style={styles.quickText}>{formatInr(v)}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+
+              <View style={styles.bankCard}>
+                <View style={styles.bankRow}>
+                  <Text style={styles.bankTitle}>Withdrawal will be sent to</Text>
+                  <View />
+                </View>
+                <Text style={styles.bankName}>{overview.bank.bankName}</Text>
+                <Text style={styles.bankAcc}>{overview.bank.accountMasked}</Text>
+                <Text style={styles.bankHolder}>{overview.bank.accountHolderName}</Text>
+              </View>
+
+              {step === 'amount' ? (
+                <TouchableOpacity
+                  style={[styles.primaryBtn, (busy || !amount.trim()) && styles.primaryBtnDisabled]}
+                  onPress={onSendOtp}
+                  disabled={busy || !amount.trim()}
+                >
+                  <LinearGradient
+                    colors={['#7F00FF', '#A855F7', '#E100FF']}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 0 }}
+                    style={styles.primaryBtnInner}
+                  >
+                    <Text style={styles.primaryText}>{busy ? 'Sending OTP...' : 'Continue'}</Text>
+                  </LinearGradient>
+                </TouchableOpacity>
+              ) : null}
+
+              {step === 'otp' ? (
+                <View style={styles.otpCard}>
+                  <Text style={styles.otpTitle}>Enter Verification Code</Text>
+                  <Text style={styles.otpSub}>We sent a 6-digit OTP to {maskedMobile}</Text>
+                  <TextInput
+                    style={styles.otpInput}
+                    keyboardType="number-pad"
+                    maxLength={6}
+                    value={otp}
+                    onChangeText={setOtp}
+                    placeholder="------"
+                    placeholderTextColor="#bbb"
+                    editable={!busy}
+                  />
+                  <View style={styles.otpActions}>
+                    <TouchableOpacity
+                      onPress={async () => {
+                        setBusy(true);
+                        setError(null);
+                        try {
+                          await profileApi.sendReceiverWithdrawalOtp(parsedAmount);
+                        } catch (e) {
+                          setError(getErrorMessage(e));
+                        } finally {
+                          setBusy(false);
+                        }
+                      }}
+                      disabled={busy}
+                    >
+                      <Text style={styles.resendText}>Resend code</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[styles.primaryBtn, busy && styles.primaryBtnDisabled]}
+                      onPress={onVerifyOtp}
+                      disabled={busy}
+                    >
+                      <LinearGradient
+                        colors={['#7F00FF', '#A855F7', '#E100FF']}
+                        start={{ x: 0, y: 0 }}
+                        end={{ x: 1, y: 0 }}
+                        style={styles.primaryBtnInner}
+                      >
+                        <Text style={styles.primaryText}>{busy ? 'Verifying...' : 'Verify & Continue'}</Text>
+                      </LinearGradient>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              ) : null}
+
+              {step === 'processing' ? (
+                <View style={styles.successCard}>
+                  <ActivityIndicator size="large" color="#7b2cff" />
+                  <Text style={styles.successTitle}>Please wait...</Text>
+                  <Text style={styles.successSub}>Payment is processing.</Text>
+                </View>
+              ) : null}
+
+              {step === 'success' ? (
+                <View style={styles.successCard}>
+                  <Text style={styles.successTitle}>Payment Successful!</Text>
+                  <Text style={styles.successSub}>Amount credited to your bank account.</Text>
+                  <TouchableOpacity
+                    style={styles.primaryBtn}
+                    onPress={() => {
+                      setStep('amount');
+                      setAmount('');
+                      setOtp('');
+                      setCurrentWithdrawalId(null);
+                    }}
+                  >
+                    <LinearGradient
+                      colors={['#7F00FF', '#A855F7', '#E100FF']}
+                      start={{ x: 0, y: 0 }}
+                      end={{ x: 1, y: 0 }}
+                      style={styles.primaryBtnInner}
+                    >
+                      <Text style={styles.primaryText}>Go Back</Text>
+                    </LinearGradient>
+                  </TouchableOpacity>
+                </View>
+              ) : null}
+
+              {step === 'failed' ? (
+                <View style={styles.successCard}>
+                  <Text style={styles.successTitle}>Payment Failed</Text>
+                  <Text style={styles.successSub}>No money was deducted. Please try again.</Text>
+                  <TouchableOpacity
+                    style={styles.primaryBtn}
+                    onPress={() => {
+                      setStep('amount');
+                      setAmount('');
+                      setOtp('');
+                      setCurrentWithdrawalId(null);
+                    }}
+                  >
+                    <LinearGradient
+                      colors={['#7F00FF', '#A855F7', '#E100FF']}
+                      start={{ x: 0, y: 0 }}
+                      end={{ x: 1, y: 0 }}
+                      style={styles.primaryBtnInner}
+                    >
+                      <Text style={styles.primaryText}>Try Again</Text>
+                    </LinearGradient>
+                  </TouchableOpacity>
+                </View>
+              ) : null}
+
+              <View style={styles.historyWrap}>
+                <Text style={styles.sectionLabel}>Recent Withdrawals</Text>
+                {overview.recent.length === 0 ? (
+                  <Text style={styles.emptyHistory}>No withdrawals yet.</Text>
+                ) : (
+                  overview.recent.slice(0, 5).map((row) => (
+                    <View key={row.id} style={styles.historyRow}>
+                      <View>
+                        <Text style={styles.historyAmount}>{formatInr(row.amount)}</Text>
+                        <Text style={styles.historyDate}>{formatDate(row.createdAt)}</Text>
+                      </View>
+                      <Text style={styles.historyStatus}>
+                        {row.payoutStatus
+                          ? row.payoutStatus[0].toUpperCase() + row.payoutStatus.slice(1)
+                          : row.status}
+                      </Text>
+                    </View>
+                  ))
+                )}
+              </View>
+            </>
+          ) : (
+            <View style={styles.emptyStateCard}>
+              <Text style={styles.emptyStateTitle}>Withdraw Earnings</Text>
+              <Text style={styles.emptyStateSub}>
+                Complete your required details to continue the withdrawal flow.
+              </Text>
+              <TouchableOpacity onPress={handleCompleteRequiredDetails} activeOpacity={0.8}>
+                <LinearGradient
+                  colors={['#7F00FF', '#A855F7', '#E100FF']}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 0 }}
+                  style={styles.primaryBtnInner}
+                >
+                  <Text style={styles.primaryText}>Complete Required Details</Text>
+                </LinearGradient>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.secondaryBtn} onPress={() => void loadOverview()}>
+                <Text style={styles.secondaryBtnText}>Refresh</Text>
+              </TouchableOpacity>
+            </View>
+          )}
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -458,10 +521,47 @@ const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: '#f7f7f8' },
   content: { padding: 16, paddingBottom: 36 },
   centered: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  centeredContainer: { flex: 1, backgroundColor: '#f7f7f8', padding: 16 },
   topRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 },
-  back: { fontSize: 20, color: '#111', fontWeight: '700' },
+  back: { fontSize: 24, color: '#111', fontWeight: '700', padding: 4 },
   title: { fontSize: 20, fontWeight: '800', color: '#111' },
   error: { color: '#b91c1c', fontSize: 12, fontWeight: '700', marginBottom: 10 },
+  centeredCard: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 24,
+  },
+  actionIcon: {
+    fontSize: 48,
+    marginBottom: 16,
+  },
+  centeredTitle: {
+    fontSize: 22,
+    fontWeight: '800',
+    color: '#111',
+    marginBottom: 12,
+    textAlign: 'center',
+  },
+  centeredSubtitle: {
+    fontSize: 14,
+    color: '#666',
+    textAlign: 'center',
+    marginBottom: 24,
+    lineHeight: 20,
+  },
+  actionButton: {
+    paddingHorizontal: 24,
+    paddingVertical: 14,
+    borderRadius: 12,
+    minWidth: 200,
+  },
+  actionButtonText: {
+    color: '#fff',
+    fontSize: 15,
+    fontWeight: '800',
+    textAlign: 'center',
+  },
   infoCard: {
     backgroundColor: '#fff',
     borderRadius: 12,
@@ -475,12 +575,11 @@ const styles = StyleSheet.create({
   infoBtn: {
     marginTop: 10,
     alignSelf: 'flex-start',
-    backgroundColor: '#7b2cff',
     borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
   },
-  infoBtnText: { color: '#fff', fontSize: 12, fontWeight: '800' },
+  infoBtnText: { color: '#fff', fontSize: 13, fontWeight: '800', textAlign: 'center' },
   balanceCard: {
     backgroundColor: '#eb83da',
     borderRadius: 14,
@@ -528,8 +627,10 @@ const styles = StyleSheet.create({
   bankHolder: { fontSize: 11, color: '#7b2cff', marginTop: 5, fontWeight: '700' },
   primaryBtn: {
     marginTop: 16,
-    backgroundColor: '#7b2cff',
     borderRadius: 10,
+    overflow: 'hidden',
+  },
+  primaryBtnInner: {
     alignItems: 'center',
     justifyContent: 'center',
     minHeight: 44,

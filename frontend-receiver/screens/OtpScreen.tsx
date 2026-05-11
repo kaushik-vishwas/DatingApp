@@ -15,6 +15,7 @@ import {
 } from 'react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { LinearGradient } from 'expo-linear-gradient';
 
 import { authApi, getErrorMessage, saveJwt } from '../services/api';
 import { useAuth } from '../context/AuthContext';
@@ -28,10 +29,13 @@ import { normalizeIndianMobileDigits } from '../utils/validation';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Otp'>;
 
+// function maskPhoneDigits(digits: string): string {
+//   const d = digits.replace(/\D/g, '');
+//   if (d.length < 4) return d;
+//   return `******${d.slice(-4)}`;
+// }
 function maskPhoneDigits(digits: string): string {
-  const d = digits.replace(/\D/g, '');
-  if (d.length < 4) return d;
-  return `******${d.slice(-4)}`;
+  return digits;
 }
 
 export default function OtpScreen({ navigation, route }: Props) {
@@ -234,20 +238,24 @@ export default function OtpScreen({ navigation, route }: Props) {
 
               {/* Verify Button */}
               <TouchableOpacity
-                style={[
-                  styles.verifyButton,
-                  (loading || otp.join('').length !== 6) && styles.verifyButtonDisabled,
-                ]}
-                onPress={handleVerify}
-                disabled={loading || otp.join('').length !== 6}
-                activeOpacity={0.8}
-              >
-                {loading ? (
-                  <ActivityIndicator color="#fff" size="small" />
-                ) : (
-                  <Text style={styles.verifyButtonText}>Verify & Continue</Text>
-                )}
-              </TouchableOpacity>
+  style={(loading || otp.join('').length !== 6) && styles.verifyButtonDisabled}
+  onPress={handleVerify}
+  disabled={loading || otp.join('').length !== 6}
+  activeOpacity={0.8}
+>
+  <LinearGradient
+    colors={['#7F00FF', '#A855F7', '#E100FF']}
+    start={{ x: 0, y: 0 }}
+    end={{ x: 1, y: 0 }}
+    style={styles.verifyButton}
+  >
+    {loading ? (
+      <ActivityIndicator color="#fff" size="small" />
+    ) : (
+      <Text style={styles.verifyButtonText}>Verify & Continue</Text>
+    )}
+  </LinearGradient>
+</TouchableOpacity>
 
               {/* Resend Section */}
               <View style={styles.resendContainer}>
@@ -390,7 +398,6 @@ const styles = StyleSheet.create({
     backgroundColor: '#f8f3ff',
   },
   verifyButton: {
-    backgroundColor: '#7b2cff',
     paddingVertical: 16,
     borderRadius: 12,
     alignItems: 'center',
