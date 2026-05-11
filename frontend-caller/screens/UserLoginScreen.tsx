@@ -5,19 +5,19 @@ import { Image, StyleSheet } from 'react-native';
 import { AuthLoginCard } from '../components/auth/AuthLoginCard';
 import { getForcedAppKind } from '../config/appKind';
 import type { RootStackParamList } from '../navigation/RootStackParamList';
-import { normalizeEmail } from '../utils/validation';
+import { normalizeIndianMobileDigits } from '../utils/validation';
 import SelectoLogo from '../assets/SelectoLogo.png';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'UserLogin'>;
 
 export default function UserLoginScreen({ navigation, route }: Props): React.JSX.Element {
-  const [email, setEmail] = useState(route.params?.email ?? '');
+  const [mobile, setMobile] = useState(route.params?.mobile ?? '');
 
   useEffect(() => {
-    setEmail(route.params?.email ?? '');
-  }, [route.params?.email]);
+    setMobile(route.params?.mobile ?? '');
+  }, [route.params?.mobile]);
 
-  const normalized = normalizeEmail(email) || undefined;
+  const normalizedMobile = normalizeIndianMobileDigits(mobile) || undefined;
   const forcedAppKind = getForcedAppKind();
   const isCallerOnlyApp = forcedAppKind === 'caller';
 
@@ -28,15 +28,15 @@ export default function UserLoginScreen({ navigation, route }: Props): React.JSX
   return (
     <AuthLoginCard
       navigation={navigation}
-      email={email}
-      onEmailChange={setEmail}
+      mobile={mobile}
+      onMobileChange={setMobile}
       customLogo={<Image source={SelectoLogo} style={styles.logo} resizeMode="contain" />}
       title="User sign in"
-      subtitle="For app members — use the email and password you registered with"
+      subtitle="For app members — sign in with your registered mobile number"
       primaryRegisterLabel="Create an account"
-      onPrimaryRegister={() => navigation.navigate('UserRegister', { email: normalized })}
+      onPrimaryRegister={() => navigation.navigate('UserRegister', { mobile: normalizedMobile })}
       switchLoginLabel={isCallerOnlyApp ? undefined : 'Login as receiver'}
-      onSwitchLogin={isCallerOnlyApp ? undefined : () => navigation.navigate('ReceiverLogin', { email: normalized })}
+      onSwitchLogin={isCallerOnlyApp ? undefined : () => navigation.navigate('ReceiverLogin', { mobile: normalizedMobile })}
       onChooseAccountType={isCallerOnlyApp ? undefined : resetToRoleGate}
       authAccountType="user"
     />

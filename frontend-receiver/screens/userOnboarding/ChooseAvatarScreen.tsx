@@ -28,7 +28,8 @@ export default function ChooseAvatarScreen({ navigation }: Props): React.JSX.Ele
   const [selected, setSelected] = useState(avatarPresets[0]!);
 
   React.useEffect(() => {
-    if (!avatarPresets.includes(selected)) {
+    const selectedId = toAvatarUri(selected);
+    if (!avatarPresets.some((p) => toAvatarUri(p) === selectedId)) {
       setSelected(avatarPresets[0]!);
     }
   }, [avatarPresets, selected]);
@@ -62,13 +63,13 @@ export default function ChooseAvatarScreen({ navigation }: Props): React.JSX.Ele
       <View style={styles.listWrap}>
         <FlatList
           data={avatarPresets}
-          keyExtractor={(item, index) => `${typeof item}-${String(item)}-${index}`}
+          keyExtractor={(item, index) => `${toAvatarUri(item)}-${index}`}
           numColumns={3}
           columnWrapperStyle={styles.row}
           contentContainerStyle={styles.grid}
           scrollEnabled
           renderItem={({ item }) => {
-            const active = item === selected;
+            const active = toAvatarUri(item) === toAvatarUri(selected);
             return (
               <TouchableOpacity
                 style={[styles.cell, active && styles.cellActive]}

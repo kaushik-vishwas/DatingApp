@@ -1432,11 +1432,13 @@ export const sendReceiverWithdrawalOtp = async (
       { upsert: true, new: true, setDefaultsOnInsert: true }
     );
 
-    await sendOtpEmail(receiver.email, code, 'verification');
+    if (receiver.email) {
+      await sendOtpEmail(receiver.email, code, 'verification');
+    }
 
     res.status(200).json({
-      message: 'OTP sent to your Gmail',
-      email: receiver.email,
+      message: 'OTP sent',
+      otpEmail: receiver.email ?? null,
       expiresInSec: 300,
     });
   } catch (err) {
@@ -2130,10 +2132,12 @@ export const sendReceiverBankUpdateOtp = async (
     receiver.pendingBankName = String(bankName).trim();
     await receiver.save();
 
-    await sendOtpEmail(receiver.email, otpCode, 'verification');
+    if (receiver.email) {
+      await sendOtpEmail(receiver.email, otpCode, 'verification');
+    }
     res.status(200).json({
-      message: 'OTP sent to your Gmail',
-      emailMasked: maskEmail(receiver.email),
+      message: 'OTP sent',
+      emailMasked: receiver.email ? maskEmail(receiver.email) : null,
       expiresInSec: 300,
     });
   } catch (err) {

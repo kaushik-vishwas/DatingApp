@@ -21,19 +21,15 @@ import type { RootStackParamList } from '../navigation/RootStackParamList';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Otp'>;
 
-function maskEmail(email: string): string {
-  const e = email.trim();
-  const at = e.indexOf('@');
-  if (at <= 1) return e;
-  const local = e.slice(0, at);
-  const domain = e.slice(at + 1);
-  const visible = local.slice(0, 2);
-  return `${visible}***@${domain}`;
+function maskPhoneDigits(digits: string): string {
+  const d = digits.replace(/\D/g, '');
+  if (d.length < 4) return d;
+  return `******${d.slice(-4)}`;
 }
 
 export default function OtpScreen({ navigation, route }: Props) {
   const insets = useSafeAreaInsets();
-  const { email, accountType } = route.params;
+  const { phone, accountType } = route.params;
   const { signIn } = useAuth();
   const [otp, setOtp] = useState<string>('');
   const [loading, setLoading] = useState<boolean>(false);
@@ -43,16 +39,12 @@ export default function OtpScreen({ navigation, route }: Props) {
   const validateOtp = (): string | null => {
     const code = otp.trim();
     if (code.length !== 6 || !/^\d+$/.test(code)) {
-      return 'Enter the 6-digit code from your email';
+      return 'Enter the 6-digit code sent to your mobile';
     }
     return null;
   };
 
   const handleVerify = async () => {
-    if (!email) {
-      Alert.alert('Error', 'Missing email. Go back and try again.');
-      return;
-    }
     const err = validateOtp();
     if (err) {
       Alert.alert('Validation', err);
@@ -61,7 +53,7 @@ export default function OtpScreen({ navigation, route }: Props) {
 
     setLoading(true);
     try {
-      const { data } = await authApi.verifyOtp(email, otp.trim(), accountType);
+      const { data } = await authApi.verifyOtp(phone, otp.trim(), accountType);
       if (!data?.token) {
         Alert.alert('Error', 'No token returned from server');
         return;
@@ -76,11 +68,11 @@ export default function OtpScreen({ navigation, route }: Props) {
   };
 
   const handleResend = async () => {
-    if (!email) return;
+    if (!phone) return;
     setResendLoading(true);
     try {
-      await authApi.sendOtp(email, accountType);
-      Alert.alert('OTP sent', 'Check your inbox for the verification code.');
+      await authApi.sendOtp(phone, accountType);
+      Alert.alert('OTP sent', 'Check your mobile for the verification code.');
     } catch (e) {
       Alert.alert('Error', getErrorMessage(e));
     } finally {
@@ -118,8 +110,8 @@ export default function OtpScreen({ navigation, route }: Props) {
               <Text style={styles.title}>Verify OTP</Text>
               <View style={styles.underline} />
 
-              <Text style={styles.hint}>Enter the code sent to your email</Text>
-              <Text style={styles.toWhere}>{maskEmail(email)}</Text>
+              <Text style={styles.hint}>Enter the code sent to your mobile</Text>
+              <Text style={styles.toWhere}>{maskPhoneDigits(phone)}</Text>
 
               <View style={styles.otpRow}>
                 {Array.from({ length: 6 }).map((_, idx) => {

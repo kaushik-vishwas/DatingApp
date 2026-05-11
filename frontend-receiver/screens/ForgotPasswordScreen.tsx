@@ -42,11 +42,7 @@ export default function ForgotPasswordScreen({ navigation, route }: Props): Reac
       const { data } = await authApi.forgotPassword(e, accountType);
       setEmail(e);
       setStep(2);
-      if (data.emailSent === false) {
-        Alert.alert('Forgot password', data.message);
-      } else {
-        Alert.alert('Check your email', 'Enter the 6-digit code and your new password.');
-      }
+      Alert.alert('Forgot password', data.message);
     } catch (err) {
       Alert.alert('Error', getErrorMessage(err));
     } finally {

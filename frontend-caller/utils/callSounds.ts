@@ -1,4 +1,4 @@
-import { Audio, type AVPlaybackStatusSuccess, type InterruptionModeAndroid, type InterruptionModeIOS } from 'expo-av';
+import { Audio, InterruptionModeAndroid, InterruptionModeIOS, type AVPlaybackStatusSuccess } from 'expo-av';
 
 const OUTGOING_BEEP_URL = 'https://actions.google.com/sounds/v1/alarms/beep_short.ogg';
 const INCOMING_RING_URL = 'https://actions.google.com/sounds/v1/alarms/phone_alerts_and_rings.ogg';
@@ -15,8 +15,8 @@ async function ensureAudioMode(): Promise<void> {
     allowsRecordingIOS: false,
     playsInSilentModeIOS: true,
     staysActiveInBackground: false,
-    interruptionModeIOS: Audio.INTERRUPTION_MODE_IOS_DO_NOT_MIX as InterruptionModeIOS,
-    interruptionModeAndroid: Audio.INTERRUPTION_MODE_ANDROID_DO_NOT_MIX as InterruptionModeAndroid,
+    interruptionModeIOS: InterruptionModeIOS.DoNotMix,
+    interruptionModeAndroid: InterruptionModeAndroid.DoNotMix,
     shouldDuckAndroid: true,
     playThroughEarpieceAndroid: false,
   });

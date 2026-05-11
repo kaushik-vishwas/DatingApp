@@ -16,10 +16,9 @@ export interface UpdateCallerPayload {
 export type AuthAccountType = 'user' | 'receiver';
 
 export interface RegisterPayload {
-  name: string;
-  email: string;
+  name?: string;
+  email?: string;
   phone: string;
-  password: string;
   /** `YYYY-MM-DD` */
   dateOfBirth: string;
   role?: UserRole;
@@ -33,7 +32,7 @@ export interface LoginResponse {
 
 export interface SendOtpResponse {
   message: string;
-  emailSent?: boolean;
+  sent?: boolean;
 }
 
 export interface VerifyOtpResponse {

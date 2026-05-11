@@ -87,7 +87,11 @@ export default function CallerEditProfileScreen({ navigation }: Props): React.JS
   }, [user]);
 
   useEffect(() => {
-    if (isCallerAvatarPresetId(profileImageValue) && !allowedAvatarPresetIds.includes(profileImageValue)) {
+    if (
+      profileImageValue &&
+      isCallerAvatarPresetId(profileImageValue) &&
+      !allowedAvatarPresetIds.includes(profileImageValue)
+    ) {
       setProfileImageValue(allowedAvatarPresetIds[0] ?? null);
     }
   }, [allowedAvatarPresetIds, profileImageValue]);

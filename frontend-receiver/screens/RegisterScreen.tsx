@@ -1,4 +1,4 @@
-import React, { useCallback, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Alert,
   KeyboardAvoidingView,
@@ -16,10 +16,16 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { authApi, getErrorMessage } from '../services/api';
+import {
+  isPhoneRegisteredForAccountType,
+} from '../services/localMobileAuthStorage';
 import type { RootStackParamList } from '../navigation/RootStackParamList';
 import DobPickerField from '../components/DobPickerField';
 import { ageFromLocalCalendarBirthDate, formatDateOnlyLocal, maxDobDateForMinAge } from '../utils/birthDateClient';
-import { isValidEmail, normalizeEmail, validateIndianMobileDigits, validatePasswordStrength } from '../utils/validation';
+import {
+  normalizeIndianMobileDigits,
+  validateIndianMobileDigits,
+} from '../utils/validation';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Register'>;
 
@@ -27,15 +33,16 @@ export default function RegisterScreen({ navigation, route }: Props) {
   const insets = useSafeAreaInsets();
   const [fullName, setFullName] = useState<string>('');
   const [dob, setDob] = useState<Date | null>(null);
-  const [emailAddress, setEmailAddress] = useState<string>(route.params?.email ?? '');
-  const [phone, setPhone] = useState<string>('');
-  const [password, setPassword] = useState<string>('');
-  const [confirmPassword, setConfirmPassword] = useState<string>('');
+  const [phone, setPhone] = useState<string>(route.params?.phone ?? '');
   const [agreedToPolicies, setAgreedToPolicies] = useState<boolean>(false);
   const [loading, setLoading] = useState<boolean>(false);
   const [showTermsModal, setShowTermsModal] = useState<boolean>(false);
   const [showPrivacyModal, setShowPrivacyModal] = useState<boolean>(false);
   const scrollRef = useRef<ScrollView | null>(null);
+
+  useEffect(() => {
+    if (route.params?.phone) setPhone(route.params.phone);
+  }, [route.params?.phone, route.params?.email]);
 
   const scrollToFocusedInput = useCallback(() => {
     requestAnimationFrame(() => {
@@ -55,17 +62,9 @@ export default function RegisterScreen({ navigation, route }: Props) {
     const age = ageFromLocalCalendarBirthDate(dob);
     if (age < 18 || age > 120) return 'You must be between 18 and 120 years old';
 
-    const email = normalizeEmail(emailAddress);
-    if (!email) return 'Email is required';
-    if (!isValidEmail(email)) return 'Enter a valid email address';
-
-    const digits = phone.replace(/\D/g, '');
+    const digits = normalizeIndianMobileDigits(phone);
     const phoneErr = validateIndianMobileDigits(digits);
     if (phoneErr) return phoneErr;
-
-    const pwErr = validatePasswordStrength(password);
-    if (pwErr) return pwErr;
-    if (password !== confirmPassword) return 'Passwords do not match';
 
     if (!agreedToPolicies) return 'You must agree to the Terms & Conditions and Privacy Policy';
 
@@ -81,22 +80,25 @@ export default function RegisterScreen({ navigation, route }: Props) {
     if (!dob) return;
 
     const name = fullName.trim();
-    const email = normalizeEmail(emailAddress);
-    const phoneDigits = phone.replace(/\D/g, '');
+    const phoneDigits = normalizeIndianMobileDigits(phone);
+
+    const taken = await isPhoneRegisteredForAccountType(phoneDigits, 'receiver');
+    if (taken) {
+      Alert.alert('Mobile number already registered', 'Mobile number already registered');
+      return;
+    }
 
     setLoading(true);
     try {
       await authApi.register({
         name,
-        email,
         phone: phoneDigits,
-        password,
         dateOfBirth: formatDateOnlyLocal(dob),
         role: 'receiver',
       });
 
-      await authApi.sendOtp(email, 'receiver');
-      navigation.navigate('Otp', { email, accountType: 'receiver' });
+      await authApi.sendOtp(phoneDigits, 'receiver');
+      navigation.navigate('Otp', { phone: phoneDigits, accountType: 'receiver' });
     } catch (e) {
       Alert.alert('Error', getErrorMessage(e));
     } finally {
@@ -147,18 +149,6 @@ export default function RegisterScreen({ navigation, route }: Props) {
             fallbackDate={maxDobDateForMinAge(25)}
           />
 
-          <Text style={styles.label}>Email Address</Text>
-          <TextInput
-            style={styles.input}
-            placeholder="you@example.com"
-            placeholderTextColor="#999"
-            keyboardType="email-address"
-            autoCapitalize="none"
-            value={emailAddress}
-            onChangeText={setEmailAddress}
-            onFocus={scrollToFocusedInput}
-          />
-
           <Text style={styles.label}>Phone Number</Text>
           <TextInput
             style={styles.input}
@@ -167,32 +157,6 @@ export default function RegisterScreen({ navigation, route }: Props) {
             keyboardType="phone-pad"
             value={phone}
             onChangeText={setPhone}
-            onFocus={scrollToFocusedInput}
-          />
-
-          <Text style={styles.label}>Password</Text>
-          <TextInput
-            style={styles.input}
-            placeholder="At least 8 characters, letter + number"
-            placeholderTextColor="#999"
-            secureTextEntry
-            autoCapitalize="none"
-            autoCorrect={false}
-            value={password}
-            onChangeText={setPassword}
-            onFocus={scrollToFocusedInput}
-          />
-
-          <Text style={styles.label}>Confirm password</Text>
-          <TextInput
-            style={styles.input}
-            placeholder="Re-enter password"
-            placeholderTextColor="#999"
-            secureTextEntry
-            autoCapitalize="none"
-            autoCorrect={false}
-            value={confirmPassword}
-            onChangeText={setConfirmPassword}
             onFocus={scrollToFocusedInput}
           />
 
@@ -316,10 +280,8 @@ export default function RegisterScreen({ navigation, route }: Props) {
               <Text style={styles.modalText}>
                 We collect the following personal information when you register:
                 {'\n\n'}• Full Name
-                {'\n'}• Email Address
                 {'\n'}• Phone Number
                 {'\n'}• Date of Birth
-                {'\n'}• Password (encrypted)
               </Text>
 
               <Text style={styles.modalSectionTitle}>2. How We Use Your Information</Text>

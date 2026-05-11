@@ -7,12 +7,12 @@ export type RootStackParamList = {
   Splash: undefined;
   RoleGate: undefined;
   ReceiverEducation: undefined;
-  UserLogin: { email?: string } | undefined;
-  ReceiverLogin: { email?: string } | undefined;
+  UserLogin: { mobile?: string } | undefined;
+  ReceiverLogin: { mobile?: string } | undefined;
   ForgotPassword: { accountType: AuthAccountType };
   Register: { email?: string; phone?: string } | undefined;
-  UserRegister: { email?: string } | undefined;
-  Otp: { email: string; accountType: AuthAccountType };
+  UserRegister: { email?: string; mobile?: string } | undefined;
+  Otp: { phone: string; accountType: AuthAccountType };
   CompleteProfileFlow: undefined;
   UserOnboardingFlow: undefined;
   UnderReview: undefined;

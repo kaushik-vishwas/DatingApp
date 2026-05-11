@@ -32,6 +32,7 @@ import {
 import type { CompleteProfileStackParamList } from '../../navigation/CompleteProfileStackParamList';
 import { formatApiErrorForAlert, getResolvedApiBaseUrl, profileApi } from '../../services/api';
 import type { Gender } from '../../types/user';
+import { resolveProfileImageSource } from '../../utils/avatarSource';
 import { shouldUploadProfileImageToCloudinary } from '../../utils/profileImageUrl';
 import { validateProfileInfo } from '../../utils/completeProfileSteps';
 
@@ -158,6 +159,7 @@ export default function ProfileInfoScreen({ navigation }: Props): React.JSX.Elem
             label="Profile avatar *"
             uri={state.profileImageUri}
             mimeType={state.profileImageMime}
+            imageSource={resolveProfileImageSource(state.profileImageUri)}
             onPick={pickProfileImage}
             onClear={() => update({ profileImageUri: null, profileImageMime: null })}
             hint="Select one female avatar from the list"

@@ -38,8 +38,8 @@ const mongoose_1 = __importStar(require("mongoose"));
 exports.RECEIVER_AUDIO_CALL_RATE_INR_PER_MIN = 5;
 const receiverSchema = new mongoose_1.Schema({
     name: { type: String, required: true, trim: true },
-    email: { type: String, required: true, unique: true, lowercase: true, trim: true },
-    phone: { type: String, required: true, trim: true },
+    email: { type: String, required: false, unique: true, sparse: true, lowercase: true, trim: true, default: null },
+    phone: { type: String, required: true, trim: true, unique: true },
     isVerified: { type: Boolean, default: false },
     otp: { type: String, default: null },
     otpExpiry: { type: Date, default: null },

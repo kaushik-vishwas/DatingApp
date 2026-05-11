@@ -397,11 +397,8 @@ function logProfileCompleteFailure(
 /** APIs */
 
 export const authApi = {
-  login: (email: string, password: string, accountType: AuthAccountType) =>
-    api.post<LoginResponse>('/auth/login', { email, password, accountType }),
-
-  sendOtp: (email: string, accountType: AuthAccountType) =>
-    api.post<SendOtpResponse>('/auth/send-otp', { email, accountType }),
+  sendOtp: (phone: string, accountType: AuthAccountType) =>
+    api.post<SendOtpResponse>('/auth/send-otp', { phone, accountType }),
 
   forgotPassword: (email: string, accountType: AuthAccountType) =>
     api.post<SendOtpResponse>('/auth/forgot-password', { email, accountType }),
@@ -419,8 +416,8 @@ export const authApi = {
       accountType,
     }),
 
-  verifyOtp: (email: string, otp: string, accountType: AuthAccountType) =>
-    api.post<VerifyOtpResponse>('/auth/verify-otp', { email, otp, accountType }),
+  verifyOtp: (phone: string, otp: string, accountType: AuthAccountType) =>
+    api.post<VerifyOtpResponse>('/auth/verify-otp', { phone, otp, accountType }),
 
   register: (payload: RegisterPayload) =>
     api.post<RegisterResponse>('/auth/register', payload),

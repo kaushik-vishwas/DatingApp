@@ -16,10 +16,12 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { CALLER_FEMALE_AVATAR_PRESETS } from '../../constants/userOnboarding';
+import { CALLER_FEMALE_AVATAR_PRESETS, isCallerAvatarPresetId } from '../../constants/userOnboarding';
 import { useAuth } from '../../context/AuthContext';
+import { uploadToCloudinary } from '../../lib/cloudinary';
 import type { ReceiverStackParamList } from '../../navigation/ReceiverStackParamList';
-import { getErrorMessage, profileApi } from '../../services/api';
+import { formatApiErrorForAlert, getErrorMessage, profileApi } from '../../services/api';
+import { resolveProfileImageSource } from '../../utils/avatarSource';
 
 type Nav = NativeStackNavigationProp<ReceiverStackParamList, 'ReceiverEditProfile'>;
 
@@ -33,7 +35,7 @@ export default function ReceiverEditProfileScreen(): React.JSX.Element {
   const [languages, setLanguages] = useState<string[]>(user?.languages ?? []);
   const [interests, setInterests] = useState<string[]>(user?.interests ?? []);
   const [showSuccess, setShowSuccess] = useState(false);
-  const [profileImageUri, setProfileImageUri] = useState<any>(user?.profileImage ?? null);
+  const [profileImageUri, setProfileImageUri] = useState<string | null>(user?.profileImage ?? null);
   const [avatarModal, setAvatarModal] = useState(false);
 
   const onSave = async () => {
@@ -45,15 +47,34 @@ export default function ReceiverEditProfileScreen(): React.JSX.Element {
       Alert.alert('Validation', 'Please select an avatar.');
       return;
     }
-    if (!CALLER_FEMALE_AVATAR_PRESETS.includes(profileImageUri)) {
+    const allowedPreset =
+      isCallerAvatarPresetId(profileImageUri) &&
+      CALLER_FEMALE_AVATAR_PRESETS.some((p) => p.id === profileImageUri);
+    const isHttpsAvatar = /^https:\/\//i.test(profileImageUri.trim());
+    if (!allowedPreset && !isHttpsAvatar) {
       Alert.alert('Validation', 'Please select one avatar from the available list.');
       return;
     }
     setSaving(true);
     try {
+      let profileImage = profileImageUri.trim();
+      if (isCallerAvatarPresetId(profileImage)) {
+        try {
+          profileImage = (
+            await uploadToCloudinary(profileImage, {
+              mimeType: 'image/png',
+              resourceType: 'image',
+              fileName: 'avatar.png',
+            })
+          ).secure_url;
+        } catch (uploadErr: unknown) {
+          Alert.alert('Photo upload failed', formatApiErrorForAlert(uploadErr));
+          return;
+        }
+      }
       await profileApi.updateReceiverProfile({
         name: name.trim(),
-        profileImage: profileImageUri,
+        profileImage,
         state: stateValue.trim(),
         languages,
         interests,
@@ -94,11 +115,7 @@ export default function ReceiverEditProfileScreen(): React.JSX.Element {
         <TouchableOpacity style={styles.photoCircle} onPress={() => setAvatarModal(true)}>
           {profileImageUri ? (
           <Image
-          source={
-            typeof profileImageUri === 'string'
-              ? { uri: profileImageUri }
-              : profileImageUri
-          }
+          source={resolveProfileImageSource(profileImageUri) ?? { uri: profileImageUri }}
           style={styles.photoImage}
         />
           ) : (
@@ -156,19 +173,19 @@ export default function ReceiverEditProfileScreen(): React.JSX.Element {
             <Text style={styles.modalTitle}>Select Avatar</Text>
             <ScrollView style={styles.modalList} keyboardShouldPersistTaps="handled">
               <View style={styles.avatarGrid}>
-                {CALLER_FEMALE_AVATAR_PRESETS.map((avatarUrl) => {
-                  const active = profileImageUri === avatarUrl;
+                {CALLER_FEMALE_AVATAR_PRESETS.map((preset) => {
+                  const active = profileImageUri === preset.id;
                   return (
                     <TouchableOpacity
-                      key={avatarUrl}
+                      key={preset.id}
                       style={[styles.avatarCell, active && styles.avatarCellActive]}
                       onPress={() => {
-                        setProfileImageUri(avatarUrl);
+                        setProfileImageUri(preset.id);
                         setAvatarModal(false);
                       }}
                       activeOpacity={0.85}
                     >
-                     <Image source={avatarUrl} style={styles.avatarThumb} />
+                     <Image source={preset.source} style={styles.avatarThumb} />
                     </TouchableOpacity>
                   );
                 })}

@@ -18,12 +18,12 @@ import { useAuth } from '../../context/AuthContext';
 import type { RootStackParamList } from '../../navigation/RootStackParamList';
 import { authApi, getErrorMessage, saveJwt } from '../../services/api';
 import type { AuthAccountType } from '../../types/api';
-import { isValidEmail, normalizeEmail, validatePasswordStrength } from '../../utils/validation';
+import { normalizeIndianMobileDigits, validateIndianMobileDigits } from '../../utils/validation';
 
 export type AuthLoginCardProps = {
   navigation: NativeStackNavigationProp<RootStackParamList>;
-  email: string;
-  onEmailChange: (value: string) => void;
+  mobile: string;
+  onMobileChange: (value: string) => void;
   logoLetter?: string; // Made optional
   title: string;
   subtitle: string;
@@ -41,10 +41,12 @@ export type AuthLoginCardProps = {
   customLogo?: React.ReactNode;
 };
 
+type LoginStep = 'mobile' | 'otp';
+
 export function AuthLoginCard({
   navigation,
-  email,
-  onEmailChange,
+  mobile,
+  onMobileChange,
   logoLetter,
   title,
   subtitle,
@@ -62,7 +64,8 @@ export function AuthLoginCard({
   const showSecondaryRegister = Boolean(secondaryRegisterLabel && onSecondaryRegister);
   const showSwitchLogin = Boolean(switchLoginLabel && onSwitchLogin);
   const { signIn } = useAuth();
-  const [password, setPassword] = useState<string>('');
+  const [step, setStep] = useState<LoginStep>('mobile');
+  const [otp, setOtp] = useState<string>('');
   const [loading, setLoading] = useState<boolean>(false);
   const scrollRef = useRef<ScrollView | null>(null);
 
@@ -72,40 +75,45 @@ export function AuthLoginCard({
       setTimeout(() => {
         const responder = TextInput.State.currentlyFocusedInput?.();
         if (!responder || !scrollRef.current) return;
-        // @ts-expect-error: RN types don't expose `scrollResponderScrollNativeHandleToKeyboard` on ref
         scrollRef.current.getScrollResponder()?.scrollResponderScrollNativeHandleToKeyboard(responder, 120, true);
       }, 30);
     });
   }, []);
 
-  const validate = (): string | null => {
-    const e = normalizeEmail(email);
-    if (!e) return 'Please enter your email';
-    if (!isValidEmail(e)) return 'Enter a valid email address';
-    const pwErr = validatePasswordStrength(password);
-    if (pwErr) return pwErr;
-    return null;
-  };
+  const digits = normalizeIndianMobileDigits(mobile);
 
-  const handleLogin = async () => {
-    const err = validate();
+  const onSendOtp = async () => {
+    const err = validateIndianMobileDigits(digits);
     if (err) {
       Alert.alert('Validation', err);
       return;
     }
+    try {
+      await authApi.sendOtp(digits, authAccountType);
+      setOtp('');
+      setStep('otp');
+    } catch (e) {
+      Alert.alert('No account found', 'No account found');
+    }
+  };
 
-    const e = normalizeEmail(email)!;
+  const onVerifyOtpAndLogin = async () => {
+    const code = otp.trim();
+    if (!/^\d{6}$/.test(code)) {
+      Alert.alert('Validation', 'Enter a valid 6-digit OTP.');
+      return;
+    }
     setLoading(true);
     try {
-      const { data } = await authApi.login(e, password, authAccountType);
+      const { data } = await authApi.verifyOtp(digits, code, authAccountType);
       if (!data?.token) {
         Alert.alert('Error', 'No token returned from server');
         return;
       }
       await saveJwt(data.token);
       signIn(data.token, data.user);
-    } catch (err) {
-      Alert.alert('Could not sign in', getErrorMessage(err));
+    } catch (e) {
+      Alert.alert('Error', getErrorMessage(e));
     } finally {
       setLoading(false);
     }
@@ -140,42 +148,49 @@ export function AuthLoginCard({
             <Text style={styles.title}>{title}</Text>
             <Text style={styles.subtitle}>{subtitle}</Text>
 
-            <Text style={styles.label}>Email</Text>
+            <Text style={styles.label}>Mobile number</Text>
             <TextInput
               style={styles.input}
-              placeholder="you@example.com"
+              placeholder="10-digit mobile"
               placeholderTextColor="#999"
-              keyboardType="email-address"
+              keyboardType="phone-pad"
               autoCapitalize="none"
               autoCorrect={false}
-              value={email}
-              onChangeText={onEmailChange}
+              editable={step === 'mobile'}
+              value={mobile}
+              onChangeText={onMobileChange}
               onFocus={scrollToFocusedInput}
             />
 
-            <Text style={styles.label}>Password</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="••••••••"
-              placeholderTextColor="#999"
-              secureTextEntry
-              autoCapitalize="none"
-              autoCorrect={false}
-              value={password}
-              onChangeText={setPassword}
-              onFocus={scrollToFocusedInput}
-            />
-
-            <TouchableOpacity onPress={() => navigation.navigate('ForgotPassword', { accountType: authAccountType })}>
-              <Text style={styles.forgot}>Forgot password?</Text>
-            </TouchableOpacity>
+            {step === 'otp' ? (
+              <>
+                <Text style={styles.label}>OTP</Text>
+                <TextInput
+                  style={styles.input}
+                  placeholder="6-digit OTP"
+                  placeholderTextColor="#999"
+                  keyboardType="number-pad"
+                  maxLength={6}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  value={otp}
+                  onChangeText={setOtp}
+                  onFocus={scrollToFocusedInput}
+                />
+                <TouchableOpacity onPress={() => setStep('mobile')} style={styles.changeNumber}>
+                  <Text style={styles.changeNumberText}>Change number</Text>
+                </TouchableOpacity>
+              </>
+            ) : null}
 
             <TouchableOpacity
               style={[styles.button, loading && styles.buttonDisabled]}
-              onPress={() => void handleLogin()}
+              onPress={() => void (step === 'mobile' ? onSendOtp() : onVerifyOtpAndLogin())}
               disabled={loading}
             >
-              <Text style={styles.buttonText}>{loading ? 'Signing in…' : 'Log in'}</Text>
+              <Text style={styles.buttonText}>
+                {loading ? 'Signing in…' : step === 'mobile' ? 'Send OTP' : 'Log in'}
+              </Text>
             </TouchableOpacity>
 
             <TouchableOpacity style={styles.footer} onPress={onPrimaryRegister}>
@@ -276,11 +291,14 @@ const styles = StyleSheet.create({
     marginBottom: 14,
     backgroundColor: '#fff',
   },
-  forgot: {
+  changeNumber: {
+    marginTop: -6,
+    marginBottom: 8,
+  },
+  changeNumberText: {
     color: PURPLE,
     fontSize: 12,
     fontWeight: '600',
-    marginBottom: 14,
   },
   button: {
     backgroundColor: PURPLE,

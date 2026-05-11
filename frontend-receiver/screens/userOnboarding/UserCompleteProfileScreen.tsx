@@ -28,6 +28,7 @@ import { useAuth } from '../../context/AuthContext';
 import { useUserOnboarding } from '../../context/UserOnboardingContext';
 import type { UserOnboardingStackParamList } from '../../navigation/UserOnboardingStackParamList';
 import { getErrorMessage, profileApi } from '../../services/api';
+import { resolveProfileImageSource } from '../../utils/avatarSource';
 
 const PURPLE = '#7b2cff';
 
@@ -196,7 +197,10 @@ export default function UserCompleteProfileScreen({ navigation }: Props): React.
             activeOpacity={0.9}
           >
             {imageUri ? (
-              <Image source={{ uri: imageUri }} style={styles.avatarImg} />
+              <Image
+                source={resolveProfileImageSource(imageUri) ?? { uri: imageUri }}
+                style={styles.avatarImg}
+              />
             ) : (
               <View style={styles.avatarPlaceholder}>
                 <Text style={styles.camera}>📷</Text>

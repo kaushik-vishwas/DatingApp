@@ -2,6 +2,7 @@ import React from 'react';
 import {
   ActivityIndicator,
   Image,
+  type ImageSourcePropType,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -12,9 +13,11 @@ const PURPLE = '#7b2cff';
 
 type Props = {
   label: string;
-  /** Local file URI after pick */
+  /** Local file URI after pick, or a stable preset id (e.g. preset:female:1). */
   uri: string | null;
   mimeType?: string | null;
+  /** When `uri` is not a real image URL, pass bundled source for preview. */
+  imageSource?: ImageSourcePropType | null;
   /** Shown for non-image files */
   displayName?: string | null;
   onPick: () => void;
@@ -28,6 +31,7 @@ export function UploadField({
   label,
   uri,
   mimeType,
+  imageSource,
   displayName,
   onPick,
   onClear,
@@ -54,7 +58,9 @@ export function UploadField({
   };
   const isImage = Boolean(
     uri &&
-      (mimeType?.toLowerCase().startsWith('image/') || isImageUri(uri))
+      (imageSource != null ||
+        mimeType?.toLowerCase().startsWith('image/') ||
+        isImageUri(uri)),
   );
 
   return (
@@ -75,7 +81,7 @@ export function UploadField({
           isImage ? (
             <View style={styles.imagePreviewWrap}>
               <Image
-                source={{ uri }}
+                source={imageSource ?? { uri }}
                 style={imageShape === 'rectangle' ? styles.previewRect : styles.previewCircle}
               />
             </View>

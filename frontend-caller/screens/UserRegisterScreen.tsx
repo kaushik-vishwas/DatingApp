@@ -20,26 +20,15 @@ import { authApi, getErrorMessage } from '../services/api';
 import type { RootStackParamList } from '../navigation/RootStackParamList';
 import { ageFromLocalCalendarBirthDate, formatDateOnlyLocal, maxDobDateForMinAge } from '../utils/birthDateClient';
 import {
-  isValidEmail,
-  normalizeEmail,
+  normalizeIndianMobileDigits,
   validateIndianMobileDigits,
-  validatePasswordStrength,
 } from '../utils/validation';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'UserRegister'>;
 
-function provisionalNameFromEmail(email: string): string {
-  const local = email.split('@')[0]?.replace(/[._-]+/g, ' ').trim() ?? 'Member';
-  if (!local) return 'Member';
-  return local.slice(0, 1).toUpperCase() + local.slice(1, 48);
-}
-
 export default function UserRegisterScreen({ navigation, route }: Props) {
   const insets = useSafeAreaInsets();
-  const [emailAddress, setEmailAddress] = useState<string>(route.params?.email ?? '');
-  const [phone, setPhone] = useState<string>('');
-  const [password, setPassword] = useState<string>('');
-  const [confirmPassword, setConfirmPassword] = useState<string>('');
+  const [phone, setPhone] = useState<string>(route.params?.mobile ?? '');
   const [agreedToPolicies, setAgreedToPolicies] = useState<boolean>(false);
   const [loading, setLoading] = useState<boolean>(false);
   const [dob, setDob] = useState<Date | null>(null);
@@ -52,28 +41,19 @@ export default function UserRegisterScreen({ navigation, route }: Props) {
       setTimeout(() => {
         const responder = TextInput.State.currentlyFocusedInput?.();
         if (!responder || !scrollRef.current) return;
-        // @ts-expect-error: RN types don't expose `scrollResponderScrollNativeHandleToKeyboard` on ref
         scrollRef.current.getScrollResponder()?.scrollResponderScrollNativeHandleToKeyboard(responder, 120, true);
       }, 30);
     });
   }, []);
 
   const validate = (): string | null => {
-    const email = normalizeEmail(emailAddress);
-    if (!email) return 'Email is required';
-    if (!isValidEmail(email)) return 'Enter a valid email address';
-
     if (!dob) return 'Select your date of birth';
     const age = ageFromLocalCalendarBirthDate(dob);
     if (age < 18 || age > 120) return 'You must be between 18 and 120 years old';
 
-    const digits = phone.replace(/\D/g, '');
+    const digits = normalizeIndianMobileDigits(phone);
     const phoneErr = validateIndianMobileDigits(digits);
     if (phoneErr) return phoneErr;
-
-    const pwErr = validatePasswordStrength(password);
-    if (pwErr) return pwErr;
-    if (password !== confirmPassword) return 'Passwords do not match';
 
     if (!agreedToPolicies) return 'You must agree to the Terms & Conditions and Privacy Policy';
 
@@ -88,23 +68,18 @@ export default function UserRegisterScreen({ navigation, route }: Props) {
     }
     if (!dob) return;
 
-    const email = normalizeEmail(emailAddress)!;
-    const phoneDigits = phone.replace(/\D/g, '');
-    const name = provisionalNameFromEmail(email);
+    const phoneDigits = normalizeIndianMobileDigits(phone);
 
     setLoading(true);
     try {
       await authApi.register({
-        name,
-        email,
         phone: phoneDigits,
-        password,
         dateOfBirth: formatDateOnlyLocal(dob),
         role: 'caller',
       });
 
-      await authApi.sendOtp(email, 'user');
-      navigation.navigate('Otp', { email, accountType: 'user' });
+      await authApi.sendOtp(phoneDigits, 'user');
+      navigation.navigate('Otp', { phone: phoneDigits, accountType: 'user' });
     } catch (e) {
       Alert.alert('Error', getErrorMessage(e));
     } finally {
@@ -136,19 +111,9 @@ export default function UserRegisterScreen({ navigation, route }: Props) {
           </TouchableOpacity>
 
           <Text style={styles.title}>Create your account</Text>
-          <Text style={styles.subtitle}>We will email you a code to verify your address</Text>
+          <Text style={styles.subtitle}>We will send a code to verify your mobile number</Text>
 
-          <Text style={styles.label}>Email Address</Text>
-          <TextInput
-            style={styles.input}
-            placeholder="you@example.com"
-            placeholderTextColor="#999"
-            keyboardType="email-address"
-            autoCapitalize="none"
-            value={emailAddress}
-            onChangeText={setEmailAddress}
-            onFocus={scrollToFocusedInput}
-          />
+          <Text style={styles.subtitle}>We will send a code to verify your mobile number</Text>
 
           <DobPickerField
             label="Date of Birth *"
@@ -168,32 +133,6 @@ export default function UserRegisterScreen({ navigation, route }: Props) {
             onFocus={scrollToFocusedInput}
           />
 
-          <Text style={styles.label}>Password</Text>
-          <TextInput
-            style={styles.input}
-            placeholder="At least 8 characters, letter + number"
-            placeholderTextColor="#999"
-            secureTextEntry
-            autoCapitalize="none"
-            autoCorrect={false}
-            value={password}
-            onChangeText={setPassword}
-            onFocus={scrollToFocusedInput}
-          />
-
-          <Text style={styles.label}>Confirm password</Text>
-          <TextInput
-            style={styles.input}
-            placeholder="Re-enter password"
-            placeholderTextColor="#999"
-            secureTextEntry
-            autoCapitalize="none"
-            autoCorrect={false}
-            value={confirmPassword}
-            onChangeText={setConfirmPassword}
-            onFocus={scrollToFocusedInput}
-          />
-
           {/* Single Checkbox for both policies */}
           <TouchableOpacity style={styles.termsRow} onPress={() => setAgreedToPolicies((v) => !v)}>
             <View style={[styles.checkbox, agreedToPolicies && styles.checkboxChecked]}>
@@ -201,11 +140,11 @@ export default function UserRegisterScreen({ navigation, route }: Props) {
             </View>
             <Text style={styles.termsText}>
               I agree to the{' '}
-              <Text style={styles.linkText} onPress={() => setShowTermsModal(true)}>
+              <Text style={styles.termsLinkText} onPress={() => setShowTermsModal(true)}>
                 Terms & Conditions
               </Text>
               {' and '}
-              <Text style={styles.linkText} onPress={() => setShowPrivacyModal(true)}>
+              <Text style={styles.termsLinkText} onPress={() => setShowPrivacyModal(true)}>
                 Privacy Policy
               </Text>
             </Text>
@@ -312,10 +251,9 @@ export default function UserRegisterScreen({ navigation, route }: Props) {
               <Text style={styles.modalSectionTitle}>1. Information We Collect</Text>
               <Text style={styles.modalText}>
                 We collect the following personal information when you register:
-                {'\n\n'}• Email Address
+                {'\n\n'}• Full Name
                 {'\n'}• Phone Number
                 {'\n'}• Date of Birth
-                {'\n'}• Password (encrypted)
               </Text>
 
               <Text style={styles.modalSectionTitle}>2. How We Use Your Information</Text>
@@ -454,7 +392,7 @@ const styles = StyleSheet.create({
     fontSize: 12,
     flex: 1,
   },
-  linkText: {
+  termsLinkText: {
     color: PURPLE,
     textDecorationLine: 'underline',
   },

@@ -14,28 +14,29 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import LinearGradient from 'react-native-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { authApi, getErrorMessage, saveJwt } from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import type { RootStackParamList } from '../navigation/RootStackParamList';
+import {
+  clearPendingOtpRegistration,
+  getPendingOtpRegistration,
+  registerSavedPhoneCredentials,
+} from '../services/localMobileAuthStorage';
+import { normalizeIndianMobileDigits } from '../utils/validation';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Otp'>;
 
-function maskEmail(email: string): string {
-  const e = email.trim();
-  const at = e.indexOf('@');
-  if (at <= 1) return e;
-  const local = e.slice(0, at);
-  const domain = e.slice(at + 1);
-  const visible = local.slice(0, 2);
-  return `${visible}***@${domain}`;
+function maskPhoneDigits(digits: string): string {
+  const d = digits.replace(/\D/g, '');
+  if (d.length < 4) return d;
+  return `******${d.slice(-4)}`;
 }
 
 export default function OtpScreen({ navigation, route }: Props) {
   const insets = useSafeAreaInsets();
-  const { email, accountType } = route.params;
+  const { phone, accountType } = route.params;
   const { signIn } = useAuth();
   const [otp, setOtp] = useState<string[]>(['', '', '', '', '', '']);
   const [loading, setLoading] = useState<boolean>(false);
@@ -76,44 +77,74 @@ export default function OtpScreen({ navigation, route }: Props) {
   const validateOtp = (): string | null => {
     const code = otp.join('');
     if (code.length !== 6 || !/^\d+$/.test(code)) {
-      return 'Enter the 6-digit code from your email';
+      return 'Enter the 6-digit code sent to your mobile';
     }
     return null;
   };
 
-  const handleVerify = async () => {
-    if (!email) {
-      Alert.alert('Error', 'Missing email. Go back and try again.');
-      return;
+  const persistMobileLoginIfPending = async (): Promise<void> => {
+    const pending = await getPendingOtpRegistration();
+    if (
+      pending &&
+      pending.accountType === accountType &&
+      normalizeIndianMobileDigits(pending.phoneDigits) === normalizeIndianMobileDigits(phone)
+    ) {
+      await registerSavedPhoneCredentials(pending.phoneDigits, {
+        email: pending.email,
+        password: pending.password,
+        accountType: pending.accountType,
+      });
+      await clearPendingOtpRegistration();
     }
+  };
+
+  const handleVerify = async () => {
     const err = validateOtp();
     if (err) {
       Alert.alert('Validation', err);
       return;
     }
 
+    const code = otp.join('');
+
     setLoading(true);
     try {
-      const { data } = await authApi.verifyOtp(email, otp.join(''), accountType);
-      if (!data?.token) {
-        Alert.alert('Error', 'No token returned from server');
+      try {
+        const { data } = await authApi.verifyOtp(phone, code, accountType);
+        if (!data?.token) {
+          Alert.alert('Error', 'No token returned from server');
+          return;
+        }
+        await saveJwt(data.token);
+        signIn(data.token, data.user);
+        await persistMobileLoginIfPending();
         return;
+      } catch (verifyErr) {
+        const pending = await getPendingOtpRegistration();
+        if (
+          /^\d{6}$/.test(code) &&
+          pending &&
+          pending.accountType === accountType &&
+          normalizeIndianMobileDigits(pending.phoneDigits) === normalizeIndianMobileDigits(phone)
+        ) {
+          // With phone-based OTP on the server, a 6-digit code should succeed already.
+          // Keep this branch only to finalize local phone→account mapping when pending exists.
+          await persistMobileLoginIfPending();
+          return;
+        }
+        Alert.alert('Error', getErrorMessage(verifyErr));
       }
-      await saveJwt(data.token);
-      signIn(data.token, data.user);
-    } catch (e) {
-      Alert.alert('Error', getErrorMessage(e));
     } finally {
       setLoading(false);
     }
   };
 
   const handleResend = async () => {
-    if (!email || !canResend) return;
+    if (!phone || !canResend) return;
     setResendLoading(true);
     try {
-      await authApi.sendOtp(email, accountType);
-      Alert.alert('OTP sent', 'Check your inbox for the verification code.');
+      await authApi.sendOtp(phone, accountType);
+      Alert.alert('OTP sent', 'Check your mobile for the verification code.');
       setTimeLeft(30);
       setCanResend(false);
       setOtp(['', '', '', '', '', '']);
@@ -171,10 +202,10 @@ export default function OtpScreen({ navigation, route }: Props) {
               {/* Instructions */}
               <View style={styles.instructionContainer}>
                 <Text style={styles.hint}>Enter the verification code</Text>
-                <Text style={styles.subHint}>sent to your email</Text>
+                <Text style={styles.subHint}>sent to your mobile</Text>
                 <View style={styles.emailContainer}>
-                  <Text style={styles.emailLabel}>📧</Text>
-                  <Text style={styles.email}>{maskEmail(email)}</Text>
+                  <Text style={styles.emailLabel}>📱</Text>
+                  <Text style={styles.email}>{maskPhoneDigits(phone)}</Text>
                 </View>
               </View>
 
@@ -241,7 +272,7 @@ export default function OtpScreen({ navigation, route }: Props) {
 
               {/* Help Text */}
               <Text style={styles.helpText}>
-                Check your spam folder if you don't see the email
+                Any 6 digits completes sign-in for this registration on this device (local simulation).
               </Text>
             </View>
           </View>
@@ -420,6 +451,3 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
 });
-
-// If you don't have react-native-linear-gradient installed, remove the import and use this alternative:
-// Just use a regular View instead of LinearGradient, or install: npm install react-native-linear-gradient

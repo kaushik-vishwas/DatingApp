@@ -37,9 +37,16 @@ export function validatePasswordStrength(password: string): string | null {
 }
 
 /** Indian 10-digit mobile (starts 6–9). */
+export function normalizeIndianMobileDigits(input: string): string {
+  const d = input.replace(/\D/g, '');
+  if (d.length <= 10) return d;
+  return d.slice(-10);
+}
+
 export function validateIndianMobileDigits(digits: string): string | null {
-  if (digits.length !== 10) return 'Enter a 10-digit mobile number';
-  if (!/^[6-9]\d{9}$/.test(digits)) return 'Enter a valid Indian mobile number';
+  const d = normalizeIndianMobileDigits(digits);
+  if (d.length !== 10) return 'Enter a 10-digit mobile number';
+  if (!/^[6-9]\d{9}$/.test(d)) return 'Enter a valid Indian mobile number';
   return null;
 }
 

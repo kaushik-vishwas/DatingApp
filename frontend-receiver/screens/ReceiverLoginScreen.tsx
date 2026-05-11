@@ -5,19 +5,19 @@ import { Image, StyleSheet } from 'react-native';
 import { AuthLoginCard } from '../components/auth/AuthLoginCard';
 import { getForcedAppKind } from '../config/appKind';
 import type { RootStackParamList } from '../navigation/RootStackParamList';
-import { normalizeEmail } from '../utils/validation';
+import { normalizeIndianMobileDigits } from '../utils/validation';
 import SelectoLogo from '../assets/SelectoLogo.png';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'ReceiverLogin'>;
 
 export default function ReceiverLoginScreen({ navigation, route }: Props): React.JSX.Element {
-  const [email, setEmail] = useState(route.params?.email ?? '');
+  const [mobile, setMobile] = useState(route.params?.mobile ?? '');
 
   useEffect(() => {
-    setEmail(route.params?.email ?? '');
-  }, [route.params?.email]);
+    setMobile(route.params?.mobile ?? '');
+  }, [route.params?.mobile]);
 
-  const normalized = normalizeEmail(email) || undefined;
+  const normalizedMobile = normalizeIndianMobileDigits(mobile);
   const forcedAppKind = getForcedAppKind();
   const isReceiverOnlyApp = forcedAppKind === 'receiver';
 
@@ -28,15 +28,15 @@ export default function ReceiverLoginScreen({ navigation, route }: Props): React
   return (
     <AuthLoginCard
       navigation={navigation}
-      email={email}
-      onEmailChange={setEmail}
+      mobile={mobile}
+      onMobileChange={setMobile}
       customLogo={<Image source={SelectoLogo} style={styles.logo} resizeMode="contain" />}
       title="Receiver sign in"
-      subtitle="For call receivers — use the email and password you applied with"
+      subtitle="For call receivers — sign in with your registered mobile number"
       primaryRegisterLabel="Register as receiver"
-      onPrimaryRegister={() => navigation.navigate('Register', { email: normalized })}
+      onPrimaryRegister={() => navigation.navigate('Register', { phone: normalizedMobile || undefined })}
       switchLoginLabel={isReceiverOnlyApp ? undefined : 'Login as user'}
-      onSwitchLogin={isReceiverOnlyApp ? undefined : () => navigation.navigate('UserLogin', { email: normalized })}
+      onSwitchLogin={isReceiverOnlyApp ? undefined : () => navigation.navigate('UserLogin', { mobile: normalizedMobile })}
       onChooseAccountType={isReceiverOnlyApp ? undefined : resetToRoleGate}
       authAccountType="receiver"
     />

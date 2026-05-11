@@ -23,12 +23,17 @@ import {
   CALLER_LANGUAGE_OPTIONS,
   INDIAN_STATES,
   getCallerAvatarPresetsByGender,
+  getDefaultCallerAvatarUriForGender,
+  isAllowedCallerAvatarUri,
+  toAvatarImageSource,
+  toAvatarUri,
 } from '../../constants/userOnboarding';
 import { useAuth } from '../../context/AuthContext';
 import type { CallerStackParamList } from '../../navigation/CallerStackParamList';
 import { getErrorMessage, profileApi } from '../../services/api';
 import type { Gender } from '../../types/user';
 import { ageFromLocalCalendarBirthDate, formatDateOnlyLocal, maxDobDateForMinAge, parseDateOnlyLocalToDate } from '../../utils/birthDateClient';
+import { resolveProfileImageSource } from '../../utils/avatarSource';
 
 const PURPLE = '#7b2cff';
 const MAX_INTERESTS = 3;
@@ -84,10 +89,10 @@ export default function CallerEditProfileScreen({ navigation }: Props): React.JS
   }, [user]);
 
   useEffect(() => {
-    if (imageUri && !allowedAvatarPresets.includes(imageUri)) {
-      setImageUri(allowedAvatarPresets[0] ?? null);
+    if (imageUri && !isAllowedCallerAvatarUri(imageUri, gender)) {
+      setImageUri(getDefaultCallerAvatarUriForGender(gender));
     }
-  }, [allowedAvatarPresets, imageUri]);
+  }, [allowedAvatarPresets, gender, imageUri]);
 
   const chip = (label: string, selected: boolean, onPress: () => void) => (
     <TouchableOpacity
@@ -132,7 +137,7 @@ export default function CallerEditProfileScreen({ navigation }: Props): React.JS
       Alert.alert('Validation', 'Please choose an avatar.');
       return;
     }
-    if (!allowedAvatarPresets.includes(imageUri)) {
+    if (!isAllowedCallerAvatarUri(imageUri, gender)) {
       Alert.alert('Validation', 'Please choose a valid avatar for the selected gender.');
       return;
     }
@@ -174,7 +179,10 @@ export default function CallerEditProfileScreen({ navigation }: Props): React.JS
         <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
           <TouchableOpacity style={styles.avatarWrap} onPress={() => setAvatarModal(true)} activeOpacity={0.9}>
             {imageUri ? (
-              <Image source={{ uri: imageUri }} style={styles.avatarImg} />
+              <Image
+                source={resolveProfileImageSource(imageUri) ?? { uri: imageUri }}
+                style={styles.avatarImg}
+              />
             ) : (
               <View style={styles.avatarPlaceholder}>
                 <Text style={styles.camera}>📷</Text>
@@ -291,19 +299,20 @@ export default function CallerEditProfileScreen({ navigation }: Props): React.JS
             <Text style={styles.modalTitle}>Select Avatar</Text>
             <ScrollView style={styles.modalList} keyboardShouldPersistTaps="handled">
               <View style={styles.avatarGrid}>
-                {allowedAvatarPresets.map((avatarUrl) => {
-                  const active = imageUri === avatarUrl;
+                {allowedAvatarPresets.map((preset) => {
+                  const valueUri = toAvatarUri(preset);
+                  const active = imageUri === valueUri;
                   return (
                     <TouchableOpacity
-                      key={avatarUrl}
+                      key={valueUri}
                       style={[styles.avatarCell, active && styles.avatarCellActive]}
                       onPress={() => {
-                        setImageUri(avatarUrl);
+                        setImageUri(valueUri);
                         setAvatarModal(false);
                       }}
                       activeOpacity={0.85}
                     >
-                      <Image source={{ uri: avatarUrl }} style={styles.avatarThumb} />
+                      <Image source={toAvatarImageSource(preset)} style={styles.avatarThumb} />
                     </TouchableOpacity>
                   );
                 })}

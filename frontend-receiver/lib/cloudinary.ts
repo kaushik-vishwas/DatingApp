@@ -1,5 +1,8 @@
 import axios, { isAxiosError } from 'axios';
 import Constants from 'expo-constants';
+import { Image } from 'react-native';
+
+import { resolveCallerAvatarPresetSource } from '../constants/userOnboarding';
 
 export type CloudinaryResourceType = 'image' | 'raw' | 'video' | 'auto';
 
@@ -67,9 +70,16 @@ export async function uploadToCloudinary(
     options.resourceType ?? inferResourceType(options.mimeType ?? 'image/jpeg');
   const endpoint = `https://api.cloudinary.com/v1_1/${cloudName}/${resourceType}/upload`;
 
+  let resolvedUri = fileUri.trim();
+  const presetSource = resolveCallerAvatarPresetSource(resolvedUri);
+  if (presetSource != null) {
+    const asset = Image.resolveAssetSource(presetSource);
+    if (asset?.uri) resolvedUri = asset.uri;
+  }
+
   const name =
     options.fileName?.trim() ||
-    fileUri.split('/').pop()?.split('?')[0] ||
+    resolvedUri.split('/').pop()?.split('?')[0] ||
     (resourceType === 'raw' ? 'document.pdf' : 'upload.jpg');
 
   const mime =
@@ -87,7 +97,7 @@ export async function uploadToCloudinary(
       form.append('upload_preset', uploadPreset);
       form.append(
         'file',
-        { uri: fileUri, type: mime, name } as unknown as Parameters<FormData['append']>[1]
+        { uri: resolvedUri, type: mime, name } as unknown as Parameters<FormData['append']>[1]
       );
 
       /**
