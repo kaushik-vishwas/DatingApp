@@ -146,11 +146,15 @@ export default function AppNavigator(): React.JSX.Element {
           ) : (
             <Stack.Screen name="UnderReview" component={UnderReviewScreen} />
           )
-        ) : accountStatus === 'pending_profile' ? (
-          <Stack.Screen name="CompleteProfileFlow" component={CompleteProfileFlow} />
         ) : (
-          // Receivers can use the app immediately after completing profile (no admin approval gating).
-          <Stack.Screen name="Home" component={ReceiverAppNavigator} />
+          <Stack.Screen
+            name="Home"
+            children={() => (
+              <ReceiverAppNavigator
+                initialRouteName={accountStatus === 'pending_profile' ? 'ReceiverEditProfile' : 'ReceiverHome'}
+              />
+            )}
+          />
         )}
       </Stack.Navigator>
     </NavigationContainer>

@@ -4,6 +4,16 @@ import mongoose from 'mongoose';
 import Razorpay from 'razorpay';
 import User, { type UserDocument } from '../models/User';
 import WalletTopup from '../models/WalletTopup';
+
+type LeanWalletTopup = {
+  _id: mongoose.Types.ObjectId;
+  razorpayOrderId: string;
+  razorpayPaymentId: string;
+  payAmount: number;
+  bonusPercent: number;
+  creditAdded: number;
+  createdAt: Date;
+};
 import { toApiUser } from './authController';
 import { blockCallerUntilApproved } from '../utils/accountAccess';
 import {
@@ -28,6 +38,46 @@ function verifyPaymentSignature(orderId: string, paymentId: string, signature: s
     return false;
   }
 }
+
+/**
+ * GET /wallet/topups — list successful wallet recharges for the signed-in caller.
+ */
+export const listWalletTopups = async (req: Request, res: Response): Promise<void> => {
+  try {
+    if (req.accountKind !== 'user') {
+      res.status(403).json({ message: 'Only app users can view wallet transactions' });
+      return;
+    }
+    const authUser = req.user as UserDocument | undefined;
+    if (!authUser?._id) {
+      res.status(401).json({ message: 'Not authorized' });
+      return;
+    }
+    if (blockCallerUntilApproved(req, res)) return;
+
+    const rows = await WalletTopup.find({ userId: authUser._id })
+      .sort({ createdAt: -1 })
+      .limit(100)
+      .select('razorpayOrderId razorpayPaymentId payAmount bonusPercent creditAdded createdAt')
+      .lean<LeanWalletTopup[]>();
+
+    res.status(200).json({
+      topups: rows.map((r) => ({
+        id: String(r._id),
+        razorpayOrderId: r.razorpayOrderId,
+        razorpayPaymentId: r.razorpayPaymentId,
+        payAmount: r.payAmount,
+        bonusPercent: r.bonusPercent,
+        creditAdded: r.creditAdded,
+        createdAt: r.createdAt.toISOString(),
+      })),
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error('listWalletTopups error:', msg);
+    res.status(500).json({ message: msg || 'Server error' });
+  }
+};
 
 /**
  * POST /wallet/razorpay-order — create Razorpay order (amount = payAmount in paise).

@@ -2,6 +2,7 @@ import { Audio, InterruptionModeAndroid, InterruptionModeIOS, type AVPlaybackSta
 
 const OUTGOING_BEEP_URL = 'https://actions.google.com/sounds/v1/alarms/beep_short.ogg';
 const INCOMING_RING_URL = 'https://actions.google.com/sounds/v1/alarms/phone_alerts_and_rings.ogg';
+/** Random-match search uses the same asset as outgoing beeps, softer volume & slower cadence. */
 
 let audioModePrepared = false;
 
@@ -52,6 +53,41 @@ export async function startOutgoingCallTone(): Promise<() => Promise<void>> {
         break;
       }
       await wait(1700);
+    }
+  })();
+
+  return async () => {
+    disposed = true;
+    try {
+      await sound.stopAsync();
+    } catch {
+      // ignore
+    }
+    try {
+      await sound.unloadAsync();
+    } catch {
+      // ignore
+    }
+  };
+}
+
+/**
+ * Lightweight repeating sound while the random-match overlay is visible (finding + ringing).
+ */
+export async function startRandomMatchingTone(): Promise<() => Promise<void>> {
+  await ensureAudioMode();
+  const sound = new Audio.Sound();
+  await sound.loadAsync({ uri: OUTGOING_BEEP_URL }, { shouldPlay: false, isLooping: false, volume: 0.38 });
+
+  let disposed = false;
+  void (async () => {
+    while (!disposed) {
+      try {
+        await sound.replayAsync();
+      } catch {
+        break;
+      }
+      await wait(950);
     }
   })();
 

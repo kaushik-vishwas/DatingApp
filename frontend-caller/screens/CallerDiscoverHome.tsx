@@ -1,11 +1,13 @@
 import { useNavigation } from '@react-navigation/native';
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  Animated,
   FlatList,
   Image,
   KeyboardAvoidingView,
+  Modal,
   Platform,
   RefreshControl,
   ScrollView,
@@ -32,11 +34,16 @@ import { useCallSignals } from '../context/CallSignalContext';
 import { callApi, discoverApi, getErrorMessage } from '../services/api';
 import type { DiscoverReceiverSummary } from '../types/api';
 import { resolveProfileImageSource } from '../utils/avatarSource';
+import { startRandomMatchingTone } from '../utils/callSounds';
 import { getReceiverPresenceInfo } from '../utils/receiverStatus';
 import SelectoLogo from '../assets/SelectoLogo.png'
 
 const PURPLE = '#7b2cff';
 const GREEN = '#22c55e';
+
+const RANDOM_MATCH_RING_EXPAND_MS = 2400;
+const RANDOM_MATCH_RING_CYCLE_MS =
+  RANDOM_MATCH_RING_EXPAND_MS + 2 * (RANDOM_MATCH_RING_EXPAND_MS / 3);
 
 export default function CallerDiscoverHome(): React.JSX.Element {
   const insets = useSafeAreaInsets();
@@ -55,6 +62,9 @@ export default function CallerDiscoverHome(): React.JSX.Element {
   const [appliedFilters, setAppliedFilters] = useState<DiscoverFiltersState>(DEFAULT_DISCOVER_FILTERS);
   const [modalDraft, setModalDraft] = useState<DiscoverFiltersState>(DEFAULT_DISCOVER_FILTERS);
   const [randomCalling, setRandomCalling] = useState(false);
+  const randomRingPulse0 = useRef(new Animated.Value(0)).current;
+  const randomRingPulse1 = useRef(new Animated.Value(0)).current;
+  const randomRingPulse2 = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
     const t = setTimeout(() => setDebounced(search.trim()), 350);
@@ -121,6 +131,45 @@ export default function CallerDiscoverHome(): React.JSX.Element {
     };
   }, [fetchList]);
 
+  useEffect(() => {
+    const rings = [randomRingPulse0, randomRingPulse1, randomRingPulse2];
+    if (!randomCalling) {
+      for (const v of rings) {
+        v.stopAnimation(() => v.setValue(0));
+      }
+      return;
+    }
+    const stagger = RANDOM_MATCH_RING_EXPAND_MS / 3;
+    const loops = rings.map((v, i) => {
+      const lead = i * stagger;
+      const tail = RANDOM_MATCH_RING_CYCLE_MS - lead - RANDOM_MATCH_RING_EXPAND_MS;
+      return Animated.loop(
+        Animated.sequence([
+          Animated.delay(lead),
+          Animated.timing(v, {
+            toValue: 1,
+            duration: RANDOM_MATCH_RING_EXPAND_MS,
+            useNativeDriver: true,
+          }),
+          Animated.timing(v, {
+            toValue: 0,
+            duration: 0,
+            useNativeDriver: true,
+          }),
+          Animated.delay(Math.max(0, tail)),
+        ])
+      );
+    });
+    for (const l of loops) {
+      l.start();
+    }
+    return () => {
+      for (const l of loops) {
+        l.stop();
+      }
+    };
+  }, [randomCalling, randomRingPulse0, randomRingPulse1, randomRingPulse2]);
+
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     setErr(null);
@@ -161,6 +210,7 @@ export default function CallerDiscoverHome(): React.JSX.Element {
     if (randomCalling) return;
     setRandomCalling(true);
     void (async () => {
+      let stopMatchSound: (() => Promise<void>) | undefined;
       const MAX_RANDOM_RETRIES = 3;
       const isRetryableRandomInviteError = (message: string): boolean => {
         const msg = message.toLowerCase();
@@ -174,6 +224,7 @@ export default function CallerDiscoverHome(): React.JSX.Element {
         );
       };
       try {
+        stopMatchSound = await startRandomMatchingTone();
         let lastErr: unknown = null;
         for (let attempt = 0; attempt < MAX_RANDOM_RETRIES; attempt += 1) {
           try {
@@ -186,6 +237,8 @@ export default function CallerDiscoverHome(): React.JSX.Element {
               navigation.navigate('Wallet');
               return;
             }
+            await stopMatchSound?.();
+            stopMatchSound = undefined;
             await startCallInvite(data.receiverId, data.name, data.profileImage ?? null);
             return;
           } catch (e: unknown) {
@@ -201,6 +254,7 @@ export default function CallerDiscoverHome(): React.JSX.Element {
       } catch (e: unknown) {
         Alert.alert('Random call', getErrorMessage(e));
       } finally {
+        await stopMatchSound?.();
         setRandomCalling(false);
       }
     })();
@@ -368,7 +422,7 @@ export default function CallerDiscoverHome(): React.JSX.Element {
       >
         <Text style={styles.promoTitle}>Meet Someone New!</Text>
         <View style={styles.promoBtn}>
-          <Text style={styles.promoBtnText}>{randomCalling ? 'Matching…' : 'Call Random'}</Text>
+          <Text style={styles.promoBtnText}>{randomCalling ? 'Please wait…' : 'Call Random'}</Text>
         </View>
       </TouchableOpacity>
 
@@ -443,6 +497,86 @@ export default function CallerDiscoverHome(): React.JSX.Element {
           setFilterModalVisible(false);
         }}
       />
+
+      <Modal visible={randomCalling} animationType="fade" statusBarTranslucent>
+        <View style={styles.matchOverlay}>
+          <View style={styles.matchWaveArea}>
+            <View style={styles.matchRippleHub}>
+              <Animated.View
+                style={[
+                  styles.matchRippleCircle,
+                  {
+                    opacity: randomRingPulse0.interpolate({
+                      inputRange: [0, 0.1, 0.5, 1],
+                      outputRange: [0, 0.55, 0.2, 0],
+                    }),
+                    transform: [
+                      {
+                        scale: randomRingPulse0.interpolate({
+                          inputRange: [0, 1],
+                          outputRange: [0.42, 3.95],
+                        }),
+                      },
+                    ],
+                  },
+                ]}
+              />
+              <Animated.View
+                style={[
+                  styles.matchRippleCircle,
+                  {
+                    opacity: randomRingPulse1.interpolate({
+                      inputRange: [0, 0.1, 0.5, 1],
+                      outputRange: [0, 0.55, 0.2, 0],
+                    }),
+                    transform: [
+                      {
+                        scale: randomRingPulse1.interpolate({
+                          inputRange: [0, 1],
+                          outputRange: [0.42, 3.95],
+                        }),
+                      },
+                    ],
+                  },
+                ]}
+              />
+              <Animated.View
+                style={[
+                  styles.matchRippleCircle,
+                  {
+                    opacity: randomRingPulse2.interpolate({
+                      inputRange: [0, 0.1, 0.5, 1],
+                      outputRange: [0, 0.55, 0.2, 0],
+                    }),
+                    transform: [
+                      {
+                        scale: randomRingPulse2.interpolate({
+                          inputRange: [0, 1],
+                          outputRange: [0.42, 3.95],
+                        }),
+                      },
+                    ],
+                  },
+                ]}
+              />
+              <View style={styles.matchRippleCore} />
+            </View>
+            <Text style={styles.matchTitle}>Connecting you…</Text>
+            <Text style={styles.matchSub}>Hang tight while we pair you with someone.</Text>
+          </View>
+
+          <View style={styles.matchCallerRow}>
+            {currentUserProfileImageSource ? (
+              <Image source={currentUserProfileImageSource} style={styles.matchCallerAvatar} />
+            ) : (
+              <View style={[styles.matchCallerAvatar, styles.matchCallerAvatarPh]}>
+                <Text style={styles.matchCallerInitial}>{user?.name?.charAt(0) ?? '?'}</Text>
+              </View>
+            )}
+            <Text style={styles.matchYouLabel}>You</Text>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -578,6 +712,90 @@ const styles = StyleSheet.create({
     color: PURPLE, 
     fontWeight: '900', 
     fontSize: 14 
+  },
+
+  matchOverlay: {
+    flex: 1,
+    backgroundColor: '#121018',
+    paddingHorizontal: 24,
+    paddingTop: Platform.OS === 'ios' ? 56 : 40,
+    paddingBottom: 40,
+    justifyContent: 'space-between',
+  },
+  matchWaveArea: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingBottom: 24,
+  },
+  matchRippleHub: {
+    width: 120,
+    height: 120,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 28,
+    overflow: 'visible',
+  },
+  matchRippleCircle: {
+    position: 'absolute',
+    left: '50%',
+    top: '50%',
+    width: 104,
+    height: 104,
+    marginLeft: -52,
+    marginTop: -52,
+    borderRadius: 52,
+    borderWidth: 2.5,
+    borderColor: 'rgba(174,140,255,0.9)',
+    backgroundColor: 'transparent',
+  },
+  matchRippleCore: {
+    width: 14,
+    height: 14,
+    borderRadius: 7,
+    backgroundColor: '#c4b5fd',
+    zIndex: 2,
+  },
+  matchTitle: {
+    color: '#fff',
+    fontSize: 22,
+    fontWeight: '800',
+    textAlign: 'center',
+    marginBottom: 8,
+  },
+  matchSub: {
+    color: 'rgba(255,255,255,0.85)',
+    fontSize: 14,
+    textAlign: 'center',
+    paddingHorizontal: 12,
+    lineHeight: 20,
+  },
+  matchCallerRow: {
+    alignItems: 'center',
+    paddingBottom: 8,
+  },
+  matchCallerAvatar: {
+    width: 92,
+    height: 92,
+    borderRadius: 46,
+    borderWidth: 3,
+    borderColor: '#fff',
+  },
+  matchCallerAvatarPh: {
+    backgroundColor: PURPLE,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  matchCallerInitial: {
+    color: '#fff',
+    fontSize: 32,
+    fontWeight: '900',
+  },
+  matchYouLabel: {
+    marginTop: 10,
+    color: 'rgba(255,255,255,0.9)',
+    fontSize: 13,
+    fontWeight: '700',
   },
   
   // Search Section

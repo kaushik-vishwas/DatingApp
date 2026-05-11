@@ -13,7 +13,8 @@ export type ReceiverStackParamList = {
   ReceiverSettings: undefined;
   ReceiverNotifications: undefined;
   ReceiverBankDetails: undefined;
-  ReceiverEditProfile: undefined;
+  ReceiverEditProfile: { fromWithdrawKyc?: boolean } | undefined;
+  ReceiverAutoVerification: undefined;
   ReceiverProfilePreview: undefined;
   ReceiverDeleteAccount: undefined;
   ReceiverEarningsBreakdown: undefined;

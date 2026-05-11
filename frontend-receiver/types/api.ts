@@ -397,6 +397,11 @@ export interface UpdateReceiverProfilePayload {
   languages?: string[];
   interests?: string[];
   state?: string;
+  aadhaarNumber?: string;
+  panNumber?: string;
+  aadhaarFront?: string;
+  aadhaarBack?: string;
+  panFront?: string;
   audioCallRate?: number;
   isAvailable?: boolean;
 }

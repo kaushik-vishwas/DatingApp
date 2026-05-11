@@ -26,7 +26,6 @@ export default function ReceiverBankDetailsScreen(): React.JSX.Element {
   const { user, refreshUser } = useAuth();
   const [step, setStep] = useState<Step>('form');
   const [busy, setBusy] = useState(false);
-  const [emailMasked, setEmailMasked] = useState('');
   const [otp, setOtp] = useState('');
   const [holderName, setHolderName] = useState(user?.bankAccountHolderName ?? '');
   const [accountType, setAccountType] = useState<'savings' | 'current'>(
@@ -36,6 +35,18 @@ export default function ReceiverBankDetailsScreen(): React.JSX.Element {
   const [confirmAccountNumber, setConfirmAccountNumber] = useState(user?.bankAccountNumber ?? '');
   const [ifsc, setIfsc] = useState(user?.bankIfsc ?? '');
   const [bankName, setBankName] = useState(user?.bankName ?? '');
+  const formValid =
+    Boolean(holderName.trim()) &&
+    Boolean(accountNumber.trim()) &&
+    Boolean(confirmAccountNumber.trim()) &&
+    Boolean(ifsc.trim()) &&
+    Boolean(bankName.trim()) &&
+    accountNumber.trim() === confirmAccountNumber.trim();
+  const maskedMobile = (() => {
+    const d = String(user?.phone ?? '').replace(/\D/g, '');
+    if (d.length < 4) return d || 'your mobile';
+    return `******${d.slice(-4)}`;
+  })();
 
   const sendOtp = async () => {
     if (!holderName.trim() || !accountNumber.trim() || !ifsc.trim() || !bankName.trim()) {
@@ -48,14 +59,13 @@ export default function ReceiverBankDetailsScreen(): React.JSX.Element {
     }
     setBusy(true);
     try {
-      const { data } = await profileApi.sendReceiverBankUpdateOtp({
+      await profileApi.sendReceiverBankUpdateOtp({
         bankAccountHolderName: holderName.trim(),
         bankAccountType: accountType,
         bankAccountNumber: accountNumber.trim(),
         bankIfsc: ifsc.trim().toUpperCase(),
         bankName: bankName.trim(),
       });
-      setEmailMasked(data.emailMasked);
       setStep('otp');
     } catch (e) {
       Alert.alert('Failed', getErrorMessage(e));
@@ -102,7 +112,7 @@ export default function ReceiverBankDetailsScreen(): React.JSX.Element {
 
       {step === 'form' ? (
         <>
-          <Text style={styles.pageTitle}>Update Bank Account</Text>
+          <Text style={styles.pageTitle}>Apply for KYC</Text>
           <Text style={styles.pageSub}>Your earnings will be transferred to this account.</Text>
           <Field label="Account holder name" value={holderName} onChangeText={setHolderName} />
           <Text style={styles.label}>Account Type</Text>
@@ -125,7 +135,11 @@ export default function ReceiverBankDetailsScreen(): React.JSX.Element {
           <Field label="IFSC code" value={ifsc} onChangeText={setIfsc} />
           <Field label="Bank name" value={bankName} onChangeText={setBankName} />
 
-          <TouchableOpacity style={[styles.primaryBtn, busy && styles.disabled]} onPress={sendOtp} disabled={busy}>
+          <TouchableOpacity
+            style={[styles.primaryBtn, (busy || !formValid) && styles.disabled]}
+            onPress={sendOtp}
+            disabled={busy || !formValid}
+          >
             <Text style={styles.primaryText}>{busy ? 'Sending OTP...' : 'Submit Modification'}</Text>
           </TouchableOpacity>
         </>
@@ -133,8 +147,8 @@ export default function ReceiverBankDetailsScreen(): React.JSX.Element {
 
       {step === 'otp' ? (
         <View style={styles.otpWrap}>
-          <Text style={styles.pageTitle}>Verify Phone</Text>
-          <Text style={styles.pageSub}>Enter Verification Code sent to {emailMasked}</Text>
+          <Text style={styles.pageTitle}>Verify your identity</Text>
+          <Text style={styles.pageSub}>Enter Verification Code sent to {maskedMobile}</Text>
           <TextInput
             value={otp}
             onChangeText={setOtp}

@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.creditWallet = exports.verifyRazorpayWalletPayment = exports.createRazorpayWalletOrder = void 0;
+exports.creditWallet = exports.verifyRazorpayWalletPayment = exports.createRazorpayWalletOrder = exports.listWalletTopups = void 0;
 const crypto_1 = __importDefault(require("crypto"));
 const mongoose_1 = __importDefault(require("mongoose"));
 const razorpay_1 = __importDefault(require("razorpay"));
@@ -31,6 +31,46 @@ function verifyPaymentSignature(orderId, paymentId, signature, secret) {
         return false;
     }
 }
+/**
+ * GET /wallet/topups — list successful wallet recharges for the signed-in caller.
+ */
+const listWalletTopups = async (req, res) => {
+    try {
+        if (req.accountKind !== 'user') {
+            res.status(403).json({ message: 'Only app users can view wallet transactions' });
+            return;
+        }
+        const authUser = req.user;
+        if (!authUser?._id) {
+            res.status(401).json({ message: 'Not authorized' });
+            return;
+        }
+        if ((0, accountAccess_1.blockCallerUntilApproved)(req, res))
+            return;
+        const rows = await WalletTopup_1.default.find({ userId: authUser._id })
+            .sort({ createdAt: -1 })
+            .limit(100)
+            .select('razorpayOrderId razorpayPaymentId payAmount bonusPercent creditAdded createdAt')
+            .lean();
+        res.status(200).json({
+            topups: rows.map((r) => ({
+                id: String(r._id),
+                razorpayOrderId: r.razorpayOrderId,
+                razorpayPaymentId: r.razorpayPaymentId,
+                payAmount: r.payAmount,
+                bonusPercent: r.bonusPercent,
+                creditAdded: r.creditAdded,
+                createdAt: r.createdAt.toISOString(),
+            })),
+        });
+    }
+    catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error('listWalletTopups error:', msg);
+        res.status(500).json({ message: msg || 'Server error' });
+    }
+};
+exports.listWalletTopups = listWalletTopups;
 /**
  * POST /wallet/razorpay-order — create Razorpay order (amount = payAmount in paise).
  */

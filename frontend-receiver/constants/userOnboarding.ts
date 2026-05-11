@@ -101,63 +101,59 @@ export const CALLER_MALE_AVATAR_PRESETS: string[] = [
   'https://randomuser.me/api/portraits/men/30.jpg',
 ];
 
-/** Same pattern as frontend-caller: bundled assets + stable ids (works in production APK). */
+/** Keep type for compatibility, but receiver now uses URL presets. */
 export type CallerAvatarPreset = {
   id: string;
   source: ImageSourcePropType;
 };
 
-const CALLER_FEMALE_AVATAR_SOURCES: ImageSourcePropType[] = [
-  require('../assets/girlavt/girlavt1.png'),
-  require('../assets/girlavt/girlavt2.png'),
-  require('../assets/girlavt/girlavt3.png'),
-  require('../assets/girlavt/girlavt4.png'),
-  require('../assets/girlavt/girlavt5.png'),
-  require('../assets/girlavt/girlavt6.png'),
-  require('../assets/girlavt/girlavt7.png'),
-  require('../assets/girlavt/girlavt8.png'),
-  require('../assets/girlavt/girlavt9.png'),
-  require('../assets/girlavt/girlavt10.png'),
-  require('../assets/girlavt/girlavt11.png'),
-  require('../assets/girlavt/girlavt12.png'),
-  require('../assets/girlavt/girlavt13.png'),
-  require('../assets/girlavt/girlavt14.png'),
-  require('../assets/girlavt/girlavt15.png'),
-  require('../assets/girlavt/girlavt16.png'),
-  require('../assets/girlavt/girlavt17.png'),
-  require('../assets/girlavt/girlavt18.png'),
-  require('../assets/girlavt/girlavt19.png'),
-  require('../assets/girlavt/girlavt20.png'),
-  require('../assets/girlavt/girlavt21.png'),
-  require('../assets/girlavt/girlavt22.png'),
-  require('../assets/girlavt/girlavt23.png'),
-  require('../assets/girlavt/girlavt24.png'),
-  require('../assets/girlavt/girlavt25.png'),
-  require('../assets/girlavt/girlavt26.png'),
-  require('../assets/girlavt/girlavt27.png'),
+/** Female avatars use remote URLs only (no local asset upload). */
+export const CALLER_FEMALE_AVATAR_PRESETS: string[] = [
+  'https://res.cloudinary.com/dfeeqvx3v/image/upload/v1778499409/girlavt/wexwq9wrjzmmjtirknps.png',
+  'https://res.cloudinary.com/dfeeqvx3v/image/upload/v1778499409/girlavt/sca7sjsdkxn3bkkzyk1b.png',
+  'https://res.cloudinary.com/dfeeqvx3v/image/upload/v1778499409/girlavt/s0xonzfkqv92qyrwcvz4.png',
+  'https://res.cloudinary.com/dfeeqvx3v/image/upload/v1778499409/girlavt/s0kpzium3jhfk1mhm2nq.png',
+  'https://res.cloudinary.com/dfeeqvx3v/image/upload/v1778499408/girlavt/kllrg1zosnj0og2uskk7.png',
+  'https://res.cloudinary.com/dfeeqvx3v/image/upload/v1778499408/girlavt/qabvx7hppbiedegicgfm.png',
+  'https://res.cloudinary.com/dfeeqvx3v/image/upload/v1778499408/girlavt/ivcai4nd6vznx2gtgnoz.png',
+  'https://res.cloudinary.com/dfeeqvx3v/image/upload/v1778499408/girlavt/k1daiflhmsipixs88ei3.png',
+  'https://res.cloudinary.com/dfeeqvx3v/image/upload/v1778499408/girlavt/a2wemd1qf4pu94crmzyo.png',
+  'https://res.cloudinary.com/dfeeqvx3v/image/upload/v1778499408/girlavt/dfpifcwevzvpe2ivuhgx.png',
+  'https://res.cloudinary.com/dfeeqvx3v/image/upload/v1778499408/girlavt/yfwuel4gnc1fbaps1adu.png',
+  'https://res.cloudinary.com/dfeeqvx3v/image/upload/v1778499407/girlavt/be7qcpmszpxd0dxvyxyk.png',
+  'https://res.cloudinary.com/dfeeqvx3v/image/upload/v1778499407/girlavt/ihebuaeozubmumklyn0d.png',
+  'https://res.cloudinary.com/dfeeqvx3v/image/upload/v1778499407/girlavt/gmiretont6jdciubcfsl.png',
+  'https://res.cloudinary.com/dfeeqvx3v/image/upload/v1778499407/girlavt/ovg3wbgqrlkdrrrtds5e.png',
+  'https://res.cloudinary.com/dfeeqvx3v/image/upload/v1778499407/girlavt/rlfudwpbrnr6vajmbziq.png',
+  'https://res.cloudinary.com/dfeeqvx3v/image/upload/v1778499407/girlavt/jfnp6izyhpokmxbmuuey.png',
+  'https://res.cloudinary.com/dfeeqvx3v/image/upload/v1778499407/girlavt/cbqv8ya0uk7xe5ldlx8n.png',
+  'https://res.cloudinary.com/dfeeqvx3v/image/upload/v1778499406/girlavt/hdeqf4gtbrp4dsq66u7i.png',
+  'https://res.cloudinary.com/dfeeqvx3v/image/upload/v1778499407/girlavt/vq7k6pmupo5o7fdyktzk.png',
+  'https://res.cloudinary.com/dfeeqvx3v/image/upload/v1778499406/girlavt/c8eb7yyalnyhnvpajyjk.png',
+  'https://res.cloudinary.com/dfeeqvx3v/image/upload/v1778499406/girlavt/wmutjkcvixgpmyprbvwi.png',
+  'https://res.cloudinary.com/dfeeqvx3v/image/upload/v1778499406/girlavt/n11gv4pnrpdfyuku4wlx.png',
+  'https://res.cloudinary.com/dfeeqvx3v/image/upload/v1778499406/girlavt/mmhmarcalyznpr04bksw.png',
+  'https://res.cloudinary.com/dfeeqvx3v/image/upload/v1778499406/girlavt/wjvs2jfvngnkn23cmsej.png',
+  'https://res.cloudinary.com/dfeeqvx3v/image/upload/v1778499405/girlavt/m2ays7unaozygjqlhiwi.png',
+  'https://res.cloudinary.com/dfeeqvx3v/image/upload/v1778499405/girlavt/qr8lrmwqqmhpg153slp7.png',
 ];
 
-export const CALLER_FEMALE_AVATAR_PRESETS: CallerAvatarPreset[] = CALLER_FEMALE_AVATAR_SOURCES.map(
-  (source, idx) => ({
-    id: `preset:female:${idx + 1}`,
-    source,
-  }),
-);
-
-const CALLER_FEMALE_PRESET_SOURCE_BY_ID = new Map<string, ImageSourcePropType>(
-  CALLER_FEMALE_AVATAR_PRESETS.map((p) => [p.id, p.source]),
+/** Backward compatibility for older saved values like `preset:female:1`. */
+const LEGACY_FEMALE_PRESET_URL_BY_ID = new Map<string, string>(
+  CALLER_FEMALE_AVATAR_PRESETS.map((url, idx) => [`preset:female:${idx + 1}`, url]),
 );
 
 export function resolveCallerAvatarPresetSource(
   presetId: string | null | undefined,
 ): ImageSourcePropType | null {
   if (!presetId) return null;
-  return CALLER_FEMALE_PRESET_SOURCE_BY_ID.get(presetId) ?? null;
+  const url = LEGACY_FEMALE_PRESET_URL_BY_ID.get(presetId);
+  return url ? { uri: url } : null;
 }
 
 export function isCallerAvatarPresetId(value: string | null | undefined): boolean {
   if (!value) return false;
-  return CALLER_FEMALE_PRESET_SOURCE_BY_ID.has(value);
+  return LEGACY_FEMALE_PRESET_URL_BY_ID.has(value);
 }
 
 /** Male: HTTPS URL strings. Female: bundled preset objects. */

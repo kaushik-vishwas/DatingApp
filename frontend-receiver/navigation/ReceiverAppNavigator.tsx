@@ -13,6 +13,7 @@ import ReceiverSettingsScreen from '../screens/receiver/ReceiverSettingsScreen';
 import ReceiverNotificationsScreen from '../screens/receiver/ReceiverNotificationsScreen';
 import ReceiverBankDetailsScreen from '../screens/receiver/ReceiverBankDetailsScreen';
 import ReceiverEditProfileScreen from '../screens/receiver/ReceiverEditProfileScreen';
+import ReceiverAutoVerificationScreen from '../screens/receiver/ReceiverAutoVerificationScreen';
 import ReceiverProfilePreviewScreen from '../screens/receiver/ReceiverProfilePreviewScreen';
 import ReceiverDeleteAccountScreen from '../screens/receiver/ReceiverDeleteAccountScreen';
 import ReceiverEarningsBreakdownScreen from '../screens/receiver/ReceiverEarningsBreakdownScreen';
@@ -21,12 +22,18 @@ import type { ReceiverStackParamList } from './ReceiverStackParamList';
 
 const Stack = createNativeStackNavigator<ReceiverStackParamList>();
 
-export default function ReceiverAppNavigator(): React.JSX.Element {
+type Props = {
+  initialRouteName?: keyof ReceiverStackParamList;
+};
+
+export default function ReceiverAppNavigator({
+  initialRouteName = 'ReceiverHome',
+}: Props): React.JSX.Element {
   const insets = useSafeAreaInsets();
   const bottomGap = Math.max(10, insets.bottom);
   return (
     <Stack.Navigator
-      initialRouteName="ReceiverHome"
+      initialRouteName={initialRouteName}
       screenOptions={{
         headerShown: false,
         animation: 'slide_from_right',
@@ -38,6 +45,7 @@ export default function ReceiverAppNavigator(): React.JSX.Element {
       <Stack.Screen name="ReceiverNotifications" component={ReceiverNotificationsScreen} />
       <Stack.Screen name="ReceiverBankDetails" component={ReceiverBankDetailsScreen} />
       <Stack.Screen name="ReceiverEditProfile" component={ReceiverEditProfileScreen} />
+      <Stack.Screen name="ReceiverAutoVerification" component={ReceiverAutoVerificationScreen} />
       <Stack.Screen name="ReceiverProfilePreview" component={ReceiverProfilePreviewScreen} />
       <Stack.Screen name="ReceiverDeleteAccount" component={ReceiverDeleteAccountScreen} />
       <Stack.Screen name="ReceiverEarningsBreakdown" component={ReceiverEarningsBreakdownScreen} />

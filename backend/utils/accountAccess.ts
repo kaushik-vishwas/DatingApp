@@ -26,16 +26,12 @@ export function blockCallerUntilApproved(req: Request, res: Response): boolean {
   return false;
 }
 
-/** Block receiver chat until admin has approved their KYC profile. */
+/** Receiver access gate: no admin-approval wait; only suspended accounts are blocked. */
 export function blockReceiverUntilApproved(req: Request, res: Response): boolean {
   if (req.accountKind !== 'receiver') return false;
   const r = req.receiver as ReceiverDocument | undefined;
   if (!r) {
     res.status(401).json({ message: 'Not authorized' });
-    return true;
-  }
-  if (r.accountStatus !== 'approved') {
-    res.status(403).json({ message: 'Your account is pending admin approval.' });
     return true;
   }
   if (r.suspended) {

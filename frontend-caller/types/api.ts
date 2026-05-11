@@ -91,6 +91,21 @@ export interface RazorpayOrderResponse {
   prefillName: string;
 }
 
+/** GET /wallet/topups */
+export type CallerWalletTopupRow = {
+  id: string;
+  razorpayOrderId: string;
+  razorpayPaymentId: string;
+  payAmount: number;
+  bonusPercent: number;
+  creditAdded: number;
+  createdAt: string;
+};
+
+export interface CallerWalletTopupsResponse {
+  topups: CallerWalletTopupRow[];
+}
+
 export interface DiscoverReceiversResponse {
   receivers: DiscoverReceiverSummary[];
 }

@@ -1,6 +1,8 @@
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import React, { useState } from 'react';
+import * as DocumentPicker from 'expo-document-picker';
+import * as ImagePicker from 'expo-image-picker';
 import {
   Alert,
   Image,
@@ -16,17 +18,86 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { CALLER_FEMALE_AVATAR_PRESETS, isCallerAvatarPresetId } from '../../constants/userOnboarding';
+import {
+  CALLER_FEMALE_AVATAR_PRESETS,
+  toAvatarImageSource,
+  toAvatarUri,
+} from '../../constants/userOnboarding';
+import { UploadField } from '../../components/ui/UploadField';
 import { useAuth } from '../../context/AuthContext';
-import { uploadToCloudinary } from '../../lib/cloudinary';
+import { inferResourceType, uploadToCloudinary } from '../../lib/cloudinary';
 import type { ReceiverStackParamList } from '../../navigation/ReceiverStackParamList';
-import { formatApiErrorForAlert, getErrorMessage, profileApi } from '../../services/api';
+import { getErrorMessage, profileApi } from '../../services/api';
 import { resolveProfileImageSource } from '../../utils/avatarSource';
+import { shouldUploadProfileImageToCloudinary } from '../../utils/profileImageUrl';
+import type { RouteProp } from '@react-navigation/native';
+import { useRoute } from '@react-navigation/native';
 
 type Nav = NativeStackNavigationProp<ReceiverStackParamList, 'ReceiverEditProfile'>;
+type PickedDocument = { uri: string; name?: string; mimeType?: string };
+
+async function pickKycDocument(onPicked: (doc: PickedDocument) => void): Promise<void> {
+  Alert.alert('Upload document', 'Choose source', [
+    { text: 'Cancel', style: 'cancel' },
+    {
+      text: 'Photo library',
+      onPress: async () => {
+        const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+        if (!perm.granted) {
+          Alert.alert('Permission', 'Photo library access is required.');
+          return;
+        }
+        const result = await ImagePicker.launchImageLibraryAsync({
+          mediaTypes: ImagePicker.MediaTypeOptions.Images,
+          quality: 0.9,
+        });
+        if (result.canceled || !result.assets[0]) return;
+        const a = result.assets[0];
+        onPicked({
+          uri: a.uri,
+          name: a.fileName ?? 'document.jpg',
+          mimeType: a.mimeType ?? 'image/jpeg',
+        });
+      },
+    },
+    {
+      text: 'Document (PDF)',
+      onPress: async () => {
+        const result = await DocumentPicker.getDocumentAsync({
+          type: ['application/pdf', 'image/*'],
+          copyToCacheDirectory: true,
+        });
+        if (result.canceled || !result.assets[0]) return;
+        const a = result.assets[0];
+        onPicked({
+          uri: a.uri,
+          name: a.name ?? 'document.pdf',
+          mimeType: a.mimeType ?? 'application/pdf',
+        });
+      },
+    },
+  ]);
+}
+
+async function ensureUploadedUrl(doc: PickedDocument, fileName: string): Promise<string> {
+  const raw = doc.uri.trim();
+  if (/^https:\/\//i.test(raw) && !shouldUploadProfileImageToCloudinary(raw)) return raw;
+  try {
+    const res = await uploadToCloudinary(raw, {
+      mimeType: doc.mimeType,
+      resourceType: inferResourceType(doc.mimeType ?? 'image/jpeg'),
+      fileName: doc.name || fileName,
+    });
+    return res.secure_url;
+  } catch {
+    return raw;
+  }
+}
 
 export default function ReceiverEditProfileScreen(): React.JSX.Element {
   const navigation = useNavigation<Nav>();
+  const route = useRoute<RouteProp<ReceiverStackParamList, 'ReceiverEditProfile'>>();
+  const fromWithdrawKyc = Boolean(route.params?.fromWithdrawKyc);
   const { user, refreshUser } = useAuth();
   const [saving, setSaving] = useState(false);
 
@@ -34,50 +105,73 @@ export default function ReceiverEditProfileScreen(): React.JSX.Element {
   const [stateValue, setStateValue] = useState(user?.state ?? '');
   const [languages, setLanguages] = useState<string[]>(user?.languages ?? []);
   const [interests, setInterests] = useState<string[]>(user?.interests ?? []);
+  const [aadhaarNumber, setAadhaarNumber] = useState(String(user?.aadhaarNumber ?? ''));
+  const [panNumber, setPanNumber] = useState(String(user?.panNumber ?? ''));
+  const [aadhaarFront, setAadhaarFront] = useState<PickedDocument | null>(
+    user?.aadhaarFront ? { uri: user.aadhaarFront, name: 'aadhaar-front' } : null
+  );
+  const [aadhaarBack, setAadhaarBack] = useState<PickedDocument | null>(
+    user?.aadhaarBack ? { uri: user.aadhaarBack, name: 'aadhaar-back' } : null
+  );
+  const [panFront, setPanFront] = useState<PickedDocument | null>(
+    user?.panFront ? { uri: user.panFront, name: 'pan-front' } : null
+  );
   const [showSuccess, setShowSuccess] = useState(false);
   const [profileImageUri, setProfileImageUri] = useState<string | null>(user?.profileImage ?? null);
   const [avatarModal, setAvatarModal] = useState(false);
+  const isWithdrawKycMode = fromWithdrawKyc;
 
   const onSave = async () => {
-    if (!name.trim()) {
-      Alert.alert('Validation', 'Name is required.');
-      return;
-    }
-    if (!profileImageUri) {
-      Alert.alert('Validation', 'Please select an avatar.');
-      return;
-    }
-    const allowedPreset =
-      isCallerAvatarPresetId(profileImageUri) &&
-      CALLER_FEMALE_AVATAR_PRESETS.some((p) => p.id === profileImageUri);
-    const isHttpsAvatar = /^https:\/\//i.test(profileImageUri.trim());
-    if (!allowedPreset && !isHttpsAvatar) {
-      Alert.alert('Validation', 'Please select one avatar from the available list.');
-      return;
+    const aadhaarDigits = aadhaarNumber.replace(/\D/g, '');
+    const pan = panNumber.trim().toUpperCase();
+    if (isWithdrawKycMode) {
+      if (!/^\d{12}$/.test(aadhaarDigits)) {
+        Alert.alert('Validation', 'Please enter a valid 12-digit Aadhaar number.');
+        return;
+      }
+      if (!/^[A-Z]{5}[0-9]{4}[A-Z]$/.test(pan)) {
+        Alert.alert('Validation', 'Please enter a valid PAN (example: ABCDE1234F).');
+        return;
+      }
+      if (!aadhaarFront || !aadhaarBack || !panFront) {
+        Alert.alert('Validation', 'Please upload Aadhaar front, Aadhaar back, and PAN front.');
+        return;
+      }
+    } else {
+      if (!name.trim()) {
+        Alert.alert('Validation', 'Name is required.');
+        return;
+      }
+      if (!profileImageUri) {
+        Alert.alert('Validation', 'Please select an avatar.');
+        return;
+      }
+      const allowedPreset = CALLER_FEMALE_AVATAR_PRESETS.some((p) => toAvatarUri(p) === profileImageUri);
+      const isHttpsAvatar = /^https:\/\//i.test(profileImageUri.trim());
+      if (!allowedPreset && !isHttpsAvatar) {
+        Alert.alert('Validation', 'Please select one avatar from the available list.');
+        return;
+      }
     }
     setSaving(true);
     try {
-      let profileImage = profileImageUri.trim();
-      if (isCallerAvatarPresetId(profileImage)) {
-        try {
-          profileImage = (
-            await uploadToCloudinary(profileImage, {
-              mimeType: 'image/png',
-              resourceType: 'image',
-              fileName: 'avatar.png',
-            })
-          ).secure_url;
-        } catch (uploadErr: unknown) {
-          Alert.alert('Photo upload failed', formatApiErrorForAlert(uploadErr));
-          return;
-        }
-      }
+      const aadhaarFrontUrl =
+        isWithdrawKycMode && aadhaarFront ? await ensureUploadedUrl(aadhaarFront, 'aadhaar-front') : undefined;
+      const aadhaarBackUrl =
+        isWithdrawKycMode && aadhaarBack ? await ensureUploadedUrl(aadhaarBack, 'aadhaar-back') : undefined;
+      const panFrontUrl =
+        isWithdrawKycMode && panFront ? await ensureUploadedUrl(panFront, 'pan-front') : undefined;
       await profileApi.updateReceiverProfile({
-        name: name.trim(),
-        profileImage,
-        state: stateValue.trim(),
-        languages,
-        interests,
+        name: isWithdrawKycMode ? undefined : name.trim(),
+        profileImage: isWithdrawKycMode ? undefined : profileImageUri?.trim(),
+        state: isWithdrawKycMode ? undefined : stateValue.trim(),
+        languages: isWithdrawKycMode ? undefined : languages,
+        interests: isWithdrawKycMode ? undefined : interests,
+        aadhaarNumber: isWithdrawKycMode ? aadhaarDigits : undefined,
+        panNumber: isWithdrawKycMode ? pan : undefined,
+        aadhaarFront: aadhaarFrontUrl,
+        aadhaarBack: aadhaarBackUrl,
+        panFront: panFrontUrl,
       });
       await refreshUser();
       setShowSuccess(true);
@@ -103,48 +197,99 @@ export default function ReceiverEditProfileScreen(): React.JSX.Element {
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
           <Text style={styles.backText}>←</Text>
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Edit Your Profile</Text>
+        <Text style={styles.headerTitle}>{isWithdrawKycMode ? 'Verify your identity' : 'Complete Your Profile'}</Text>
         <View style={styles.backBtn} />
       </View>
 
-      {/* <Text style={styles.title}>Edit Your Profile</Text> */}
-      <Text style={styles.subtitle}>This information will be visible to users who want to call.</Text>
+      <Text style={styles.subtitle}>
+        {isWithdrawKycMode
+          ? 'Upload your identity documents for withdrawal KYC.'
+          : 'This information will be visible to users who want to call.'}
+      </Text>
 
-      <Text style={styles.fieldLabel}>Profile Avatar</Text>
-      <View style={styles.photoWrap}>
-        <TouchableOpacity style={styles.photoCircle} onPress={() => setAvatarModal(true)}>
-          {profileImageUri ? (
-          <Image
-          source={resolveProfileImageSource(profileImageUri) ?? { uri: profileImageUri }}
-          style={styles.photoImage}
-        />
-          ) : (
-            <Text style={styles.photoPlaceholder}>📷</Text>
-          )}
-        </TouchableOpacity>
-        <TouchableOpacity onPress={() => setAvatarModal(true)}>
-          <Text style={styles.photoAction}>Choose one of 30 girl avatars</Text>
-        </TouchableOpacity>
-      </View>
+      {isWithdrawKycMode ? (
+        <>
+          <Field
+            label="Aadhaar Number"
+            value={aadhaarNumber}
+            onChangeText={(v) => setAadhaarNumber(v.replace(/\D/g, '').slice(0, 12))}
+            keyboardType="numeric"
+          />
+          <Field
+            label="PAN Number"
+            value={panNumber}
+            onChangeText={(v) => setPanNumber(v.toUpperCase())}
+          />
+          <UploadField
+            label="Aadhaar — front *"
+            uri={aadhaarFront?.uri ?? null}
+            mimeType={aadhaarFront?.mimeType}
+            displayName={aadhaarFront?.name}
+            imageShape="rectangle"
+            onPick={() => void pickKycDocument(setAadhaarFront)}
+            onClear={() => setAadhaarFront(null)}
+            hint="PNG, JPG or PDF"
+          />
+          <UploadField
+            label="Aadhaar — back *"
+            uri={aadhaarBack?.uri ?? null}
+            mimeType={aadhaarBack?.mimeType}
+            displayName={aadhaarBack?.name}
+            imageShape="rectangle"
+            onPick={() => void pickKycDocument(setAadhaarBack)}
+            onClear={() => setAadhaarBack(null)}
+            hint="PNG, JPG or PDF"
+          />
+          <UploadField
+            label="PAN — front *"
+            uri={panFront?.uri ?? null}
+            mimeType={panFront?.mimeType}
+            displayName={panFront?.name}
+            imageShape="rectangle"
+            onPick={() => void pickKycDocument(setPanFront)}
+            onClear={() => setPanFront(null)}
+            hint="PNG, JPG or PDF"
+          />
+        </>
+      ) : (
+        <>
+          <Text style={styles.fieldLabel}>Profile Avatar</Text>
+          <View style={styles.photoWrap}>
+            <TouchableOpacity style={styles.photoCircle} onPress={() => setAvatarModal(true)}>
+              {profileImageUri ? (
+              <Image
+              source={resolveProfileImageSource(profileImageUri) ?? { uri: profileImageUri }}
+              style={styles.photoImage}
+            />
+              ) : (
+                <Text style={styles.photoPlaceholder}>📷</Text>
+              )}
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => setAvatarModal(true)}>
+              <Text style={styles.photoAction}>Choose one of 30 girl avatars</Text>
+            </TouchableOpacity>
+          </View>
 
-      <Field label="Display Name" value={name} onChangeText={setName} />
-      <Field label="State" value={stateValue} onChangeText={setStateValue} />
+          <Field label="Display Name" value={name} onChangeText={setName} />
+          <Field label="State" value={stateValue} onChangeText={setStateValue} />
 
-      <Text style={[styles.fieldLabel, { marginTop: 10 }]}>Languages You Speak (select up to 2)</Text>
-      <ChipGroup
-        options={['English', 'Hindi', 'Tamil', 'Telugu', 'Malayalam', 'Kannada', 'Bengali', 'Marathi']}
-        selected={languages}
-        max={2}
-        onChange={setLanguages}
-      />
+          <Text style={[styles.fieldLabel, { marginTop: 10 }]}>Languages You Speak (select up to 2)</Text>
+          <ChipGroup
+            options={['English', 'Hindi', 'Tamil', 'Telugu', 'Malayalam', 'Kannada', 'Bengali', 'Marathi']}
+            selected={languages}
+            max={2}
+            onChange={setLanguages}
+          />
 
-      <Text style={[styles.fieldLabel, { marginTop: 10 }]}>Your interests (select up to 3)</Text>
-      <ChipGroup
-        options={['Technology', 'Movies', 'Music', 'Travel', 'Cooking', 'Sports', 'Books', 'Gaming', 'Art', 'Fashion']}
-        selected={interests}
-        max={3}
-        onChange={setInterests}
-      />
+          <Text style={[styles.fieldLabel, { marginTop: 10 }]}>Your interests (select up to 3)</Text>
+          <ChipGroup
+            options={['Technology', 'Movies', 'Music', 'Travel', 'Cooking', 'Sports', 'Books', 'Gaming', 'Art', 'Fashion']}
+            selected={interests}
+            max={3}
+            onChange={setInterests}
+          />
+        </>
+      )}
 
       <TouchableOpacity style={[styles.saveBtn, saving && styles.saveBtnDisabled]} disabled={saving} onPress={onSave}>
         <Text style={styles.saveText}>{saving ? 'Saving...' : 'Continue'}</Text>
@@ -154,13 +299,32 @@ export default function ReceiverEditProfileScreen(): React.JSX.Element {
         <View style={styles.successOverlay}>
           <View style={styles.successCard}>
             <Text style={styles.successTitle}>Congratulations</Text>
-            <Text style={styles.successSub}>Your Profile is Updated!</Text>
-            <TouchableOpacity style={styles.successBtn} onPress={() => navigation.goBack()}>
-              <Text style={styles.successBtnText}>Go Back</Text>
+            <Text style={styles.successSub}>
+              {fromWithdrawKyc ? 'Your identity details are saved.' : 'Your Profile is Updated!'}
+            </Text>
+            <TouchableOpacity
+              style={styles.successBtn}
+              onPress={() => {
+                if (fromWithdrawKyc) {
+                  navigation.replace('ReceiverBankDetails');
+                } else {
+                  if (user?.accountStatus === 'pending_profile') {
+                    navigation.replace('ReceiverAutoVerification');
+                  } else if (navigation.canGoBack()) {
+                    navigation.goBack();
+                  } else {
+                    navigation.replace('ReceiverHome');
+                  }
+                }
+              }}
+            >
+              <Text style={styles.successBtnText}>{fromWithdrawKyc ? 'Continue' : 'Next'}</Text>
             </TouchableOpacity>
-            <TouchableOpacity onPress={() => navigation.navigate('ReceiverProfilePreview')}>
-              <Text style={styles.previewLink}>View Preview</Text>
-            </TouchableOpacity>
+            {fromWithdrawKyc ? (
+              <TouchableOpacity onPress={() => navigation.navigate('ReceiverProfilePreview')}>
+                <Text style={styles.previewLink}>View Preview</Text>
+              </TouchableOpacity>
+            ) : null}
           </View>
         </View>
       ) : null}
@@ -174,18 +338,19 @@ export default function ReceiverEditProfileScreen(): React.JSX.Element {
             <ScrollView style={styles.modalList} keyboardShouldPersistTaps="handled">
               <View style={styles.avatarGrid}>
                 {CALLER_FEMALE_AVATAR_PRESETS.map((preset) => {
-                  const active = profileImageUri === preset.id;
+                  const presetUri = toAvatarUri(preset);
+                  const active = profileImageUri === presetUri;
                   return (
                     <TouchableOpacity
-                      key={preset.id}
+                      key={presetUri}
                       style={[styles.avatarCell, active && styles.avatarCellActive]}
                       onPress={() => {
-                        setProfileImageUri(preset.id);
+                        setProfileImageUri(presetUri);
                         setAvatarModal(false);
                       }}
                       activeOpacity={0.85}
                     >
-                     <Image source={preset.source} style={styles.avatarThumb} />
+                     <Image source={toAvatarImageSource(preset)} style={styles.avatarThumb} />
                     </TouchableOpacity>
                   );
                 })}

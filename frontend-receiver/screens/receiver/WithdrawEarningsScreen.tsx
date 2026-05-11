@@ -15,6 +15,7 @@ import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { io, type Socket } from 'socket.io-client';
+import { useAuth } from '../../context/AuthContext';
 import { getErrorMessage, getJwt, getResolvedApiBaseUrl, profileApi } from '../../services/api';
 import type { ReceiverStackParamList } from '../../navigation/ReceiverStackParamList';
 import type { ReceiverWithdrawalOverviewResponse } from '../../types/api';
@@ -34,6 +35,7 @@ function formatDate(iso: string): string {
 
 export default function WithdrawEarningsScreen(): React.JSX.Element {
   const navigation = useNavigation<WithdrawNav>();
+  const { user } = useAuth();
   const [loading, setLoading] = useState<boolean>(true);
   const [busy, setBusy] = useState<boolean>(false);
   const [overview, setOverview] = useState<ReceiverWithdrawalOverviewResponse | null>(null);
@@ -67,8 +69,66 @@ export default function WithdrawEarningsScreen(): React.JSX.Element {
     return Number.isFinite(n) ? Math.round(n * 100) / 100 : 0;
   }, [amount]);
 
+  const maskedMobile = useMemo(() => {
+    const d = String(user?.phone ?? '').replace(/\D/g, '');
+    if (d.length < 4) return d || 'your mobile';
+    return `******${d.slice(-4)}`;
+  }, [user?.phone]);
+
+  const isIdentityComplete = useMemo(() => {
+    if (!user) return false;
+    const aadhaarDigits = String(user.aadhaarNumber ?? '').replace(/\D/g, '');
+    const pan = String(user.panNumber ?? '').trim().toUpperCase();
+    return Boolean(
+      user.aadhaarFront?.trim() &&
+        user.aadhaarBack?.trim() &&
+        user.panFront?.trim() &&
+        /^\d{12}$/.test(aadhaarDigits) &&
+        /^[A-Z]{5}[0-9]{4}[A-Z]$/.test(pan),
+    );
+  }, [user]);
+
+  const isBankDetailsComplete = useMemo(() => {
+    if (!overview) return false;
+    return Boolean(
+      overview.bank.bankName?.trim() &&
+        overview.bank.accountHolderName?.trim() &&
+        overview.bank.accountMasked?.trim(),
+    );
+  }, [overview]);
+
+  const getWithdrawKycAction = useCallback(() => {
+    if (!isIdentityComplete) {
+      return {
+        title: 'Complete KYC',
+        subtitle: 'First complete Aadhaar/PAN details and documents.',
+        onPress: () => navigation.navigate('ReceiverEditProfile', { fromWithdrawKyc: true }),
+      };
+    }
+    return {
+      title: 'Complete KYC',
+      subtitle: 'Now complete your bank account details.',
+      onPress: () => navigation.navigate('ReceiverBankDetails'),
+    };
+  }, [isIdentityComplete, navigation]);
+
+  const ensureWithdrawKycReady = useCallback((): boolean => {
+    if (!isIdentityComplete) {
+      Alert.alert('Complete KYC', 'Please complete Verify Your Identity first.');
+      navigation.navigate('ReceiverEditProfile', { fromWithdrawKyc: true });
+      return false;
+    }
+    if (!isBankDetailsComplete) {
+      Alert.alert('Complete KYC', 'Please complete Apply for KYC bank details.');
+      navigation.navigate('ReceiverBankDetails');
+      return false;
+    }
+    return true;
+  }, [isIdentityComplete, isBankDetailsComplete, navigation]);
+
   const onSendOtp = async () => {
     if (!overview) return;
+    if (!ensureWithdrawKycReady()) return;
     if (!Number.isFinite(parsedAmount) || parsedAmount < 1) {
       Alert.alert('Invalid amount', 'Enter a valid withdrawal amount.');
       return;
@@ -93,7 +153,7 @@ export default function WithdrawEarningsScreen(): React.JSX.Element {
 
   const onVerifyOtp = async () => {
     if (!/^\d{6}$/.test(otp.trim())) {
-      Alert.alert('Invalid OTP', 'Please enter the 6-digit OTP sent to your Gmail.');
+      Alert.alert('Invalid OTP', 'Please enter the 6-digit OTP sent to your mobile.');
       return;
     }
     setBusy(true);
@@ -206,7 +266,17 @@ export default function WithdrawEarningsScreen(): React.JSX.Element {
         <View style={{ width: 14 }} />
       </View>
 
-      {error ? <Text style={styles.error}>{error}</Text> : null}
+      {(!isIdentityComplete || !isBankDetailsComplete) ? (
+        <View style={styles.infoCard}>
+          <Text style={styles.infoTitle}>Action Required</Text>
+          <Text style={styles.infoText}>{getWithdrawKycAction().subtitle}</Text>
+          <TouchableOpacity style={styles.infoBtn} onPress={getWithdrawKycAction().onPress}>
+            <Text style={styles.infoBtnText}>Complete KYC</Text>
+          </TouchableOpacity>
+        </View>
+      ) : error ? (
+        <Text style={styles.error}>{error}</Text>
+      ) : null}
 
       {overview ? (
         <>
@@ -241,14 +311,21 @@ export default function WithdrawEarningsScreen(): React.JSX.Element {
           </View>
 
           <View style={styles.bankCard}>
-            <Text style={styles.bankTitle}>Withdrawal will be sent to</Text>
+            <View style={styles.bankRow}>
+              <Text style={styles.bankTitle}>Withdrawal will be sent to</Text>
+              <View />
+            </View>
             <Text style={styles.bankName}>{overview.bank.bankName}</Text>
             <Text style={styles.bankAcc}>{overview.bank.accountMasked}</Text>
             <Text style={styles.bankHolder}>{overview.bank.accountHolderName}</Text>
           </View>
 
           {step === 'amount' ? (
-            <TouchableOpacity style={[styles.primaryBtn, busy && styles.primaryBtnDisabled]} onPress={onSendOtp} disabled={busy}>
+            <TouchableOpacity
+              style={[styles.primaryBtn, (busy || !amount.trim()) && styles.primaryBtnDisabled]}
+              onPress={onSendOtp}
+              disabled={busy || !amount.trim()}
+            >
               <Text style={styles.primaryText}>{busy ? 'Sending OTP...' : 'Continue'}</Text>
             </TouchableOpacity>
           ) : null}
@@ -256,7 +333,7 @@ export default function WithdrawEarningsScreen(): React.JSX.Element {
           {step === 'otp' ? (
             <View style={styles.otpCard}>
               <Text style={styles.otpTitle}>Enter Verification Code</Text>
-              <Text style={styles.otpSub}>We sent a 6-digit OTP to {overview.otpEmail}</Text>
+              <Text style={styles.otpSub}>We sent a 6-digit OTP to {maskedMobile}</Text>
               <TextInput
                 style={styles.otpInput}
                 keyboardType="number-pad"
@@ -356,7 +433,20 @@ export default function WithdrawEarningsScreen(): React.JSX.Element {
             )}
           </View>
         </>
-      ) : null}
+      ) : (
+        <View style={styles.emptyStateCard}>
+          <Text style={styles.emptyStateTitle}>Withdraw Earnings</Text>
+          <Text style={styles.emptyStateSub}>
+            Complete your required details to continue the withdrawal flow.
+          </Text>
+          <TouchableOpacity style={styles.primaryBtn} onPress={getWithdrawKycAction().onPress}>
+            <Text style={styles.primaryText}>Complete Required Details</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.secondaryBtn} onPress={() => void loadOverview()}>
+            <Text style={styles.secondaryBtnText}>Refresh</Text>
+          </TouchableOpacity>
+        </View>
+      )}
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -372,6 +462,25 @@ const styles = StyleSheet.create({
   back: { fontSize: 20, color: '#111', fontWeight: '700' },
   title: { fontSize: 20, fontWeight: '800', color: '#111' },
   error: { color: '#b91c1c', fontSize: 12, fontWeight: '700', marginBottom: 10 },
+  infoCard: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#f0d8b0',
+    padding: 12,
+    marginBottom: 10,
+  },
+  infoTitle: { fontSize: 13, fontWeight: '800', color: '#7a4b00' },
+  infoText: { marginTop: 4, fontSize: 12, color: '#5f5f5f' },
+  infoBtn: {
+    marginTop: 10,
+    alignSelf: 'flex-start',
+    backgroundColor: '#7b2cff',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  infoBtnText: { color: '#fff', fontSize: 12, fontWeight: '800' },
   balanceCard: {
     backgroundColor: '#eb83da',
     borderRadius: 14,
@@ -412,6 +521,7 @@ const styles = StyleSheet.create({
     borderColor: '#e3e3e3',
     backgroundColor: '#fff',
   },
+  bankRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   bankTitle: { fontSize: 11, color: '#666', fontWeight: '700', marginBottom: 4 },
   bankName: { fontSize: 13, color: '#222', fontWeight: '700' },
   bankAcc: { fontSize: 12, color: '#666', marginTop: 2 },
@@ -479,4 +589,26 @@ const styles = StyleSheet.create({
   historyAmount: { color: '#111', fontWeight: '800', fontSize: 13 },
   historyDate: { color: '#777', fontSize: 11, marginTop: 2 },
   historyStatus: { color: '#7b2cff', fontWeight: '700', textTransform: 'capitalize', fontSize: 12 },
+  emptyStateCard: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#ececec',
+    padding: 14,
+    marginTop: 8,
+  },
+  emptyStateTitle: { fontSize: 16, fontWeight: '800', color: '#202020' },
+  emptyStateSub: { marginTop: 6, fontSize: 12, color: '#666' },
+  secondaryBtn: {
+    marginTop: 10,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#d7c7ff',
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 42,
+    paddingHorizontal: 14,
+    backgroundColor: '#fff',
+  },
+  secondaryBtnText: { color: '#7b2cff', fontSize: 14, fontWeight: '800' },
 });

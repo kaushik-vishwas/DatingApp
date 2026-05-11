@@ -69,7 +69,7 @@ export default function WalletScreen({ navigation }: Props): React.JSX.Element {
             <Text style={styles.backTxt}>←</Text>
           </TouchableOpacity>
           <Text style={styles.title}>Wallet</Text>
-          <TouchableOpacity onPress={() => Alert.alert('Transactions', 'History coming soon.')}>
+          <TouchableOpacity onPress={() => navigation.navigate('WalletTransactions')}>
             <Text style={styles.txLink}>View Transactions</Text>
           </TouchableOpacity>
         </View>

@@ -24,6 +24,7 @@ import type {
   VerifyOtpResponse,
   WalletCreditResponse,
   RazorpayOrderResponse,
+  CallerWalletTopupsResponse,
   ChatMessagesResponse,
   ChatConversationsResponse,
   ReceiverWalletSummaryResponse,
@@ -288,6 +289,8 @@ export const discoverApi = {
 };
 
 export const walletApi = {
+  listTopups: () => api.get<CallerWalletTopupsResponse>('/wallet/topups'),
+
   credit: (body: { payAmount: number; bonusPercent: number }) =>
     api.post<WalletCreditResponse>('/wallet/credit', body),
 
