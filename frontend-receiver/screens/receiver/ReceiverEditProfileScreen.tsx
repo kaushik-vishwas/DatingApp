@@ -372,42 +372,52 @@ export default function ReceiverEditProfileScreen(): React.JSX.Element {
 
           {/* Success Modal */}
           {showSuccess ? (
-            <View style={styles.successOverlay}>
-              <View style={styles.successCard}>
-                <View style={styles.successIconContainer}>
-                  <Text style={styles.successIcon}>✓</Text>
-                </View>
-                <Text style={styles.successTitle}>Success!</Text>
-                <Text style={styles.successSub}>
-                  {isWithdrawKycMode ? 'Identity verified successfully' : 'Profile updated successfully'}
-                </Text>
-                <TouchableOpacity
-                  style={styles.successBtn}
-                  onPress={() => {
-                    if (fromWithdrawKyc) {
-                      navigation.replace('ReceiverBankDetails');
-                    } else {
-                      if (navigation.canGoBack()) {
-                        navigation.goBack();
-                      } else {
-                        navigation.replace('ReceiverHome');
-                      }
-                    }
-                  }}
-                  activeOpacity={0.8}
-                >
-                  <LinearGradient
-                    colors={['#7F00FF', '#A855F7', '#E100FF']}
-                    start={{ x: 0, y: 0 }}
-                    end={{ x: 1, y: 0 }}
-                    style={styles.successBtnGradient}
-                  >
-                    <Text style={styles.successBtnText}>{fromWithdrawKyc ? 'Continue to Bank' : 'Done'}</Text>
-                  </LinearGradient>
-                </TouchableOpacity>
-              </View>
-            </View>
-          ) : null}
+  <View style={styles.successOverlay}>
+    <View style={styles.successCard}>
+      <View style={styles.successIconContainer}>
+        <Text style={styles.successIcon}>✓</Text>
+      </View>
+      <Text style={styles.successTitle}>Success!</Text>
+      <Text style={styles.successSub}>
+        {isWithdrawKycMode ? 'Identity verified successfully' : 'Profile updated successfully'}
+      </Text>
+      <TouchableOpacity
+        style={styles.successBtn}
+        onPress={async () => {
+          if (fromWithdrawKyc) {
+            navigation.replace('ReceiverBankDetails');
+          } else {
+            // Refresh user data first
+            await refreshUser();
+            
+            // Check if audio verification is already done
+            if (user?.userAudio && user.userAudio.trim()) {
+              // Audio already verified, go back or home
+              if (navigation.canGoBack()) {
+                navigation.goBack();
+              } else {
+                navigation.replace('ReceiverHome');
+              }
+            } else {
+              // Need audio verification
+              navigation.replace('ReceiverAutoVerification');
+            }
+          }
+        }}
+        activeOpacity={0.8}
+      >
+        <LinearGradient
+          colors={['#7F00FF', '#A855F7', '#E100FF']}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 0 }}
+          style={styles.successBtnGradient}
+        >
+          <Text style={styles.successBtnText}>{fromWithdrawKyc ? 'Continue to Bank' : 'Done'}</Text>
+        </LinearGradient>
+      </TouchableOpacity>
+    </View>
+  </View>
+) : null}
         </ScrollView>
       </KeyboardAvoidingView>
 

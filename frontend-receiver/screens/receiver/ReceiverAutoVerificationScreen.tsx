@@ -2,6 +2,7 @@ import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import React, { useEffect, useRef, useState } from 'react';
 import {
+  Alert,
   Animated,
   Easing,
   StyleSheet,
@@ -14,16 +15,20 @@ import Icon from 'react-native-vector-icons/Feather';
 import { LinearGradient } from 'expo-linear-gradient';
 
 import type { ReceiverStackParamList } from '../../navigation/ReceiverStackParamList';
+import { profileApi } from '../../services/api';
+import { useAuth } from '../../context/AuthContext';
 
 type Nav = NativeStackNavigationProp<ReceiverStackParamList, 'ReceiverAutoVerification'>;
 
 export default function ReceiverAutoVerificationScreen(): React.JSX.Element {
   const navigation = useNavigation<Nav>();
+  const { refreshUser } = useAuth();
 
   const [recording, setRecording] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
   const [success, setSuccess] = useState(false);
   const [buttonEnabled, setButtonEnabled] = useState(false);
+  const [isCompleting, setIsCompleting] = useState(false);
 
   const wave1 = useRef(new Animated.Value(0)).current;
   const wave2 = useRef(new Animated.Value(0)).current;
@@ -67,6 +72,22 @@ export default function ReceiverAutoVerificationScreen(): React.JSX.Element {
     createWave(wave3, 1200).start();
   };
 
+  const completeAudioVerification = async () => {
+    setIsCompleting(true);
+    try {
+      // Just update userAudio with a dummy value using existing API
+      await profileApi.updateReceiverProfile({
+        userAudio: 'audio_verified_' + Date.now(),
+      });
+      await refreshUser();
+      navigation.replace('ReceiverHome');
+    } catch (error) {
+      Alert.alert('Error', 'Failed to complete verification');
+    } finally {
+      setIsCompleting(false);
+    }
+  };
+
   const handleFakeRecording = () => {
     if (recording || success) return;
 
@@ -85,13 +106,11 @@ export default function ReceiverAutoVerificationScreen(): React.JSX.Element {
     }, 6500);
   };
 
-  // Fixed: Changed output range to use numbers for numeric interpolation
   const animatedDots = dots.interpolate({
     inputRange: [0, 1, 2, 3],
     outputRange: [0, 1, 2, 3],
   });
 
-  // Fixed: Changed to properly format the dots text
   const getDotsText = () => {
     const value = Math.floor(animatedDots as any);
     switch(value) {
@@ -124,7 +143,6 @@ export default function ReceiverAutoVerificationScreen(): React.JSX.Element {
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'left', 'right']}>
       <View style={styles.container}>
-        {/* Header */}
         <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}>
           <Icon name="chevron-left" size={24} color="#111827" />
         </TouchableOpacity>
@@ -134,7 +152,6 @@ export default function ReceiverAutoVerificationScreen(): React.JSX.Element {
         <Text style={styles.title}>Audio Verification</Text>
         <Text style={styles.subTitle}>Record your audio by saying these lines</Text>
 
-        {/* Script */}
         <View style={styles.scriptWrap}>
           <Text style={styles.scriptText}>
             Hello! Friendship is very special because good friends are always by our side;
@@ -143,7 +160,6 @@ export default function ReceiverAutoVerificationScreen(): React.JSX.Element {
           </Text>
         </View>
 
-        {/* Mic Animation */}
         <View style={styles.micArea}>
           <Animated.View style={[styles.wave, renderWave(wave1, 90)]} />
           <Animated.View style={[styles.wave, renderWave(wave2, 110)]} />
@@ -182,16 +198,15 @@ export default function ReceiverAutoVerificationScreen(): React.JSX.Element {
           ) : null}
         </View>
 
-        {/* Bottom Button */}
         <TouchableOpacity
-          disabled={!buttonEnabled}
+          disabled={!buttonEnabled || isCompleting}
           activeOpacity={0.9}
-          onPress={() => navigation.replace('ReceiverHome')}
+          onPress={completeAudioVerification}
           style={{ width: '100%' }}
         >
           <LinearGradient
             colors={
-              buttonEnabled
+              buttonEnabled && !isCompleting
                 ? ['#7F00FF', '#A855F7', '#E100FF']
                 : ['#d8d8dd', '#d8d8dd']
             }
@@ -202,10 +217,10 @@ export default function ReceiverAutoVerificationScreen(): React.JSX.Element {
             <Text
               style={[
                 styles.proceedText,
-                !buttonEnabled && { color: '#777' },
+                (!buttonEnabled || isCompleting) && { color: '#777' },
               ]}
             >
-              Proceed
+              {isCompleting ? 'Completing...' : 'Proceed'}
             </Text>
           </LinearGradient>
         </TouchableOpacity>

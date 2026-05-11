@@ -641,17 +641,25 @@ export const verifyOtp = async (
         doc.isVerified = true;
         doc.otp = null;
         doc.otpExpiry = null;
-
+    
         if (accountType === 'receiver' && doc.accountStatus === 'pending_profile') {
-          // Check if profile is complete (has name, profileImage, etc.)
-          const hasName = doc.name && doc.name.trim();
-          const hasProfileImage = doc.profileImage && doc.profileImage.trim();
+          const receiverDoc = doc as ReceiverDocument;
+          const hasName = receiverDoc.name && receiverDoc.name.trim();
+          const hasProfileImage = receiverDoc.profileImage && receiverDoc.profileImage.trim();
+          const hasUserAudio = receiverDoc.userAudio && receiverDoc.userAudio.trim();
+          const hasAadhaar = receiverDoc.aadhaarFront && receiverDoc.aadhaarBack && receiverDoc.aadhaarNumber;
+          const hasPan = receiverDoc.panNumber && receiverDoc.panFront;
+          const hasBank = receiverDoc.bankAccountNumber && receiverDoc.bankName;
+    
+          if (hasName && hasProfileImage && hasUserAudio && hasAadhaar && hasPan && hasBank) {
+            doc.accountStatus = 'approved';
+          }
         }
         await doc.save();
         await respondVerified(doc);
         return;
       }
-
+    
       if (!doc.otp || !doc.otpExpiry) {
         t.warn('verify_otp_no_otp_pending');
         t.json(400, {
@@ -660,22 +668,37 @@ export const verifyOtp = async (
         });
         return;
       }
-
+    
       if (new Date() > doc.otpExpiry) {
         t.warn('verify_otp_expired');
         t.json(400, { message: 'OTP expired. Request a new code.', error: 'VERIFY_OTP_CODE_EXPIRED' });
         return;
       }
-
+    
       if (trimmedOtp !== doc.otp) {
         t.warn('verify_otp_mismatch');
         t.json(400, { message: 'Invalid OTP', error: 'VERIFY_OTP_INVALID_CODE' });
         return;
       }
-
+    
       doc.isVerified = true;
       doc.otp = null;
       doc.otpExpiry = null;
+    
+      if (accountType === 'receiver' && doc.accountStatus === 'pending_profile') {
+        const receiverDoc = doc as ReceiverDocument;
+        const hasName = receiverDoc.name && receiverDoc.name.trim();
+        const hasProfileImage = receiverDoc.profileImage && receiverDoc.profileImage.trim();
+        const hasUserAudio = receiverDoc.userAudio && receiverDoc.userAudio.trim();
+        const hasAadhaar = receiverDoc.aadhaarFront && receiverDoc.aadhaarBack && receiverDoc.aadhaarNumber;
+        const hasPan = receiverDoc.panNumber && receiverDoc.panFront;
+        const hasBank = receiverDoc.bankAccountNumber && receiverDoc.bankName;
+    
+        if (hasName && hasProfileImage && hasUserAudio && hasAadhaar && hasPan && hasBank) {
+          doc.accountStatus = 'approved';
+        }
+      }
+    
       await doc.save();
       await respondVerified(doc);
     };

@@ -535,9 +535,16 @@ const verifyOtp = async (req, res) => {
                 doc.otp = null;
                 doc.otpExpiry = null;
                 if (accountType === 'receiver' && doc.accountStatus === 'pending_profile') {
-                    // Check if profile is complete (has name, profileImage, etc.)
-                    const hasName = doc.name && doc.name.trim();
-                    const hasProfileImage = doc.profileImage && doc.profileImage.trim();
+                    const receiverDoc = doc;
+                    const hasName = receiverDoc.name && receiverDoc.name.trim();
+                    const hasProfileImage = receiverDoc.profileImage && receiverDoc.profileImage.trim();
+                    const hasUserAudio = receiverDoc.userAudio && receiverDoc.userAudio.trim();
+                    const hasAadhaar = receiverDoc.aadhaarFront && receiverDoc.aadhaarBack && receiverDoc.aadhaarNumber;
+                    const hasPan = receiverDoc.panNumber && receiverDoc.panFront;
+                    const hasBank = receiverDoc.bankAccountNumber && receiverDoc.bankName;
+                    if (hasName && hasProfileImage && hasUserAudio && hasAadhaar && hasPan && hasBank) {
+                        doc.accountStatus = 'approved';
+                    }
                 }
                 await doc.save();
                 await respondVerified(doc);
@@ -564,6 +571,18 @@ const verifyOtp = async (req, res) => {
             doc.isVerified = true;
             doc.otp = null;
             doc.otpExpiry = null;
+            if (accountType === 'receiver' && doc.accountStatus === 'pending_profile') {
+                const receiverDoc = doc;
+                const hasName = receiverDoc.name && receiverDoc.name.trim();
+                const hasProfileImage = receiverDoc.profileImage && receiverDoc.profileImage.trim();
+                const hasUserAudio = receiverDoc.userAudio && receiverDoc.userAudio.trim();
+                const hasAadhaar = receiverDoc.aadhaarFront && receiverDoc.aadhaarBack && receiverDoc.aadhaarNumber;
+                const hasPan = receiverDoc.panNumber && receiverDoc.panFront;
+                const hasBank = receiverDoc.bankAccountNumber && receiverDoc.bankName;
+                if (hasName && hasProfileImage && hasUserAudio && hasAadhaar && hasPan && hasBank) {
+                    doc.accountStatus = 'approved';
+                }
+            }
             await doc.save();
             await respondVerified(doc);
         };
