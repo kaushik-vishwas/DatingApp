@@ -2,7 +2,6 @@ import bcrypt from 'bcryptjs';
 import type { Response, Request } from 'express';
 import User, { type UserDocument } from '../models/User';
 import Receiver, { RECEIVER_AUDIO_CALL_RATE_INR_PER_MIN, type ReceiverDocument } from '../models/Receiver';
-import { sendOtpEmail } from '../config/email';
 import {
   calculateAgeFromBirthDateUtc,
   dateOnlyIsoFromUtcDate,
@@ -24,7 +23,6 @@ export type UserRole = 'caller' | 'receiver';
 export interface SafeUser {
   _id: string;
   name: string;
-  email: string | null;
   phone: string;
   isVerified: boolean;
   role: UserRole;
@@ -74,8 +72,6 @@ type LegacyRegisterRole = 'caller' | 'receiver' | 'both';
 
 type RegisterBody = {
   name?: string;
-  /** Optional legacy field (older clients). New auth is phone-based. */
-  email?: string;
   phone: string;
   /** ISO calendar date `YYYY-MM-DD` */
   dateOfBirth: string;
@@ -94,11 +90,11 @@ function resolveRegisterBirthDate(
   return { ok: true, dob, age: calculateAgeFromBirthDateUtc(dob) };
 }
 
-type LoginBody = { email?: string; password?: string; phone?: string; accountType: AccountTypeParam };
-type SendOtpBody = { email?: string; phone?: string; accountType: AccountTypeParam };
-type VerifyOtpBody = { email?: string; phone?: string; otp: string; accountType: AccountTypeParam };
+type LoginBody = { phone?: string; accountType: AccountTypeParam };
+type SendOtpBody = { phone: string; accountType: AccountTypeParam };
+type VerifyOtpBody = { phone: string; otp: string; accountType: AccountTypeParam };
 type ResetPasswordBody = {
-  email: string;
+  phone: string;
   otp: string;
   newPassword: string;
   accountType: AccountTypeParam;
@@ -118,7 +114,6 @@ export function toApiUser(user: UserDocument): SafeUser {
   return {
     _id: String(user._id),
     name: u.name,
-    email: u.email ?? null,
     phone: u.phone,
     isVerified: u.isVerified,
     role: 'caller',
@@ -158,7 +153,6 @@ export function toApiReceiver(receiver: ReceiverDocument): SafeUser {
   return {
     _id: String(receiver._id),
     name: r.name,
-    email: r.email ?? null,
     phone: r.phone,
     isVerified: r.isVerified,
     role: 'receiver',
@@ -207,14 +201,6 @@ export function toSafeUser(doc: UserDocument | ReceiverDocument): SafeUser {
   return toApiReceiver(doc as ReceiverDocument);
 }
 
-async function emailTaken(normalizedEmail: string): Promise<boolean> {
-  const [u, r] = await Promise.all([
-    User.exists({ email: normalizedEmail }),
-    Receiver.exists({ email: normalizedEmail }),
-  ]);
-  return Boolean(u || r);
-}
-
 async function phoneTaken(phone: string): Promise<boolean> {
   const normalizedPhone = String(phone).trim();
   const [u, r] = await Promise.all([
@@ -233,7 +219,7 @@ export const register = async (
 ): Promise<void> => {
   const t = beginApiTrace('POST /auth/register', req, res);
   try {
-    const { name, email, phone, role, dateOfBirth } = req.body;
+    const { name, phone, role, dateOfBirth } = req.body;
 
     if (!phone || !String(phone).trim()) {
       t.warn('register_validation_missing_fields');
@@ -265,20 +251,6 @@ export const register = async (
       return;
     }
 
-    const normalizedEmail =
-      typeof email === 'string' && email.trim()
-        ? String(email).toLowerCase().trim()
-        : null;
-
-    if (normalizedEmail && (await emailTaken(normalizedEmail))) {
-      t.warn('register_email_conflict', { emailHash: `[len=${normalizedEmail.length}]` });
-      t.json(409, {
-        message: 'Email already registered',
-        error: 'REGISTER_EMAIL_TAKEN',
-      });
-      return;
-    }
-
     const allowed: LegacyRegisterRole[] = ['caller', 'receiver', 'both'];
     const userRole: LegacyRegisterRole = role && allowed.includes(role) ? role : 'receiver';
     const resolvedName =
@@ -287,7 +259,6 @@ export const register = async (
     if (userRole === 'caller') {
       const user = await User.create({
         name: resolvedName,
-        email: normalizedEmail,
         phone: phoneDigits,
         isVerified: false,
         passwordHash: null,
@@ -304,7 +275,6 @@ export const register = async (
 
     const receiver = await Receiver.create({
       name: resolvedName,
-      email: normalizedEmail,
       phone: phoneDigits,
       isVerified: false,
       passwordHash: null,
@@ -351,11 +321,10 @@ export const sendOtp = async (
 ): Promise<void> => {
   const t = beginApiTrace('POST /auth/send-otp', req, res);
   try {
-    const { email, phone, accountType } = req.body;
+    const { phone, accountType } = req.body;
     const phoneDigits = typeof phone === 'string' ? String(phone).trim() : '';
-    const normalizedEmail = typeof email === 'string' ? String(email).toLowerCase().trim() : '';
 
-    if (!phoneDigits && !normalizedEmail) {
+    if (!phoneDigits) {
       t.warn('send_otp_validation_identifier_missing');
       t.json(400, { message: 'phone is required', error: 'SEND_OTP_MISSING_PHONE' });
       return;
@@ -371,8 +340,8 @@ export const sendOtp = async (
 
     const doc =
       accountType === 'user'
-        ? await User.findOne(phoneDigits ? { phone: phoneDigits } : { email: normalizedEmail })
-        : await Receiver.findOne(phoneDigits ? { phone: phoneDigits } : { email: normalizedEmail });
+        ? await User.findOne({ phone: phoneDigits })
+        : await Receiver.findOne({ phone: phoneDigits });
 
     if (!doc) {
       t.warn('send_otp_account_not_found');
@@ -391,7 +360,7 @@ export const sendOtp = async (
     await doc.save();
 
     console.log(
-      `[OTP TEST] ${accountType}:${phoneDigits || normalizedEmail} → OTP: ${otp} (expires ${otpExpiry.toISOString()})`
+      `[OTP TEST] ${accountType}:${phoneDigits} → OTP: ${otp} (expires ${otpExpiry.toISOString()})`
     );
 
     t.log('send_otp_ok');
@@ -407,14 +376,15 @@ export const forgotPassword = async (
   req: Request<{}, {}, SendOtpBody>,
   res: Response
 ): Promise<void> => {
-  const genericMessage = 'If an account exists with this email, a reset code has been sent.';
+  const genericMessage = 'If an account exists with this phone number, a reset code has been sent.';
   const t = beginApiTrace('POST /auth/forgot-password', req, res);
   try {
     const otpBypass = process.env.OTP_BYPASS?.toLowerCase() === 'true';
-    const { email, accountType } = req.body;
-    if (!email) {
-      t.warn('forgot_password_validation_email');
-      t.json(400, { message: 'email is required', error: 'FORGOT_PASSWORD_MISSING_EMAIL' });
+    const { phone, accountType } = req.body;
+    
+    if (!phone) {
+      t.warn('forgot_password_validation_phone');
+      t.json(400, { message: 'phone is required', error: 'FORGOT_PASSWORD_MISSING_PHONE' });
       return;
     }
     if (accountType !== 'user' && accountType !== 'receiver') {
@@ -426,15 +396,15 @@ export const forgotPassword = async (
       return;
     }
 
-    const normalizedEmail = String(email).toLowerCase().trim();
+    const phoneDigits = String(phone).trim();
     const doc =
       accountType === 'user'
-        ? await User.findOne({ email: normalizedEmail })
-        : await Receiver.findOne({ email: normalizedEmail });
+        ? await User.findOne({ phone: phoneDigits })
+        : await Receiver.findOne({ phone: phoneDigits });
 
     if (!doc) {
       t.log('forgot_password_no_account_generic_response');
-      t.json(200, { message: genericMessage, emailSent: false });
+      t.json(200, { message: genericMessage, resetSent: false });
       return;
     }
 
@@ -445,39 +415,12 @@ export const forgotPassword = async (
     doc.otpExpiry = otpExpiry;
     await doc.save();
 
-    console.log(`[PASSWORD RESET OTP] ${doc.email} → OTP: ${otp} (expires ${otpExpiry.toISOString()})`);
+    console.log(`[PASSWORD RESET OTP] ${doc.phone} → OTP: ${otp} (expires ${otpExpiry.toISOString()})`);
 
-    if (otpBypass) {
-      t.log('forgot_password_bypass');
-      t.json(200, { message: genericMessage, emailSent: false });
-      return;
-    }
-
-    let emailSent = true;
-    try {
-      if (!doc.email) {
-        emailSent = false;
-      } else {
-        await sendOtpEmail(doc.email, otp, 'password_reset');
-      }
-    } catch (mailErr) {
-      emailSent = false;
-      t.logFullError('forgot_password_email_transport', mailErr, { subsystem: 'smtp' });
-      if (mailErr && typeof mailErr === 'object' && 'response' in mailErr) {
-        const raw = (mailErr as { response?: unknown }).response;
-        t.warn('forgot_password_smtp_vendor_response_present', {
-          snippet: typeof raw === 'string' ? raw.slice(0, 500) : String(raw),
-        });
-      }
-    }
-
-    t.log('forgot_password_done', { emailSent });
+    t.log('forgot_password_done');
     t.json(200, {
-      message: emailSent
-        ? genericMessage
-        : 'Code could not be emailed. Check server logs and EMAIL_USER / EMAIL_PASS, or use the code printed in the server console.',
-      emailSent,
-      ...(emailSent ? {} : { errorHint: 'FORGOT_PASSWORD_SMTP_FAILED' }),
+      message: genericMessage,
+      resetSent: true,
     });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -493,11 +436,12 @@ export const resetPassword = async (
   const t = beginApiTrace('POST /auth/reset-password', req, res);
   try {
     const otpBypass = process.env.OTP_BYPASS?.toLowerCase() === 'true';
-    const { email, otp, newPassword, accountType } = req.body;
-    if (!email || !otp || !newPassword) {
+    const { phone, otp, newPassword, accountType } = req.body;
+    
+    if (!phone || !otp || !newPassword) {
       t.warn('reset_password_validation_fields');
       t.json(400, {
-        message: 'email, otp, and newPassword are required',
+        message: 'phone, otp, and newPassword are required',
         error: 'RESET_PASSWORD_MISSING_FIELDS',
       });
       return;
@@ -521,7 +465,7 @@ export const resetPassword = async (
       return;
     }
 
-    const normalizedEmail = String(email).toLowerCase().trim();
+    const phoneDigits = String(phone).trim();
 
     const finishReset = async (
       doc: UserDocument | ReceiverDocument
@@ -544,7 +488,7 @@ export const resetPassword = async (
     };
 
     if (accountType === 'user') {
-      const doc = await User.findOne({ email: normalizedEmail }).select('+passwordHash');
+      const doc = await User.findOne({ phone: phoneDigits }).select('+passwordHash');
       if (!doc) {
         t.warn('reset_password_user_not_found');
         t.json(400, { message: 'Invalid or expired code', error: 'RESET_PASSWORD_BAD_OR_MISSING_CODE' });
@@ -585,7 +529,7 @@ export const resetPassword = async (
       return;
     }
 
-    const doc = await Receiver.findOne({ email: normalizedEmail }).select('+passwordHash');
+    const doc = await Receiver.findOne({ phone: phoneDigits }).select('+passwordHash');
     if (!doc) {
       t.warn('reset_password_receiver_not_found');
       t.json(400, { message: 'Invalid or expired code', error: 'RESET_PASSWORD_BAD_OR_MISSING_CODE' });
@@ -641,11 +585,10 @@ export const verifyOtp = async (
   const t = beginApiTrace('POST /auth/verify-otp', req, res);
   try {
     const otpBypass = process.env.OTP_BYPASS?.toLowerCase() === 'true';
-    const { email, phone, otp, accountType } = req.body;
+    const { phone, otp, accountType } = req.body;
     const phoneDigits = typeof phone === 'string' ? String(phone).trim() : '';
-    const normalizedEmail = typeof email === 'string' ? String(email).toLowerCase().trim() : '';
 
-    if (!otp || (!phoneDigits && !normalizedEmail)) {
+    if (!otp || !phoneDigits) {
       t.warn('verify_otp_validation_fields');
       t.json(400, { message: 'phone and otp are required', error: 'VERIFY_OTP_MISSING_FIELDS' });
       return;
@@ -728,7 +671,7 @@ export const verifyOtp = async (
     };
 
     if (accountType === 'user') {
-      const doc = await User.findOne(phoneDigits ? { phone: phoneDigits } : { email: normalizedEmail });
+      const doc = await User.findOne({ phone: phoneDigits });
       if (!doc) {
         t.warn('verify_otp_user_not_found');
         t.json(404, { message: 'User not found', error: 'VERIFY_OTP_USER_NOT_FOUND' });
@@ -738,7 +681,7 @@ export const verifyOtp = async (
       return;
     }
 
-    const doc = await Receiver.findOne(phoneDigits ? { phone: phoneDigits } : { email: normalizedEmail });
+    const doc = await Receiver.findOne({ phone: phoneDigits });
     if (!doc) {
       t.warn('verify_otp_receiver_not_found');
       t.json(404, { message: 'User not found', error: 'VERIFY_OTP_RECEIVER_NOT_FOUND' });
