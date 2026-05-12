@@ -141,7 +141,7 @@ export function toApiUser(user: UserDocument): SafeUser {
     suspended: Boolean(u.suspended),
     walletBalance: typeof u.walletBalance === 'number' && Number.isFinite(u.walletBalance) ? u.walletBalance : 0,
     audioCallRate: null,
-    userAudio: u.userAudio ?? null,
+    userAudio: u.userAudio ?? "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3?utm_source=chatgpt.com",
     isAvailable: false,
     isOnline: false,
     rejectionReason: null,
