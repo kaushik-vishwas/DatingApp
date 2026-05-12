@@ -1,3 +1,4 @@
+import { useIsFocused } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import React, { useEffect, useState } from 'react';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
@@ -32,10 +33,12 @@ type Props = {
 
 export default function CallerBottomTabs({ active, navigation }: Props): React.JSX.Element {
   const insets = useSafeAreaInsets();
+  const isFocused = useIsFocused();
   const [notificationUnread, setNotificationUnread] = useState(0);
   const bottomInset = Math.max(insets.bottom, 0);
 
   useEffect(() => {
+    if (!isFocused) return;
     let cancelled = false;
     const refresh = async () => {
       try {
@@ -55,14 +58,10 @@ export default function CallerBottomTabs({ active, navigation }: Props): React.J
       }
     };
     void refresh();
-    const timer = setInterval(() => {
-      void refresh();
-    }, 10000);
     return () => {
       cancelled = true;
-      clearInterval(timer);
     };
-  }, [active]);
+  }, [active, isFocused]);
   const tab = (
     id: CallerTabId,
     icon: string,

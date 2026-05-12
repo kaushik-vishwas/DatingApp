@@ -2,6 +2,7 @@ import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
 import React, { useCallback, useState } from 'react';
+import { LinearGradient } from 'expo-linear-gradient';
 import {
   Alert,
   ActivityIndicator,
@@ -395,33 +396,38 @@ export default function ReceiverHomeDashboard(): React.JSX.Element {
               <Text style={styles.sectionTitle}>Earnings Summary</Text>
               {summaryError ? <Text style={styles.summaryErr}>{summaryError}</Text> : null}
 
-              <View style={styles.earningsMainCard}>
-                <View style={styles.earningsHeader}>
-                  <Text style={styles.earningsSubtitle}>Total Earnings</Text>
-                  <View style={styles.earningsIconWrap}>
-                    <Text style={styles.earningsIcon}>💰</Text>
-                  </View>
-                </View>
-                <Text style={styles.earningsAmount}>
-                  {walletSummary
-                    ? formatInr(
-                        typeof walletSummary.callEarningsLifetime === 'number'
-                          ? walletSummary.callEarningsLifetime
-                          : 0
-                      )
-                    : '…'}
-                </Text>
-                <Text style={styles.earningsPeriod}>
-                  Score-tier payout from voice calls (your earning rate × talk time)
-                </Text>
-                {walletSummary &&
-                typeof walletSummary.walletBalance === 'number' &&
-                walletSummary.walletBalance > 0 ? (
-                  <Text style={styles.earningsWalletNote}>
-                    Withdrawable chat credits: {formatInr(walletSummary.walletBalance)}
-                  </Text>
-                ) : null}
-              </View>
+              <LinearGradient
+  colors={['#7F00FF', '#A855F7', '#E100FF']}
+  start={{ x: 0, y: 0 }}
+  end={{ x: 1, y: 1 }}
+  style={styles.earningsMainCard}
+>
+  <View style={styles.earningsHeader}>
+    <Text style={styles.earningsSubtitle}>Total Earnings</Text>
+    <View style={styles.earningsIconWrap}>
+      <Text style={styles.earningsIcon}>💰</Text>
+    </View>
+  </View>
+  <Text style={styles.earningsAmount}>
+    {walletSummary
+      ? formatInr(
+          typeof walletSummary.callEarningsLifetime === 'number'
+            ? walletSummary.callEarningsLifetime
+            : 0
+        )
+      : '…'}
+  </Text>
+  {/* <Text style={styles.earningsPeriod}>
+    Score-tier payout from voice calls (your earning rate × talk time)
+  </Text> */}
+  {walletSummary &&
+  typeof walletSummary.walletBalance === 'number' &&
+  walletSummary.walletBalance > 0 ? (
+    <Text style={styles.earningsWalletNote}>
+      Withdrawable chat credits: {formatInr(walletSummary.walletBalance)}
+    </Text>
+  ) : null}
+</LinearGradient>
 
               <View style={styles.smallEarningsRow}>
                 <View style={styles.smallEarningsCard}>
@@ -509,21 +515,32 @@ export default function ReceiverHomeDashboard(): React.JSX.Element {
               <View style={styles.sectionHeaderRow}>
                 <Text style={styles.sectionTitle}>Leader Board</Text>
               </View>
-              <View style={styles.leaderBoardCard}>
-                <Text style={styles.leaderMinutesBig}>
-                  {callInsights ? Math.round(callInsights.leaderboard.totalMinutes) : 0}
-                  <Text style={styles.leaderMinutesUnit}> Minutes</Text>
-                </Text>
-              </View>
-              <View style={styles.leaderBoardCardPurple}>
-                <Text style={styles.leaderMinutesBig}>
-                  {callInsights ? Math.round(callInsights.leaderboard.thisMonthMinutes) : 0}
-                  <Text style={styles.leaderMinutesUnit}> Minutes</Text>
-                </Text>
-                <View style={styles.progressTrack}>
-                  <View style={styles.progressFill} />
-                </View>
-              </View>
+              <LinearGradient
+  colors={['#7F00FF', '#A855F7', '#E100FF']}
+  start={{ x: 0, y: 0 }}
+  end={{ x: 1, y: 1 }}
+  style={styles.leaderBoardCard}
+>
+  <Text style={styles.leaderMinutesBig}>
+    {callInsights ? Math.round(callInsights.leaderboard.totalMinutes) : 0}
+    <Text style={styles.leaderMinutesUnit}> Minutes</Text>
+  </Text>
+</LinearGradient>
+
+<LinearGradient
+  colors={['#7F00FF', '#A855F7', '#E100FF']}
+  start={{ x: 0, y: 0 }}
+  end={{ x: 1, y: 1 }}
+  style={styles.leaderBoardCardPurple}
+>
+  <Text style={styles.leaderMinutesBig}>
+    {callInsights ? Math.round(callInsights.leaderboard.thisMonthMinutes) : 0}
+    <Text style={styles.leaderMinutesUnit}> Minutes</Text>
+  </Text>
+  <View style={styles.progressTrack}>
+    <View style={styles.progressFill} />
+  </View>
+</LinearGradient>
             </View>
           </>
         ) : (
@@ -797,11 +814,9 @@ const styles = StyleSheet.create({
   
   // Earnings Card
   earningsMainCard: {
-    backgroundColor: '#e97cdd',
-    borderColor: '#dd67cf',
-    borderWidth: 1,
     borderRadius: 14,
     padding: 14,
+    color: '#fff', 
   },
   earningsHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   earningsIconWrap: {
@@ -813,10 +828,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   earningsIcon: { fontSize: 18 },
-  earningsSubtitle: { fontSize: 12, fontWeight: '700', color: '#492245' },
-  earningsAmount: { fontSize: 36, fontWeight: '900', color: '#111', marginTop: 4 },
-  earningsPeriod: { fontSize: 12, fontWeight: '600', color: '#5f3b5d', marginTop: 2 },
-  earningsWalletNote: { fontSize: 11, fontWeight: '600', color: '#7c4a78', marginTop: 8 },
+  earningsSubtitle: { fontSize: 12, fontWeight: '700', color: '#fff' },
+  earningsAmount: { fontSize: 36, fontWeight: '900', color: '#fff', marginTop: 4 },
+  earningsPeriod: { fontSize: 12, fontWeight: '600', color: '#fff', marginTop: 2 },
+  earningsWalletNote: { fontSize: 11, fontWeight: '600', color: '#fff', marginTop: 8 },
   smallEarningsRow: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 12, gap: 10 },
   smallEarningsCard: {
     flex: 1,
@@ -837,7 +852,6 @@ const styles = StyleSheet.create({
   emptyRecent: { color: '#666', fontSize: 13, paddingVertical: 8, textAlign: 'center' },
   quickActionsCol: { gap: 10 },
   leaderBoardCard: {
-    backgroundColor: PURPLE,
     borderRadius: 12,
     padding: 14,
   },
@@ -845,9 +859,8 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(123,44,255,0.16)',
     borderRadius: 12,
     padding: 14,
-    borderWidth: 1,
-    borderColor: 'rgba(123,44,255,0.24)',
     marginTop: 12,
+    color: '#fff', 
   },
   leaderMinutesBig: { color: '#fff', fontWeight: '900', fontSize: 36 },
   leaderMinutesUnit: { fontSize: 15, fontWeight: '700' },

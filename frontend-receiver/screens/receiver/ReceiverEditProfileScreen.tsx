@@ -29,7 +29,7 @@ import { UploadField } from '../../components/ui/UploadField';
 import { useAuth } from '../../context/AuthContext';
 import { inferResourceType, uploadToCloudinary } from '../../lib/cloudinary';
 import type { ReceiverStackParamList } from '../../navigation/ReceiverStackParamList';
-import { getErrorMessage, profileApi } from '../../services/api';
+import { authApi, getErrorMessage, profileApi } from '../../services/api';
 import { resolveProfileImageSource } from '../../utils/avatarSource';
 import { shouldUploadProfileImageToCloudinary } from '../../utils/profileImageUrl';
 import type { RouteProp } from '@react-navigation/native';
@@ -100,7 +100,7 @@ export default function ReceiverEditProfileScreen(): React.JSX.Element {
   const navigation = useNavigation<Nav>();
   const route = useRoute<RouteProp<ReceiverStackParamList, 'ReceiverEditProfile'>>();
   const fromWithdrawKyc = Boolean(route.params?.fromWithdrawKyc);
-  const { user, refreshUser } = useAuth();
+  const { user, refreshUser, applyServerUser } = useAuth();
   const [saving, setSaving] = useState(false);
 
   const [name, setName] = useState(user?.name ?? '');
@@ -387,19 +387,18 @@ export default function ReceiverEditProfileScreen(): React.JSX.Element {
           if (fromWithdrawKyc) {
             navigation.replace('ReceiverBankDetails');
           } else {
-            // Refresh user data first
-            await refreshUser();
-            
-            // Check if audio verification is already done
-            if (user?.userAudio && user.userAudio.trim()) {
-              // Audio already verified, go back or home
-              if (navigation.canGoBack()) {
-                navigation.goBack();
+            try {
+              const { data } = await authApi.me();
+              applyServerUser(data.user);
+              const canDashboard =
+                data.user.accountStatus === 'approved' && Boolean(data.user.userAudio?.trim());
+              if (canDashboard) {
+                if (navigation.canGoBack()) navigation.goBack();
+                else navigation.replace('ReceiverHome');
               } else {
-                navigation.replace('ReceiverHome');
+                navigation.replace('ReceiverAutoVerification');
               }
-            } else {
-              // Need audio verification
+            } catch {
               navigation.replace('ReceiverAutoVerification');
             }
           }

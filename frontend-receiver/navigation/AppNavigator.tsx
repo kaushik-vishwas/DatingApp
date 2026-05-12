@@ -149,11 +149,15 @@ export default function AppNavigator(): React.JSX.Element {
         ) : (
           <Stack.Screen
             name="Home"
-            children={() => (
-              <ReceiverAppNavigator
-                initialRouteName={accountStatus === 'pending_profile' ? 'ReceiverEditProfile' : 'ReceiverHome'}
-              />
-            )}
+            children={() => {
+              const receiverDashboardOk =
+                accountStatus === 'approved' && Boolean(user.userAudio?.trim());
+              return (
+                <ReceiverAppNavigator
+                  initialRouteName={receiverDashboardOk ? 'ReceiverHome' : 'ReceiverEditProfile'}
+                />
+              );
+            }}
           />
         )}
       </Stack.Navigator>

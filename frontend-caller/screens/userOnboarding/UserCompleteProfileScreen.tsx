@@ -17,11 +17,12 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { LinearGradient } from 'expo-linear-gradient';
+import Icon from 'react-native-vector-icons/Ionicons';
 
 import {
   CALLER_INTEREST_OPTIONS,
   CALLER_LANGUAGE_OPTIONS,
-  INDIAN_STATES,
   resolveCallerAvatarPresetSource,
 } from '../../constants/userOnboarding';
 import { useAuth } from '../../context/AuthContext';
@@ -36,8 +37,9 @@ type Props = NativeStackScreenProps<
   'UserCompleteProfile'
 >;
 
-function toggleInList(list: string[], item: string): string[] {
+function toggleInList(list: string[], item: string, max?: number): string[] {
   if (list.includes(item)) return list.filter((x) => x !== item);
+  if (max && list.length >= max) return list;
   return [...list, item];
 }
 
@@ -51,9 +53,7 @@ export default function UserCompleteProfileScreen({
   const { user, refreshUser, applyServerUser } = useAuth();
 
   const [fullName, setFullName] = useState('');
-  const [state, setState] = useState('Karnataka');
-  const [stateModal, setStateModal] = useState(false);
-
+  const [state, setState] = useState('');
   const [interests, setInterests] = useState<string[]>([]);
   const [languages, setLanguages] = useState<string[]>([]);
 
@@ -97,7 +97,7 @@ export default function UserCompleteProfileScreen({
     }
 
     if (!state.trim()) {
-      Alert.alert('Validation', 'Please select your state.');
+      Alert.alert('Validation', 'Please enter your state.');
       return;
     }
 
@@ -196,7 +196,7 @@ export default function UserCompleteProfileScreen({
             style={styles.backWrap}
             onPress={() => navigation.goBack()}
           >
-            <Text style={styles.back}>←</Text>
+            <Icon name="chevron-back" size={24} color={PURPLE} />
           </TouchableOpacity>
 
           <Text style={styles.title}>Complete Your Profile</Text>
@@ -240,7 +240,7 @@ export default function UserCompleteProfileScreen({
             autoCapitalize="words"
           />
 
-          <Text style={styles.label}>Interests</Text>
+          <Text style={styles.label}>Interests (max 2)</Text>
 
           <View style={styles.chipGrid}>
             {CALLER_INTEREST_OPTIONS.map((opt) =>
@@ -270,17 +270,16 @@ export default function UserCompleteProfileScreen({
 
           <Text style={styles.label}>State</Text>
 
-          <TouchableOpacity
-            style={styles.select}
-            onPress={() => setStateModal(true)}
-            activeOpacity={0.85}
-          >
-            <Text style={styles.selectText}>{state}</Text>
+          <TextInput
+            style={styles.input}
+            placeholder="Enter your state"
+            placeholderTextColor="#999"
+            value={state}
+            onChangeText={setState}
+            autoCapitalize="words"
+          />
 
-            <Text style={styles.chev}>▼</Text>
-          </TouchableOpacity>
-
-          <Text style={styles.label}>Languages</Text>
+          <Text style={styles.label}>Languages (max 4)</Text>
 
           <View style={styles.chipGrid}>
             {CALLER_LANGUAGE_OPTIONS.map((opt) =>
@@ -288,70 +287,42 @@ export default function UserCompleteProfileScreen({
                 opt,
                 languages.includes(opt),
                 () =>
-                  setLanguages((prev) =>
-                    toggleInList(prev, opt),
-                  ),
+                  setLanguages((prev) => {
+                    if (prev.includes(opt)) {
+                      return prev.filter((x) => x !== opt);
+                    }
+                    if (prev.length >= 4) {
+                      Alert.alert(
+                        'Maximum 4 languages',
+                        'You can select only 4 languages.',
+                      );
+                      return prev;
+                    }
+                    return [...prev, opt];
+                  }),
               ),
             )}
           </View>
         </ScrollView>
 
         <TouchableOpacity
-          style={[
-            styles.button,
-            submitting && styles.buttonDisabled,
-          ]}
+          style={styles.buttonWrapper}
           onPress={() => void onSubmit()}
           disabled={submitting}
-          activeOpacity={0.9}
+          activeOpacity={0.8}
         >
-          <Text style={styles.buttonText}>
-            {submitting ? 'Saving…' : 'Continue'}
-          </Text>
+          <LinearGradient
+            colors={['#7F00FF', '#A855F7', '#E100FF']}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 0 }}
+            style={[styles.button, submitting && styles.buttonDisabled]}
+          >
+            <Text style={styles.buttonText}>
+              {submitting ? 'Saving…' : 'Continue'}
+            </Text>
+          </LinearGradient>
         </TouchableOpacity>
       </KeyboardAvoidingView>
-
-      <Modal visible={stateModal} transparent animationType="fade">
-        <View style={styles.modalOverlay}>
-          <Pressable
-            style={styles.modalDismiss}
-            onPress={() => setStateModal(false)}
-          />
-
-          <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>Select State</Text>
-
-            <ScrollView
-              style={styles.modalList}
-              keyboardShouldPersistTaps="handled"
-            >
-              {INDIAN_STATES.map((s) => (
-                <TouchableOpacity
-                  key={s}
-                  style={[
-                    styles.stateRow,
-                    s === state && styles.stateRowActive,
-                  ]}
-                  onPress={() => {
-                    setState(s);
-                    setStateModal(false);
-                  }}
-                >
-                  <Text
-                    style={[
-                      styles.stateRowText,
-                      s === state &&
-                        styles.stateRowTextActive,
-                    ]}
-                  >
-                    {s}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-          </View>
-        </View>
-      </Modal>
     </View>
   );
 }
@@ -359,7 +330,7 @@ export default function UserCompleteProfileScreen({
 const styles = StyleSheet.create({
   bg: {
     flex: 1,
-    backgroundColor: '#f4f4f5',
+    backgroundColor: '#fff',
   },
 
   flex: {
@@ -376,11 +347,6 @@ const styles = StyleSheet.create({
     alignSelf: 'flex-start',
     padding: 4,
     marginBottom: 8,
-  },
-
-  back: {
-    fontSize: 22,
-    color: '#111',
   },
 
   title: {
@@ -498,37 +464,17 @@ const styles = StyleSheet.create({
     color: '#fff',
   },
 
-  select: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    borderWidth: 1,
-    borderColor: '#e5e5e5',
-    borderRadius: 12,
-    paddingHorizontal: 14,
-    paddingVertical: 14,
-    backgroundColor: '#fff',
-  },
-
-  selectText: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: '#111',
-  },
-
-  chev: {
-    fontSize: 12,
-    color: '#888',
-  },
-
-  button: {
+  buttonWrapper: {
     position: 'absolute',
     left: 20,
     right: 20,
     bottom: 24,
-    backgroundColor: PURPLE,
-    paddingVertical: 16,
     borderRadius: 12,
+    overflow: 'hidden',
+  },
+
+  button: {
+    paddingVertical: 16,
     alignItems: 'center',
   },
 
@@ -540,56 +486,5 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 16,
     fontWeight: '800',
-  },
-
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.45)',
-    justifyContent: 'center',
-    padding: 24,
-  },
-
-  modalDismiss: {
-    ...StyleSheet.absoluteFillObject,
-  },
-
-  modalCard: {
-    backgroundColor: '#fff',
-    borderRadius: 14,
-    maxHeight: '70%',
-    paddingVertical: 12,
-    zIndex: 1,
-  },
-
-  modalTitle: {
-    fontSize: 17,
-    fontWeight: '800',
-    paddingHorizontal: 18,
-    paddingBottom: 10,
-    color: '#111',
-  },
-
-  modalList: {
-    paddingHorizontal: 8,
-  },
-
-  stateRow: {
-    paddingVertical: 14,
-    paddingHorizontal: 14,
-    borderRadius: 10,
-  },
-
-  stateRowActive: {
-    backgroundColor: 'rgba(123,44,255,0.12)',
-  },
-
-  stateRowText: {
-    fontSize: 15,
-    color: '#222',
-  },
-
-  stateRowTextActive: {
-    fontWeight: '700',
-    color: PURPLE,
   },
 });

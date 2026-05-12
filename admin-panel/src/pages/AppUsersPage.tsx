@@ -186,7 +186,7 @@ export function AppUsersPage() {
         <div>
           <h1 className="text-2xl font-bold text-neutral-900">User Management</h1>
           <p className="mt-1 text-sm text-neutral-500">
-            Nesthama app users — search, filter, export. Status matches access: Active (not suspended) or Inactive
+            Selecto app users — search, filter, export. Status matches access: Active (not suspended) or Inactive
             (suspended). ✓ approve or restore; ✕ suspend.
           </p>
         </div>

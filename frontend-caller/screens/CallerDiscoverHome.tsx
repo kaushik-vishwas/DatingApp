@@ -1,5 +1,6 @@
-import { useNavigation } from '@react-navigation/native';
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { useIsFocused, useNavigation } from '@react-navigation/native';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { LinearGradient } from 'expo-linear-gradient';
 import {
   ActivityIndicator,
   Alert,
@@ -47,6 +48,7 @@ const RANDOM_MATCH_RING_CYCLE_MS =
 
 export default function CallerDiscoverHome(): React.JSX.Element {
   const insets = useSafeAreaInsets();
+  const isFocused = useIsFocused();
   const contentBottomPadding = getCallerTabBarContentPadding(insets.bottom);
   const navigation = useNavigation<CallerTabBarNavigation>();
   const { user, refreshUser } = useAuth();
@@ -89,6 +91,8 @@ export default function CallerDiscoverHome(): React.JSX.Element {
     if (appliedFilters.onlineOnly) {
       rows = rows.filter((r) => r.isOnline);
     }
+    // Filter out offline receivers
+    rows = rows.filter((r) => r.isOnline === true);
     return rows;
   }, [language, debounced, appliedFilters]);
 
@@ -115,21 +119,21 @@ export default function CallerDiscoverHome(): React.JSX.Element {
   }, [fetchList]);
 
   useEffect(() => {
-    let cancelled = false;
-    const poll = setInterval(() => {
-      void fetchList()
-        .then((rows) => {
-          if (!cancelled) setReceivers(rows);
-        })
-        .catch(() => {
-          // Keep existing cards on transient poll failures.
+    if (!isFocused) return;
+    void fetchList()
+      .then((rows) => {
+        setReceivers((prev) => {
+          if (prev.length === rows.length && prev.every((p, i) => p._id === rows[i]?._id)) {
+            return prev;
+          }
+          return rows;
         });
-    }, 8000);
-    return () => {
-      cancelled = true;
-      clearInterval(poll);
-    };
-  }, [fetchList]);
+      })
+      .catch(() => {
+        // Keep existing cards on transient failures.
+      });
+    return;
+  }, [fetchList, isFocused]);
 
   useEffect(() => {
     const rings = [randomRingPulse0, randomRingPulse1, randomRingPulse2];
@@ -185,7 +189,10 @@ export default function CallerDiscoverHome(): React.JSX.Element {
   }, [fetchList, refreshUser]);
 
   const wallet = typeof user?.walletBalance === 'number' && Number.isFinite(user.walletBalance) ? user.walletBalance : 0;
-  const currentUserProfileImageSource = resolveProfileImageSource(user?.profileImage);
+  const currentUserProfileImageSource = useMemo(
+    () => resolveProfileImageSource(user?.profileImage),
+    [user?.profileImage]
+  );
 
   const onCall = (item: DiscoverReceiverSummary) => {
     const rate = item.audioCallRate;
@@ -244,7 +251,6 @@ export default function CallerDiscoverHome(): React.JSX.Element {
           } catch (e: unknown) {
             lastErr = e;
             const msg = getErrorMessage(e);
-            // Random match can race with other callers; retry with another receiver.
             if (!isRetryableRandomInviteError(msg) || attempt === MAX_RANDOM_RETRIES - 1) {
               throw e;
             }
@@ -274,7 +280,6 @@ export default function CallerDiscoverHome(): React.JSX.Element {
     );
   };
 
-  // Helper function to get short language code (first 3 letters)
   const getShortLang = (lang: string) => {
     return lang.substring(0, 3);
   };
@@ -290,7 +295,6 @@ export default function CallerDiscoverHome(): React.JSX.Element {
         ? `₹${item.audioCallRate}/min`
         : 'TBD';
 
-    // Show only first 2 languages with 3-letter codes
     const displayedLanguages = item.languages.slice(0, 2).map(getShortLang);
     const remainingCount = item.languages.length - 2;
 
@@ -301,7 +305,6 @@ export default function CallerDiscoverHome(): React.JSX.Element {
         onPress={() => navigation.navigate('ReceiverProfile', { receiver: item })}
       >
         <View style={styles.cardRow}>
-          {/* Left Column: Avatar + Rating below */}
           <View style={styles.leftColumn}>
             <View style={[styles.avatarWrapper, { borderColor: statusColor }]}>
               {item.profileImage ? (
@@ -314,7 +317,6 @@ export default function CallerDiscoverHome(): React.JSX.Element {
               <View style={[styles.statusDot, { backgroundColor: statusColor }]} />
             </View>
             
-            {/* Rating below avatar */}
             <View style={styles.ratingBelow}>
               <Text style={styles.star}>★</Text>
               <Text style={styles.ratingText}>{item.ratingAvg}</Text>
@@ -322,9 +324,7 @@ export default function CallerDiscoverHome(): React.JSX.Element {
             </View>
           </View>
 
-          {/* Middle Column: Main Info */}
           <View style={styles.infoSection}>
-            {/* Name */}
             <Text style={styles.cardName} numberOfLines={1}>
               {item.name}
               {item.age != null ? `, ${item.age}` : ''}
@@ -334,13 +334,11 @@ export default function CallerDiscoverHome(): React.JSX.Element {
               {interestStr}
             </Text>
             
-            {/* State */}
             <Text style={styles.cardLoc} numberOfLines={1}>
               {item.state?.trim() || '—'}
             </Text>
           </View>
 
-          {/* Right Column: Rate Button + Languages (horizontal) + Status below */}
           <View style={styles.rightColumn}>
             <TouchableOpacity
               style={styles.callBtn}
@@ -353,7 +351,6 @@ export default function CallerDiscoverHome(): React.JSX.Element {
               <Text style={styles.callBtnText}>{rateLabel}</Text>
             </TouchableOpacity>
             
-            {/* Languages in horizontal row */}
             <View style={styles.languagesRow}>
               {displayedLanguages.map((lang) => (
                 <View key={lang} style={styles.miniLang}>
@@ -365,7 +362,6 @@ export default function CallerDiscoverHome(): React.JSX.Element {
               )}
             </View>
             
-            {/* Status below languages */}
             <View style={[styles.statusPillRight, { backgroundColor: `${statusColor}15` }]}>
               <Text style={[styles.statusTextRight, { color: statusColor }]}>{statusLabel}</Text>
             </View>
@@ -375,9 +371,9 @@ export default function CallerDiscoverHome(): React.JSX.Element {
     );
   };
 
-  const listHeader = (
-    <View style={styles.headerBlock}>
-      {/* Enhanced Top Section */}
+  // Sticky Top Card (only logo, wallet, DP)
+  const StickyTopCard = () => (
+    <View style={styles.stickyTopCard}>
       <View style={styles.topSection}>
         <View style={styles.topBar}>
           <Image 
@@ -386,7 +382,6 @@ export default function CallerDiscoverHome(): React.JSX.Element {
             resizeMode="contain"
           />
           <View style={styles.topRight}>
-            {/* Wallet Capsule with Ring (Border) - No background color, just border ring */}
             <TouchableOpacity
               style={styles.walletCapsule}
               onPress={() => navigation.navigate('Wallet')}
@@ -398,7 +393,6 @@ export default function CallerDiscoverHome(): React.JSX.Element {
               </View>
             </TouchableOpacity>
             
-            {/* Enhanced Avatar with Border */}
             {currentUserProfileImageSource ? (
               <View style={styles.avatarCapsule}>
                 <Image source={currentUserProfileImageSource} style={styles.meAvatar} />
@@ -413,51 +407,6 @@ export default function CallerDiscoverHome(): React.JSX.Element {
           </View>
         </View>
       </View>
-
-      {/* Promo Card */}
-      <TouchableOpacity
-        style={styles.promoPink}
-        activeOpacity={0.9}
-        onPress={onCallRandom}
-      >
-        <Text style={styles.promoTitle}>Meet Someone New!</Text>
-        <View style={styles.promoBtn}>
-          <Text style={styles.promoBtnText}>{randomCalling ? 'Please wait…' : 'Call Random'}</Text>
-        </View>
-      </TouchableOpacity>
-
-      {/* Search Section */}
-      <View style={styles.searchSection}>
-        <View style={styles.searchRow}>
-          <TextInput
-            style={styles.searchInput}
-            placeholder="Search by name or interest…"
-            placeholderTextColor="#999"
-            value={search}
-            onChangeText={setSearch}
-          />
-          <TouchableOpacity
-            style={styles.filterBtn}
-            onPress={() => {
-              setModalDraft({ ...appliedFilters });
-              setFilterModalVisible(true);
-            }}
-            activeOpacity={0.85}
-          >
-            <DiscoverFilterIcon />
-          </TouchableOpacity>
-        </View>
-
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.langScroll}>
-          {langChip('All', null)}
-          {CALLER_LANGUAGE_OPTIONS.map((l) => langChip(l, l))}
-        </ScrollView>
-      </View>
-
-      {err ? <Text style={styles.errText}>{err}</Text> : null}
-      {loading && receivers.length === 0 ? (
-        <ActivityIndicator style={styles.loader} color={PURPLE} />
-      ) : null}
     </View>
   );
 
@@ -467,22 +416,82 @@ export default function CallerDiscoverHome(): React.JSX.Element {
         style={styles.safe}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       >
-        <FlatList
-          style={{ marginBottom: contentBottomPadding }}
-          data={receivers}
-          keyExtractor={(it) => it._id}
-          renderItem={renderItem}
-          ListHeaderComponent={listHeader}
-          contentContainerStyle={[styles.listContent, { paddingBottom: contentBottomPadding }]}
-          ListFooterComponent={<View style={{ height: 12 }} />}
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void onRefresh()} />}
-          keyboardShouldPersistTaps="handled"
-          ListEmptyComponent={
-            !loading ? (
-              <Text style={styles.empty}>No receivers match your filters yet.</Text>
-            ) : null
-          }
-        />
+        <View style={styles.safe}>
+          {/* Sticky Top Card - Only Logo, Wallet, DP */}
+          <StickyTopCard />
+          
+          {/* Scrollable Content (Promo, Search, Filters, Cards) */}
+          <FlatList
+            data={receivers}
+            keyExtractor={(it) => it._id}
+            renderItem={renderItem}
+            contentContainerStyle={[styles.listContent, { paddingBottom: contentBottomPadding }]}
+            ListHeaderComponent={
+              <>
+                {/* Promo Card */}
+              {/* Promo Card with Purple Gradient */}
+<TouchableOpacity
+  activeOpacity={0.9}
+  onPress={onCallRandom}
+>
+  <LinearGradient
+    colors={['#7F00FF', '#A855F7', '#E100FF']}
+    start={{ x: 0, y: 0 }}
+    end={{ x: 1, y: 1 }}
+    style={styles.promoGradient}
+  >
+    <Text style={styles.promoTitle}>Meet Someone New!</Text>
+    <View style={styles.promoBtn}>
+      <Text style={styles.promoBtnText}>{randomCalling ? 'Please wait…' : 'Call Random'}</Text>
+    </View>
+  </LinearGradient>
+</TouchableOpacity>
+
+                {/* Search Section */}
+                <View style={styles.searchSection}>
+                  <View style={styles.searchRow}>
+                    <TextInput
+                      style={styles.searchInput}
+                      placeholder="Search by name or interest…"
+                      placeholderTextColor="#999"
+                      value={search}
+                      onChangeText={setSearch}
+                    />
+                    <TouchableOpacity
+                      style={styles.filterBtn}
+                      onPress={() => {
+                        setModalDraft({ ...appliedFilters });
+                        setFilterModalVisible(true);
+                      }}
+                      activeOpacity={0.85}
+                    >
+                      <DiscoverFilterIcon />
+                    </TouchableOpacity>
+                  </View>
+
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.langScroll}>
+                    {langChip('All', null)}
+                    {CALLER_LANGUAGE_OPTIONS.map((l) => langChip(l, l))}
+                  </ScrollView>
+                </View>
+
+                {err ? <Text style={styles.errText}>{err}</Text> : null}
+                {loading && receivers.length === 0 ? (
+                  <ActivityIndicator style={styles.loader} color={PURPLE} />
+                ) : null}
+              </>
+            }
+            ListFooterComponent={<View style={{ height: 12 }} />}
+            refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void onRefresh()} />}
+            keyboardShouldPersistTaps="handled"
+            ListEmptyComponent={
+              !loading && receivers.length === 0 ? (
+                <Text style={styles.empty}>No receivers available right now.</Text>
+              ) : null
+            }
+            showsVerticalScrollIndicator={false}
+          />
+        </View>
       </KeyboardAvoidingView>
       <CallerBottomTabs active="home" navigation={navigation} />
 
@@ -583,25 +592,31 @@ export default function CallerDiscoverHome(): React.JSX.Element {
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: '#f6f6f7' },
-  listContent: { paddingHorizontal: 16, paddingBottom: 24 },
-  headerBlock: { paddingBottom: 8 },
+  
+  stickyTopCard: {
+    backgroundColor: '#fff',
+    paddingHorizontal: 16,
+    paddingTop: 8,
+    paddingBottom: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e5e5e5',
+    zIndex: 10,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  
+  listContent: { 
+    paddingHorizontal: 16, 
+    paddingBottom: 24,
+    paddingTop: 8,
+  },
   
   // Enhanced Top Section Styles
   topSection: {
-    marginHorizontal: -16,
-    marginTop: -8,
-    marginBottom: 16,
-    paddingHorizontal: 16,
-    paddingTop: 12,
-    paddingBottom: 16,
     backgroundColor: '#fff',
-    borderBottomLeftRadius: 24,
-    borderBottomRightRadius: 24,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.08,
-    shadowRadius: 12,
-    elevation: 8,
   },
   topBar: {
     flexDirection: 'row',
@@ -618,12 +633,11 @@ const styles = StyleSheet.create({
     gap: 12 
   },
   
-  // Wallet Capsule with Ring (Border) - Just outer ring, no background color inside
   walletCapsule: {
     borderRadius: 40,
     borderWidth: 1.5,
     borderColor: PURPLE,
-    backgroundColor: 'transparent', // No background color
+    backgroundColor: 'transparent',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
@@ -636,7 +650,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 8,
     gap: 6,
-    backgroundColor: 'transparent', // Transparent background
+    backgroundColor: 'transparent',
   },
   walletIco: { 
     fontSize: 16,
@@ -644,10 +658,9 @@ const styles = StyleSheet.create({
   wallet: { 
     fontSize: 15, 
     fontWeight: '800', 
-    color: '#111', // Dark text for contrast
+    color: '#111',
   },
   
-  // Enhanced Avatar Capsule
   avatarCapsule: {
     width: 44,
     height: 44,
@@ -683,36 +696,6 @@ const styles = StyleSheet.create({
     fontSize: 18,
   },
   
-  // Promo Card
-  promoPink: {
-    borderRadius: 16,
-    padding: 16,
-    backgroundColor: '#ff72d2',
-    marginBottom: 16,
-    shadowColor: '#ff72d2',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.2,
-    shadowRadius: 8,
-    elevation: 4,
-  },
-  promoTitle: { 
-    color: '#fff', 
-    fontSize: 18, 
-    fontWeight: '900', 
-    marginBottom: 12 
-  },
-  promoBtn: {
-    alignSelf: 'flex-start',
-    backgroundColor: 'rgba(255,255,255,0.95)',
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: 12,
-  },
-  promoBtnText: { 
-    color: PURPLE, 
-    fontWeight: '900', 
-    fontSize: 14 
-  },
 
   matchOverlay: {
     flex: 1,
@@ -798,7 +781,6 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   
-  // Search Section
   searchSection: {
     marginBottom: 12,
   },
@@ -886,7 +868,6 @@ const styles = StyleSheet.create({
     fontSize: 14 
   },
   
-  // Card Styles
   card: {
     backgroundColor: '#fff',
     borderRadius: 12,
@@ -905,8 +886,36 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
     gap: 12,
   },
+
+  promoGradient: {
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 16,
+    shadowColor: '#7F00FF',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  promoTitle: { 
+    color: '#fff', 
+    fontSize: 18, 
+    fontWeight: '900', 
+    marginBottom: 12 
+  },
+  promoBtn: {
+    alignSelf: 'flex-start',
+    backgroundColor: 'rgba(255,255,255,0.95)',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 12,
+  },
+  promoBtnText: { 
+    color: PURPLE, 
+    fontWeight: '900', 
+    fontSize: 14 
+  },
   
-  // Left Column: Avatar + Rating below
   leftColumn: {
     alignItems: 'center',
     width: 60,
@@ -964,7 +973,6 @@ const styles = StyleSheet.create({
     color: '#888',
   },
   
-  // Middle Column: Main Info
   infoSection: {
     flex: 1,
     gap: 6,
@@ -986,7 +994,6 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   
-  // Right Column: Rate Button + Languages + Status
   rightColumn: {
     alignItems: 'flex-end',
     minWidth: 70,

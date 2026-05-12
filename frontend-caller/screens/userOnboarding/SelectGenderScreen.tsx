@@ -8,6 +8,8 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { LinearGradient } from 'expo-linear-gradient';
+import Icon from 'react-native-vector-icons/Ionicons';
 
 import { useAuth } from '../../context/AuthContext';
 import { useUserOnboarding } from '../../context/UserOnboardingContext';
@@ -16,41 +18,82 @@ import type { Gender } from '../../types/user';
 
 const PURPLE = '#7b2cff';
 
-type Props = NativeStackScreenProps<UserOnboardingStackParamList, 'SelectGender'>;
+type Props = NativeStackScreenProps<
+  UserOnboardingStackParamList,
+  'SelectGender'
+>;
 
-export default function SelectGenderScreen({ navigation }: Props): React.JSX.Element {
+export default function SelectGenderScreen({
+  navigation,
+}: Props): React.JSX.Element {
   const insets = useSafeAreaInsets();
+
   const { setGender } = useUserOnboarding();
   const { signOut } = useAuth();
+
   const [selected, setSelected] = useState<Gender | null>(null);
 
   const onLeave = () => {
-    Alert.alert('Exit setup?', 'You can sign in again later to continue.', [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Exit', style: 'destructive', onPress: () => void signOut() },
-    ]);
+    Alert.alert(
+      'Exit setup?',
+      'You can sign in again later to continue.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Exit',
+          style: 'destructive',
+          onPress: () => void signOut(),
+        },
+      ],
+    );
   };
 
   const onContinue = () => {
     if (!selected) {
-      Alert.alert('Select gender', 'Please choose an option to continue.');
+      Alert.alert(
+        'Select gender',
+        'Please choose an option to continue.',
+      );
       return;
     }
+
     setGender(selected);
     navigation.navigate('ChooseAvatar');
   };
 
-  const row = (value: Gender, label: string, icon?: string) => {
+  const row = (value: Gender, label: string) => {
     const active = selected === value;
+
     return (
       <TouchableOpacity
         key={value}
-        style={[styles.option, active && styles.optionActive]}
+        style={styles.option}
         onPress={() => setSelected(value)}
         activeOpacity={0.85}
       >
-        {icon ? <Text style={[styles.optionIcon, active && styles.optionTextActive]}>{icon}</Text> : null}
-        <Text style={[styles.optionLabel, active && styles.optionTextActive]}>{label}</Text>
+        {active ? (
+          <LinearGradient
+            colors={['#7F00FF', '#A855F7', '#E100FF']}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 0 }}
+            style={styles.optionGradient}
+          >
+            <Text
+              style={[
+                styles.optionLabel,
+                styles.optionTextActive,
+              ]}
+            >
+              {label}
+            </Text>
+          </LinearGradient>
+        ) : (
+          <View style={styles.optionInner}>
+            <Text style={styles.optionLabel}>
+              {label}
+            </Text>
+          </View>
+        )}
       </TouchableOpacity>
     );
   };
@@ -60,26 +103,57 @@ export default function SelectGenderScreen({ navigation }: Props): React.JSX.Ele
       style={[
         styles.bg,
         {
-          paddingTop: Math.max(insets.top, 14) + 18,
+          paddingTop: Math.max(insets.top, 14) + 10,
           paddingBottom: Math.max(insets.bottom, 14) + 18,
         },
       ]}
     >
       <View style={styles.card}>
-        <TouchableOpacity style={styles.backWrap} onPress={onLeave}>
-          <Text style={styles.back}>←</Text>
+        {/* Back Button */}
+        <TouchableOpacity
+          style={styles.backWrap}
+          onPress={onLeave}
+          activeOpacity={0.7}
+        >
+          <Icon
+            name="chevron-back"
+            size={28}
+            color="#7b2cff"
+          />
         </TouchableOpacity>
-        <Text style={styles.title}>Select Gender</Text>
-        <Text style={styles.subtitle}>This helps us personalize your experience</Text>
 
+        {/* Title */}
+        <Text style={styles.title}>Select Gender</Text>
+
+        <View style={styles.underline} />
+
+        <Text style={styles.subtitle}>
+          This helps us personalize your experience
+        </Text>
+
+        {/* Gender Options */}
         <View style={styles.list}>
           {row('male', 'Male')}
           {row('female', 'Female')}
-          {row('other', 'Other', '🏳️‍🌈')}
+          {row('other', 'Other')}
         </View>
 
-        <TouchableOpacity style={styles.button} onPress={onContinue} activeOpacity={0.9}>
-          <Text style={styles.buttonText}>Get Started!</Text>
+        {/* Bottom Button */}
+        <TouchableOpacity
+          style={styles.buttonWrapper}
+          onPress={onContinue}
+          activeOpacity={0.9}
+        >
+          <LinearGradient
+            colors={['#7F00FF', '#A855F7', '#E100FF']}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 0 }}
+            style={styles.button}
+          >
+            <Text style={styles.buttonText}>
+              Get Started!
+            </Text>
+          </LinearGradient>
         </TouchableOpacity>
       </View>
     </View>
@@ -89,72 +163,95 @@ export default function SelectGenderScreen({ navigation }: Props): React.JSX.Ele
 const styles = StyleSheet.create({
   bg: {
     flex: 1,
-    backgroundColor: '#f4f4f5',
+    backgroundColor: '#fff',
     paddingHorizontal: 20,
   },
+
   card: {
     flex: 1,
     width: '100%',
   },
+
   backWrap: {
-    marginBottom: 12,
-    alignSelf: 'flex-start',
-    padding: 4,
-  },
-  back: {
-    fontSize: 22,
-    color: '#111',
-  },
-  title: {
-    fontSize: 22,
-    fontWeight: '800',
-    color: '#111',
-    marginBottom: 6,
-  },
-  subtitle: {
-    fontSize: 13,
-    color: '#666',
-    marginBottom: 28,
-  },
-  list: {
-    gap: 12,
-  },
-  option: {
-    flexDirection: 'row',
+    width: 42,
+    height: 42,
     alignItems: 'center',
-    paddingVertical: 16,
-    paddingHorizontal: 18,
-    borderRadius: 12,
-    backgroundColor: '#fff',
-    borderWidth: 1,
-    borderColor: '#e8e8e8',
+    justifyContent: 'center',
+    marginBottom: 20,
   },
-  optionActive: {
+
+  title: {
+    fontSize: 24,
+    fontWeight: '900',
+    color: '#111',
+  },
+
+  underline: {
+    height: 3,
     backgroundColor: PURPLE,
-    borderColor: PURPLE,
+    width: 72,
+    borderRadius: 2,
+    marginTop: 10,
+    marginBottom: 14,
   },
-  optionIcon: {
-    fontSize: 18,
-    marginRight: 10,
+
+  subtitle: {
+    fontSize: 14,
+    color: '#666',
+    marginBottom: 30,
+    lineHeight: 20,
   },
+
+  list: {
+    gap: 14,
+  },
+
+  option: {
+    borderRadius: 14,
+    overflow: 'hidden',
+  },
+
+  optionGradient: {
+    paddingVertical: 18,
+    paddingHorizontal: 18,
+    alignItems: 'center',
+    borderRadius: 14,
+  },
+
+  optionInner: {
+    paddingVertical: 18,
+    paddingHorizontal: 18,
+    borderRadius: 14,
+    backgroundColor: '#fff',
+    borderWidth: 1.5,
+    borderColor: '#e8e8e8',
+    alignItems: 'center',
+  },
+
   optionLabel: {
     fontSize: 16,
-    fontWeight: '700',
+    fontWeight: '800',
     color: '#111',
   },
+
   optionTextActive: {
     color: '#fff',
   },
-  button: {
+
+  buttonWrapper: {
     marginTop: 'auto',
-    backgroundColor: PURPLE,
+    borderRadius: 14,
+    overflow: 'hidden',
+  },
+
+  button: {
     paddingVertical: 16,
-    borderRadius: 12,
     alignItems: 'center',
   },
+
   buttonText: {
     color: '#fff',
     fontSize: 16,
-    fontWeight: '800',
+    fontWeight: '900',
   },
 });

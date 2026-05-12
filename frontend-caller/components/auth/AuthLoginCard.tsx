@@ -13,6 +13,7 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { LinearGradient } from 'expo-linear-gradient';
 
 import { useAuth } from '../../context/AuthContext';
 import type { RootStackParamList } from '../../navigation/RootStackParamList';
@@ -24,7 +25,7 @@ export type AuthLoginCardProps = {
   navigation: NativeStackNavigationProp<RootStackParamList>;
   mobile: string;
   onMobileChange: (value: string) => void;
-  logoLetter?: string; // Made optional
+  logoLetter?: string;
   title: string;
   subtitle: string;
   primaryRegisterLabel: string;
@@ -33,11 +34,8 @@ export type AuthLoginCardProps = {
   onSecondaryRegister?: () => void;
   switchLoginLabel?: string;
   onSwitchLogin?: () => void;
-  /** Return to role picker (splash path) without signing in */
   onChooseAccountType?: () => void;
-  /** Backend auth table: `users` vs `receivers` */
   authAccountType: AuthAccountType;
-  /** Optional custom logo component */
   customLogo?: React.ReactNode;
 };
 
@@ -70,7 +68,6 @@ export function AuthLoginCard({
   const scrollRef = useRef<ScrollView | null>(null);
 
   const scrollToFocusedInput = useCallback(() => {
-    // Let the keyboard animate in first.
     requestAnimationFrame(() => {
       setTimeout(() => {
         const responder = TextInput.State.currentlyFocusedInput?.();
@@ -121,7 +118,11 @@ export function AuthLoginCard({
 
   return (
     <View style={styles.bg}>
-      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} enabled={Platform.OS === 'ios'}>
+      <KeyboardAvoidingView 
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined} 
+        style={styles.keyboardView}
+        enabled={Platform.OS === 'ios'}
+      >
         <ScrollView
           ref={(r) => {
             scrollRef.current = r;
@@ -129,13 +130,14 @@ export function AuthLoginCard({
           contentContainerStyle={[
             styles.scrollContent,
             {
-              paddingTop: Math.max(insets.top, 14) + 18,
-              paddingBottom: Math.max(insets.bottom, 14) + 24,
+              paddingTop: Math.max(insets.top, 20),
+              paddingBottom: Math.max(insets.bottom, 20),
             },
           ]}
           keyboardShouldPersistTaps="handled"
           keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
           onScrollBeginDrag={Keyboard.dismiss}
+          showsVerticalScrollIndicator={false}
         >
           <View style={styles.card}>
             {customLogo ? (
@@ -145,6 +147,7 @@ export function AuthLoginCard({
                 <Text style={styles.logoLetter}>{logoLetter}</Text>
               </View>
             ) : null}
+            
             <Text style={styles.title}>{title}</Text>
             <Text style={styles.subtitle}>{subtitle}</Text>
 
@@ -184,13 +187,21 @@ export function AuthLoginCard({
             ) : null}
 
             <TouchableOpacity
-              style={[styles.button, loading && styles.buttonDisabled]}
+              style={[styles.buttonWrapper, loading && styles.buttonDisabled]}
               onPress={() => void (step === 'mobile' ? onSendOtp() : onVerifyOtpAndLogin())}
               disabled={loading}
+              activeOpacity={0.8}
             >
-              <Text style={styles.buttonText}>
-                {loading ? 'Signing in…' : step === 'mobile' ? 'Send OTP' : 'Log in'}
-              </Text>
+              <LinearGradient
+                colors={['#7F00FF', '#A855F7', '#E100FF']}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 0 }}
+                style={styles.button}
+              >
+                <Text style={styles.buttonText}>
+                  {loading ? 'Signing in…' : step === 'mobile' ? 'Send OTP' : 'Log in'}
+                </Text>
+              </LinearGradient>
             </TouchableOpacity>
 
             <TouchableOpacity style={styles.footer} onPress={onPrimaryRegister}>
@@ -231,11 +242,13 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#fff',
   },
+  keyboardView: {
+    flex: 1,
+  },
   scrollContent: {
     flexGrow: 1,
-    paddingVertical: 24,
+    justifyContent: 'center',
     paddingHorizontal: 20,
-    paddingBottom: 40,
   },
   card: {
     width: '100%',
@@ -244,7 +257,7 @@ const styles = StyleSheet.create({
     borderRadius: 0,
   },
   logoContainer: {
-    alignItems: 'flex-start', // Left aligned
+    alignItems: 'flex-start',
     justifyContent: 'center',
     marginBottom: 10,
   },
@@ -300,12 +313,14 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '600',
   },
-  button: {
-    backgroundColor: PURPLE,
-    paddingVertical: 14,
-    borderRadius: 10,
-    alignItems: 'center',
+  buttonWrapper: {
     marginTop: 6,
+    borderRadius: 10,
+    overflow: 'hidden',
+  },
+  button: {
+    paddingVertical: 14,
+    alignItems: 'center',
   },
   buttonDisabled: {
     opacity: 0.6,

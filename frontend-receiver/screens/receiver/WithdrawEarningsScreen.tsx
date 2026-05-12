@@ -150,7 +150,7 @@ export default function WithdrawEarningsScreen(): React.JSX.Element {
 
   const onVerifyOtp = async () => {
     if (!/^\d{6}$/.test(otp.trim())) {
-      Alert.alert('Invalid OTP', 'Please enter the 6dd-digit OTP sent to your mobile.');
+      Alert.alert('Invalid OTP', 'Please enter the 6-digit OTP sent to your mobile.');
       return;
     }
     setBusy(true);

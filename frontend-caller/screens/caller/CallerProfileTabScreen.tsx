@@ -1,6 +1,7 @@
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
+import { useFocusEffect } from '@react-navigation/native';
 import Constants from 'expo-constants';
-import React, { useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import {
   Alert,
   Image,
@@ -18,6 +19,7 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import CallerBottomTabs, { getCallerTabBarContentPadding } from '../../components/caller/CallerBottomTabs';
 import { useAuth } from '../../context/AuthContext';
 import type { CallerStackParamList } from '../../navigation/CallerStackParamList';
+import { profileApi } from '../../services/api';
 import { resolveProfileImageSource } from '../../utils/avatarSource';
 
 const PURPLE = '#7b2cff';
@@ -37,14 +39,33 @@ export default function CallerProfileTabScreen({ navigation }: Props): React.JSX
   const contentBottomPadding = getCallerTabBarContentPadding(insets.bottom);
   const { user, signOut } = useAuth();
   const [logoutOpen, setLogoutOpen] = useState(false);
+  const [calls, setCalls] = useState(0);
+  const [mins, setMins] = useState(0);
 
   const appVersion =
     (typeof Constants.expoConfig?.version === 'string' && Constants.expoConfig.version) || '1.0.0';
 
   const wallet = typeof user?.walletBalance === 'number' && Number.isFinite(user.walletBalance) ? user.walletBalance : 0;
-  const calls = 0;
-  const mins = 0;
   const profileImageSource = resolveProfileImageSource(user?.profileImage);
+
+  const loadCallStats = useCallback(async (): Promise<void> => {
+    try {
+      const { data } = await profileApi.callerCallHistory('all');
+      const completed = data.calls.filter((row) => row.status === 'completed');
+      const totalDurationSec = completed.reduce((sum, row) => sum + Math.max(0, row.durationSec || 0), 0);
+      setCalls(completed.length);
+      setMins(Math.floor(totalDurationSec / 60));
+    } catch {
+      setCalls(0);
+      setMins(0);
+    }
+  }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      void loadCallStats();
+    }, [loadCallStats])
+  );
 
   const menuRow = (
     icon: string,

@@ -61,6 +61,15 @@ const birthDate_1 = require("../utils/birthDate");
 const razorpayXPayoutService_1 = require("../services/razorpayXPayoutService");
 const socketRegistry_1 = require("../socket/socketRegistry");
 const apiTraceLog_1 = require("../utils/apiTraceLog");
+function receiverOnboardingProfileFieldsComplete(r) {
+    return Boolean(r.name?.trim() &&
+        r.profileImage?.trim() &&
+        r.state?.trim() &&
+        Array.isArray(r.languages) &&
+        r.languages.length > 0 &&
+        Array.isArray(r.interests) &&
+        r.interests.length > 0);
+}
 function parseCallerAudioHttpsUrl(body) {
     const raw = typeof body.userAudio === 'string'
         ? body.userAudio
@@ -1688,9 +1697,25 @@ const updateReceiverProfile = async (req, res) => {
         if (receiver.aadhaarFront && receiver.aadhaarBack && receiver.panFront) {
             receiver.documents = [receiver.aadhaarFront, receiver.aadhaarBack, receiver.panFront];
         }
+        if (typeof req.body.userAudio === 'string') {
+            const rawAudio = req.body.userAudio.trim();
+            if (rawAudio) {
+                if (!/^https?:\/\//i.test(rawAudio)) {
+                    res.status(400).json({ message: 'userAudio must be a valid http(s) URL' });
+                    return;
+                }
+                receiver.userAudio = rawAudio;
+            }
+        }
         receiver.audioCallRate = Receiver_1.RECEIVER_AUDIO_CALL_RATE_INR_PER_MIN;
         if (typeof req.body.isAvailable === 'boolean') {
             receiver.isAvailable = req.body.isAvailable;
+        }
+        if (receiver.accountStatus === 'pending_profile') {
+            const audioOk = Boolean(receiver.userAudio?.trim()) && /^https?:\/\//i.test(String(receiver.userAudio).trim());
+            if (receiverOnboardingProfileFieldsComplete(receiver) && audioOk) {
+                receiver.accountStatus = 'approved';
+            }
         }
         await receiver.save();
         await (0, callQueue_1.syncReceiverQueueState)(receiverId);

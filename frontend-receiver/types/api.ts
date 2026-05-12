@@ -404,6 +404,7 @@ export interface UpdateReceiverProfilePayload {
   panFront?: string;
   audioCallRate?: number;
   isAvailable?: boolean;
+  userAudio?: string;
 }
 
 export interface DeleteReceiverAccountPayload {
