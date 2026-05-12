@@ -31,18 +31,14 @@ export default function ReceiverAutoVerificationScreen(): React.JSX.Element {
   const navigation = useNavigation<Nav>();
   const { applyServerUser } = useAuth();
   const [savingToServer, setSavingToServer] = useState(false);
-  const [canContinue, setCanContinue] = useState(false);
 
   const onUploadComplete = (url: string): void => {
     void (async () => {
       setSavingToServer(true);
-      setCanContinue(false);
       try {
         const { data } = await profileApi.updateReceiverProfile({ userAudio: url });
         applyServerUser(data.user);
-        if (data.user.accountStatus === 'approved' && Boolean(data.user.userAudio?.trim())) {
-          setCanContinue(true);
-        } else {
+        if (!(data.user.accountStatus === 'approved' && Boolean(data.user.userAudio?.trim()))) {
           Alert.alert(
             'Profile incomplete',
             'Finish your profile (name, photo, state, languages, interests) first, then record your voice again.'
@@ -57,7 +53,6 @@ export default function ReceiverAutoVerificationScreen(): React.JSX.Element {
   };
 
   const onProceed = (): void => {
-    if (!canContinue) return;
     navigation.replace('ReceiverHome');
   };
 
@@ -82,14 +77,14 @@ export default function ReceiverAutoVerificationScreen(): React.JSX.Element {
           <VoiceVerificationRecorder scriptText={RECEIVER_AUDIO_VERIFICATION_SCRIPT} onUploadComplete={onUploadComplete} />
         </ScrollView>
 
-        <TouchableOpacity disabled={!canContinue} activeOpacity={0.9} onPress={onProceed} style={styles.proceedWrap}>
+        <TouchableOpacity activeOpacity={0.9} onPress={onProceed} style={styles.proceedWrap}>
           <LinearGradient
-            colors={canContinue ? ['#7F00FF', '#A855F7', '#E100FF'] : ['#d8d8dd', '#d8d8dd']}
+            colors={['#7F00FF', '#A855F7', '#E100FF']}
             start={{ x: 0, y: 0 }}
             end={{ x: 1, y: 0 }}
             style={styles.proceedBtn}
           >
-            <Text style={[styles.proceedText, !canContinue && styles.proceedTextDisabled]}>Continue to dashboard</Text>
+            <Text style={styles.proceedText}>Continue to dashboard</Text>
           </LinearGradient>
         </TouchableOpacity>
       </View>
@@ -158,9 +153,6 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 17,
     fontWeight: '800',
-  },
-  proceedTextDisabled: {
-    color: '#777',
   },
   savingOverlay: {
     flex: 1,

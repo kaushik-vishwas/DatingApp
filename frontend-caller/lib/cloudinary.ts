@@ -1,3 +1,4 @@
+import axios, { isAxiosError } from 'axios';
 import Constants from 'expo-constants';
 
 export type CloudinaryResourceType = 'image' | 'raw' | 'video' | 'auto';
@@ -12,6 +13,10 @@ export type CloudinaryUploadResult = {
   secure_url: string;
   public_id?: string;
 };
+
+function wait(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 function getCloudinaryConfig(): { cloudName: string; uploadPreset: string } {
   const extra = (Constants as any)?.expoConfig?.extra ?? (Constants as any)?.manifest?.extra ?? {};
@@ -75,32 +80,46 @@ export async function uploadToCloudinary(
         ? 'audio/mp4'
         : 'image/jpeg');
 
-  const form = new FormData();
-  form.append('upload_preset', uploadPreset);
-  form.append(
-    'file',
-    { uri: fileUri, type: mime, name } as unknown as Parameters<FormData['append']>[1]
-  );
+  let lastError: unknown = null;
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    try {
+      const form = new FormData();
+      form.append('upload_preset', uploadPreset);
+      form.append(
+        'file',
+        { uri: fileUri, type: mime, name } as unknown as Parameters<FormData['append']>[1]
+      );
 
-  const res = await fetch(endpoint, {
-    method: 'POST',
-    body: form,
-  });
+      const res = await axios.post<{
+        secure_url?: string;
+        public_id?: string;
+        error?: { message?: string };
+      }>(endpoint, form, {
+        timeout: 120_000,
+        headers: { Accept: 'application/json' },
+      });
 
-  const json = (await res.json()) as {
-    secure_url?: string;
-    public_id?: string;
-    error?: { message?: string };
-  };
+      const json = res.data;
+      if (!json?.secure_url) {
+        const msg = json?.error?.message || 'Cloudinary response missing secure_url';
+        throw new Error(msg);
+      }
 
-  if (!res.ok) {
-    const msg = json?.error?.message || res.statusText || 'Upload failed';
-    throw new Error(msg);
+      return { secure_url: json.secure_url, public_id: json.public_id };
+    } catch (e) {
+      lastError = e;
+      if (isAxiosError(e) && e.response?.data && typeof e.response.data === 'object') {
+        const body = e.response.data as { error?: { message?: string } };
+        const apiMsg = body.error?.message;
+        if (apiMsg) lastError = new Error(apiMsg);
+      }
+      if (attempt < 3) {
+        await wait(500 * attempt);
+        continue;
+      }
+    }
   }
 
-  if (!json.secure_url) {
-    throw new Error('Cloudinary response missing secure_url');
-  }
-
-  return { secure_url: json.secure_url, public_id: json.public_id };
+  if (lastError instanceof Error) throw lastError;
+  throw new Error('Upload failed');
 }
