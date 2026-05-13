@@ -123,6 +123,7 @@ type UpdateReceiverBody = {
   panFront?: string;
   audioCallRate?: number;
   isAvailable?: boolean;
+  gender?: Gender | null;
   /** Voice sample URL (https). When profile fields are complete, promotes `pending_profile` → `approved`. */
   userAudio?: string;
 };
@@ -1145,11 +1146,12 @@ function effectiveCallReceiverEarnedInr(row: {
   if (typeof row.receiverEarnedInr === 'number' && Number.isFinite(row.receiverEarnedInr)) {
     return roundInr(row.receiverEarnedInr);
   }
+  const sec = Math.max(0, Math.floor(Number(row.durationSec) || 0));
   const rate =
     typeof row.receiverPayoutRatePerMinute === 'number' && Number.isFinite(row.receiverPayoutRatePerMinute)
       ? row.receiverPayoutRatePerMinute
       : 0;
-  return roundInr((row.durationSec / 60) * Math.max(0, rate));
+  return roundInr((sec / 60) * Math.max(0, rate));
 }
 
 /**
@@ -1177,6 +1179,7 @@ export const getReceiverWalletSummary = async (req: Request, res: Response): Pro
 
     const weekStart = new Date(now);
     weekStart.setDate(now.getDate() - 7);
+    weekStart.setHours(0, 0, 0, 0);
 
     const receiver = await Receiver.findById(rid).select('walletBalance');
     const walletBalance =
@@ -1605,6 +1608,7 @@ export const getReceiverCallInsights = async (
     const effectiveTotalScore = roundInr(persistedScore + liveOnlineScore);
     const weekStart = new Date(now);
     weekStart.setDate(now.getDate() - 7);
+    weekStart.setHours(0, 0, 0, 0);
     const monthStart = new Date(now);
     monthStart.setDate(1);
     monthStart.setHours(0, 0, 0, 0);
@@ -1640,13 +1644,16 @@ export const getReceiverCallInsights = async (
       callers.map((c) => [String(c._id), { name: c.name, profileImage: c.profileImage ?? null }])
     );
 
-    const totalDurationSec = completed.reduce((sum, row) => sum + row.durationSec, 0);
+    const safeDur = (row: { durationSec: number }): number =>
+      Math.max(0, Math.floor(Number(row.durationSec) || 0));
+
+    const totalDurationSec = completed.reduce((sum, row) => sum + safeDur(row), 0);
     const weekDurationSec = completed
       .filter((row) => row.startedAt >= weekStart)
-      .reduce((sum, row) => sum + row.durationSec, 0);
+      .reduce((sum, row) => sum + safeDur(row), 0);
     const monthDurationSec = completed
       .filter((row) => row.startedAt >= monthStart)
-      .reduce((sum, row) => sum + row.durationSec, 0);
+      .reduce((sum, row) => sum + safeDur(row), 0);
 
     const filtered = completed.filter((row) => {
       if (range === 'week') return row.startedAt >= weekStart;
@@ -1660,11 +1667,11 @@ export const getReceiverCallInsights = async (
       callerName: callerById.get(String(row.callerId))?.name ?? 'Caller',
       callerImage: callerById.get(String(row.callerId))?.profileImage ?? null,
       startedAt: row.startedAt.toISOString(),
-      durationSec: row.durationSec,
+      durationSec: safeDur(row),
       earningInr: roundInr(
         typeof row.receiverEarnedInr === 'number' && Number.isFinite(row.receiverEarnedInr)
           ? row.receiverEarnedInr
-          : (row.durationSec / 60) *
+          : (safeDur(row) / 60) *
               (typeof row.receiverPayoutRatePerMinute === 'number' &&
               Number.isFinite(row.receiverPayoutRatePerMinute)
                 ? row.receiverPayoutRatePerMinute
@@ -1699,13 +1706,14 @@ export const getReceiverCallInsights = async (
         });
       }
       const agg = byCaller.get(callerId)!;
+      const d = safeDur(row);
       if (row.startedAt >= weekStart) {
         agg.callsWeek += 1;
-        agg.durationWeekSec += row.durationSec;
+        agg.durationWeekSec += d;
       }
       if (row.startedAt >= monthStart) {
         agg.callsMonth += 1;
-        agg.durationMonthSec += row.durationSec;
+        agg.durationMonthSec += d;
       }
       if (typeof row.callerRating === 'number') {
         agg.ratingSum += row.callerRating;
@@ -1737,14 +1745,17 @@ export const getReceiverCallInsights = async (
       { $project: { _id: 0, avg: 1, count: 1 } },
     ]);
 
+    const secToLeaderboardMinutes = (sec: number): number =>
+      Math.max(0, Math.round(Math.max(0, sec) / 60));
+
     res.status(200).json({
       leaderboard: {
         totalDurationSec,
-        totalMinutes: roundInr(totalDurationSec / 60),
+        totalMinutes: secToLeaderboardMinutes(totalDurationSec),
         thisWeekDurationSec: weekDurationSec,
-        thisWeekMinutes: roundInr(weekDurationSec / 60),
+        thisWeekMinutes: secToLeaderboardMinutes(weekDurationSec),
         thisMonthDurationSec: monthDurationSec,
-        thisMonthMinutes: roundInr(monthDurationSec / 60),
+        thisMonthMinutes: secToLeaderboardMinutes(monthDurationSec),
       },
       recentCalls,
       callerHistory,
@@ -1979,6 +1990,12 @@ export const updateReceiverProfile = async (
     }
     if (typeof req.body.state === 'string' && req.body.state.trim()) {
       receiver.state = req.body.state.trim();
+    }
+    if (typeof req.body.gender === 'string') {
+      const g = req.body.gender.trim();
+      if (g === 'male' || g === 'female' || g === 'other') {
+        receiver.gender = g;
+      }
     }
     if (Array.isArray(req.body.languages)) {
       receiver.languages = req.body.languages.map((x) => String(x).trim()).filter(Boolean);

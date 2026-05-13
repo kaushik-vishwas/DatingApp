@@ -19,6 +19,7 @@ const reasonClass = (reason: string) => {
   if (reason === 'Harassment') return 'bg-orange-50 text-orange-700';
   if (reason === 'Inappropriate content') return 'bg-rose-50 text-rose-700';
   if (reason === 'Fake profile') return 'bg-violet-50 text-violet-700';
+  if (reason === 'Call session issue') return 'bg-amber-50 text-amber-800';
   return 'bg-neutral-100 text-neutral-700';
 };
 

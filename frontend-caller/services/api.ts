@@ -23,6 +23,7 @@ import type {
   UpdateCallerPayload,
   VerifyOtpResponse,
   WalletCreditResponse,
+  WalletOffersResponse,
   RazorpayOrderResponse,
   CallerWalletTopupsResponse,
   ChatMessagesResponse,
@@ -35,6 +36,7 @@ import type {
   SendWithdrawalOtpResponse,
   VerifyWithdrawalOtpResponse,
   CallerCallHistoryResponse,
+  CallerAppReviewMeResponse,
   CallerNotificationsResponse,
   ReceiverEarningsBreakdownResponse,
   ReceiverNotifyCandidatesResponse,
@@ -252,6 +254,12 @@ export const profileApi = {
       params: { range },
     }),
 
+  getCallerAppReview: () =>
+    api.get<CallerAppReviewMeResponse>('/profile/caller-app-review'),
+
+  putCallerAppReview: (body: { stars: number; review: string }) =>
+    api.put<{ ok: boolean }>('/profile/caller-app-review', body),
+
   callerNotifications: () =>
     api.get<CallerNotificationsResponse>('/profile/caller-notifications'),
 
@@ -290,6 +298,8 @@ export const discoverApi = {
 
 export const walletApi = {
   listTopups: () => api.get<CallerWalletTopupsResponse>('/wallet/topups'),
+
+  offers: () => api.get<WalletOffersResponse>('/wallet/offers'),
 
   credit: (body: { payAmount: number; bonusPercent: number }) =>
     api.post<WalletCreditResponse>('/wallet/credit', body),
@@ -368,12 +378,16 @@ export const callApi = {
       settledAmountInr: number;
       receiverEarnedInr: number;
       canRate: boolean;
+      /** Present when the authenticated participant is the caller (`user`). */
+      callerWalletBalanceInr?: number;
     }>(
       '/calls/session/end',
       { callId }
     ),
   sessionRate: (callId: string, rating: number) =>
     api.post<{ ok: boolean }>('/calls/session/rate', { callId, rating }),
+  sessionReport: (callId: string, tags: string[]) =>
+    api.post<{ ok: boolean }>('/calls/session/report', { callId, tags }),
 };
 
 export default api;

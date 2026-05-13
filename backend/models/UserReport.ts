@@ -6,6 +6,8 @@ export const REPORT_REASONS = [
   'Inappropriate content',
   'Fake profile',
   'Other',
+  /** Caller post–voice-call issue (tags stored in `preview`). */
+  'Call session issue',
 ] as const;
 
 export type ReportReason = (typeof REPORT_REASONS)[number];

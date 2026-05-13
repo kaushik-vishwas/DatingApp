@@ -397,8 +397,12 @@ function logProfileCompleteFailure(
 /** APIs */
 
 export const authApi = {
-  sendOtp: (phone: string, accountType: AuthAccountType) =>
-    api.post<SendOtpResponse>('/auth/send-otp', { phone, accountType }),
+  sendOtp: (
+    phone: string,
+    accountType: AuthAccountType,
+    signup?: { name?: string; dateOfBirth?: string; role?: 'caller' | 'receiver' | 'both' }
+  ) =>
+    api.post<SendOtpResponse>('/auth/send-otp', signup ? { phone, accountType, signup } : { phone, accountType }),
 
   forgotPassword: (email: string, accountType: AuthAccountType) =>
     api.post<SendOtpResponse>('/auth/forgot-password', { email, accountType }),

@@ -1,4 +1,5 @@
 import type { VoiceBootstrapResponse } from '../types/api';
+import type { Gender } from '../types/user';
 
 export type IncomingCallParams = {
   callId: string;
@@ -14,6 +15,8 @@ export type ReceiverStackParamList = {
   ReceiverNotifications: undefined;
   ReceiverBankDetails: undefined;
   ReceiverEditProfile: { fromWithdrawKyc?: boolean } | undefined;
+  ReceiverSelectGender: undefined;
+  ReceiverCreateProfile: { gender?: Gender } | undefined;
   ReceiverAutoVerification: undefined;
   ReceiverProfilePreview: undefined;
   ReceiverDeleteAccount: undefined;

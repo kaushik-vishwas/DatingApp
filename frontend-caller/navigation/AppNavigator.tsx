@@ -5,11 +5,12 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { useAuth } from '../context/AuthContext';
 import { hasSeenAuthWelcome } from '../services/authWelcomeStorage';
 import { getForcedAppKind } from '../config/appKind';
-import type { RootStackParamList } from './RootStackParamList';
+import type { PostBrandSplashRoute, RootStackParamList } from './RootStackParamList';
 import { navigationRef } from './navigationRef';
 
 import ReceiverEducationScreen from '../screens/onboarding/ReceiverEducationScreen';
 import RoleGateScreen from '../screens/onboarding/RoleGateScreen';
+import BrandSplashScreen from '../screens/BrandSplashScreen';
 import SplashScreen from '../screens/onboarding/SplashScreen';
 import ReceiverLoginScreen from '../screens/ReceiverLoginScreen';
 import UserLoginScreen from '../screens/UserLoginScreen';
@@ -25,11 +26,11 @@ import UserOnboardingFlow from './UserOnboardingFlow';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
-/** Signed-out tree: load welcome flag so logout skips Splash and opens RoleGate. */
+/** Signed-out tree: animated BrandSplash first; then the same entry route as before (welcome Splash, RoleGate, or forced login). */
 function SignedOutNavigator(): React.JSX.Element {
   const forcedAppKind = getForcedAppKind();
   const [ready, setReady] = useState(false);
-  const [initialRoute, setInitialRoute] = useState<'Splash' | 'RoleGate' | 'UserLogin' | 'ReceiverLogin'>('Splash');
+  const [initialRoute, setInitialRoute] = useState<PostBrandSplashRoute>('Splash');
 
   useEffect(() => {
     let cancelled = false;
@@ -62,9 +63,14 @@ function SignedOutNavigator(): React.JSX.Element {
   return (
     <NavigationContainer<RootStackParamList> ref={navigationRef}>
       <Stack.Navigator
-        initialRouteName={initialRoute}
+        initialRouteName="BrandSplash"
         screenOptions={{ headerShown: false }}
       >
+        <Stack.Screen
+          name="BrandSplash"
+          component={BrandSplashScreen}
+          initialParams={{ postSplashRoute: initialRoute }}
+        />
         <Stack.Screen name="Splash" component={SplashScreen} />
         <Stack.Screen name="RoleGate" component={RoleGateScreen} />
         <Stack.Screen name="ReceiverEducation" component={ReceiverEducationScreen} />

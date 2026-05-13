@@ -5,6 +5,7 @@ import User from '../models/User';
 import Receiver, { RECEIVER_AUDIO_CALL_RATE_INR_PER_MIN } from '../models/Receiver';
 import CallSession from '../models/CallSession';
 import ReceiverRating from '../models/ReceiverRating';
+import UserReport from '../models/UserReport';
 import {
   buildVoiceCallId,
   createStreamUserToken,
@@ -398,6 +399,15 @@ export const endVoiceSession = async (
       });
     }
 
+    let callerWalletBalanceInr: number | undefined;
+    if (accountKind === 'user') {
+      const callerDoc = await User.findById(meId).select('walletBalance').lean();
+      callerWalletBalanceInr =
+        typeof callerDoc?.walletBalance === 'number' && Number.isFinite(callerDoc.walletBalance)
+          ? roundInr(Math.max(0, callerDoc.walletBalance))
+          : 0;
+    }
+
     res.status(200).json({
       ok: true,
       durationSec: settled.durationSec,
@@ -405,6 +415,7 @@ export const endVoiceSession = async (
       settledAmountInr: settled.settledAmountInr,
       receiverEarnedInr: settled.receiverEarnedInr,
       canRate: settled.durationSec >= 30,
+      ...(callerWalletBalanceInr !== undefined ? { callerWalletBalanceInr } : {}),
     });
     releaseReceiverReservation(settled.receiverId);
     await syncReceiverQueueState(settled.receiverId);
@@ -518,6 +529,81 @@ export const rateVoiceSession = async (
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error('rateVoiceSession error:', msg);
+    res.status(500).json({ message: msg || 'Server error' });
+  }
+};
+
+/** Labels must match caller app post-call issue chips. */
+const VOICE_CALL_ISSUE_TAGS = [
+  'Background noise',
+  'Not Talking',
+  'Asked me to end Call',
+  'Wrong Gender',
+  'Call Disconnected',
+] as const;
+
+const voiceIssueTagSet = new Set<string>(VOICE_CALL_ISSUE_TAGS);
+
+/**
+ * POST /calls/session/report — caller reports issues after a completed voice call (admin moderation queue).
+ */
+export const reportVoiceSessionIssue = async (
+  req: Request<{}, {}, { callId?: string; tags?: unknown }>,
+  res: Response
+): Promise<void> => {
+  try {
+    if (req.accountKind !== 'user' || !req.user?._id) {
+      res.status(403).json({ message: 'Only callers can submit call reports' });
+      return;
+    }
+    const callId = String(req.body.callId ?? '').trim();
+    const tagsRaw = req.body.tags;
+    const tags = Array.isArray(tagsRaw)
+      ? [...new Set(tagsRaw.map((t) => String(t).trim()).filter(Boolean))]
+      : [];
+    if (!callId) {
+      res.status(400).json({ message: 'callId is required' });
+      return;
+    }
+    if (!tags.length) {
+      res.status(400).json({ message: 'Select at least one issue' });
+      return;
+    }
+    const unknown = tags.filter((t) => !voiceIssueTagSet.has(t));
+    if (unknown.length) {
+      res.status(400).json({ message: 'Invalid issue tag(s)' });
+      return;
+    }
+
+    const session = await CallSession.findOne({ callId, callerId: req.user._id });
+    if (!session) {
+      res.status(404).json({ message: 'Call session not found' });
+      return;
+    }
+    if (session.status !== 'completed') {
+      res.status(409).json({ message: 'You can report only after the call has ended.' });
+      return;
+    }
+
+    const cost = roundInr(session.settledAmountInr || 0);
+    const preview = [`Issues: ${tags.join(', ')}`, `Call: ${callId}`, `${session.durationSec}s`, `₹${cost}`]
+      .join(' · ')
+      .slice(0, 500);
+
+    await UserReport.create({
+      reporterKind: 'user',
+      reporterId: req.user._id,
+      reportedKind: 'receiver',
+      reportedId: session.receiverId,
+      reason: 'Call session issue',
+      preview,
+      status: 'pending',
+      resolution: null,
+    });
+    res.status(201).json({ ok: true });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error('reportVoiceSessionIssue error:', msg);
     res.status(500).json({ message: msg || 'Server error' });
   }
 };

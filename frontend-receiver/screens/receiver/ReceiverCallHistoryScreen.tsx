@@ -6,13 +6,10 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import type { ReceiverStackParamList } from '../../navigation/ReceiverStackParamList';
 import { getErrorMessage, profileApi } from '../../services/api';
 import type { ReceiverCallInsightsResponse } from '../../types/api';
+import { formatCallDurationCompact, leaderboardMinutesFromSeconds } from '../../utils/callDurationDisplay';
 
 type Nav = NativeStackNavigationProp<ReceiverStackParamList, 'ReceiverCallHistory'>;
 type RangeTab = 'all' | 'week' | 'month';
-
-function fmtMinutes(sec: number): string {
-  return `${Math.max(1, Math.round(sec / 60))} min`;
-}
 
 export default function ReceiverCallHistoryScreen(): React.JSX.Element {
   const navigation = useNavigation<Nav>();
@@ -72,9 +69,15 @@ export default function ReceiverCallHistoryScreen(): React.JSX.Element {
       ) : data ? (
         <>
           <View style={styles.summaryCard}>
-            <Text style={styles.summaryText}>Total: {Math.round(data.leaderboard.totalMinutes)} min</Text>
-            <Text style={styles.summaryText}>Week: {Math.round(data.leaderboard.thisWeekMinutes)} min</Text>
-            <Text style={styles.summaryText}>Month: {Math.round(data.leaderboard.thisMonthMinutes)} min</Text>
+            <Text style={styles.summaryText}>
+              Total: {leaderboardMinutesFromSeconds(data.leaderboard.totalDurationSec)} min
+            </Text>
+            <Text style={styles.summaryText}>
+              Week: {leaderboardMinutesFromSeconds(data.leaderboard.thisWeekDurationSec)} min
+            </Text>
+            <Text style={styles.summaryText}>
+              Month: {leaderboardMinutesFromSeconds(data.leaderboard.thisMonthDurationSec)} min
+            </Text>
           </View>
 
           <Text style={styles.section}>Caller-wise history</Text>
@@ -84,8 +87,8 @@ export default function ReceiverCallHistoryScreen(): React.JSX.Element {
             data.callerHistory.map((row) => (
               <View key={row.callerId} style={styles.rowCard}>
                 <Text style={styles.name}>{row.callerName}</Text>
-                <Text style={styles.meta}>This week: {row.callsWeek} calls • {fmtMinutes(row.durationWeekSec)}</Text>
-                <Text style={styles.meta}>This month: {row.callsMonth} calls • {fmtMinutes(row.durationMonthSec)}</Text>
+                <Text style={styles.meta}>This week: {row.callsWeek} calls • {formatCallDurationCompact(row.durationWeekSec)}</Text>
+                <Text style={styles.meta}>This month: {row.callsMonth} calls • {formatCallDurationCompact(row.durationMonthSec)}</Text>
                 <Text style={styles.meta}>Rating received: {row.avgRating ?? 'N/A'}</Text>
               </View>
             ))
@@ -99,7 +102,7 @@ export default function ReceiverCallHistoryScreen(): React.JSX.Element {
               <View key={row.id} style={styles.rowCard}>
                 <Text style={styles.name}>{row.callerName}</Text>
                 <Text style={styles.meta}>{new Date(row.startedAt).toLocaleString()}</Text>
-                <Text style={styles.meta}>Duration: {fmtMinutes(row.durationSec)}</Text>
+                <Text style={styles.meta}>Duration: {formatCallDurationCompact(row.durationSec)}</Text>
                 <Text style={styles.meta}>Rating: {row.rating ?? 'N/A'}</Text>
               </View>
             ))

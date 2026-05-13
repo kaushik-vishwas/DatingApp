@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { getMyCallerAppReview, upsertMyCallerAppReview } from '../controllers/callerAppReviewController';
 import {
   completeCallerProfile,
   completeProfile,
@@ -45,6 +46,8 @@ router.patch('/receiver', protect, updateReceiverProfile);
 router.post('/receiver/reopen-kyc', protect, reopenRejectedReceiverKyc);
 router.delete('/receiver', protect, deleteReceiverAccount);
 router.get('/caller-call-history', protect, getCallerCallHistory);
+router.get('/caller-app-review', protect, getMyCallerAppReview);
+router.put('/caller-app-review', protect, upsertMyCallerAppReview);
 router.get('/caller-notifications', protect, getCallerNotifications);
 router.post('/receiver/bank/send-otp', protect, sendReceiverBankUpdateOtp);
 router.post('/receiver/bank/verify', protect, verifyReceiverBankUpdateOtp);

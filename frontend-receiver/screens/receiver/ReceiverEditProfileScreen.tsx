@@ -100,7 +100,7 @@ export default function ReceiverEditProfileScreen(): React.JSX.Element {
   const navigation = useNavigation<Nav>();
   const route = useRoute<RouteProp<ReceiverStackParamList, 'ReceiverEditProfile'>>();
   const fromWithdrawKyc = Boolean(route.params?.fromWithdrawKyc);
-  const { user, refreshUser, applyServerUser } = useAuth();
+  const { user, refreshUser, signOut } = useAuth();
   const [saving, setSaving] = useState(false);
 
   const [name, setName] = useState(user?.name ?? '');
@@ -225,15 +225,26 @@ export default function ReceiverEditProfileScreen(): React.JSX.Element {
           showsVerticalScrollIndicator={false}
         >
           {/* Header */}
-          <View style={styles.header}>
-            <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
-              <Icon name="chevron-left" size={26} color="#1a1a1a" />
-            </TouchableOpacity>
-            <Text style={styles.headerTitle}>
-              {isWithdrawKycMode ? 'Verify Identity' : 'Complete Profile'}
-            </Text>
-            <View style={styles.backBtn} />
-          </View>
+       {/* Header */}
+<View style={styles.header}>
+<TouchableOpacity 
+  onPress={() => {
+    // Just go back - no sign out
+    if (navigation.canGoBack()) {
+      navigation.goBack();
+    } else {
+      navigation.replace('ReceiverHome');
+    }
+  }} 
+  style={styles.backBtn}
+>
+  <Icon name="chevron-left" size={26} color="#1a1a1a" />
+</TouchableOpacity>
+  <Text style={styles.headerTitle}>
+    {isWithdrawKycMode ? 'Verify Identity' : 'Complete Profile'}
+  </Text>
+  <View style={styles.placeholder} />
+</View>
 
           {/* Subtitle */}
           <Text style={styles.subtitle}>
@@ -382,38 +393,32 @@ export default function ReceiverEditProfileScreen(): React.JSX.Element {
         {isWithdrawKycMode ? 'Identity verified successfully' : 'Profile updated successfully'}
       </Text>
       <TouchableOpacity
-        style={styles.successBtn}
-        onPress={async () => {
-          if (fromWithdrawKyc) {
-            navigation.replace('ReceiverBankDetails');
-          } else {
-            try {
-              const { data } = await authApi.me();
-              applyServerUser(data.user);
-              const canDashboard =
-                data.user.accountStatus === 'approved' && Boolean(data.user.userAudio?.trim());
-              if (canDashboard) {
-                if (navigation.canGoBack()) navigation.goBack();
-                else navigation.replace('ReceiverHome');
-              } else {
-                navigation.replace('ReceiverAutoVerification');
-              }
-            } catch {
-              navigation.replace('ReceiverAutoVerification');
-            }
-          }
-        }}
-        activeOpacity={0.8}
-      >
-        <LinearGradient
-          colors={['#7F00FF', '#A855F7', '#E100FF']}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 0 }}
-          style={styles.successBtnGradient}
-        >
-          <Text style={styles.successBtnText}>{fromWithdrawKyc ? 'Continue to Bank' : 'Done'}</Text>
-        </LinearGradient>
-      </TouchableOpacity>
+  style={styles.successBtn}
+  onPress={async () => {
+    setShowSuccess(false);
+    
+    if (fromWithdrawKyc) {
+      navigation.replace('ReceiverBankDetails');
+    } else {
+      // ALWAYS go back - no audio verification check
+      if (navigation.canGoBack()) {
+        navigation.goBack();
+      } else {
+        navigation.replace('ReceiverHome');
+      }
+    }
+  }}
+  activeOpacity={0.8}
+>
+  <LinearGradient
+    colors={['#7F00FF', '#A855F7', '#E100FF']}
+    start={{ x: 0, y: 0 }}
+    end={{ x: 1, y: 0 }}
+    style={styles.successBtnGradient}
+  >
+    <Text style={styles.successBtnText}>{fromWithdrawKyc ? 'Continue to Bank' : 'Done'}</Text>
+  </LinearGradient>
+</TouchableOpacity>
     </View>
   </View>
 ) : null}
@@ -530,6 +535,12 @@ const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: '#F8F9FA' },
   screen: { flex: 1, backgroundColor: '#F8F9FA' },
   content: { paddingHorizontal: 20, paddingBottom: 40, paddingTop: 8 },
+
+
+  placeholder: {
+    width: 40,
+    height: 40,
+  },
   
   header: { 
     flexDirection: 'row', 

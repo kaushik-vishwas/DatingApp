@@ -27,6 +27,7 @@ import {
 } from '../services/notificationUnread';
 import { chatApi, getErrorMessage, profileApi } from '../services/api';
 import type { ReceiverCallInsightsResponse, ReceiverWalletSummaryResponse } from '../types/api';
+import { formatCallDurationCompact, leaderboardMinutesFromSeconds } from '../utils/callDurationDisplay';
 import { type ReceiverPresenceInfo } from '../utils/receiverStatus';
 import SelectoLogo from '../assets/SelectoLogo.png';
 
@@ -473,7 +474,7 @@ export default function ReceiverHomeDashboard(): React.JSX.Element {
                   key={row.id}
                   callerId={row.callerId}
                   title={row.callerName}
-                  subtitle={`${Math.max(1, Math.round(row.durationSec / 60))} min`}
+                  subtitle={formatCallDurationCompact(row.durationSec)}
                   callerImage={row.callerImage}
                   onMessage={onMessageCaller}
                 />
@@ -515,32 +516,59 @@ export default function ReceiverHomeDashboard(): React.JSX.Element {
               <View style={styles.sectionHeaderRow}>
                 <Text style={styles.sectionTitle}>Leader Board</Text>
               </View>
-              <LinearGradient
-  colors={['#7F00FF', '#A855F7', '#E100FF']}
-  start={{ x: 0, y: 0 }}
-  end={{ x: 1, y: 1 }}
-  style={styles.leaderBoardCard}
->
-  <Text style={styles.leaderMinutesBig}>
-    {callInsights ? Math.round(callInsights.leaderboard.totalMinutes) : 0}
-    <Text style={styles.leaderMinutesUnit}> Minutes</Text>
-  </Text>
-</LinearGradient>
+              {callInsights ? (
+                <>
+                  <LinearGradient
+                    colors={['#7F00FF', '#A855F7', '#E100FF']}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 1 }}
+                    style={styles.leaderBoardCard}
+                  >
+                    <Text style={styles.leaderBoardCaption}>All-time talk time</Text>
+                    <Text style={styles.leaderMinutesBig}>
+                      {leaderboardMinutesFromSeconds(callInsights.leaderboard.totalDurationSec)}
+                      <Text style={styles.leaderMinutesUnit}> min</Text>
+                    </Text>
+                  </LinearGradient>
 
-<LinearGradient
-  colors={['#7F00FF', '#A855F7', '#E100FF']}
-  start={{ x: 0, y: 0 }}
-  end={{ x: 1, y: 1 }}
-  style={styles.leaderBoardCardPurple}
->
-  <Text style={styles.leaderMinutesBig}>
-    {callInsights ? Math.round(callInsights.leaderboard.thisMonthMinutes) : 0}
-    <Text style={styles.leaderMinutesUnit}> Minutes</Text>
-  </Text>
-  <View style={styles.progressTrack}>
-    <View style={styles.progressFill} />
-  </View>
-</LinearGradient>
+                  <LinearGradient
+                    colors={['#7F00FF', '#A855F7', '#E100FF']}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 1 }}
+                    style={styles.leaderBoardCardPurple}
+                  >
+                    <Text style={styles.leaderBoardCaption}>This calendar month</Text>
+                    <Text style={styles.leaderMinutesBig}>
+                      {leaderboardMinutesFromSeconds(callInsights.leaderboard.thisMonthDurationSec)}
+                      <Text style={styles.leaderMinutesUnit}> min</Text>
+                    </Text>
+                    <View style={styles.progressTrack}>
+                      <View
+                        style={[
+                          styles.progressFill,
+                          {
+                            width: `${Math.min(
+                              100,
+                              callInsights.leaderboard.totalDurationSec > 0
+                                ? (callInsights.leaderboard.thisMonthDurationSec /
+                                    callInsights.leaderboard.totalDurationSec) *
+                                    100
+                                : 0
+                            )}%`,
+                          },
+                        ]}
+                      />
+                    </View>
+                  </LinearGradient>
+
+                  {/* <Text style={styles.leaderWeekFoot}>
+                    This week (last 7 days, from midnight):{' '}
+                    <Text style={styles.leaderWeekFootEm}>
+                      {leaderboardMinutesFromSeconds(callInsights.leaderboard.thisWeekDurationSec)} min
+                    </Text>
+                  </Text> */}
+                </>
+              ) : null}
             </View>
           </>
         ) : (
@@ -862,8 +890,24 @@ const styles = StyleSheet.create({
     marginTop: 12,
     color: '#fff', 
   },
-  leaderMinutesBig: { color: '#fff', fontWeight: '900', fontSize: 36 },
+  leaderBoardCaption: {
+    color: 'rgba(255,255,255,0.92)',
+    fontSize: 13,
+    fontWeight: '700',
+    marginBottom: 6,
+    textAlign: 'left',
+  },
+  leaderMinutesBig: { color: '#fff', fontWeight: '900', fontSize: 36, textAlign: 'left' },
   leaderMinutesUnit: { fontSize: 15, fontWeight: '700' },
+  leaderWeekFoot: {
+    marginTop: 10,
+    marginHorizontal: 16,
+    fontSize: 13,
+    color: '#555',
+    fontWeight: '600',
+    textAlign: 'center',
+  },
+  leaderWeekFootEm: { color: '#111', fontWeight: '900' },
   progressTrack: {
     marginTop: 10,
     height: 7,
@@ -871,7 +915,7 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255,255,255,0.55)',
     overflow: 'hidden',
   },
-  progressFill: { width: '58%', height: 7, backgroundColor: '#f4b900' },
+  progressFill: { height: 7, backgroundColor: '#f4b900' },
   muted: { color: '#888', textAlign: 'center', paddingHorizontal: 16 },
 });
 

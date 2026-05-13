@@ -128,7 +128,7 @@ export default function SelectGenderScreen({
         <View style={styles.underline} />
 
         <Text style={styles.subtitle}>
-          This helps us personalize your experience
+          This helps dd personalize your experience
         </Text>
 
         {/* Gender Options */}

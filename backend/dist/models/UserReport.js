@@ -41,6 +41,8 @@ exports.REPORT_REASONS = [
     'Inappropriate content',
     'Fake profile',
     'Other',
+    /** Caller post–voice-call issue (tags stored in `preview`). */
+    'Call session issue',
 ];
 const userReportSchema = new mongoose_1.Schema({
     reporterKind: { type: String, enum: ['user', 'receiver'], required: true },

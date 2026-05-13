@@ -10,4 +10,5 @@ router.post('/session/start', auth_1.protect, callController_1.startVoiceSession
 router.post('/session/sync', auth_1.protect, callController_1.syncVoiceSession);
 router.post('/session/end', auth_1.protect, callController_1.endVoiceSession);
 router.post('/session/rate', auth_1.protect, callController_1.rateVoiceSession);
+router.post('/session/report', auth_1.protect, callController_1.reportVoiceSessionIssue);
 exports.default = router;

@@ -97,7 +97,7 @@ export default function ChooseAvatarScreen({
       <View style={styles.underline} />
 
       <Text style={styles.subtitle}>
-        Tell us a bit about yssourself
+        Tell us a bit about yourself
       </Text>
 
       {/* Featured Avatar */}

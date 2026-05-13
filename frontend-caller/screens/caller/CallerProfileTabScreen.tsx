@@ -150,8 +150,30 @@ export default function CallerProfileTabScreen({ navigation }: Props): React.JSX
           </View>
         </View>
 
+        <View style={styles.actionCardsRow}>
+          <TouchableOpacity
+            style={styles.actionCard}
+            onPress={() => navigation.navigate('CallerShareApp')}
+            activeOpacity={0.88}
+          >
+            <Text style={styles.actionCardIco}>📤</Text>
+            <Text style={styles.actionCardTitle}>Share app</Text>
+            <Text style={styles.actionCardSub}>Invite friends</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.actionCard}
+            onPress={() => navigation.navigate('CallerFaq')}
+            activeOpacity={0.88}
+          >
+            <Text style={styles.actionCardIco}>❔</Text>
+            <Text style={styles.actionCardTitle}>FAQ</Text>
+            <Text style={styles.actionCardSub}>Common questions</Text>
+          </TouchableOpacity>
+        </View>
+
         <View style={styles.menuBlock}>
           {menuRow('👤', 'Edit Profile', () => navigation.navigate('CallerEditProfile'))}
+          {menuRow('⭐', 'Rate Us', () => navigation.navigate('CallerRateUs'))}
           {menuRow('💬', 'Chats', () => navigation.navigate('CallerChats'))}
           {menuRow('❓', 'Help & Support', () => navigation.navigate('CallerHelp'))}
           {menuRow('📄', 'Terms & Privacy', () => navigation.navigate('CallerTerms'))}
@@ -220,6 +242,20 @@ const styles = StyleSheet.create({
   statIco: { fontSize: 18, marginBottom: 6 },
   statVal: { fontSize: 16, fontWeight: '900', color: '#111' },
   statLbl: { fontSize: 11, color: '#666', marginTop: 4, fontWeight: '700' },
+  actionCardsRow: { flexDirection: 'row', gap: 10, marginBottom: 22 },
+  actionCard: {
+    flex: 1,
+    backgroundColor: '#fafafa',
+    borderRadius: 14,
+    paddingVertical: 16,
+    paddingHorizontal: 12,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#ececec',
+  },
+  actionCardIco: { fontSize: 26, marginBottom: 8 },
+  actionCardTitle: { fontSize: 15, fontWeight: '900', color: '#111' },
+  actionCardSub: { fontSize: 11, color: '#888', marginTop: 4, fontWeight: '600', textAlign: 'center' },
   menuBlock: { gap: 10 },
   menuRow: {
     flexDirection: 'row',

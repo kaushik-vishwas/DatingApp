@@ -106,6 +106,25 @@ export interface CallerWalletTopupsResponse {
   topups: CallerWalletTopupRow[];
 }
 
+export type WalletOfferRow = {
+  id: string;
+  amount: number;
+  bonusPercent: number;
+  popular: boolean;
+  active: boolean;
+  offerBannerDataUrl?: string | null;
+};
+
+export type WalletOffersResponse = {
+  offers: WalletOfferRow[];
+  banner:
+    | {
+        offerId: string;
+        imageDataUrl: string;
+      }
+    | null;
+};
+
 export interface DiscoverReceiversResponse {
   receivers: DiscoverReceiverSummary[];
 }
@@ -298,6 +317,15 @@ export interface CallerCallHistoryRow {
 
 export interface CallerCallHistoryResponse {
   calls: CallerCallHistoryRow[];
+}
+
+/** GET /profile/caller-app-review */
+export interface CallerAppReviewMeResponse {
+  exists: boolean;
+  stars: number | null;
+  review: string | null;
+  createdAt: string | null;
+  updatedAt: string | null;
 }
 
 export type CallerNotificationType = 'transaction' | 'chat' | 'call';

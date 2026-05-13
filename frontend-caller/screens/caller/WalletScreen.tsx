@@ -1,39 +1,63 @@
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import React, { useState } from 'react';
-import { Alert, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Alert, ScrollView, StyleSheet, Text, TouchableOpacity, View, Image } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { WALLET_PACKAGES, creditForPackage, type WalletPackage } from '../../constants/walletPackages';
+import { walletApi } from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
 import type { CallerStackParamList } from '../../navigation/CallerStackParamList';
+import type { WalletOfferRow } from '../../types/api';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const PURPLE = '#7b2cff';
+const GST_PERCENTAGE = 28;
 
 type Props = NativeStackScreenProps<CallerStackParamList, 'Wallet'>;
+
+const WALLET_OFFER_BANNER_KEY = '@nesthama_wallet_offer_banner_seen';
 
 export default function WalletScreen({ navigation }: Props): React.JSX.Element {
   const insets = useSafeAreaInsets();
   const { user } = useAuth();
-  const [selected, setSelected] = useState<WalletPackage | null>(null);
+  const [selected, setSelected] = useState<WalletOfferRow | null>(null);
+  const [offers, setOffers] = useState<WalletOfferRow[] | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [bannerImage, setBannerImage] = useState<string | null>(null);
+  const [bannerOpen, setBannerOpen] = useState(false);
 
   const bal = typeof user?.walletBalance === 'number' && Number.isFinite(user.walletBalance) ? user.walletBalance : 0;
+
+  // Calculate credit directly without static function
+  const calculateCredit = (amount: number, bonusPercent: number): number => {
+    // amount from API is the base amount (without GST)
+    const totalCredit = amount * (1 + bonusPercent / 100);
+    return Math.round(totalCredit * 100) / 100;
+  };
 
   const onProceed = () => {
     if (!selected) {
       Alert.alert('Select amount', 'Choose a recharge pack to continue.');
       return;
     }
-    const credit = creditForPackage(selected);
+    
+    const credit = calculateCredit(selected.amount, selected.bonusPercent);
+    const walletAmount = selected.amount;
+    const gstAmount = (selected.amount * GST_PERCENTAGE) / 100;
+    const totalAmount = selected.amount + gstAmount;
+    
     navigation.navigate('PaymentMethod', {
-      payAmount: selected.pay,
-      bonusPercent: selected.bonus,
+      walletAmount: walletAmount,
+      payAmount: totalAmount,
+      gstAmount: gstAmount,
+      totalAmount: totalAmount,
+      bonusPercent: selected.bonusPercent,
       creditAmount: credit,
     });
   };
 
-  const renderPkg = ({ item }: { item: WalletPackage }) => {
-    const active = selected?.pay === item.pay && selected?.bonus === item.bonus;
-    const credit = creditForPackage(item);
+  const renderPkg = ({ item }: { item: WalletOfferRow }) => {
+    const active = selected?.id === item.id;
+    const credit = calculateCredit(item.amount, item.bonusPercent);
     return (
       <TouchableOpacity
         style={[styles.pkg, active && styles.pkgActive]}
@@ -45,11 +69,69 @@ export default function WalletScreen({ navigation }: Props): React.JSX.Element {
             <Text style={styles.popularTxt}>Popular</Text>
           </View>
         ) : null}
-        <Text style={styles.pkgPay}>₹ {item.pay}</Text>
-        <Text style={styles.pkgBonus}>+{item.bonus}% Extra</Text>
+        <Text style={styles.pkgPay}>₹ {item.amount}</Text>
+        <Text style={styles.pkgBonus}>+{item.bonusPercent}% Extra</Text>
         <Text style={styles.pkgCredit}>Credit ₹{credit.toLocaleString('en-IN')}</Text>
       </TouchableOpacity>
     );
+  };
+
+  React.useEffect(() => {
+    let mounted = true;
+    (async () => {
+      try {
+        setLoading(true);
+        console.log('🔍 Fetching wallet offers...');
+        
+        const { data } = await walletApi.offers();
+        console.log('📦 API Response:', JSON.stringify(data, null, 2));
+        
+        if (!mounted) return;
+        
+        setOffers(data.offers ?? []);
+        
+        // Get banner from the response
+        if (data.banner?.imageDataUrl) {
+          console.log('✅ Banner URL found:', data.banner.imageDataUrl);
+          setBannerImage(data.banner.imageDataUrl);
+          
+          // FORCE OPEN BANNER FOR TESTING - REMOVE IN PRODUCTION
+          console.log('🎉 FORCE OPENING BANNER');
+          setBannerOpen(true);
+          
+          // Original logic (commented for testing)
+          // const seen = await AsyncStorage.getItem(WALLET_OFFER_BANNER_KEY);
+          // console.log('💾 Storage value:', seen);
+          // if (seen !== 'true') {
+          //   console.log('🎉 Showing banner');
+          //   setBannerOpen(true);
+          // }
+        } else {
+          console.log('❌ No banner in API response');
+          console.log('   Check: popular offer with offerBannerDataUrl exists?');
+        }
+      } catch (e) {
+        console.error('❌ Error:', e);
+        if (!mounted) return;
+        setOffers([]);
+        setBannerImage(null);
+      } finally {
+        if (mounted) {
+          setLoading(false);
+          console.log('🏁 Loading complete, bannerOpen:', bannerOpen);
+        }
+      }
+    })();
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  const closeBanner = async () => {
+    console.log('🔒 Closing banner');
+    setBannerOpen(false);
+    await AsyncStorage.setItem(WALLET_OFFER_BANNER_KEY, 'true');
+    console.log('✅ Banner closed and saved to storage');
   };
 
   return (
@@ -64,14 +146,34 @@ export default function WalletScreen({ navigation }: Props): React.JSX.Element {
         ]}
         showsVerticalScrollIndicator={false}
       >
+        {/* Banner Popup */}
+        {bannerOpen && bannerImage ? (
+          <View style={styles.bannerOverlay}>
+            <View style={styles.bannerPopup}>
+              <TouchableOpacity style={styles.bannerClose} onPress={closeBanner}>
+                <Text style={styles.bannerCloseText}>✕</Text>
+              </TouchableOpacity>
+              <Image 
+                source={{ uri: bannerImage }} 
+                style={styles.bannerImage}
+                resizeMode="cover"
+                onError={() => console.log('❌ Image failed to load')}
+                onLoad={() => console.log('✅ Image loaded successfully')}
+              />
+            </View>
+          </View>
+        ) : null}
+
         <View style={styles.header}>
           <TouchableOpacity onPress={() => navigation.goBack()} style={styles.back}>
             <Text style={styles.backTxt}>←</Text>
           </TouchableOpacity>
           <Text style={styles.title}>Wallet</Text>
-          <TouchableOpacity onPress={() => navigation.navigate('WalletTransactions')}>
-            <Text style={styles.txLink}>View Transactions</Text>
-          </TouchableOpacity>
+          <View style={{ flexDirection: 'row', gap: 8 }}>
+            <TouchableOpacity onPress={() => navigation.navigate('WalletTransactions')}>
+              <Text style={styles.txLink}>View Transactions</Text>
+            </TouchableOpacity>
+          </View>
         </View>
 
         <View style={styles.balanceCard}>
@@ -81,16 +183,22 @@ export default function WalletScreen({ navigation }: Props): React.JSX.Element {
 
         <Text style={styles.section}>Add Balance to Wallet</Text>
         <View>
-          {Array.from({ length: Math.ceil(WALLET_PACKAGES.length / 2) }, (_, row) => (
+          {offers && offers.length > 0
+            ? Array.from({ length: Math.ceil(offers.length / 2) }, (_, row) => (
             <View key={row} style={styles.row}>
-              {WALLET_PACKAGES.slice(row * 2, row * 2 + 2).map((p) => (
-                <View key={`${p.pay}-${p.bonus}`} style={styles.pkgCell}>
+              {offers.slice(row * 2, row * 2 + 2).map((p) => (
+                <View key={`${p.amount}-${p.bonusPercent}`} style={styles.pkgCell}>
                   {renderPkg({ item: p })}
                 </View>
               ))}
-              {WALLET_PACKAGES.slice(row * 2, row * 2 + 2).length === 1 ? <View style={styles.pkgCell} /> : null}
+              {offers.slice(row * 2, row * 2 + 2).length === 1 ? <View style={styles.pkgCell} /> : null}
             </View>
-          ))}
+          ))
+            : !loading && (
+              <Text style={{ textAlign: 'center', color: '#888', marginTop: 20 }}>
+                No offers available
+              </Text>
+            )}
         </View>
 
         <View style={styles.secureRow}>
@@ -167,4 +275,61 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   ctaTxt: { color: '#fff', fontSize: 16, fontWeight: '900' },
+  
+  // Banner Popup Styles
+  bannerOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.7)',
+    zIndex: 9999,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  bannerPopup: {
+    width: '85%',
+    backgroundColor: '#fff',
+    borderRadius: 20,
+    overflow: 'hidden',
+    elevation: 5,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
+  },
+  bannerClose: {
+    position: 'absolute',
+    top: 10,
+    right: 10,
+    zIndex: 10000,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  bannerCloseText: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: 'bold',
+  },
+  bannerImage: {
+    width: '100%',
+    height: 200,
+  },
+  bannerButton: {
+    backgroundColor: PURPLE,
+    paddingVertical: 12,
+    alignItems: 'center',
+    margin: 16,
+    borderRadius: 10,
+  },
+  bannerButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
 });

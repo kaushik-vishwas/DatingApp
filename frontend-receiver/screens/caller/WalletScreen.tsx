@@ -68,7 +68,7 @@ export default function WalletScreen({ navigation }: Props): React.JSX.Element {
         <Text style={styles.balanceAmt}>₹ {bal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</Text>
       </View>
 
-      <Text style={styles.section}>Add Balance to Wallet</Text>
+      <Text style={styles.section}>Add Balancsse tossss ssWallet</Text>
       <ScrollView scrollEnabled={false} showsVerticalScrollIndicator={false}>
         {Array.from({ length: Math.ceil(WALLET_PACKAGES.length / 2) }, (_, row) => (
           <View key={row} style={styles.row}>

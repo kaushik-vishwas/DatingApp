@@ -10,6 +10,8 @@ import { SettingsPage } from './pages/SettingsPage';
 import { RevenuePage } from './pages/RevenuePage';
 import { WithdrawalsPage } from './pages/WithdrawalsPage';
 import { ReportsPage } from './pages/ReportsPage';
+import { RatingsPage } from './pages/RatingsPage';
+import { WalletOffersPage } from './pages/WalletOffers';
 
 function RequireAuth() {
   const { token, bootstrapping } = useAdminAuth();
@@ -43,7 +45,9 @@ function AppRoutes() {
           <Route path="/kyc" element={<KycApprovalsPage />} />
           <Route path="/revenue" element={<RevenuePage />} />
           <Route path="/withdrawals" element={<WithdrawalsPage />} />
+          <Route path="/wallet-offers" element={<WalletOffersPage />} />
           <Route path="/reports" element={<ReportsPage />} />
+          <Route path="/ratings" element={<RatingsPage />} />
           <Route path="/settings" element={<SettingsPage />} />
         </Route>
       </Route>

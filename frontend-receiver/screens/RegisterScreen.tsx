@@ -74,40 +74,47 @@ export default function RegisterScreen({ navigation, route }: Props) {
     return null;
   };
 
-  const handleRegister = async () => {
-    const err = validate();
-    if (err) {
-      Alert.alert('Validation', err);
-      return;
-    }
-    if (!dob) return;
+ const handleRegister = async () => {
+  const err = validate();
+  if (err) {
+    Alert.alert('Validation', err);
+    return;
+  }
+  if (!dob) return;
 
-    const name = fullName.trim();
-    const phoneDigits = normalizeIndianMobileDigits(phone);
+  const name = fullName.trim();
+  const phoneDigits = normalizeIndianMobileDigits(phone);
 
+  // Check if phone already exists in database
+  setLoading(true);
+  try {
+    // First check if phone is already registered
     const taken = await isPhoneRegisteredForAccountType(phoneDigits, 'receiver');
     if (taken) {
-      Alert.alert('Mobile number already registered', 'Mobile number already registered');
+      Alert.alert(
+        'Account exists', 
+        'This mobile number is already registered. Please login instead.',
+        [
+          { text: 'Login', onPress: () => navigation.navigate('ReceiverLogin', { mobile: phoneDigits }) },
+          { text: 'Cancel', style: 'cancel' }
+        ]
+      );
       return;
     }
 
-    setLoading(true);
-    try {
-      await authApi.register({
-        name,
-        phone: phoneDigits,
-        dateOfBirth: formatDateOnlyLocal(dob),
-        role: 'receiver',
-      });
-
-      await authApi.sendOtp(phoneDigits, 'receiver');
-      navigation.navigate('Otp', { phone: phoneDigits, accountType: 'receiver' });
-    } catch (e) {
-      Alert.alert('Error', getErrorMessage(e));
-    } finally {
-      setLoading(false);
-    }
-  };
+    // If not taken, send OTP
+    await authApi.sendOtp(phoneDigits, 'receiver', {
+      name,
+      dateOfBirth: formatDateOnlyLocal(dob),
+      role: 'receiver',
+    });
+    navigation.navigate('Otp', { phone: phoneDigits, accountType: 'receiver' });
+  } catch (e) {
+    Alert.alert('Error', getErrorMessage(e));
+  } finally {
+    setLoading(false);
+  }
+};
 
   return (
     <View style={styles.bg}>
@@ -132,7 +139,7 @@ export default function RegisterScreen({ navigation, route }: Props) {
           onScrollBeginDrag={Keyboard.dismiss}
           showsVerticalScrollIndicator={false}
         >
-          <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
+          <TouchableOpacity onPress={() => navigation.navigate('ReceiverLogin', undefined)} style={styles.backButton}>
             <Icon name="chevron-left" size={24} color={PURPLE} />
           </TouchableOpacity>
 

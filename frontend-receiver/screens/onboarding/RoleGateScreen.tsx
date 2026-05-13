@@ -15,7 +15,7 @@ export default function RoleGateScreen({ navigation }: Props): React.JSX.Element
 
   
   const goReceiver = () => {
-    navigation.navigate('ReceiverEducation', undefined);
+    navigation.navigate('ReceiverLogin', undefined);
   };
 
   return (

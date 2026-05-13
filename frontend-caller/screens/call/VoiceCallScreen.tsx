@@ -1,7 +1,8 @@
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Ionicons } from '@expo/vector-icons';
-import { ActivityIndicator, Alert, Image, Modal, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, Image, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
 import { Audio } from 'expo-av';
 import Constants from 'expo-constants';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -12,9 +13,28 @@ import { useAuth } from '../../context/AuthContext';
 import { callApi, getErrorMessage, getJwt, getResolvedApiBaseUrl } from '../../services/api';
 import { resolveProfileImageSource } from '../../utils/avatarSource';
 
-type Props =
-  | NativeStackScreenProps<CallerStackParamList, 'VoiceCall'>
-  | NativeStackScreenProps<ReceiverStackParamList, 'VoiceCall'>;
+type PostCallDetails = {
+  durationSec: number;
+  costInr: number;
+  walletInr: number;
+};
+
+/** Must match backend `VOICE_CALL_ISSUE_TAGS`. */
+const POST_CALL_ISSUE_TAGS = [
+  'Background noise',
+  'Not Talking',
+  'Asked me to end Call',
+  'Wrong Gender',
+  'Call Disconnected',
+] as const;
+
+function formatCallDurationShort(totalSec: number): string {
+  const s = Math.max(0, Math.floor(totalSec));
+  const m = Math.floor(s / 60);
+  const rem = s % 60;
+  if (m <= 0) return `${rem}s`;
+  return `${m}m ${String(rem).padStart(2, '0')}s`;
+}
 
 export default function VoiceCallScreen({ navigation, route }: Props): React.JSX.Element {
   const MIN_RATING_SECONDS = 55;
@@ -57,9 +77,13 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
   const [elapsedSec, setElapsedSec] = useState(0);
   const [muted, setMuted] = useState(false);
   const [liveSettledAmountInr, setLiveSettledAmountInr] = useState(0);
-  const [ratingOpen, setRatingOpen] = useState(false);
+  const [postCallOpen, setPostCallOpen] = useState(false);
+  const [postCallThanks, setPostCallThanks] = useState(false);
+  const [postCallDetails, setPostCallDetails] = useState<PostCallDetails | null>(null);
   const [selectedRating, setSelectedRating] = useState(0);
+  const [selectedIssueTags, setSelectedIssueTags] = useState<Set<string>>(() => new Set());
   const [submittingRating, setSubmittingRating] = useState(false);
+  const [submittingIssue, setSubmittingIssue] = useState(false);
   const autoEndByBalanceRef = useRef(false);
   const activeCallRef = useRef<{
     leave: () => Promise<void>;
@@ -133,6 +157,23 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
             ? Math.max(0, data.receiverEarnedInr)
             : 0
         );
+        const durationSec =
+          typeof data.durationSec === 'number' && Number.isFinite(data.durationSec)
+            ? Math.max(0, data.durationSec)
+            : 0;
+        const costInr =
+          typeof data.settledAmountInr === 'number' && Number.isFinite(data.settledAmountInr)
+            ? Math.max(0, data.settledAmountInr)
+            : 0;
+        const walletFromApi =
+          typeof data.callerWalletBalanceInr === 'number' && Number.isFinite(data.callerWalletBalanceInr)
+            ? Math.max(0, data.callerWalletBalanceInr)
+            : null;
+        setPostCallDetails({
+          durationSec,
+          costInr,
+          walletInr: walletFromApi ?? callerWalletInr,
+        });
         return result;
       } catch {
         // Allow future retries if a transient failure happens now.
@@ -144,9 +185,11 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
     return endSessionPromiseRef.current;
   };
 
-  const showRatingPrompt = () => {
+  const openPostCallSummary = () => {
     setSelectedRating(0);
-    setRatingOpen(true);
+    setSelectedIssueTags(new Set());
+    setPostCallThanks(false);
+    setPostCallOpen(true);
   };
 
   const stopQueueAndExit = () => {
@@ -161,6 +204,25 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
     }
     (navigation as any).navigate('ReceiverHome');
   };
+
+  const closePostCallAndExit = () => {
+    setPostCallOpen(false);
+    setPostCallThanks(false);
+    stopQueueAndExit();
+  };
+
+  const toggleIssueTag = (tag: string) => {
+    setSelectedIssueTags((prev) => {
+      const next = new Set(prev);
+      if (next.has(tag)) next.delete(tag);
+      else next.add(tag);
+      return next;
+    });
+  };
+
+  const summaryDurationSec = postCallDetails?.durationSec ?? elapsedSec;
+  const summaryCostInr = postCallDetails?.costInr ?? 0;
+  const summaryWalletInr = postCallDetails?.walletInr ?? callerWalletInr;
 
   const leaveMedia = async () => {
     try {
@@ -289,7 +351,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
           if (userRoleRef.current === 'caller' && callerCanRateByDurationRef.current) {
             await ensureSessionEnded();
             await leaveMedia();
-            showRatingPrompt();
+            openPostCallSummary();
             return;
           }
           void ensureSessionEnded();
@@ -374,7 +436,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
     if (user?.role === 'caller' && callerCanRateByDuration) {
       await ensureSessionEnded();
       await leaveMedia();
-      showRatingPrompt();
+      openPostCallSummary();
       return;
     }
     void ensureSessionEnded();
@@ -486,61 +548,178 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
           </View>
         </sdk.StreamCall>
       </sdk.StreamVideo>
-      <Modal visible={ratingOpen} transparent animationType="fade">
-        <View style={styles.modalOverlay}>
-          <View style={styles.ratingCard}>
-            <Text style={styles.ratingTitle}>Rate this call</Text>
-            <Text style={styles.ratingSubtitle}>How was the call quality?</Text>
-            <View style={styles.starRow}>
-              {[1, 2, 3, 4, 5].map((n) => (
-                <TouchableOpacity
-                  key={n}
-                  activeOpacity={0.75}
-                  onPress={() => setSelectedRating(n)}
-                  style={styles.starHit}
-                  accessibilityRole="button"
-                  accessibilityLabel={`Rate ${n} out of 5`}
-                >
-                  <Ionicons
-                    name={n <= selectedRating ? 'star' : 'star-outline'}
-                    size={38}
-                    color={n <= selectedRating ? '#f59e0b' : '#d1d5db'}
-                  />
+      <Modal visible={postCallOpen} animationType="fade" transparent>
+        <View style={[styles.postModalRoot, postCallThanks && styles.postModalRootDim]}>
+          {postCallThanks ? (
+            <View style={[styles.postThanksWrap, { paddingTop: insets.top + 40 }]}>
+              <View style={styles.postThanksCard}>
+                <Text style={styles.postThanksTitle}>Thanks !</Text>
+                <View style={styles.postThanksStars}>
+                  {[1, 2, 3, 4, 5].map((n) => (
+                    <Ionicons
+                      key={n}
+                      name={n <= selectedRating ? 'star' : 'star-outline'}
+                      size={34}
+                      color={n <= selectedRating ? '#eab308' : '#d1d5db'}
+                    />
+                  ))}
+                </View>
+                <Text style={styles.postThanksSub}>for your Reviews !</Text>
+                <TouchableOpacity activeOpacity={0.9} onPress={closePostCallAndExit} style={styles.postThanksBtnTouch}>
+                  <LinearGradient
+                    colors={['#7F00FF', '#7b2cff', '#9333ea']}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 1 }}
+                    style={styles.postGradBtn}
+                  >
+                    <Text style={styles.postGradBtnText}>Go Back</Text>
+                  </LinearGradient>
                 </TouchableOpacity>
-              ))}
+              </View>
             </View>
-            <TouchableOpacity
-              style={[styles.ratingSubmitBtn, selectedRating === 0 && styles.ratingSubmitBtnOff]}
-              disabled={selectedRating === 0 || submittingRating}
-              onPress={() => {
-                void (async () => {
-                  if (!selectedRating) return;
-                  setSubmittingRating(true);
-                  try {
-                    await callApi.sessionRate(callIdRef.current, selectedRating);
-                  } catch {
-                    // Keep exit behavior even if rating submit fails.
-                  } finally {
-                    setSubmittingRating(false);
-                    setRatingOpen(false);
-                    stopQueueAndExit();
-                  }
-                })();
+          ) : (
+            <ScrollView
+              style={styles.postScroll}
+              contentContainerStyle={{
+                paddingHorizontal: 22,
+                paddingTop: insets.top + 18,
+                paddingBottom: insets.bottom + 28,
               }}
+              keyboardShouldPersistTaps="handled"
             >
-              <Text style={styles.ratingSubmitText}>{submittingRating ? 'Submitting...' : 'Submit'}</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.ratingSkipBtn}
-              disabled={submittingRating}
-              onPress={() => {
-                setRatingOpen(false);
-                stopQueueAndExit();
-              }}
-            >
-              <Text style={styles.ratingSkipText}>Skip</Text>
-            </TouchableOpacity>
-          </View>
+              <View style={styles.postHeroAvatar}>
+                {route.params.peerImage ? (
+                  <Image source={{ uri: route.params.peerImage }} style={styles.postHeroAvatarImg} />
+                ) : (
+                  <View style={[styles.postHeroAvatarImg, styles.postHeroAvatarPh]}>
+                    <Text style={styles.postHeroAvatarInitial}>
+                      {(route.params.peerName || 'U').trim().charAt(0).toUpperCase()}
+                    </Text>
+                  </View>
+                )}
+              </View>
+              <Text style={styles.postPeerTitle}>{route.params.peerName || 'Receiver'}</Text>
+
+              <View style={styles.postDetailBox}>
+                <View style={styles.postDetailRow}>
+                  <Text style={styles.postDetailLabel}>Total Duration</Text>
+                  <Text style={styles.postDetailValue}>{formatCallDurationShort(summaryDurationSec)}</Text>
+                </View>
+                <View style={styles.postDetailRow}>
+                  <Text style={styles.postDetailLabel}>Total Cost</Text>
+                  <Text style={styles.postDetailValue}>₹{summaryCostInr}</Text>
+                </View>
+                <View style={[styles.postDetailRow, styles.postDetailRowLast]}>
+                  <Text style={styles.postDetailLabel}>Remaining Balance</Text>
+                  <Text style={[styles.postDetailValue, styles.postDetailValueAccent]}>₹{summaryWalletInr}</Text>
+                </View>
+              </View>
+
+              <Text style={styles.postSectionTitle}>Rate your experience</Text>
+              <View style={styles.postStarRow}>
+                {[1, 2, 3, 4, 5].map((n) => (
+                  <TouchableOpacity
+                    key={n}
+                    activeOpacity={0.75}
+                    onPress={() => setSelectedRating(n)}
+                    style={styles.postStarHit}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Rate ${n} out of 5`}
+                  >
+                    <Ionicons
+                      name={n <= selectedRating ? 'star' : 'star-outline'}
+                      size={36}
+                      color={n <= selectedRating ? '#f59e0b' : '#d1d5db'}
+                    />
+                  </TouchableOpacity>
+                ))}
+              </View>
+              <TouchableOpacity
+                activeOpacity={0.9}
+                disabled={selectedRating === 0 || submittingRating}
+                onPress={() => {
+                  void (async () => {
+                    if (!selectedRating) return;
+                    setSubmittingRating(true);
+                    try {
+                      await callApi.sessionRate(callIdRef.current, selectedRating);
+                      setPostCallThanks(true);
+                    } catch {
+                      Alert.alert('Rating', 'Could not submit your rating. You can still report an issue or go home.');
+                    } finally {
+                      setSubmittingRating(false);
+                    }
+                  })();
+                }}
+                style={[styles.postPrimaryBtnOuter, (selectedRating === 0 || submittingRating) && styles.postBtnDisabled]}
+              >
+                <LinearGradient
+                  colors={['#7F00FF', '#7b2cff', '#9333ea']}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 1 }}
+                  style={styles.postGradBtn}
+                >
+                  <Text style={styles.postGradBtnText}>
+                    {submittingRating ? 'Submitting...' : 'Submit Review'}
+                  </Text>
+                </LinearGradient>
+              </TouchableOpacity>
+
+              <View style={styles.postDivider} />
+
+              <Text style={styles.postReportHeading}>
+                Faced any Issue? <Text style={styles.postReportHere}>Report Here</Text>
+              </Text>
+              <View style={styles.postChipWrap}>
+                {POST_CALL_ISSUE_TAGS.map((tag) => {
+                  const on = selectedIssueTags.has(tag);
+                  return (
+                    <TouchableOpacity
+                      key={tag}
+                      onPress={() => toggleIssueTag(tag)}
+                      activeOpacity={0.85}
+                      style={[styles.postChip, on && styles.postChipOn]}
+                    >
+                      <Text style={[styles.postChipTxt, on && styles.postChipTxtOn]}>{tag}</Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+              <TouchableOpacity
+                activeOpacity={0.9}
+                disabled={selectedIssueTags.size === 0 || submittingIssue}
+                onPress={() => {
+                  void (async () => {
+                    if (selectedIssueTags.size === 0) return;
+                    setSubmittingIssue(true);
+                    try {
+                      await callApi.sessionReport(callIdRef.current, [...selectedIssueTags]);
+                      setSelectedIssueTags(new Set());
+                      Alert.alert('Submitted', 'Thank you. Our team will review your report.');
+                    } catch (e) {
+                      Alert.alert('Report', getErrorMessage(e));
+                    } finally {
+                      setSubmittingIssue(false);
+                    }
+                  })();
+                }}
+                style={[
+                  styles.postIssueBtn,
+                  (selectedIssueTags.size === 0 || submittingIssue) && styles.postBtnDisabled,
+                ]}
+              >
+                <Text style={styles.postIssueBtnTxt}>{submittingIssue ? 'Submitting...' : 'Submit Issue'}</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.postSkipBtn}
+                disabled={submittingRating}
+                onPress={closePostCallAndExit}
+              >
+                <Text style={styles.postSkipTxt}>Skip, go to home</Text>
+              </TouchableOpacity>
+            </ScrollView>
+          )}
         </View>
       </Modal>
     </View>
@@ -659,42 +838,134 @@ const styles = StyleSheet.create({
   },
   countdownTitle: { color: '#d1d5db', fontSize: 11, fontWeight: '700' },
   countdownValue: { color: '#fff', fontSize: 28, fontWeight: '900', marginTop: 2 },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.45)',
+  postModalRoot: { flex: 1, backgroundColor: '#fff' },
+  postModalRootDim: { backgroundColor: 'rgba(17, 24, 39, 0.52)' },
+  postScroll: { flex: 1, backgroundColor: '#fff' },
+  postHeroAvatar: {
+    alignSelf: 'center',
+    width: 88,
+    height: 88,
+    borderRadius: 44,
+    overflow: 'hidden',
+    borderWidth: 2,
+    borderColor: '#e5e7eb',
+    backgroundColor: '#f9fafb',
+  },
+  postHeroAvatarImg: { width: '100%', height: '100%' },
+  postHeroAvatarPh: { alignItems: 'center', justifyContent: 'center' },
+  postHeroAvatarInitial: { fontSize: 32, fontWeight: '900', color: '#6b7280' },
+  postPeerTitle: {
+    marginTop: 14,
+    textAlign: 'center',
+    fontSize: 22,
+    fontWeight: '800',
+    color: '#111827',
+  },
+  postDetailBox: {
+    marginTop: 22,
+    backgroundColor: '#f3f4f6',
+    borderRadius: 14,
+    paddingHorizontal: 16,
+    paddingVertical: 4,
+  },
+  postDetailRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 14,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: '#e5e7eb',
+  },
+  postDetailRowLast: { borderBottomWidth: 0 },
+  postDetailLabel: { fontSize: 14, fontWeight: '600', color: '#4b5563' },
+  postDetailValue: { fontSize: 15, fontWeight: '800', color: '#111827' },
+  postDetailValueAccent: { color: '#7b2cff' },
+  postSectionTitle: {
+    marginTop: 26,
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#374151',
+  },
+  postStarRow: {
+    marginTop: 14,
+    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 24,
+    gap: 6,
   },
-  ratingCard: {
-    width: '100%',
-    maxWidth: 340,
-    borderRadius: 16,
-    backgroundColor: '#fff',
-    padding: 20,
-    alignItems: 'center',
-  },
-  ratingTitle: { fontSize: 20, fontWeight: '900', color: '#111' },
-  ratingSubtitle: { marginTop: 6, fontSize: 13, color: '#666', fontWeight: '600' },
-  starRow: { marginTop: 18, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4 },
-  starHit: {
+  postStarHit: {
     paddingVertical: 6,
     paddingHorizontal: 4,
-    minWidth: 48,
-    minHeight: 48,
+    minWidth: 44,
+    minHeight: 44,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  ratingSubmitBtn: {
-    marginTop: 20,
-    width: '100%',
-    borderRadius: 10,
-    backgroundColor: '#7b2cff',
+  postPrimaryBtnOuter: { marginTop: 18, borderRadius: 14, overflow: 'hidden' },
+  postGradBtn: {
+    paddingVertical: 15,
     alignItems: 'center',
-    paddingVertical: 12,
+    justifyContent: 'center',
+    borderRadius: 14,
   },
-  ratingSubmitBtnOff: { opacity: 0.45 },
-  ratingSubmitText: { color: '#fff', fontSize: 15, fontWeight: '900' },
-  ratingSkipBtn: { marginTop: 10, paddingVertical: 8, paddingHorizontal: 12 },
-  ratingSkipText: { color: '#666', fontSize: 14, fontWeight: '700' },
+  postGradBtnText: { color: '#fff', fontSize: 16, fontWeight: '800' },
+  postBtnDisabled: { opacity: 0.45 },
+  postDivider: {
+    marginTop: 28,
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: '#e5e7eb',
+  },
+  postReportHeading: {
+    marginTop: 22,
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#374151',
+    textAlign: 'center',
+  },
+  postReportHere: { color: '#ef4444', fontWeight: '800' },
+  postChipWrap: {
+    marginTop: 14,
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+    justifyContent: 'center',
+  },
+  postChip: {
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderRadius: 22,
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+    backgroundColor: '#fff',
+  },
+  postChipOn: {
+    borderColor: '#7b2cff',
+    backgroundColor: 'rgba(123,44,255,0.08)',
+  },
+  postChipTxt: { fontSize: 13, fontWeight: '600', color: '#4b5563' },
+  postChipTxtOn: { color: '#5b21b6' },
+  postIssueBtn: {
+    marginTop: 18,
+    backgroundColor: '#ef4444',
+    borderRadius: 14,
+    paddingVertical: 15,
+    alignItems: 'center',
+  },
+  postIssueBtnTxt: { color: '#fff', fontSize: 16, fontWeight: '800' },
+  postSkipBtn: { marginTop: 20, alignSelf: 'center', paddingVertical: 10, paddingHorizontal: 12 },
+  postSkipTxt: { color: '#6b7280', fontSize: 14, fontWeight: '700' },
+  postThanksWrap: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 28 },
+  postThanksCard: {
+    width: '100%',
+    maxWidth: 340,
+    backgroundColor: '#fff',
+    borderRadius: 18,
+    paddingVertical: 28,
+    paddingHorizontal: 22,
+    alignItems: 'center',
+  },
+  postThanksTitle: { fontSize: 22, fontWeight: '900', color: '#111827' },
+  postThanksStars: { marginTop: 16, flexDirection: 'row', gap: 6 },
+  postThanksSub: { marginTop: 12, fontSize: 15, fontWeight: '700', color: '#4b5563' },
+  postThanksBtnTouch: { marginTop: 22, alignSelf: 'stretch', borderRadius: 14, overflow: 'hidden' },
 });

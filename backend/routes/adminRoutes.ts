@@ -27,6 +27,13 @@ import {
   resolveWithdrawal,
 } from '../controllers/adminController';
 import { adminProtect } from '../middleware/adminAuth';
+import {
+  createAdminWalletOffer,
+  deleteAdminWalletOffer,
+  listAdminWalletOffers,
+  updateAdminWalletOffer,
+} from '../controllers/walletOffersController';
+import { listCallerAppStoreReviews } from '../controllers/adminCallerAppReviewController';
 
 const router = Router();
 
@@ -54,9 +61,16 @@ router.patch('/receivers/:id/reject', adminProtect, rejectReceiver);
 
 router.get('/reports', adminProtect, listModerationReports);
 router.patch('/reports/:id', adminProtect, resolveModerationReport);
+router.get('/caller-app-reviews', adminProtect, listCallerAppStoreReviews);
 router.get('/overview', adminProtect, getOverviewDashboard);
 router.get('/revenue', adminProtect, getRevenueDashboard);
 router.get('/withdrawals', adminProtect, listWithdrawals);
 router.patch('/withdrawals/:id', adminProtect, resolveWithdrawal);
+
+// Wallet offers (recharge packs)
+router.get('/wallet/offers', adminProtect, listAdminWalletOffers);
+router.post('/wallet/offers', adminProtect, createAdminWalletOffer);
+router.patch('/wallet/offers/:id', adminProtect, updateAdminWalletOffer);
+router.delete('/wallet/offers/:id', adminProtect, deleteAdminWalletOffer);
 
 export default router;

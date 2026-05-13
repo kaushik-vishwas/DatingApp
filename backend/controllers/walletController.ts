@@ -4,6 +4,10 @@ import mongoose from 'mongoose';
 import Razorpay from 'razorpay';
 import User, { type UserDocument } from '../models/User';
 import WalletTopup from '../models/WalletTopup';
+import { toApiUser } from './authController';
+import { blockCallerUntilApproved } from '../utils/accountAccess';
+
+const GST_PERCENTAGE = 28;
 
 type LeanWalletTopup = {
   _id: mongoose.Types.ObjectId;
@@ -14,12 +18,6 @@ type LeanWalletTopup = {
   creditAdded: number;
   createdAt: Date;
 };
-import { toApiUser } from './authController';
-import { blockCallerUntilApproved } from '../utils/accountAccess';
-import {
-  assertAllowedWalletPackage,
-  walletCreditForPackage,
-} from '../constants/walletPackages';
 
 function getRazorpay(): Razorpay | null {
   const key_id = process.env.RAZORPAY_KEY_ID?.trim();
@@ -37,6 +35,17 @@ function verifyPaymentSignature(orderId: string, paymentId: string, signature: s
   } catch {
     return false;
   }
+}
+
+/**
+ * Calculate wallet credit by removing GST first
+ */
+function calculateWalletCredit(payAmount: number, bonusPercent: number): number {
+  // Remove GST from the paid amount to get base amount
+  const baseAmount = payAmount / (1 + GST_PERCENTAGE / 100);
+  // Calculate total credit including bonus
+  const totalCredit = baseAmount * (1 + bonusPercent / 100);
+  return Math.round(totalCredit * 100) / 100;
 }
 
 /**
@@ -110,9 +119,15 @@ export const createRazorpayWalletOrder = async (
       res.status(400).json({ message: 'payAmount and bonusPercent must be numbers' });
       return;
     }
-    const pkgErr = assertAllowedWalletPackage(payAmount, bonusPercent);
-    if (pkgErr) {
-      res.status(400).json({ message: pkgErr });
+    
+    // Remove GST to get base amount for validation
+    const baseAmount = Math.round((payAmount * 100) / (100 + GST_PERCENTAGE));
+    
+    // Validate against database
+    const { validateOfferForOrder } = await import('./walletOffersController');
+    const isValidOffer = await validateOfferForOrder(baseAmount, bonusPercent);
+    if (!isValidOffer) {
+      res.status(400).json({ message: 'Invalid wallet offer' });
       return;
     }
 
@@ -198,9 +213,15 @@ export const verifyRazorpayWalletPayment = async (req: Request<{}, {}, VerifyBod
       res.status(400).json({ message: 'payAmount and bonusPercent must be numbers' });
       return;
     }
-    const pkgErr = assertAllowedWalletPackage(payAmount, bonusPercent);
-    if (pkgErr) {
-      res.status(400).json({ message: pkgErr });
+    
+    // Remove GST to get base amount for validation
+    const baseAmount = Math.round((payAmount * 100) / (100 + GST_PERCENTAGE));
+    
+    // Validate against database
+    const { validateOfferForCredit } = await import('./walletOffersController');
+    const isValidOffer = await validateOfferForCredit(baseAmount, bonusPercent);
+    if (!isValidOffer) {
+      res.status(400).json({ message: 'Invalid wallet offer' });
       return;
     }
 
@@ -249,7 +270,8 @@ export const verifyRazorpayWalletPayment = async (req: Request<{}, {}, VerifyBod
       return;
     }
 
-    const credit = walletCreditForPackage(payAmount, bonusPercent);
+    // Calculate credit using the helper function
+    const credit = calculateWalletCredit(payAmount, bonusPercent);
 
     const userRow = await User.findById(authUser._id);
     if (!userRow) {
@@ -355,13 +377,19 @@ export const creditWallet = async (
       return;
     }
 
-    const pkgErr = assertAllowedWalletPackage(payAmount, bonusPercent);
-    if (pkgErr) {
-      res.status(400).json({ message: pkgErr });
+    // Remove GST to get base amount for validation
+    const baseAmount = Math.round((payAmount * 100) / (100 + GST_PERCENTAGE));
+    
+    // Validate against database
+    const { validateOfferForCredit } = await import('./walletOffersController');
+    const isValidOffer = await validateOfferForCredit(baseAmount, bonusPercent);
+    if (!isValidOffer) {
+      res.status(400).json({ message: 'Invalid wallet offer' });
       return;
     }
 
-    const credit = walletCreditForPackage(payAmount, bonusPercent);
+    // Calculate credit using the helper function
+    const credit = calculateWalletCredit(payAmount, bonusPercent);
 
     const user = await User.findById(authUser._id);
     if (!user) {

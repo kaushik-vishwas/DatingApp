@@ -1,4 +1,37 @@
 "use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
@@ -11,7 +44,7 @@ const User_1 = __importDefault(require("../models/User"));
 const WalletTopup_1 = __importDefault(require("../models/WalletTopup"));
 const authController_1 = require("./authController");
 const accountAccess_1 = require("../utils/accountAccess");
-const walletPackages_1 = require("../constants/walletPackages");
+const GST_PERCENTAGE = 28;
 function getRazorpay() {
     const key_id = process.env.RAZORPAY_KEY_ID?.trim();
     const key_secret = process.env.RAZORPAY_KEY_SECRET?.trim();
@@ -30,6 +63,16 @@ function verifyPaymentSignature(orderId, paymentId, signature, secret) {
     catch {
         return false;
     }
+}
+/**
+ * Calculate wallet credit by removing GST first
+ */
+function calculateWalletCredit(payAmount, bonusPercent) {
+    // Remove GST from the paid amount to get base amount
+    const baseAmount = payAmount / (1 + GST_PERCENTAGE / 100);
+    // Calculate total credit including bonus
+    const totalCredit = baseAmount * (1 + bonusPercent / 100);
+    return Math.round(totalCredit * 100) / 100;
 }
 /**
  * GET /wallet/topups — list successful wallet recharges for the signed-in caller.
@@ -98,9 +141,13 @@ const createRazorpayWalletOrder = async (req, res) => {
             res.status(400).json({ message: 'payAmount and bonusPercent must be numbers' });
             return;
         }
-        const pkgErr = (0, walletPackages_1.assertAllowedWalletPackage)(payAmount, bonusPercent);
-        if (pkgErr) {
-            res.status(400).json({ message: pkgErr });
+        // Remove GST to get base amount for validation
+        const baseAmount = Math.round((payAmount * 100) / (100 + GST_PERCENTAGE));
+        // Validate against database
+        const { validateOfferForOrder } = await Promise.resolve().then(() => __importStar(require('./walletOffersController')));
+        const isValidOffer = await validateOfferForOrder(baseAmount, bonusPercent);
+        if (!isValidOffer) {
+            res.status(400).json({ message: 'Invalid wallet offer' });
             return;
         }
         const amountPaise = Math.round(payAmount * 100);
@@ -173,9 +220,13 @@ const verifyRazorpayWalletPayment = async (req, res) => {
             res.status(400).json({ message: 'payAmount and bonusPercent must be numbers' });
             return;
         }
-        const pkgErr = (0, walletPackages_1.assertAllowedWalletPackage)(payAmount, bonusPercent);
-        if (pkgErr) {
-            res.status(400).json({ message: pkgErr });
+        // Remove GST to get base amount for validation
+        const baseAmount = Math.round((payAmount * 100) / (100 + GST_PERCENTAGE));
+        // Validate against database
+        const { validateOfferForCredit } = await Promise.resolve().then(() => __importStar(require('./walletOffersController')));
+        const isValidOffer = await validateOfferForCredit(baseAmount, bonusPercent);
+        if (!isValidOffer) {
+            res.status(400).json({ message: 'Invalid wallet offer' });
             return;
         }
         if (!verifyPaymentSignature(orderId, paymentId, signature, secret)) {
@@ -219,7 +270,8 @@ const verifyRazorpayWalletPayment = async (req, res) => {
             res.status(400).json({ message: `Payment not complete (status: ${payment.status})` });
             return;
         }
-        const credit = (0, walletPackages_1.walletCreditForPackage)(payAmount, bonusPercent);
+        // Calculate credit using the helper function
+        const credit = calculateWalletCredit(payAmount, bonusPercent);
         const userRow = await User_1.default.findById(authUser._id);
         if (!userRow) {
             res.status(404).json({ message: 'User not found' });
@@ -314,12 +366,17 @@ const creditWallet = async (req, res) => {
             res.status(400).json({ message: 'payAmount and bonusPercent must be numbers' });
             return;
         }
-        const pkgErr = (0, walletPackages_1.assertAllowedWalletPackage)(payAmount, bonusPercent);
-        if (pkgErr) {
-            res.status(400).json({ message: pkgErr });
+        // Remove GST to get base amount for validation
+        const baseAmount = Math.round((payAmount * 100) / (100 + GST_PERCENTAGE));
+        // Validate against database
+        const { validateOfferForCredit } = await Promise.resolve().then(() => __importStar(require('./walletOffersController')));
+        const isValidOffer = await validateOfferForCredit(baseAmount, bonusPercent);
+        if (!isValidOffer) {
+            res.status(400).json({ message: 'Invalid wallet offer' });
             return;
         }
-        const credit = (0, walletPackages_1.walletCreditForPackage)(payAmount, bonusPercent);
+        // Calculate credit using the helper function
+        const credit = calculateWalletCredit(payAmount, bonusPercent);
         const user = await User_1.default.findById(authUser._id);
         if (!user) {
             res.status(404).json({ message: 'User not found' });

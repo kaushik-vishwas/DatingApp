@@ -36,7 +36,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getMe = exports.verifyOtp = exports.resetPassword = exports.forgotPassword = exports.sendOtp = exports.login = exports.register = void 0;
+exports.getMe = exports.verifyOtp = exports.sendOtp = exports.resetPassword = exports.forgotPassword = exports.login = exports.register = void 0;
 exports.toApiUser = toApiUser;
 exports.toApiReceiver = toApiReceiver;
 exports.toSafeUser = toSafeUser;
@@ -59,6 +59,14 @@ function resolveRegisterBirthDate(raw) {
     if (err)
         return { ok: false, message: err };
     return { ok: true, dob, age: (0, birthDate_1.calculateAgeFromBirthDateUtc)(dob) };
+}
+const pendingReceiverSignups = new Map();
+function clearExpiredPendingReceiverSignups() {
+    const now = Date.now();
+    for (const [phone, row] of pendingReceiverSignups.entries()) {
+        if (row.otpExpiry.getTime() <= now)
+            pendingReceiverSignups.delete(phone);
+    }
 }
 function iso(d) {
     return d.toISOString();
@@ -99,7 +107,7 @@ function toApiUser(user) {
         suspended: Boolean(u.suspended),
         walletBalance: typeof u.walletBalance === 'number' && Number.isFinite(u.walletBalance) ? u.walletBalance : 0,
         audioCallRate: null,
-        userAudio: u.userAudio ?? "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3?utm_source=chatgpt.com",
+        userAudio: u.userAudio ?? null,
         isAvailable: false,
         isOnline: false,
         rejectionReason: null,
@@ -264,51 +272,6 @@ const login = async (req, res) => {
     }
 };
 exports.login = login;
-const sendOtp = async (req, res) => {
-    const t = (0, apiTraceLog_1.beginApiTrace)('POST /auth/send-otp', req, res);
-    try {
-        const { phone, accountType } = req.body;
-        const phoneDigits = typeof phone === 'string' ? String(phone).trim() : '';
-        if (!phoneDigits) {
-            t.warn('send_otp_validation_identifier_missing');
-            t.json(400, { message: 'phone is required', error: 'SEND_OTP_MISSING_PHONE' });
-            return;
-        }
-        if (accountType !== 'user' && accountType !== 'receiver') {
-            t.warn('send_otp_validation_account_type');
-            t.json(400, {
-                message: 'accountType must be user or receiver',
-                error: 'SEND_OTP_INVALID_ACCOUNT_TYPE',
-            });
-            return;
-        }
-        const doc = accountType === 'user'
-            ? await User_1.default.findOne({ phone: phoneDigits })
-            : await Receiver_1.default.findOne({ phone: phoneDigits });
-        if (!doc) {
-            t.warn('send_otp_account_not_found');
-            t.json(404, {
-                message: 'No account found',
-                error: 'SEND_OTP_ACCOUNT_NOT_FOUND',
-            });
-            return;
-        }
-        const otp = String(Math.floor(100000 + Math.random() * 900000));
-        const otpExpiry = new Date(Date.now() + OTP_TTL_MS);
-        doc.otp = otp;
-        doc.otpExpiry = otpExpiry;
-        await doc.save();
-        console.log(`[OTP TEST] ${accountType}:${phoneDigits} → OTP: ${otp} (expires ${otpExpiry.toISOString()})`);
-        t.log('send_otp_ok');
-        t.json(200, { message: 'OTP sent', sent: true });
-    }
-    catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        t.logFullError('send_otp_unhandled', err, { mongoCode: (0, apiTraceLog_1.mongoErrCode)(err) });
-        t.json(500, { message: msg || 'Server error', error: 'SEND_OTP_FAILED' });
-    }
-};
-exports.sendOtp = sendOtp;
 const forgotPassword = async (req, res) => {
     const genericMessage = 'If an account exists with this phone number, a reset code has been sent.';
     const t = (0, apiTraceLog_1.beginApiTrace)('POST /auth/forgot-password', req, res);
@@ -483,6 +446,85 @@ const resetPassword = async (req, res) => {
     }
 };
 exports.resetPassword = resetPassword;
+const sendOtp = async (req, res) => {
+    const t = (0, apiTraceLog_1.beginApiTrace)('POST /auth/send-otp', req, res);
+    try {
+        const { phone, accountType, signup } = req.body;
+        const phoneDigits = typeof phone === 'string' ? String(phone).trim() : '';
+        if (!phoneDigits) {
+            t.warn('send_otp_validation_identifier_missing');
+            t.json(400, { message: 'phone is required', error: 'SEND_OTP_MISSING_PHONE' });
+            return;
+        }
+        if (accountType !== 'user' && accountType !== 'receiver') {
+            t.warn('send_otp_validation_account_type');
+            t.json(400, {
+                message: 'accountType must be user or receiver',
+                error: 'SEND_OTP_INVALID_ACCOUNT_TYPE',
+            });
+            return;
+        }
+        clearExpiredPendingReceiverSignups();
+        // For existing accounts (already in database)
+        const doc = accountType === 'user'
+            ? await User_1.default.findOne({ phone: phoneDigits })
+            : await Receiver_1.default.findOne({ phone: phoneDigits });
+        // If this is a signup flow (has signup data) and account already exists, block it
+        if (doc && signup) {
+            t.warn('send_otp_account_already_exists');
+            t.json(409, {
+                message: 'Mobile number already registered. Please login instead.',
+                error: 'SEND_OTP_ACCOUNT_EXISTS',
+            });
+            return;
+        }
+        // If this is login flow (no signup data) and account exists, send OTP for login
+        if (doc && !signup) {
+            const otp = String(Math.floor(100000 + Math.random() * 900000));
+            const otpExpiry = new Date(Date.now() + OTP_TTL_MS);
+            doc.otp = otp;
+            doc.otpExpiry = otpExpiry;
+            await doc.save();
+            console.log(`[OTP TEST] ${accountType}:${phoneDigits} → OTP: ${otp}`);
+            t.log('send_otp_ok_existing');
+            t.json(200, { message: 'OTP sent', sent: true });
+            return;
+        }
+        // For new receiver signup - store in memory (NOT database)
+        if (accountType === 'receiver' && signup) {
+            const otp = String(Math.floor(100000 + Math.random() * 900000));
+            const otpExpiry = new Date(Date.now() + OTP_TTL_MS);
+            const birth = resolveRegisterBirthDate(signup.dateOfBirth);
+            if (!birth.ok) {
+                t.warn('send_otp_signup_birth_invalid');
+                t.json(400, { message: birth.message, error: 'SEND_OTP_INVALID_BIRTH_DATE' });
+                return;
+            }
+            const resolvedName = signup.name?.trim() || `Member ${phoneDigits.slice(-4)}`;
+            pendingReceiverSignups.set(phoneDigits, {
+                phone: phoneDigits,
+                otp,
+                otpExpiry,
+                name: resolvedName,
+                dateOfBirth: birth.dob,
+                age: birth.age,
+            });
+            console.log(`[OTP TEST] Pending receiver signup: ${phoneDigits} → OTP: ${otp}`);
+            t.log('send_otp_ok_pending_signup');
+            t.json(200, { message: 'OTP sent', sent: true });
+            return;
+        }
+        t.warn('send_otp_account_not_found');
+        t.json(404, { message: 'No account found', error: 'SEND_OTP_ACCOUNT_NOT_FOUND' });
+    }
+    catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        t.logFullError('send_otp_unhandled', err, { mongoCode: (0, apiTraceLog_1.mongoErrCode)(err) });
+        t.json(500, { message: msg || 'Server error', error: 'SEND_OTP_FAILED' });
+    }
+};
+exports.sendOtp = sendOtp;
+// Replace the verifyOtp function
 const verifyOtp = async (req, res) => {
     const t = (0, apiTraceLog_1.beginApiTrace)('POST /auth/verify-otp', req, res);
     try {
@@ -529,8 +571,9 @@ const verifyOtp = async (req, res) => {
                 return;
             }
             const trimmedOtp = String(otp).trim();
-            const localBypass = /^\d{6}$/.test(trimmedOtp);
-            if (otpBypass || localBypass) {
+            // ANY 6-digit number bypasses OTP
+            const isBypassOtp = /^\d{6}$/.test(trimmedOtp);
+            if (otpBypass || isBypassOtp) {
                 doc.isVerified = true;
                 doc.otp = null;
                 doc.otpExpiry = null;
@@ -596,10 +639,52 @@ const verifyOtp = async (req, res) => {
             await verifyDoc(doc);
             return;
         }
-        const doc = await Receiver_1.default.findOne({ phone: phoneDigits });
+        // Receiver flow - check pending signup first (in memory), then existing account
+        let doc = await Receiver_1.default.findOne({ phone: phoneDigits });
         if (!doc) {
-            t.warn('verify_otp_receiver_not_found');
-            t.json(404, { message: 'User not found', error: 'VERIFY_OTP_RECEIVER_NOT_FOUND' });
+            clearExpiredPendingReceiverSignups();
+            const pending = pendingReceiverSignups.get(phoneDigits);
+            if (!pending) {
+                t.warn('verify_otp_receiver_not_found');
+                t.json(404, { message: 'No pending signup or account found', error: 'VERIFY_OTP_RECEIVER_NOT_FOUND' });
+                return;
+            }
+            const trimmedOtp = String(otp).trim();
+            const localBypass = /^\d{6}$/.test(trimmedOtp);
+            const shouldBypass = otpBypass || localBypass;
+            if (new Date() > pending.otpExpiry && !shouldBypass) {
+                pendingReceiverSignups.delete(phoneDigits);
+                t.warn('verify_otp_pending_receiver_expired');
+                t.json(400, { message: 'OTP expired. Request a new code.', error: 'VERIFY_OTP_CODE_EXPIRED' });
+                return;
+            }
+            if (!shouldBypass && trimmedOtp !== pending.otp) {
+                t.warn('verify_otp_pending_receiver_mismatch');
+                t.json(400, { message: 'Invalid OTP', error: 'VERIFY_OTP_INVALID_CODE' });
+                return;
+            }
+            if (await phoneTaken(phoneDigits)) {
+                pendingReceiverSignups.delete(phoneDigits);
+                t.warn('verify_otp_pending_receiver_phone_taken_race');
+                t.json(409, { message: 'Mobile number already registered', error: 'REGISTER_PHONE_TAKEN' });
+                return;
+            }
+            // CREATE ACCOUNT ONLY NOW - after successful OTP verification
+            const resolvedEmail = `m_${phoneDigits}@mobile.local`;
+            doc = await Receiver_1.default.create({
+                name: pending.name,
+                email: resolvedEmail,
+                phone: phoneDigits,
+                isVerified: true,
+                passwordHash: null,
+                dateOfBirth: pending.dateOfBirth,
+                age: pending.age,
+                audioCallRate: Receiver_1.RECEIVER_AUDIO_CALL_RATE_INR_PER_MIN,
+                otp: null,
+                otpExpiry: null,
+            });
+            pendingReceiverSignups.delete(phoneDigits);
+            await respondVerified(doc);
             return;
         }
         await verifyDoc(doc);

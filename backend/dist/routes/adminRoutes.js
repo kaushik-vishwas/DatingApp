@@ -3,6 +3,8 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
 const adminController_1 = require("../controllers/adminController");
 const adminAuth_1 = require("../middleware/adminAuth");
+const walletOffersController_1 = require("../controllers/walletOffersController");
+const adminCallerAppReviewController_1 = require("../controllers/adminCallerAppReviewController");
 const router = (0, express_1.Router)();
 router.post('/auth/login', adminController_1.adminLogin);
 router.post('/auth/forgot-password', adminController_1.adminForgotPassword);
@@ -25,8 +27,14 @@ router.patch('/receivers/:id/approve', adminAuth_1.adminProtect, adminController
 router.patch('/receivers/:id/reject', adminAuth_1.adminProtect, adminController_1.rejectReceiver);
 router.get('/reports', adminAuth_1.adminProtect, adminController_1.listModerationReports);
 router.patch('/reports/:id', adminAuth_1.adminProtect, adminController_1.resolveModerationReport);
+router.get('/caller-app-reviews', adminAuth_1.adminProtect, adminCallerAppReviewController_1.listCallerAppStoreReviews);
 router.get('/overview', adminAuth_1.adminProtect, adminController_1.getOverviewDashboard);
 router.get('/revenue', adminAuth_1.adminProtect, adminController_1.getRevenueDashboard);
 router.get('/withdrawals', adminAuth_1.adminProtect, adminController_1.listWithdrawals);
 router.patch('/withdrawals/:id', adminAuth_1.adminProtect, adminController_1.resolveWithdrawal);
+// Wallet offers (recharge packs)
+router.get('/wallet/offers', adminAuth_1.adminProtect, walletOffersController_1.listAdminWalletOffers);
+router.post('/wallet/offers', adminAuth_1.adminProtect, walletOffersController_1.createAdminWalletOffer);
+router.patch('/wallet/offers/:id', adminAuth_1.adminProtect, walletOffersController_1.updateAdminWalletOffer);
+router.delete('/wallet/offers/:id', adminAuth_1.adminProtect, walletOffersController_1.deleteAdminWalletOffer);
 exports.default = router;

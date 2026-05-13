@@ -86,6 +86,41 @@ export type AppUserRecord = {
   userAudio?: string | null;
 };
 
+/** ================= WALLET OFFERS ================= */
+
+export type WalletOffer = {
+  id: string;
+  amount: number;
+  bonusPercent: number;
+  popular: boolean;
+  active: boolean;
+  offerBannerDataUrl?: string | null;
+};
+
+export type WalletOffersResponse = {
+  offers: WalletOffer[];
+};
+
+export async function fetchWalletOffers(): Promise<WalletOffer[]> {
+  const { data } = await api.get<WalletOffersResponse>('/admin/wallet/offers');
+  return data.offers;
+}
+
+export async function createWalletOffer(offer: Omit<WalletOffer, 'id'>): Promise<WalletOffer[]> {
+  const { data } = await api.post<WalletOffersResponse>('/admin/wallet/offers', offer);
+  return data.offers;
+}
+
+export async function updateWalletOffer(id: string, offer: Partial<WalletOffer>): Promise<WalletOffer[]> {
+  const { data } = await api.patch<WalletOffersResponse>(`/admin/wallet/offers/${id}`, offer);
+  return data.offers;
+}
+
+export async function deleteWalletOffer(id: string): Promise<WalletOffer[]> {
+  const { data } = await api.delete<WalletOffersResponse>(`/admin/wallet/offers/${id}`);
+  return data.offers;
+}
+
 /** ================= AUTH ================= */
 
 export async function adminLogin(email: string, password: string) {
@@ -320,6 +355,36 @@ export async function resolveModerationReport(
   action: 'ignore' | 'warn' | 'suspend'
 ) {
   const { data } = await api.patch<{ ok: boolean }>(`/admin/reports/${reportId}`, { action });
+  return data;
+}
+
+/** ================= CALLER APP RATINGS (Rate Us) ================= */
+
+export type CallerAppReviewAdminRow = {
+  _id: string;
+  userId: string;
+  userName: string;
+  email: string;
+  phone: string;
+  stars: number;
+  review: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export async function fetchCallerAppReviews(params?: { q?: string; page?: number; limit?: number }) {
+  const { data } = await api.get<{
+    reviews: CallerAppReviewAdminRow[];
+    total: number;
+    page: number;
+    limit: number;
+  }>('/admin/caller-app-reviews', {
+    params: {
+      q: params?.q?.trim() || undefined,
+      page: params?.page ?? 1,
+      limit: params?.limit ?? 50,
+    },
+  });
   return data;
 }
 

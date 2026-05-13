@@ -7,6 +7,7 @@ import { io, type Socket } from 'socket.io-client';
 import { chatApi, getErrorMessage, getJwt, getResolvedApiBaseUrl, profileApi } from '../../services/api';
 import { markNotificationsSeenNow } from '../../services/notificationUnread';
 import type { ReceiverStackParamList } from '../../navigation/ReceiverStackParamList';
+import { formatCallDurationCompact } from '../../utils/callDurationDisplay';
 
 type NotificationKind = 'message' | 'call' | 'withdrawal' | 'earning';
 type NotificationRow = {
@@ -50,7 +51,7 @@ export default function ReceiverNotificationsScreen(): React.JSX.Element {
       const callRows: NotificationRow[] = calls.recentCalls.map((c) => ({
         id: `call-${c.id}`,
         title: c.durationSec > 0 ? 'Call Completed' : 'Missed Call',
-        subtitle: `${c.callerName} • ${Math.max(1, Math.round(c.durationSec / 60))} min`,
+        subtitle: `${c.callerName} • ${formatCallDurationCompact(c.durationSec)}`,
         at: c.startedAt,
         type: 'call',
         peerId: c.callerId,

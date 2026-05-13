@@ -5,6 +5,7 @@ import {
   getRandomQueuedReceiver,
   getVoiceBootstrap,
   rateVoiceSession,
+  reportVoiceSessionIssue,
   startVoiceSession,
   syncVoiceSession,
 } from '../controllers/callController';
@@ -17,5 +18,6 @@ router.post('/session/start', protect, startVoiceSession);
 router.post('/session/sync', protect, syncVoiceSession);
 router.post('/session/end', protect, endVoiceSession);
 router.post('/session/rate', protect, rateVoiceSession);
+router.post('/session/report', protect, reportVoiceSessionIssue);
 
 export default router;

@@ -6,6 +6,9 @@ export type CallerStackParamList = {
   CallerCalls: undefined;
   CallerAlerts: undefined;
   CallerProfile: undefined;
+  CallerRateUs: undefined;
+  CallerShareApp: undefined;
+  CallerFaq: undefined;
   CallerEditProfile: undefined;
   CallerTerms: undefined;
   CallerPrivacyPolicy: undefined;

@@ -1,6 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
+const callerAppReviewController_1 = require("../controllers/callerAppReviewController");
 const profileController_1 = require("../controllers/profileController");
 const auth_1 = require("../middleware/auth");
 const router = (0, express_1.Router)();
@@ -22,6 +23,8 @@ router.patch('/receiver', auth_1.protect, profileController_1.updateReceiverProf
 router.post('/receiver/reopen-kyc', auth_1.protect, profileController_1.reopenRejectedReceiverKyc);
 router.delete('/receiver', auth_1.protect, profileController_1.deleteReceiverAccount);
 router.get('/caller-call-history', auth_1.protect, profileController_1.getCallerCallHistory);
+router.get('/caller-app-review', auth_1.protect, callerAppReviewController_1.getMyCallerAppReview);
+router.put('/caller-app-review', auth_1.protect, callerAppReviewController_1.upsertMyCallerAppReview);
 router.get('/caller-notifications', auth_1.protect, profileController_1.getCallerNotifications);
 router.post('/receiver/bank/send-otp', auth_1.protect, profileController_1.sendReceiverBankUpdateOtp);
 router.post('/receiver/bank/verify', auth_1.protect, profileController_1.verifyReceiverBankUpdateOtp);

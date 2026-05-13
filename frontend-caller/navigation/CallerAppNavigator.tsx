@@ -7,9 +7,12 @@ import CallerAlertsTabScreen from '../screens/caller/CallerAlertsTabScreen';
 import CallerCallsTabScreen from '../screens/caller/CallerCallsTabScreen';
 import CallerChatsScreen from '../screens/caller/CallerChatsScreen';
 import CallerEditProfileScreen from '../screens/caller/CallerEditProfileScreen';
+import CallerFaqScreen from '../screens/caller/CallerFaqScreen';
+import CallerShareAppScreen from '../screens/caller/CallerShareAppScreen';
 import CallerHelpScreen from '../screens/caller/CallerHelpScreen';
 import CallerPrivacyPolicyScreen from '../screens/caller/CallerPrivacyPolicyScreen';
 import CallerProfileTabScreen from '../screens/caller/CallerProfileTabScreen';
+import CallerRateUsScreen from '../screens/caller/CallerRateUsScreen';
 import CallerTermsScreen from '../screens/caller/CallerTermsScreen';
 import PaymentMethodScreen from '../screens/caller/PaymentMethodScreen';
 import ReceiverProfileScreen from '../screens/caller/ReceiverProfileScreen';
@@ -38,6 +41,9 @@ export default function CallerAppNavigator(): React.JSX.Element {
       <Stack.Screen name="CallerCalls" component={CallerCallsTabScreen} />
       <Stack.Screen name="CallerAlerts" component={CallerAlertsTabScreen} />
       <Stack.Screen name="CallerProfile" component={CallerProfileTabScreen} />
+      <Stack.Screen name="CallerRateUs" component={CallerRateUsScreen} />
+      <Stack.Screen name="CallerShareApp" component={CallerShareAppScreen} />
+      <Stack.Screen name="CallerFaq" component={CallerFaqScreen} />
       <Stack.Screen name="CallerEditProfile" component={CallerEditProfileScreen} />
       <Stack.Screen name="CallerTerms" component={CallerTermsScreen} />
       <Stack.Screen name="CallerPrivacyPolicy" component={CallerPrivacyPolicyScreen} />

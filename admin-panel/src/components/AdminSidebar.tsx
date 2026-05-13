@@ -9,6 +9,8 @@ import {
   Flag,
   Settings,
   LogOut,
+  Tag,
+  Star,
 } from 'lucide-react';
 import { useAdminAuth } from '../context/AdminAuthContext';
 
@@ -26,7 +28,9 @@ const items = [
   { to: '/kyc', label: 'KYC Approvals', icon: FileCheck2 },
   { to: '/revenue', label: 'Revenue', icon: IndianRupee },
   { to: '/withdrawals', label: 'Withdrawals', icon: Wallet },
+  { to: '/wallet-offers', label: 'Wallet Offers', icon: Tag },
   { to: '/reports', label: 'Reports', icon: Flag },
+  { to: '/ratings', label: 'Ratings', icon: Star },
   { to: '/settings', label: 'Settings', icon: Settings },
 ] as const;
 
@@ -61,7 +65,7 @@ export function AdminSidebar() {
           </div>
           <div className="min-w-0 flex-1">
             <p className="truncate text-sm font-semibold text-neutral-900">{admin?.name ?? 'Admin'}</p>
-            <p className="truncate text-xs text-neutral-500">Super Admin</p>
+            <p className="truncate text-xs text-neutral-500">{admin?.role === 'super_admin' ? 'Super Admin' : admin?.role === 'finance_admin' ? 'Finance Admin' : 'Support Admin'}</p>
           </div>
           <button
             type="button"

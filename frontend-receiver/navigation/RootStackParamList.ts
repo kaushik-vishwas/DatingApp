@@ -3,7 +3,11 @@ import type { NavigatorScreenParams } from '@react-navigation/native';
 import type { CallerStackParamList } from './CallerStackParamList';
 import type { ReceiverStackParamList } from './ReceiverStackParamList';
 
+/** First screen after animated brand splash (same destinations the app used before BrandSplash existed). */
+export type PostBrandSplashRoute = 'Splash' | 'RoleGate' | 'UserLogin' | 'ReceiverLogin';
+
 export type RootStackParamList = {
+  BrandSplash: { postSplashRoute: PostBrandSplashRoute };
   Splash: undefined;
   RoleGate: undefined;
   ReceiverEducation: undefined;
