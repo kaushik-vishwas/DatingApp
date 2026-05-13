@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Check, Edit2, Eye, Image as ImageIcon, Plus, RefreshCw, Trash2, X } from 'lucide-react';
+import { Edit2, Eye, Plus, RefreshCw, Trash2, X } from 'lucide-react';
 import { createWalletOffer, deleteWalletOffer, fetchWalletOffers, updateWalletOffer, type WalletOffer } from '../api/client';
 import { uploadToCloudinary } from '../../src/libs/cloudinary';
 export function WalletOffersPage() {
