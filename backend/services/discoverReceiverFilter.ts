@@ -30,7 +30,9 @@ export type DiscoverReceiverListQuery = {
  */
 export function buildDiscoverReceiverFilter(input: DiscoverReceiverListQuery): Record<string, unknown> {
   // const parts: Record<string, unknown>[] = [{ accountStatus: 'approved' }];
-  const parts: Record<string, unknown>[] = []; // Remove the accountStatus filter entirely
+  const parts: Record<string, unknown>[] = [{ 
+  accountStatus: { $in: ['approved', 'pending_profile', 'pending_review'] } 
+}];
 
   const langsList = input.langsRaw
     .split(/[,|]/)
