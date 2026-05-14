@@ -2,12 +2,6 @@ import bcrypt from 'bcryptjs';
 import type { Response, Request } from 'express';
 import User, { type UserDocument } from '../models/User';
 import Receiver, { RECEIVER_AUDIO_CALL_RATE_INR_PER_MIN, type ReceiverDocument } from '../models/Receiver';
-import {
-  calculateAgeFromBirthDateUtc,
-  dateOnlyIsoFromUtcDate,
-  parseDateOnlyToUtcMidnight,
-  validateBirthDateForAccount,
-} from '../utils/birthDate';
 import { PAUSED_MSG } from '../utils/accountAccess';
 import { signAppAccessToken } from '../utils/authToken';
 import { bumpReceiverAuthSession, bumpUserAuthSession } from '../services/authSessionService';
@@ -42,8 +36,6 @@ export interface SafeUser {
   languages: string[];
   interests: string[];
   gender: 'male' | 'female' | 'other' | null;
-  /** `YYYY-MM-DD` when set */
-  dateOfBirth: string | null;
   age: number | null;
   state: string | null;
   createdAt: string;
@@ -73,22 +65,8 @@ type LegacyRegisterRole = 'caller' | 'receiver' | 'both';
 type RegisterBody = {
   name?: string;
   phone: string;
-  /** ISO calendar date `YYYY-MM-DD` */
-  dateOfBirth: string;
   role?: LegacyRegisterRole;
 };
-
-function resolveRegisterBirthDate(
-  raw: unknown
-): { ok: true; dob: Date; age: number } | { ok: false; message: string } {
-  const dob = parseDateOnlyToUtcMidnight(raw);
-  if (!dob) {
-    return { ok: false, message: 'dateOfBirth is required (format YYYY-MM-DD)' };
-  }
-  const err = validateBirthDateForAccount(dob);
-  if (err) return { ok: false, message: err };
-  return { ok: true, dob, age: calculateAgeFromBirthDateUtc(dob) };
-}
 
 type LoginBody = { phone?: string; accountType: AccountTypeParam };
 type SendOtpBody = { 
@@ -96,7 +74,6 @@ type SendOtpBody = {
   accountType: AccountTypeParam;
   signup?: {
     name?: string;
-    dateOfBirth?: string;
     role?: LegacyRegisterRole;
   };
 };
@@ -106,8 +83,6 @@ type PendingReceiverSignup = {
   otp: string;
   otpExpiry: Date;
   name: string;
-  dateOfBirth: Date;
-  age: number;
 };
 const pendingReceiverSignups = new Map<string, PendingReceiverSignup>();
 
@@ -160,7 +135,6 @@ export function toApiUser(user: UserDocument): SafeUser {
     languages: u.languages ?? [],
     interests: u.interests ?? [],
     gender: u.gender ?? null,
-    dateOfBirth: dateOnlyIsoFromUtcDate(u.dateOfBirth ?? null),
     age: u.age ?? null,
     state: u.state ?? null,
     createdAt: iso(u.createdAt),
@@ -199,7 +173,6 @@ export function toApiReceiver(receiver: ReceiverDocument): SafeUser {
     languages: r.languages ?? [],
     interests: r.interests ?? [],
     gender: r.gender ?? null,
-    dateOfBirth: dateOnlyIsoFromUtcDate(r.dateOfBirth ?? null),
     age: r.age ?? null,
     state: r.state ?? null,
     createdAt: iso(r.createdAt),
@@ -246,7 +219,7 @@ export const register = async (
 ): Promise<void> => {
   const t = beginApiTrace('POST /auth/register', req, res);
   try {
-    const { name, phone, role, dateOfBirth } = req.body;
+    const { name, phone, role } = req.body;
 
     if (!phone || !String(phone).trim()) {
       t.warn('register_validation_missing_fields');
@@ -257,17 +230,6 @@ export const register = async (
       return;
     }
     const phoneDigits = String(phone).trim();
-
-    const birth = resolveRegisterBirthDate(dateOfBirth);
-    if (!birth.ok) {
-      t.warn('register_validation_birth_date', { message: birth.message });
-      t.json(400, {
-        message: birth.message,
-        error: 'REGISTER_INVALID_BIRTH_DATE',
-      });
-      return;
-    }
-    const { dob, age } = birth;
 
     if (await phoneTaken(phoneDigits)) {
       t.warn('register_phone_conflict');
@@ -292,8 +254,6 @@ export const register = async (
         phone: phoneDigits,
         isVerified: false,
         passwordHash: null,
-        dateOfBirth: dob,
-        age,
       });
       t.log('register_ok_caller');
       t.json(201, {
@@ -309,8 +269,6 @@ export const register = async (
       phone: phoneDigits,
       isVerified: false,
       passwordHash: null,
-      dateOfBirth: dob,
-      age,
       audioCallRate: RECEIVER_AUDIO_CALL_RATE_INR_PER_MIN,
     });
     t.log('register_ok_receiver');
@@ -613,13 +571,6 @@ export const sendOtp = async (
       const otp = String(Math.floor(100000 + Math.random() * 900000));
       const otpExpiry = new Date(Date.now() + OTP_TTL_MS);
 
-      const birth = resolveRegisterBirthDate(signup.dateOfBirth);
-      if (!birth.ok) {
-        t.warn('send_otp_signup_birth_invalid');
-        t.json(400, { message: birth.message, error: 'SEND_OTP_INVALID_BIRTH_DATE' });
-        return;
-      }
-
       const resolvedName = signup.name?.trim() || `Member ${phoneDigits.slice(-4)}`;
       
       pendingReceiverSignups.set(phoneDigits, {
@@ -627,8 +578,6 @@ export const sendOtp = async (
         otp,
         otpExpiry,
         name: resolvedName,
-        dateOfBirth: birth.dob,
-        age: birth.age,
       });
       
       console.log(`[OTP TEST] Pending receiver signup: ${phoneDigits} → OTP: ${otp}`);
@@ -825,8 +774,6 @@ export const verifyOtp = async (
         phone: phoneDigits,
         isVerified: true,
         passwordHash: null,
-        dateOfBirth: pending.dateOfBirth,
-        age: pending.age,
         audioCallRate: RECEIVER_AUDIO_CALL_RATE_INR_PER_MIN,
         otp: null,
         otpExpiry: null,

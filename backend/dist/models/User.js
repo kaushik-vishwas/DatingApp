@@ -50,7 +50,6 @@ const userSchema = new mongoose_1.Schema({
     languages: { type: [String], default: [] },
     interests: { type: [String], default: [] },
     gender: { type: String, enum: ['male', 'female', 'other'], default: null },
-    dateOfBirth: { type: Date, default: null },
     age: { type: Number, default: null },
     state: { type: String, default: null, trim: true },
     passwordHash: { type: String, default: null, select: false },

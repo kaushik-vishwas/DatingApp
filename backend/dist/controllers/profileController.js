@@ -57,7 +57,6 @@ const chatPricing_1 = require("../constants/chatPricing");
 const email_1 = require("../config/email");
 const receiverAvailabilityNotifier_1 = require("../services/receiverAvailabilityNotifier");
 const callQueue_1 = require("../services/callQueue");
-const birthDate_1 = require("../utils/birthDate");
 const razorpayXPayoutService_1 = require("../services/razorpayXPayoutService");
 const socketRegistry_1 = require("../socket/socketRegistry");
 const apiTraceLog_1 = require("../utils/apiTraceLog");
@@ -107,7 +106,6 @@ function filterAllowlisted(arr, allow, max) {
  * - `name`, `profileImage`, `aadhaarFront`, `aadhaarBack`, `aadhaarNumber`, `panNumber`, `panFront` (URLs for images/docs)
  * - `languages: string[]`, `interests: string[]`
  * - `gender`: `male` | `female` | `other`
- * - `dateOfBirth`: `YYYY-MM-DD`
  * - `state`, `bankAccountHolderName`, `bankAccountType`: `savings` | `current`, `bankAccountNumber`, `bankIfsc`, `bankName`
  * - `userAudio` (optional HTTPS URL — voice capture may be UI-only without upload)
  *
@@ -159,7 +157,7 @@ const completeProfile = async (req, res) => {
             reply(401, { message: 'Not authorized', error: 'COMPLETE_PROFILE_UNAUTHORIZED' });
             return;
         }
-        const { name, profileImage, aadhaarFront, aadhaarBack, aadhaarNumber, panNumber, panFront, languages, interests, gender, dateOfBirth, state, bankAccountHolderName, bankAccountType, bankAccountNumber, bankIfsc, bankName, userAudio, } = req.body;
+        const { name, profileImage, aadhaarFront, aadhaarBack, aadhaarNumber, panNumber, panFront, languages, interests, gender, state, bankAccountHolderName, bankAccountType, bankAccountNumber, bankIfsc, bankName, userAudio, } = req.body;
         if (!name || !String(name).trim()) {
             warn('validation_failed_name');
             reply(400, { message: 'name is required', error: 'COMPLETE_PROFILE_MISSING_NAME' });
@@ -218,22 +216,6 @@ const completeProfile = async (req, res) => {
             reply(400, { message: 'gender must be male, female, or other', error: 'COMPLETE_PROFILE_INVALID_GENDER' });
             return;
         }
-        const dob = (0, birthDate_1.parseDateOnlyToUtcMidnight)(dateOfBirth);
-        if (!dob) {
-            warn('validation_failed_dob_format');
-            reply(400, {
-                message: 'dateOfBirth is required (YYYY-MM-DD)',
-                error: 'COMPLETE_PROFILE_INVALID_DOB_FORMAT',
-            });
-            return;
-        }
-        const dobErr = (0, birthDate_1.validateBirthDateForAccount)(dob);
-        if (dobErr) {
-            warn('validation_failed_dob_rules', { message: dobErr });
-            reply(400, { message: dobErr, error: 'COMPLETE_PROFILE_DOB_RULES_REJECTED' });
-            return;
-        }
-        const computedAge = (0, birthDate_1.calculateAgeFromBirthDateUtc)(dob);
         if (!state || !String(state).trim()) {
             warn('validation_failed_state');
             reply(400, { message: 'state is required', error: 'COMPLETE_PROFILE_MISSING_STATE' });
@@ -307,8 +289,6 @@ const completeProfile = async (req, res) => {
         receiver.languages = languages.map((l) => String(l).trim()).filter(Boolean);
         receiver.interests = interests.map((i) => String(i).trim()).filter(Boolean);
         receiver.gender = gender;
-        receiver.dateOfBirth = dob;
-        receiver.age = computedAge;
         receiver.state = String(state).trim();
         receiver.bankAccountHolderName = String(bankAccountHolderName).trim();
         receiver.bankAccountType = bankAccountType;
@@ -597,19 +577,6 @@ const saveReceiverKycBankFinalize = async (req, res) => {
             t.json(400, { message: 'Complete step 1 (profile info) first', error: 'KYC_BANK_STATE_REQUIRED' });
             return;
         }
-        const dob = receiver.dateOfBirth;
-        if (!dob) {
-            t.json(400, {
-                message: 'Account is missing date of birth — re-register or contact support',
-                error: 'KYC_BANK_MISSING_DOB',
-            });
-            return;
-        }
-        const dobErr = (0, birthDate_1.validateBirthDateForAccount)(dob);
-        if (dobErr) {
-            t.json(400, { message: dobErr, error: 'KYC_BANK_DOB_RULES' });
-            return;
-        }
         const front = String(receiver.aadhaarFront).trim();
         const back = String(receiver.aadhaarBack).trim();
         const panFrontUrl = String(receiver.panFront).trim();
@@ -619,7 +586,6 @@ const saveReceiverKycBankFinalize = async (req, res) => {
         receiver.bankAccountNumber = String(bankAccountNumber).trim();
         receiver.bankIfsc = String(bankIfsc).trim().toUpperCase();
         receiver.bankName = String(bankName).trim();
-        receiver.age = (0, birthDate_1.calculateAgeFromBirthDateUtc)(dob);
         receiver.audioCallRate = Receiver_1.RECEIVER_AUDIO_CALL_RATE_INR_PER_MIN;
         receiver.accountStatus = 'approved';
         await receiver.save();
@@ -706,7 +672,7 @@ const completeCallerProfile = async (req, res) => {
             t.json(401, { message: 'Not authorized', error: 'COMPLETE_CALLER_UNAUTHORIZED' });
             return;
         }
-        const { name, profileImage, languages, interests, gender, dateOfBirth, state } = req.body;
+        const { name, profileImage, languages, interests, gender, state } = req.body;
         if (!name || !String(name).trim()) {
             t.warn('complete_caller_validation_name');
             t.json(400, { message: 'name is required', error: 'COMPLETE_CALLER_MISSING_NAME' });
@@ -725,22 +691,6 @@ const completeCallerProfile = async (req, res) => {
             t.json(400, { message: 'gender must be male, female, or other', error: 'COMPLETE_CALLER_INVALID_GENDER' });
             return;
         }
-        const dob = (0, birthDate_1.parseDateOnlyToUtcMidnight)(dateOfBirth);
-        if (!dob) {
-            t.warn('complete_caller_validation_dob');
-            t.json(400, {
-                message: 'dateOfBirth is required (YYYY-MM-DD)',
-                error: 'COMPLETE_CALLER_INVALID_DOB_FORMAT',
-            });
-            return;
-        }
-        const dobErr = (0, birthDate_1.validateBirthDateForAccount)(dob);
-        if (dobErr) {
-            t.warn('complete_caller_validation_dob_rules', { message: dobErr });
-            t.json(400, { message: dobErr, error: 'COMPLETE_CALLER_DOB_REJECTED' });
-            return;
-        }
-        const computedAge = (0, birthDate_1.calculateAgeFromBirthDateUtc)(dob);
         if (!state || !String(state).trim()) {
             t.warn('complete_caller_validation_state');
             t.json(400, { message: 'state is required', error: 'COMPLETE_CALLER_MISSING_STATE' });
@@ -769,8 +719,6 @@ const completeCallerProfile = async (req, res) => {
                 languages: languages.map((l) => String(l).trim()).filter(Boolean),
                 interests: interests.map((i) => String(i).trim()).filter(Boolean),
                 gender,
-                dateOfBirth: dob,
-                age: computedAge,
                 state: String(state).trim(),
                 userAudio: voiceUrl ?? null,
                 accountStatus: 'approved',
@@ -813,7 +761,7 @@ const updateCallerProfile = async (req, res) => {
             res.status(401).json({ message: 'Not authorized' });
             return;
         }
-        const { name, profileImage, languages, interests, gender, dateOfBirth, state } = req.body;
+        const { name, profileImage, languages, interests, gender, state } = req.body;
         if (!name || !String(name).trim()) {
             res.status(400).json({ message: 'name is required' });
             return;
@@ -826,17 +774,6 @@ const updateCallerProfile = async (req, res) => {
             res.status(400).json({ message: 'gender must be male, female, or other' });
             return;
         }
-        const dob = (0, birthDate_1.parseDateOnlyToUtcMidnight)(dateOfBirth);
-        if (!dob) {
-            res.status(400).json({ message: 'dateOfBirth is required (YYYY-MM-DD)' });
-            return;
-        }
-        const dobErr = (0, birthDate_1.validateBirthDateForAccount)(dob);
-        if (dobErr) {
-            res.status(400).json({ message: dobErr });
-            return;
-        }
-        const computedAge = (0, birthDate_1.calculateAgeFromBirthDateUtc)(dob);
         if (!state || !String(state).trim()) {
             res.status(400).json({ message: 'state is required' });
             return;
@@ -865,8 +802,6 @@ const updateCallerProfile = async (req, res) => {
         user.languages = langs;
         user.interests = ints;
         user.gender = gender;
-        user.dateOfBirth = dob;
-        user.age = computedAge;
         user.state = String(state).trim();
         await user.save();
         res.status(200).json({

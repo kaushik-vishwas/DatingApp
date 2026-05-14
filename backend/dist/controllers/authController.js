@@ -43,23 +43,12 @@ exports.toSafeUser = toSafeUser;
 const bcryptjs_1 = __importDefault(require("bcryptjs"));
 const User_1 = __importDefault(require("../models/User"));
 const Receiver_1 = __importStar(require("../models/Receiver"));
-const birthDate_1 = require("../utils/birthDate");
 const accountAccess_1 = require("../utils/accountAccess");
 const authToken_1 = require("../utils/authToken");
 const authSessionService_1 = require("../services/authSessionService");
 const socketRegistry_1 = require("../socket/socketRegistry");
 const apiTraceLog_1 = require("../utils/apiTraceLog");
 const OTP_TTL_MS = 5 * 60 * 1000; // 5 minutes
-function resolveRegisterBirthDate(raw) {
-    const dob = (0, birthDate_1.parseDateOnlyToUtcMidnight)(raw);
-    if (!dob) {
-        return { ok: false, message: 'dateOfBirth is required (format YYYY-MM-DD)' };
-    }
-    const err = (0, birthDate_1.validateBirthDateForAccount)(dob);
-    if (err)
-        return { ok: false, message: err };
-    return { ok: true, dob, age: (0, birthDate_1.calculateAgeFromBirthDateUtc)(dob) };
-}
 const pendingReceiverSignups = new Map();
 function clearExpiredPendingReceiverSignups() {
     const now = Date.now();
@@ -99,7 +88,6 @@ function toApiUser(user) {
         languages: u.languages ?? [],
         interests: u.interests ?? [],
         gender: u.gender ?? null,
-        dateOfBirth: (0, birthDate_1.dateOnlyIsoFromUtcDate)(u.dateOfBirth ?? null),
         age: u.age ?? null,
         state: u.state ?? null,
         createdAt: iso(u.createdAt),
@@ -137,7 +125,6 @@ function toApiReceiver(receiver) {
         languages: r.languages ?? [],
         interests: r.interests ?? [],
         gender: r.gender ?? null,
-        dateOfBirth: (0, birthDate_1.dateOnlyIsoFromUtcDate)(r.dateOfBirth ?? null),
         age: r.age ?? null,
         state: r.state ?? null,
         createdAt: iso(r.createdAt),
@@ -177,7 +164,7 @@ async function phoneTaken(phone) {
 const register = async (req, res) => {
     const t = (0, apiTraceLog_1.beginApiTrace)('POST /auth/register', req, res);
     try {
-        const { name, phone, role, dateOfBirth } = req.body;
+        const { name, phone, role } = req.body;
         if (!phone || !String(phone).trim()) {
             t.warn('register_validation_missing_fields');
             t.json(400, {
@@ -187,16 +174,6 @@ const register = async (req, res) => {
             return;
         }
         const phoneDigits = String(phone).trim();
-        const birth = resolveRegisterBirthDate(dateOfBirth);
-        if (!birth.ok) {
-            t.warn('register_validation_birth_date', { message: birth.message });
-            t.json(400, {
-                message: birth.message,
-                error: 'REGISTER_INVALID_BIRTH_DATE',
-            });
-            return;
-        }
-        const { dob, age } = birth;
         if (await phoneTaken(phoneDigits)) {
             t.warn('register_phone_conflict');
             t.json(409, {
@@ -217,8 +194,6 @@ const register = async (req, res) => {
                 phone: phoneDigits,
                 isVerified: false,
                 passwordHash: null,
-                dateOfBirth: dob,
-                age,
             });
             t.log('register_ok_caller');
             t.json(201, {
@@ -233,8 +208,6 @@ const register = async (req, res) => {
             phone: phoneDigits,
             isVerified: false,
             passwordHash: null,
-            dateOfBirth: dob,
-            age,
             audioCallRate: Receiver_1.RECEIVER_AUDIO_CALL_RATE_INR_PER_MIN,
         });
         t.log('register_ok_receiver');
@@ -494,20 +467,12 @@ const sendOtp = async (req, res) => {
         if (accountType === 'receiver' && signup) {
             const otp = String(Math.floor(100000 + Math.random() * 900000));
             const otpExpiry = new Date(Date.now() + OTP_TTL_MS);
-            const birth = resolveRegisterBirthDate(signup.dateOfBirth);
-            if (!birth.ok) {
-                t.warn('send_otp_signup_birth_invalid');
-                t.json(400, { message: birth.message, error: 'SEND_OTP_INVALID_BIRTH_DATE' });
-                return;
-            }
             const resolvedName = signup.name?.trim() || `Member ${phoneDigits.slice(-4)}`;
             pendingReceiverSignups.set(phoneDigits, {
                 phone: phoneDigits,
                 otp,
                 otpExpiry,
                 name: resolvedName,
-                dateOfBirth: birth.dob,
-                age: birth.age,
             });
             console.log(`[OTP TEST] Pending receiver signup: ${phoneDigits} → OTP: ${otp}`);
             t.log('send_otp_ok_pending_signup');
@@ -677,8 +642,6 @@ const verifyOtp = async (req, res) => {
                 phone: phoneDigits,
                 isVerified: true,
                 passwordHash: null,
-                dateOfBirth: pending.dateOfBirth,
-                age: pending.age,
                 audioCallRate: Receiver_1.RECEIVER_AUDIO_CALL_RATE_INR_PER_MIN,
                 otp: null,
                 otpExpiry: null,
