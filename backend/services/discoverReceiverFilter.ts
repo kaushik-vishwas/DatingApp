@@ -29,7 +29,8 @@ export type DiscoverReceiverListQuery = {
  * then `age` must exist and lie in range (no matches for null/missing age).
  */
 export function buildDiscoverReceiverFilter(input: DiscoverReceiverListQuery): Record<string, unknown> {
-  const parts: Record<string, unknown>[] = [{ accountStatus: 'approved' }];
+  // const parts: Record<string, unknown>[] = [{ accountStatus: 'approved' }];
+  const parts: Record<string, unknown>[] = []; // Remove the accountStatus filter entirely
 
   const langsList = input.langsRaw
     .split(/[,|]/)
