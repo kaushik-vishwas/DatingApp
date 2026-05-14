@@ -1,5 +1,5 @@
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Ionicons } from '@expo/vector-icons';
 import {
   Alert,
@@ -352,6 +352,10 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
     setPostCallOpen(true);
   };
 
+  const navigateCallerHome = useCallback((): void => {
+    (navigation as any).navigate('CallerDiscover');
+  }, [navigation]);
+
   const stopQueueAndExit = () => {
     try {
       signalSocketRef.current?.emit('call:queue:set', { active: false });
@@ -359,7 +363,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
       // ignore signaling failures
     }
     if (user?.role === 'caller') {
-      (navigation as any).navigate('CallerDiscover');
+      navigateCallerHome();
       return;
     }
     (navigation as any).navigate('ReceiverHome');
@@ -416,10 +420,18 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
       Alert.alert(
         'Development build required',
         'Voice calling uses native WebRTC modules and will not work in Expo Go. Build and run a development build first.',
-        [{ text: 'OK', onPress: () => navigation.goBack() }]
+        [
+          {
+            text: 'OK',
+            onPress: () => {
+              if (user?.role === 'caller') navigateCallerHome();
+              else navigation.goBack();
+            },
+          },
+        ]
       );
     }
-  }, [navigation]);
+  }, [navigation, user?.role, navigateCallerHome]);
 
   useEffect(() => {
     const id = streamBootstrap?.callId;
@@ -520,7 +532,15 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
         const msg = e instanceof Error ? e.message : 'Failed to join call';
         if (!cancelled) {
           setError(msg);
-          Alert.alert('Voice call error', msg, [{ text: 'OK', onPress: () => navigation.goBack() }]);
+          Alert.alert('Voice call error', msg, [
+            {
+              text: 'OK',
+              onPress: () => {
+                if (user?.role === 'caller') navigateCallerHome();
+                else navigation.goBack();
+              },
+            },
+          ]);
         }
       }
     })();
@@ -669,7 +689,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
   const hangup = async () => {
     if (user?.role === 'caller' && getOutgoingCallerPhase(route.params as VoiceCallScreenParams) === 'ringing') {
       cancelOutgoingCallInvite();
-      navigation.goBack();
+      navigateCallerHome();
       return;
     }
     if (endingRef.current) return;
@@ -747,7 +767,10 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
         <Text style={styles.loadingText}>{error}</Text>
         <TouchableOpacity
           style={styles.preJoinBackBtn}
-          onPress={() => navigation.goBack()}
+          onPress={() => {
+            if (user?.role === 'caller') navigateCallerHome();
+            else navigation.goBack();
+          }}
           activeOpacity={0.88}
         >
           <Text style={styles.preJoinBackBtnText}>Go back</Text>

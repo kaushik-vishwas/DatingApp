@@ -308,6 +308,7 @@ export default function CallerDiscoverHome(): React.JSX.Element {
 
     const displayedLanguages = item.languages.slice(0, 2).map(getShortLang);
     const remainingCount = item.languages.length - 2;
+    const receiverAvatarSource = resolveProfileImageSource(item.profileImage);
 
     return (
       <TouchableOpacity
@@ -318,8 +319,8 @@ export default function CallerDiscoverHome(): React.JSX.Element {
         <View style={styles.cardRow}>
           <View style={styles.leftColumn}>
             <View style={[styles.avatarWrapper, { borderColor: statusColor }]}>
-              {item.profileImage ? (
-                <Image source={{ uri: item.profileImage }} style={styles.avatar} />
+              {receiverAvatarSource ? (
+                <Image source={receiverAvatarSource} style={styles.avatar} />
               ) : (
                 <View style={[styles.avatar, styles.avatarPlaceholder]}>
                   <Text style={styles.avatarGlyph}>👤</Text>

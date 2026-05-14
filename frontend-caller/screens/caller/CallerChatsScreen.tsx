@@ -17,6 +17,7 @@ import type { CallerStackParamList } from '../../navigation/CallerStackParamList
 import { chatApi, getErrorMessage } from '../../services/api';
 import type { ChatPeerSummary } from '../../types/api';
 import { useChatInbox } from '../../context/ChatInboxContext';
+import { resolveProfileImageSource } from '../../utils/avatarSource';
 import { SCREEN_FETCH_TIMEOUT_MS, withTimeout } from '../../utils/withTimeout';
 
 type Props = NativeStackScreenProps<CallerStackParamList, 'CallerChats'>;
@@ -93,7 +94,9 @@ export default function CallerChatsScreen({ navigation }: Props): React.JSX.Elem
         <FlatList
           data={rows}
           keyExtractor={(item) => item.peerId}
-          renderItem={({ item }) => (
+          renderItem={({ item }) => {
+            const peerAvatar = resolveProfileImageSource(item.peerImage);
+            return (
             <TouchableOpacity
               style={styles.row}
               onPress={() =>
@@ -104,8 +107,8 @@ export default function CallerChatsScreen({ navigation }: Props): React.JSX.Elem
                 })
               }
             >
-              {item.peerImage ? (
-                <Image source={{ uri: item.peerImage }} style={styles.avatar} />
+              {peerAvatar ? (
+                <Image source={peerAvatar} style={styles.avatar} />
               ) : (
                 <View style={[styles.avatar, styles.avatarPh]}>
                   <Text style={styles.avatarTxt}>{item.peerName.charAt(0) ?? '?'}</Text>
@@ -120,7 +123,8 @@ export default function CallerChatsScreen({ navigation }: Props): React.JSX.Elem
                 </Text>
               </View>
             </TouchableOpacity>
-          )}
+            );
+          }}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
           ListEmptyComponent={
             <View style={styles.center}>

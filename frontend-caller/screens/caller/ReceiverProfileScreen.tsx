@@ -48,6 +48,7 @@ export default function ReceiverProfileScreen({ navigation, route }: Props): Rea
   const rate = receiver.audioCallRate;
   const presence = getReceiverPresenceInfo(receiver);
   const selfProfileImageSource = resolveProfileImageSource(user?.profileImage);
+  const receiverHeroSource = resolveProfileImageSource(receiver.profileImage);
 
   const openWallet = () => {
     setRechargeModal('none');
@@ -113,8 +114,8 @@ export default function ReceiverProfileScreen({ navigation, route }: Props): Rea
 
       <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
         <View style={styles.hero}>
-          {receiver.profileImage ? (
-            <Image source={{ uri: receiver.profileImage }} style={[styles.heroImg, { borderColor: presence.color }]} />
+          {receiverHeroSource ? (
+            <Image source={receiverHeroSource} style={[styles.heroImg, { borderColor: presence.color }]} />
           ) : (
             <View style={[styles.heroImg, styles.heroPh, { borderColor: presence.color }]}>
               <Text style={styles.heroGlyph}>👤</Text>

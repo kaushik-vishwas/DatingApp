@@ -1,5 +1,6 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef } from 'react';
 import { Alert } from 'react-native';
+import { CommonActions } from '@react-navigation/native';
 import { io, type Socket } from 'socket.io-client';
 import { useAuth } from './AuthContext';
 import { callApi, getJwt, getResolvedApiBaseUrl } from '../services/api';
@@ -146,10 +147,24 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       return true;
     }
     if (userRoleRef.current === 'receiver') {
-      nav.navigate('Home', {
-        screen: 'VoiceCall',
-        params,
-      });
+      // Avoid stacking VoiceCall on top of IncomingCall (back / goBack would return to ringing UI).
+      nav.dispatch(
+        CommonActions.reset({
+          index: 0,
+          routes: [
+            {
+              name: 'Home',
+              state: {
+                routes: [
+                  { name: 'ReceiverHome' },
+                  { name: 'VoiceCall', params },
+                ],
+                index: 1,
+              },
+            },
+          ],
+        })
+      );
       return true;
     }
     return false;

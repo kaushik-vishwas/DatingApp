@@ -6,6 +6,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useCallSignals, type IncomingCallRequest } from '../../context/CallSignalContext';
 import type { ReceiverStackParamList } from '../../navigation/ReceiverStackParamList';
+import { resolveProfileImageSource } from '../../utils/avatarSource';
 
 type Props = NativeStackScreenProps<ReceiverStackParamList, 'IncomingCall'>;
 
@@ -21,6 +22,8 @@ export default function IncomingCallScreen({ navigation, route }: Props): React.
     () => ({ callId, fromType, fromId, peerName, peerImage: peerImage ?? null }),
     [callId, fromType, fromId, peerName, peerImage]
   );
+
+  const peerAvatarSource = useMemo(() => resolveProfileImageSource(peerImage), [peerImage]);
 
   const [responding, setResponding] = useState(false);
   const respondedRef = useRef(false);
@@ -114,8 +117,8 @@ export default function IncomingCallScreen({ navigation, route }: Props): React.
             style={[styles.ring, styles.ringGreen, { opacity: ring2Opacity, transform: [{ scale: ring2Scale }] }]}
           />
 
-          {peerImage ? (
-            <Image source={{ uri: peerImage }} style={styles.avatar} />
+          {peerAvatarSource ? (
+            <Image source={peerAvatarSource} style={styles.avatar} />
           ) : (
             <View style={[styles.avatar, styles.avatarPlaceholder]}>
               <Text style={styles.avatarInitial}>{peerInitial}</Text>

@@ -17,6 +17,7 @@ import type { ReceiverStackParamList } from '../../navigation/ReceiverStackParam
 import { chatApi, getErrorMessage } from '../../services/api';
 import type { ChatPeerSummary } from '../../types/api';
 import { useChatInbox } from '../../context/ChatInboxContext';
+import { resolveProfileImageSource } from '../../utils/avatarSource';
 import { SCREEN_FETCH_TIMEOUT_MS, withTimeout } from '../../utils/withTimeout';
 
 type Props = NativeStackScreenProps<ReceiverStackParamList, 'ReceiverChats'>;
@@ -66,7 +67,9 @@ export default function ReceiverChatsScreen({ navigation }: Props): React.JSX.El
     void load({ pull: true });
   };
 
-  const renderItem = ({ item }: { item: ChatPeerSummary }) => (
+  const renderItem = ({ item }: { item: ChatPeerSummary }) => {
+    const peerAvatar = resolveProfileImageSource(item.peerImage);
+    return (
     <TouchableOpacity
       style={styles.row}
       onPress={() =>
@@ -77,8 +80,8 @@ export default function ReceiverChatsScreen({ navigation }: Props): React.JSX.El
         })
       }
     >
-      {item.peerImage ? (
-        <Image source={{ uri: item.peerImage }} style={styles.avatar} />
+      {peerAvatar ? (
+        <Image source={peerAvatar} style={styles.avatar} />
       ) : (
         <View style={[styles.avatar, styles.avatarPh]}>
           <Text style={styles.avatarTxt}>{item.peerName.charAt(0) ?? '?'}</Text>
@@ -100,7 +103,8 @@ export default function ReceiverChatsScreen({ navigation }: Props): React.JSX.El
         </View>
       ) : null}
     </TouchableOpacity>
-  );
+    );
+  };
 
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'left', 'right']}>

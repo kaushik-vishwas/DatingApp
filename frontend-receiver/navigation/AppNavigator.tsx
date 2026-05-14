@@ -154,8 +154,7 @@ export default function AppNavigator(): React.JSX.Element {
           <Stack.Screen
             name="Home"
             children={() => {
-              const receiverDashboardOk =
-                accountStatus === 'approved' && Boolean(user.userAudio?.trim());
+              const receiverDashboardOk = accountStatus === 'approved';
               if (receiverDashboardOk) {
                 return <ReceiverAppNavigator initialRouteName="ReceiverHome" />;
               }

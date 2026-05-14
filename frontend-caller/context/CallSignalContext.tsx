@@ -1,5 +1,6 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef } from 'react';
 import { Alert } from 'react-native';
+import { CommonActions } from '@react-navigation/native';
 import { io, type Socket } from 'socket.io-client';
 import { useAuth } from './AuthContext';
 import { callApi, getJwt, getResolvedApiBaseUrl } from '../services/api';
@@ -90,6 +91,16 @@ function getFallbackPeerName(fromType: 'u' | 'r'): string {
   return fromType === 'r' ? 'Receiver' : 'Caller';
 }
 
+/** Outbound ringing UI must not sit under active VoiceCall (back would return to "Calling…"). */
+function callerShouldResetStackForVoiceCall(params: VoiceCallScreenParams): boolean {
+  if ('outgoingCallerPhase' in params && params.outgoingCallerPhase === 'ringing') {
+    return false;
+  }
+  return Boolean(
+    'apiKey' in params && typeof params.apiKey === 'string' && String(params.apiKey).trim().length > 0
+  );
+}
+
 export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { isSignedIn, user } = useAuth();
   const socketRef = useRef<Socket | null>(null);
@@ -127,6 +138,26 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     const nav = navigationRef.current;
     if (!nav || !nav.isReady()) return false;
     if (userRoleRef.current === 'caller') {
+      if (callerShouldResetStackForVoiceCall(params)) {
+        nav.dispatch(
+          CommonActions.reset({
+            index: 0,
+            routes: [
+              {
+                name: 'CallerApp',
+                state: {
+                  routes: [
+                    { name: 'CallerDiscover' },
+                    { name: 'VoiceCall', params },
+                  ],
+                  index: 1,
+                },
+              },
+            ],
+          })
+        );
+        return true;
+      }
       nav.navigate('CallerApp', {
         screen: 'VoiceCall',
         params,

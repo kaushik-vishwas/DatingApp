@@ -1,7 +1,7 @@
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -34,6 +34,7 @@ import type { ChatMessageDto } from '../../types/api';
 import { useAuth } from '../../context/AuthContext';
 import { useCallSignals } from '../../context/CallSignalContext';
 import { useChatInbox } from '../../context/ChatInboxContext';
+import { resolveProfileImageSource } from '../../utils/avatarSource';
 import { SCREEN_FETCH_TIMEOUT_MS, withTimeout } from '../../utils/withTimeout';
 
 const PURPLE = '#7b2cff';
@@ -74,6 +75,7 @@ export default function ChatConversationScreen({ navigation, route }: Props): Re
   const peerImage = isCaller
     ? route.params.receiverImage ?? null
     : route.params.userImage ?? null;
+  const peerAvatarSource = useMemo(() => resolveProfileImageSource(peerImage), [peerImage]);
 
   const mySenderType = user?.role === 'caller' ? 'u' : 'r';
 
@@ -424,8 +426,8 @@ export default function ChatConversationScreen({ navigation, route }: Props): Re
           <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
             <Text style={styles.backTxt}>←</Text>
           </TouchableOpacity>
-          {peerImage ? (
-            <Image source={{ uri: peerImage }} style={styles.peerAv} />
+          {peerAvatarSource ? (
+            <Image source={peerAvatarSource} style={styles.peerAv} />
           ) : (
             <View style={[styles.peerAv, styles.peerAvPh]}>
               <Text style={styles.peerAvTxt}>{peerName.charAt(0) ?? '?'}</Text>

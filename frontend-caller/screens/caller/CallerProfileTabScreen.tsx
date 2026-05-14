@@ -15,6 +15,7 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Feather, MaterialIcons, Ionicons, FontAwesome5 } from '@expo/vector-icons';
 
 import CallerBottomTabs, { getCallerTabBarContentPadding } from '../../components/caller/CallerBottomTabs';
 import { useAuth } from '../../context/AuthContext';
@@ -68,7 +69,7 @@ export default function CallerProfileTabScreen({ navigation }: Props): React.JSX
   );
 
   const menuRow = (
-    icon: string,
+    icon: React.ReactNode,
     label: string,
     onPress: () => void,
     opts?: { danger?: boolean }
@@ -78,7 +79,7 @@ export default function CallerProfileTabScreen({ navigation }: Props): React.JSX
       onPress={onPress}
       activeOpacity={0.85}
     >
-      <Text style={styles.menuIcon}>{icon}</Text>
+      <View style={styles.menuIcon}>{icon}</View>
       <Text style={[styles.menuLbl, opts?.danger && styles.menuLblDanger]}>{label}</Text>
       <Text style={styles.menuChev}>›</Text>
     </TouchableOpacity>
@@ -134,17 +135,17 @@ export default function CallerProfileTabScreen({ navigation }: Props): React.JSX
 
         <View style={styles.statsRow}>
           <View style={styles.statCard}>
-            <Text style={styles.statIco}>📞</Text>
+            <Feather name="phone-call" size={18} color="#666" style={styles.statIco} />
             <Text style={styles.statVal}>{calls}</Text>
             <Text style={styles.statLbl}>Calls</Text>
           </View>
           <View style={styles.statCard}>
-            <Text style={styles.statIco}>🕐</Text>
+            <Feather name="clock" size={18} color="#666" style={styles.statIco} />
             <Text style={styles.statVal}>{mins}</Text>
             <Text style={styles.statLbl}>Mins</Text>
           </View>
           <View style={styles.statCard}>
-            <Text style={styles.statIco}>💰</Text>
+            <FontAwesome5 name="wallet" size={18} color="#666" style={styles.statIco} />
             <Text style={styles.statVal}>{formatWalletShort(wallet)}</Text>
             <Text style={styles.statLbl}>Wallet</Text>
           </View>
@@ -156,7 +157,7 @@ export default function CallerProfileTabScreen({ navigation }: Props): React.JSX
             onPress={() => navigation.navigate('CallerShareApp')}
             activeOpacity={0.88}
           >
-            <Text style={styles.actionCardIco}>📤</Text>
+            <Feather name="share-2" size={26} color="#666" style={styles.actionCardIco} />
             <Text style={styles.actionCardTitle}>Share app</Text>
             <Text style={styles.actionCardSub}>Invite friends</Text>
           </TouchableOpacity>
@@ -165,21 +166,21 @@ export default function CallerProfileTabScreen({ navigation }: Props): React.JSX
             onPress={() => navigation.navigate('CallerFaq')}
             activeOpacity={0.88}
           >
-            <Text style={styles.actionCardIco}>❔</Text>
+            <MaterialIcons name="help-outline" size={26} color="#666" style={styles.actionCardIco} />
             <Text style={styles.actionCardTitle}>FAQ</Text>
             <Text style={styles.actionCardSub}>Common questions</Text>
           </TouchableOpacity>
         </View>
 
         <View style={styles.menuBlock}>
-          {menuRow('👤', 'Edit Profile', () => navigation.navigate('CallerEditProfile'))}
-          {menuRow('⭐', 'Rate Us', () => navigation.navigate('CallerRateUs'))}
-          {menuRow('💬', 'Chats', () => navigation.navigate('CallerChats'))}
-          {menuRow('❓', 'Help & Support', () => navigation.navigate('CallerHelp'))}
-          {menuRow('📄', 'Terms & Privacy', () => navigation.navigate('CallerTerms'))}
-          {menuRow('🔒', 'Privacy Policy', () => navigation.navigate('CallerPrivacyPolicy'))}
-          {menuRow('🗑', 'Delete Account', onDelete, { danger: true })}
-          {menuRow('🚪', 'Logout', () => setLogoutOpen(true), { danger: true })}
+          {menuRow(<Feather name="user" size={18} color="#222" />, 'Edit Profile', () => navigation.navigate('CallerEditProfile'))}
+          {menuRow(<MaterialIcons name="star-outline" size={18} color="#222" />, 'Rate Us', () => navigation.navigate('CallerRateUs'))}
+          {menuRow(<Feather name="message-circle" size={18} color="#222" />, 'Chats', () => navigation.navigate('CallerChats'))}
+          {menuRow(<Feather name="help-circle" size={18} color="#222" />, 'Help & Support', () => navigation.navigate('CallerHelp'))}
+          {menuRow(<Feather name="file-text" size={18} color="#222" />, 'Terms & Privacy', () => navigation.navigate('CallerTerms'))}
+          {menuRow(<Feather name="lock" size={18} color="#222" />, 'Privacy Policy', () => navigation.navigate('CallerPrivacyPolicy'))}
+          {menuRow(<MaterialIcons name="delete-outline" size={18} color="#dc2626" />, 'Delete Account', onDelete, { danger: true })}
+          {menuRow(<MaterialIcons name="logout" size={18} color="#dc2626" />, 'Logout', () => setLogoutOpen(true), { danger: true })}
         </View>
 
         <Text style={styles.version}>Version {appVersion}</Text>
@@ -191,7 +192,7 @@ export default function CallerProfileTabScreen({ navigation }: Props): React.JSX
         <Pressable style={styles.modalBg} onPress={() => setLogoutOpen(false)}>
           <Pressable style={styles.modalCard} onPress={(e) => e.stopPropagation()}>
             <Text style={styles.modalTitle}>Log out !</Text>
-            <Text style={styles.modalDoor}>🚪</Text>
+            <MaterialIcons name="logout" size={52} color="#dc2626" style={styles.modalIcon} />
             <Text style={styles.modalMsg}>Are You sure you want to logout !</Text>
             <TouchableOpacity style={styles.modalCta} onPress={confirmLogout} activeOpacity={0.9}>
               <Text style={styles.modalCtaTxt}>Log out</Text>
@@ -239,7 +240,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#eee',
   },
-  statIco: { fontSize: 18, marginBottom: 6 },
+  statIco: { marginBottom: 6 },
   statVal: { fontSize: 16, fontWeight: '900', color: '#111' },
   statLbl: { fontSize: 11, color: '#666', marginTop: 4, fontWeight: '700' },
   actionCardsRow: { flexDirection: 'row', gap: 10, marginBottom: 22 },
@@ -253,7 +254,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#ececec',
   },
-  actionCardIco: { fontSize: 26, marginBottom: 8 },
+  actionCardIco: { marginBottom: 8 },
   actionCardTitle: { fontSize: 15, fontWeight: '900', color: '#111' },
   actionCardSub: { fontSize: 11, color: '#888', marginTop: 4, fontWeight: '600', textAlign: 'center' },
   menuBlock: { gap: 10 },
@@ -267,7 +268,7 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     paddingHorizontal: 14,
   },
-  menuIcon: { fontSize: 18, marginRight: 12 },
+  menuIcon: { width: 30, marginRight: 12 },
   menuLbl: { flex: 1, fontSize: 15, fontWeight: '700', color: '#222' },
   menuLblDanger: { color: '#dc2626' },
   menuChev: { fontSize: 22, color: '#ccc', fontWeight: '300' },
@@ -285,7 +286,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   modalTitle: { fontSize: 18, fontWeight: '900', color: '#111', marginBottom: 8 },
-  modalDoor: { fontSize: 52, marginVertical: 8 },
+  modalIcon: { marginVertical: 8 },
   modalMsg: { fontSize: 14, color: '#666', textAlign: 'center', marginBottom: 22, lineHeight: 20 },
   modalCta: {
     width: '100%',
