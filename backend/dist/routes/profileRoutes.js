@@ -20,6 +20,7 @@ router.patch('/receiver/kyc/profile-info', auth_1.protect, profileController_1.s
 router.patch('/receiver/kyc/documents', auth_1.protect, profileController_1.saveReceiverKycDocuments);
 router.patch('/receiver/kyc/bank', auth_1.protect, profileController_1.saveReceiverKycBankFinalize);
 router.patch('/receiver', auth_1.protect, profileController_1.updateReceiverProfile);
+router.post('/receiver/complete-audio-onboarding', auth_1.protect, profileController_1.completeReceiverAudioOnboarding);
 router.post('/receiver/reopen-kyc', auth_1.protect, profileController_1.reopenRejectedReceiverKyc);
 router.delete('/receiver', auth_1.protect, profileController_1.deleteReceiverAccount);
 router.get('/caller-call-history', auth_1.protect, profileController_1.getCallerCallHistory);

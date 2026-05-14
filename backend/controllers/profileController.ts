@@ -2078,6 +2078,53 @@ export const updateReceiverProfile = async (
 };
 
 /**
+ * POST /profile/receiver/complete-audio-onboarding
+ * Called when the receiver finishes the audio verification step and continues to the dashboard.
+ * Always persists `accountStatus: 'approved'` (does not depend on other profile fields or voice URL).
+ */
+export const completeReceiverAudioOnboarding = async (req: Request, res: Response): Promise<void> => {
+  try {
+    if (req.accountKind !== 'receiver') {
+      res.status(403).json({ message: 'This endpoint is only for receiver accounts' });
+      return;
+    }
+    if (blockReceiverUntilApproved(req, res)) return;
+
+    const receiverId = String(req.receiver!._id);
+    const receiver = await Receiver.findById(receiverId);
+    if (!receiver) {
+      res.status(404).json({ message: 'Receiver not found' });
+      return;
+    }
+
+    const wasAvailable = Boolean(receiver.isAvailable);
+    const wasOnline = Boolean(receiver.isOnline);
+
+    receiver.accountStatus = 'approved';
+    await receiver.save();
+    await syncReceiverQueueState(receiverId);
+
+    const becameCallAvailable =
+      !wasAvailable && Boolean(receiver.isAvailable) && Boolean(receiver.isOnline) && wasOnline;
+    if (becameCallAvailable) {
+      void scheduleReceiverAvailabilityNotifications(receiverId).catch((e: unknown) => {
+        const msg = e instanceof Error ? e.message : String(e);
+        console.error('receiver availability notify error:', msg);
+      });
+    }
+
+    res.status(200).json({
+      message: 'Account approved',
+      user: toApiReceiver(receiver),
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error('completeReceiverAudioOnboarding error:', msg);
+    res.status(500).json({ message: msg || 'Server error' });
+  }
+};
+
+/**
  * POST /profile/receiver/reopen-kyc
  * Allows rejected receivers to re-enter the complete profile flow without logging out.
  */

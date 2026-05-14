@@ -36,7 +36,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getCallerNotifications = exports.getCallerCallHistory = exports.getReceiverEarningsBreakdown = exports.verifyReceiverBankUpdateOtp = exports.sendReceiverBankUpdateOtp = exports.deleteReceiverAccount = exports.reopenRejectedReceiverKyc = exports.updateReceiverProfile = exports.notifyReceiverRecentUser = exports.getReceiverNotifyCandidates = exports.getReceiverCallInsights = exports.verifyReceiverWithdrawalOtpAndCreate = exports.sendReceiverWithdrawalOtp = exports.getReceiverWithdrawalOverview = exports.getReceiverWalletSummary = exports.updateCallerProfile = exports.completeCallerProfile = exports.saveCallerUserAudio = exports.saveReceiverKycBankFinalize = exports.saveReceiverKycDocuments = exports.saveReceiverKycProfileInfo = exports.completeProfile = void 0;
+exports.getCallerNotifications = exports.getCallerCallHistory = exports.getReceiverEarningsBreakdown = exports.verifyReceiverBankUpdateOtp = exports.sendReceiverBankUpdateOtp = exports.deleteReceiverAccount = exports.reopenRejectedReceiverKyc = exports.completeReceiverAudioOnboarding = exports.updateReceiverProfile = exports.notifyReceiverRecentUser = exports.getReceiverNotifyCandidates = exports.getReceiverCallInsights = exports.verifyReceiverWithdrawalOtpAndCreate = exports.sendReceiverWithdrawalOtp = exports.getReceiverWithdrawalOverview = exports.getReceiverWalletSummary = exports.updateCallerProfile = exports.completeCallerProfile = exports.saveCallerUserAudio = exports.saveReceiverKycBankFinalize = exports.saveReceiverKycDocuments = exports.saveReceiverKycProfileInfo = exports.completeProfile = void 0;
 const crypto_1 = __importDefault(require("crypto"));
 const mongoose_1 = __importDefault(require("mongoose"));
 const User_1 = __importDefault(require("../models/User"));
@@ -1750,6 +1750,49 @@ const updateReceiverProfile = async (req, res) => {
     }
 };
 exports.updateReceiverProfile = updateReceiverProfile;
+/**
+ * POST /profile/receiver/complete-audio-onboarding
+ * Called when the receiver finishes the audio verification step and continues to the dashboard.
+ * Always persists `accountStatus: 'approved'` (does not depend on other profile fields or voice URL).
+ */
+const completeReceiverAudioOnboarding = async (req, res) => {
+    try {
+        if (req.accountKind !== 'receiver') {
+            res.status(403).json({ message: 'This endpoint is only for receiver accounts' });
+            return;
+        }
+        if ((0, accountAccess_1.blockReceiverUntilApproved)(req, res))
+            return;
+        const receiverId = String(req.receiver._id);
+        const receiver = await Receiver_1.default.findById(receiverId);
+        if (!receiver) {
+            res.status(404).json({ message: 'Receiver not found' });
+            return;
+        }
+        const wasAvailable = Boolean(receiver.isAvailable);
+        const wasOnline = Boolean(receiver.isOnline);
+        receiver.accountStatus = 'approved';
+        await receiver.save();
+        await (0, callQueue_1.syncReceiverQueueState)(receiverId);
+        const becameCallAvailable = !wasAvailable && Boolean(receiver.isAvailable) && Boolean(receiver.isOnline) && wasOnline;
+        if (becameCallAvailable) {
+            void (0, receiverAvailabilityNotifier_1.scheduleReceiverAvailabilityNotifications)(receiverId).catch((e) => {
+                const msg = e instanceof Error ? e.message : String(e);
+                console.error('receiver availability notify error:', msg);
+            });
+        }
+        res.status(200).json({
+            message: 'Account approved',
+            user: (0, authController_1.toApiReceiver)(receiver),
+        });
+    }
+    catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error('completeReceiverAudioOnboarding error:', msg);
+        res.status(500).json({ message: msg || 'Server error' });
+    }
+};
+exports.completeReceiverAudioOnboarding = completeReceiverAudioOnboarding;
 /**
  * POST /profile/receiver/reopen-kyc
  * Allows rejected receivers to re-enter the complete profile flow without logging out.

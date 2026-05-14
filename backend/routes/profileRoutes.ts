@@ -3,6 +3,7 @@ import { getMyCallerAppReview, upsertMyCallerAppReview } from '../controllers/ca
 import {
   completeCallerProfile,
   completeProfile,
+  completeReceiverAudioOnboarding,
   deleteReceiverAccount,
   getCallerCallHistory,
   getCallerNotifications,
@@ -43,6 +44,7 @@ router.patch('/receiver/kyc/profile-info', protect, saveReceiverKycProfileInfo);
 router.patch('/receiver/kyc/documents', protect, saveReceiverKycDocuments);
 router.patch('/receiver/kyc/bank', protect, saveReceiverKycBankFinalize);
 router.patch('/receiver', protect, updateReceiverProfile);
+router.post('/receiver/complete-audio-onboarding', protect, completeReceiverAudioOnboarding);
 router.post('/receiver/reopen-kyc', protect, reopenRejectedReceiverKyc);
 router.delete('/receiver', protect, deleteReceiverAccount);
 router.get('/caller-call-history', protect, getCallerCallHistory);

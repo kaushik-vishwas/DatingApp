@@ -53,7 +53,18 @@ export default function ReceiverAutoVerificationScreen(): React.JSX.Element {
   };
 
   const onProceed = (): void => {
-    navigation.replace('ReceiverHome');
+    void (async () => {
+      setSavingToServer(true);
+      try {
+        const { data } = await profileApi.completeReceiverAudioOnboarding();
+        applyServerUser(data.user);
+        navigation.replace('ReceiverHome');
+      } catch (e) {
+        Alert.alert('Could not continue', getErrorMessage(e));
+      } finally {
+        setSavingToServer(false);
+      }
+    })();
   };
 
   return (

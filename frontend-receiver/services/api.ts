@@ -483,6 +483,9 @@ export const profileApi = {
   updateReceiverProfile: (payload: UpdateReceiverProfilePayload) =>
     api.patch<CompleteProfileResponse>('/profile/receiver', payload),
 
+  completeReceiverAudioOnboarding: () =>
+    api.post<CompleteProfileResponse>('/profile/receiver/complete-audio-onboarding'),
+
   deleteReceiverAccount: (payload?: DeleteReceiverAccountPayload) =>
     api.delete<{ message: string }>('/profile/receiver', { data: payload ?? {} }),
 

@@ -74,7 +74,7 @@ export default function SelectGenderScreen({ navigation }: Props): React.JSX.Ele
           <Text style={styles.back}>←</Text>
         </TouchableOpacity>
         <Text style={styles.title}>Select Gender</Text>
-        <Text style={styles.subtitle}>Thissss helps us personalize your experience</Text>
+        <Text style={styles.subtitle}>This helps us personalize your experience</Text>
 
         <View style={styles.list}>
           {row('male', 'Male')}

@@ -38,8 +38,16 @@ function parseRoom(room) {
         return null;
     return { userId, receiverId };
 }
+/** Normalize ObjectId strings so account rooms match across JWT, REST, and clients. */
+function toMongoRoomId(raw) {
+    const s = String(raw).trim();
+    if (mongoose_1.default.Types.ObjectId.isValid(s)) {
+        return new mongoose_1.default.Types.ObjectId(s).toString();
+    }
+    return s;
+}
 function accountRoom(typ, accountId) {
-    return `account:${typ}:${accountId}`;
+    return `account:${typ}:${toMongoRoomId(accountId)}`;
 }
 /**
  * Real-time 1:1 chat between an app user (`users`) and a receiver (`receivers`).
@@ -157,11 +165,20 @@ function attachChatSocket(httpServer) {
             }
         })();
     });
-    io.on('connection', (socket) => {
+    io.on('connection', async (socket) => {
         const socketType = socket.data.typ;
         const socketAccountId = String(socket.data.accountId);
         const selfRoom = accountRoom(socketType, socketAccountId);
-        void socket.join(selfRoom);
+        // Socket.IO v4: join() is async; callers must not see an empty account room while DB already shows online.
+        try {
+            await socket.join(selfRoom);
+        }
+        catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            console.error('socket join account room failed:', msg);
+            socket.disconnect(true);
+            return;
+        }
         if (socketType === 'r') {
             void (async () => {
                 try {
