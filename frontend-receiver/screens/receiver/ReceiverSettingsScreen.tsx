@@ -36,6 +36,16 @@ export default function ReceiverSettingsScreen(): React.JSX.Element {
           <Icon name="chevron-right" size={18} color="#9ca3af" />
         </TouchableOpacity>
 
+        <TouchableOpacity style={styles.row} onPress={() => navigation.navigate('ReceiverHowToEarn')}>
+          <View style={styles.rowLeft}>
+            <View style={styles.iconCircle}>
+              <Icon name="trending-up" size={18} color="#7B2CFF" />
+            </View>
+            <Text style={styles.label}>How to Earn</Text>
+          </View>
+          <Icon name="chevron-right" size={18} color="#9ca3af" />
+        </TouchableOpacity>
+
         <TouchableOpacity style={styles.row} onPress={() => navigation.navigate('ReceiverNotifications')}>
           <View style={styles.rowLeft}>
             <View style={styles.iconCircle}>

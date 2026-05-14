@@ -400,7 +400,7 @@ export const authApi = {
   sendOtp: (
     phone: string,
     accountType: AuthAccountType,
-    signup?: { name?: string; dateOfBirth?: string; role?: 'caller' | 'receiver' | 'both' }
+    signup?: { name?: string; role?: 'caller' | 'receiver' | 'both' }
   ) =>
     api.post<SendOtpResponse>('/auth/send-otp', signup ? { phone, accountType, signup } : { phone, accountType }),
 

@@ -1,6 +1,6 @@
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { io, type Socket } from 'socket.io-client';
@@ -8,6 +8,7 @@ import { chatApi, getErrorMessage, getJwt, getResolvedApiBaseUrl, profileApi } f
 import { markNotificationsSeenNow } from '../../services/notificationUnread';
 import type { ReceiverStackParamList } from '../../navigation/ReceiverStackParamList';
 import { formatCallDurationCompact } from '../../utils/callDurationDisplay';
+import { SCREEN_FETCH_TIMEOUT_MS, withTimeout } from '../../utils/withTimeout';
 
 type NotificationKind = 'message' | 'call' | 'withdrawal' | 'earning';
 type NotificationRow = {
@@ -27,16 +28,22 @@ export default function ReceiverNotificationsScreen(): React.JSX.Element {
   const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState<'all' | NotificationKind>('all');
   const [rows, setRows] = useState<NotificationRow[]>([]);
+  const loadGenRef = useRef(0);
 
   const load = useCallback(async () => {
+    const id = ++loadGenRef.current;
     setLoading(true);
     setError(null);
     try {
-      const [{ data: conversations }, { data: calls }, { data: withdrawals }] = await Promise.all([
-        chatApi.conversations(),
-        profileApi.receiverCallInsights('all'),
-        profileApi.receiverWithdrawalOverview(),
-      ]);
+      const [{ data: conversations }, { data: calls }, { data: withdrawals }] = await withTimeout(
+        Promise.all([
+          chatApi.conversations(),
+          profileApi.receiverCallInsights('all'),
+          profileApi.receiverWithdrawalOverview(),
+        ]),
+        SCREEN_FETCH_TIMEOUT_MS
+      );
+      if (loadGenRef.current !== id) return;
 
       const messageRows: NotificationRow[] = conversations.conversations.map((c) => ({
         id: `msg-${c.peerId}`,
@@ -78,9 +85,10 @@ export default function ReceiverNotificationsScreen(): React.JSX.Element {
       );
       setRows(merged);
     } catch (e) {
+      if (loadGenRef.current !== id) return;
       setError(getErrorMessage(e));
     } finally {
-      setLoading(false);
+      if (loadGenRef.current === id) setLoading(false);
     }
   }, []);
 
@@ -254,7 +262,12 @@ export default function ReceiverNotificationsScreen(): React.JSX.Element {
       {loading ? (
         <ActivityIndicator size="large" color="#7b2cff" style={{ marginTop: 20 }} />
       ) : error ? (
-        <Text style={styles.error}>{error}</Text>
+        <View style={styles.errorBlock}>
+          <Text style={styles.error}>{error}</Text>
+          <TouchableOpacity style={styles.retryBtn} onPress={() => void load()} activeOpacity={0.85}>
+            <Text style={styles.retryBtnText}>Retry</Text>
+          </TouchableOpacity>
+        </View>
       ) : filtered.length === 0 ? (
         <Text style={styles.empty}>No notifications.</Text>
       ) : (
@@ -303,7 +316,15 @@ const styles = StyleSheet.create({
   tabActive: { backgroundColor: '#7b2cff', borderColor: '#7b2cff' },
   tabText: { fontSize: 12, fontWeight: '700', color: '#444' },
   tabTextActive: { color: '#fff' },
-  error: { color: '#b91c1c', fontSize: 12, fontWeight: '700' },
+  errorBlock: { marginTop: 16, alignItems: 'center', gap: 10 },
+  retryBtn: {
+    backgroundColor: '#7b2cff',
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 10,
+  },
+  retryBtnText: { color: '#fff', fontSize: 13, fontWeight: '800' },
+  error: { color: '#b91c1c', fontSize: 12, fontWeight: '700', textAlign: 'center' },
   empty: { color: '#666', fontSize: 12, marginTop: 8 },
   row: { backgroundColor: '#fff', borderRadius: 10, borderWidth: 1, borderColor: '#ececec', padding: 10, marginBottom: 8 },
   rowTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10 },

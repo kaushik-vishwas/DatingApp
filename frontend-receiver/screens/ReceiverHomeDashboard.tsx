@@ -29,6 +29,7 @@ import { chatApi, getErrorMessage, profileApi } from '../services/api';
 import type { ReceiverCallInsightsResponse, ReceiverWalletSummaryResponse } from '../types/api';
 import { formatCallDurationCompact, leaderboardMinutesFromSeconds } from '../utils/callDurationDisplay';
 import { type ReceiverPresenceInfo } from '../utils/receiverStatus';
+import { resolveProfileImageSource } from '../utils/avatarSource';
 import SelectoLogo from '../assets/SelectoLogo.png';
 
 const PURPLE = '#7b2cff';
@@ -258,13 +259,16 @@ export default function ReceiverHomeDashboard(): React.JSX.Element {
                 onPress={() => navigation.navigate('ReceiverSettings')}
                 activeOpacity={0.85}
               >
-                {user?.profileImage ? (
-                  <Image source={{ uri: user.profileImage }} style={styles.meAvatar} />
-                ) : (
-                  <View style={styles.avatarContainer}>
-                    <Text style={styles.meAvatarTxt}>{user?.name?.charAt(0) ?? '?'}</Text>
-                  </View>
-                )}
+                {(() => {
+                  const meSrc = user?.profileImage ? resolveProfileImageSource(user.profileImage) : null;
+                  return meSrc ? (
+                    <Image source={meSrc} style={styles.meAvatar} />
+                  ) : (
+                    <View style={styles.avatarContainer}>
+                      <Text style={styles.meAvatarTxt}>{user?.name?.charAt(0) ?? '?'}</Text>
+                    </View>
+                  );
+                })()}
               </TouchableOpacity>
             </View>
           </View>
@@ -294,13 +298,18 @@ export default function ReceiverHomeDashboard(): React.JSX.Element {
                         },
                       ]}
                     >
-                      {user.profileImage ? (
-                        <Image source={{ uri: user.profileImage }} style={styles.publicAvatar} />
-                      ) : (
-                        <View style={[styles.publicAvatar, styles.publicAvatarPlaceholder]}>
-                          <Text style={styles.publicAvatarGlyph}>👤</Text>
-                        </View>
-                      )}
+                      {(() => {
+                        const pubSrc = user.profileImage
+                          ? resolveProfileImageSource(user.profileImage)
+                          : null;
+                        return pubSrc ? (
+                          <Image source={pubSrc} style={styles.publicAvatar} />
+                        ) : (
+                          <View style={[styles.publicAvatar, styles.publicAvatarPlaceholder]}>
+                            <Text style={styles.publicAvatarGlyph}>👤</Text>
+                          </View>
+                        );
+                      })()}
                       <View
                         style={[
                           styles.publicStatusDot,

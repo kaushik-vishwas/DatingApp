@@ -1,7 +1,9 @@
 /**
- * Bundled require() avatars resolve via Metro to http://LAN:8081/assets?unstable_path=...
- * Those must never be saved to MongoDB — only public https URLs (after Cloudinary upload).
+ * Bundled avatars are stored as stable ids (`preset:male:1`, etc.) and must not be uploaded.
+ * Metro dev URLs for require() assets must never be saved as-is — use preset id or upload.
  */
+
+import { isCallerAvatarPresetId } from '../constants/userOnboarding';
 
 const PRIVATE_OR_LOCAL_HOST = /^(127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[0-1])\.)/i;
 
@@ -21,6 +23,10 @@ function isMetroOrDevAssetUrl(uri: string): boolean {
 export function shouldUploadProfileImageToCloudinary(uri: string): boolean {
   const raw = uri.trim();
   if (!raw) return true;
+
+  if (isCallerAvatarPresetId(raw) || raw.startsWith('preset:')) {
+    return false;
+  }
 
   if (
     raw.startsWith('file:') ||

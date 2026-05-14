@@ -1,6 +1,6 @@
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useFocusEffect } from '@react-navigation/native';
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
@@ -17,6 +17,7 @@ import type { ReceiverStackParamList } from '../../navigation/ReceiverStackParam
 import { chatApi, getErrorMessage } from '../../services/api';
 import type { ChatPeerSummary } from '../../types/api';
 import { useChatInbox } from '../../context/ChatInboxContext';
+import { SCREEN_FETCH_TIMEOUT_MS, withTimeout } from '../../utils/withTimeout';
 
 type Props = NativeStackScreenProps<ReceiverStackParamList, 'ReceiverChats'>;
 
@@ -28,17 +29,25 @@ export default function ReceiverChatsScreen({ navigation }: Props): React.JSX.El
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const loadGenRef = useRef(0);
 
-  const load = useCallback(async (): Promise<void> => {
+  const load = useCallback(async (opts?: { pull?: boolean }): Promise<void> => {
+    const id = ++loadGenRef.current;
+    if (!opts?.pull) setLoading(true);
+    setError(null);
     try {
-      const { data } = await chatApi.conversations();
+      const { data } = await withTimeout(chatApi.conversations(), SCREEN_FETCH_TIMEOUT_MS);
+      if (loadGenRef.current !== id) return;
       setRows(data.conversations);
       setError(null);
     } catch (e) {
+      if (loadGenRef.current !== id) return;
       setError(getErrorMessage(e));
     } finally {
-      setLoading(false);
-      setRefreshing(false);
+      if (loadGenRef.current === id) {
+        setLoading(false);
+        setRefreshing(false);
+      }
     }
   }, []);
 
@@ -54,7 +63,7 @@ export default function ReceiverChatsScreen({ navigation }: Props): React.JSX.El
 
   const onRefresh = (): void => {
     setRefreshing(true);
-    void load();
+    void load({ pull: true });
   };
 
   const renderItem = ({ item }: { item: ChatPeerSummary }) => (
@@ -103,7 +112,14 @@ export default function ReceiverChatsScreen({ navigation }: Props): React.JSX.El
         <View style={{ width: 40 }} />
       </View>
 
-      {error ? <Text style={styles.errBanner}>{error}</Text> : null}
+      {error && !loading ? (
+        <View style={styles.errWrap}>
+          <Text style={styles.errBanner}>{error}</Text>
+          <TouchableOpacity style={styles.retryBtn} onPress={() => void load({ pull: true })} activeOpacity={0.85}>
+            <Text style={styles.retryBtnText}>Retry</Text>
+          </TouchableOpacity>
+        </View>
+      ) : null}
 
       {loading ? (
         <View style={styles.center}>
@@ -141,9 +157,8 @@ const styles = StyleSheet.create({
   backBtn: { padding: 10 },
   back: { fontSize: 22, color: '#111' },
   headerTitle: { fontSize: 17, fontWeight: '900', color: '#111' },
+  errWrap: { marginHorizontal: 12, marginBottom: 8, gap: 8 },
   errBanner: {
-    marginHorizontal: 12,
-    marginBottom: 8,
     padding: 8,
     borderRadius: 8,
     backgroundColor: '#fee2e2',
@@ -151,6 +166,14 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '600',
   },
+  retryBtn: {
+    alignSelf: 'flex-start',
+    backgroundColor: PURPLE,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 8,
+  },
+  retryBtnText: { color: '#fff', fontSize: 13, fontWeight: '800' },
   center: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 32 },
   emptyList: { flexGrow: 1 },
   emptyEmoji: { fontSize: 48, marginBottom: 12 },

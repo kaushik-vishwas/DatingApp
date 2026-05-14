@@ -23,8 +23,6 @@ import {
   isPhoneRegisteredForAccountType,
 } from '../services/localMobileAuthStorage';
 import type { RootStackParamList } from '../navigation/RootStackParamList';
-import DobPickerField from '../components/DobPickerField';
-import { ageFromLocalCalendarBirthDate, formatDateOnlyLocal, maxDobDateForMinAge } from '../utils/birthDateClient';
 import {
   normalizeIndianMobileDigits,
   validateIndianMobileDigits,
@@ -35,7 +33,6 @@ type Props = NativeStackScreenProps<RootStackParamList, 'Register'>;
 export default function RegisterScreen({ navigation, route }: Props) {
   const insets = useSafeAreaInsets();
   const [fullName, setFullName] = useState<string>('');
-  const [dob, setDob] = useState<Date | null>(null);
   const [phone, setPhone] = useState<string>(route.params?.phone ?? '');
   const [agreedToPolicies, setAgreedToPolicies] = useState<boolean>(false);
   const [loading, setLoading] = useState<boolean>(false);
@@ -61,10 +58,6 @@ export default function RegisterScreen({ navigation, route }: Props) {
     const name = fullName.trim();
     if (name.length < 2) return 'Enter your full name (at least 2 characters)';
 
-    if (!dob) return 'Select your date of birth';
-    const age = ageFromLocalCalendarBirthDate(dob);
-    if (age < 18 || age > 120) return 'You must be between 18 and 120 years old';
-
     const digits = normalizeIndianMobileDigits(phone);
     const phoneErr = validateIndianMobileDigits(digits);
     if (phoneErr) return phoneErr;
@@ -80,7 +73,6 @@ export default function RegisterScreen({ navigation, route }: Props) {
     Alert.alert('Validation', err);
     return;
   }
-  if (!dob) return;
 
   const name = fullName.trim();
   const phoneDigits = normalizeIndianMobileDigits(phone);
@@ -105,7 +97,6 @@ export default function RegisterScreen({ navigation, route }: Props) {
     // If not taken, send OTP
     await authApi.sendOtp(phoneDigits, 'receiver', {
       name,
-      dateOfBirth: formatDateOnlyLocal(dob),
       role: 'receiver',
     });
     navigation.navigate('Otp', { phone: phoneDigits, accountType: 'receiver' });
@@ -155,13 +146,6 @@ export default function RegisterScreen({ navigation, route }: Props) {
               value={fullName}
               onChangeText={setFullName}
               onFocus={scrollToFocusedInput}
-            />
-
-            <DobPickerField
-              label="Date of Birth *"
-              value={dob}
-              onChange={setDob}
-              fallbackDate={maxDobDateForMinAge(25)}
             />
 
             <Text style={styles.label}>Phone Number *</Text>

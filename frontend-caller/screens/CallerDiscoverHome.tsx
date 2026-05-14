@@ -37,6 +37,7 @@ import type { DiscoverReceiverSummary } from '../types/api';
 import { resolveProfileImageSource } from '../utils/avatarSource';
 import { startRandomMatchingTone } from '../utils/callSounds';
 import { getReceiverPresenceInfo } from '../utils/receiverStatus';
+import { SCREEN_FETCH_TIMEOUT_MS, withTimeout } from '../utils/withTimeout';
 import SelectoLogo from '../assets/SelectoLogo.png'
 
 const PURPLE = '#7b2cff';
@@ -67,6 +68,7 @@ export default function CallerDiscoverHome(): React.JSX.Element {
   const randomRingPulse0 = useRef(new Animated.Value(0)).current;
   const randomRingPulse1 = useRef(new Animated.Value(0)).current;
   const randomRingPulse2 = useRef(new Animated.Value(0)).current;
+  const discoverLoadGenRef = useRef(0);
 
   useEffect(() => {
     const t = setTimeout(() => setDebounced(search.trim()), 350);
@@ -96,31 +98,34 @@ export default function CallerDiscoverHome(): React.JSX.Element {
     return rows;
   }, [language, debounced, appliedFilters]);
 
-  useEffect(() => {
-    let cancelled = false;
+  const fetchDiscoverReceivers = useCallback(async (): Promise<void> => {
+    const id = ++discoverLoadGenRef.current;
     setLoading(true);
     setErr(null);
-    void fetchList()
-      .then((rows) => {
-        if (!cancelled) setReceivers(rows);
-      })
-      .catch((e: unknown) => {
-        if (!cancelled) {
-          setErr(getErrorMessage(e));
-          setReceivers([]);
-        }
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
+    try {
+      const rows = await withTimeout(fetchList(), SCREEN_FETCH_TIMEOUT_MS);
+      if (discoverLoadGenRef.current !== id) return;
+      setReceivers(rows);
+      setErr(null);
+    } catch (e: unknown) {
+      if (discoverLoadGenRef.current !== id) return;
+      setErr(getErrorMessage(e));
+      setReceivers([]);
+    } finally {
+      if (discoverLoadGenRef.current === id) setLoading(false);
+    }
   }, [fetchList]);
 
   useEffect(() => {
+    void fetchDiscoverReceivers();
+    return () => {
+      discoverLoadGenRef.current += 1;
+    };
+  }, [fetchDiscoverReceivers]);
+
+  useEffect(() => {
     if (!isFocused) return;
-    void fetchList()
+    void withTimeout(fetchList(), SCREEN_FETCH_TIMEOUT_MS)
       .then((rows) => {
         setReceivers((prev) => {
           if (prev.length === rows.length && prev.every((p, i) => p._id === rows[i]?._id)) {
@@ -179,7 +184,7 @@ export default function CallerDiscoverHome(): React.JSX.Element {
     setErr(null);
     try {
       await refreshUser();
-      const rows = await fetchList();
+      const rows = await withTimeout(fetchList(), SCREEN_FETCH_TIMEOUT_MS);
       setReceivers(rows);
     } catch (e: unknown) {
       setErr(getErrorMessage(e));
@@ -206,7 +211,10 @@ export default function CallerDiscoverHome(): React.JSX.Element {
     }
     void (async () => {
       try {
-        await startCallInvite(item._id, item.name, item.profileImage ?? null);
+        await startCallInvite(item._id, item.name, item.profileImage ?? null, {
+          receiverRatePerMinuteHint:
+            item.audioCallRate != null && Number.isFinite(item.audioCallRate) ? item.audioCallRate : undefined,
+        });
       } catch (e: unknown) {
         Alert.alert('Call failed', getErrorMessage(e));
       }
@@ -246,7 +254,10 @@ export default function CallerDiscoverHome(): React.JSX.Element {
             }
             await stopMatchSound?.();
             stopMatchSound = undefined;
-            await startCallInvite(data.receiverId, data.name, data.profileImage ?? null);
+            await startCallInvite(data.receiverId, data.name, data.profileImage ?? null, {
+              receiverRatePerMinuteHint:
+                rate != null && Number.isFinite(rate) ? rate : undefined,
+            });
             return;
           } catch (e: unknown) {
             lastErr = e;
@@ -475,7 +486,18 @@ export default function CallerDiscoverHome(): React.JSX.Element {
                   </ScrollView>
                 </View>
 
-                {err ? <Text style={styles.errText}>{err}</Text> : null}
+                {err ? (
+                  <View style={styles.errBlock}>
+                    <Text style={styles.errText}>{err}</Text>
+                    <TouchableOpacity
+                      style={styles.retryBtn}
+                      onPress={() => void fetchDiscoverReceivers()}
+                      activeOpacity={0.85}
+                    >
+                      <Text style={styles.retryBtnText}>Retry</Text>
+                    </TouchableOpacity>
+                  </View>
+                ) : null}
                 {loading && receivers.length === 0 ? (
                   <ActivityIndicator style={styles.loader} color={PURPLE} />
                 ) : null}
@@ -485,7 +507,7 @@ export default function CallerDiscoverHome(): React.JSX.Element {
             refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void onRefresh()} />}
             keyboardShouldPersistTaps="handled"
             ListEmptyComponent={
-              !loading && receivers.length === 0 ? (
+              !loading && receivers.length === 0 && !err ? (
                 <Text style={styles.empty}>No receivers available right now.</Text>
               ) : null
             }
@@ -852,10 +874,26 @@ const styles = StyleSheet.create({
   langChipTextActive: { 
     color: PURPLE 
   },
+  errBlock: {
+    marginBottom: 10,
+    alignItems: 'center',
+    gap: 8,
+  },
+  retryBtn: {
+    backgroundColor: PURPLE,
+    paddingHorizontal: 18,
+    paddingVertical: 8,
+    borderRadius: 10,
+  },
+  retryBtnText: {
+    color: '#fff',
+    fontSize: 13,
+    fontWeight: '800',
+  },
   errText: { 
     color: '#b91c1c', 
     fontSize: 13, 
-    marginBottom: 8,
+    marginBottom: 0,
     textAlign: 'center',
   },
   loader: { 

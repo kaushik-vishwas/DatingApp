@@ -1,11 +1,12 @@
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import type { ReceiverStackParamList } from '../../navigation/ReceiverStackParamList';
 import { getErrorMessage, profileApi } from '../../services/api';
 import type { ReceiverEarningsBreakdownResponse } from '../../types/api';
+import { SCREEN_FETCH_TIMEOUT_MS, withTimeout } from '../../utils/withTimeout';
 
 type Nav = NativeStackNavigationProp<ReceiverStackParamList, 'ReceiverEarningsAnalytics'>;
 
@@ -15,17 +16,21 @@ export default function ReceiverEarningsAnalyticsScreen(): React.JSX.Element {
   const [error, setError] = useState<string | null>(null);
   const [data, setData] = useState<ReceiverEarningsBreakdownResponse | null>(null);
   const [tab, setTab] = useState<'week' | 'month' | 'all'>('week');
+  const loadGenRef = useRef(0);
 
   const load = useCallback(async () => {
+    const id = ++loadGenRef.current;
     setLoading(true);
     setError(null);
     try {
-      const { data } = await profileApi.receiverEarningsBreakdown(tab);
+      const { data } = await withTimeout(profileApi.receiverEarningsBreakdown(tab), SCREEN_FETCH_TIMEOUT_MS);
+      if (loadGenRef.current !== id) return;
       setData(data);
     } catch (e) {
+      if (loadGenRef.current !== id) return;
       setError(getErrorMessage(e));
     } finally {
-      setLoading(false);
+      if (loadGenRef.current === id) setLoading(false);
     }
   }, [tab]);
 
@@ -66,7 +71,12 @@ export default function ReceiverEarningsAnalyticsScreen(): React.JSX.Element {
       {loading ? (
         <ActivityIndicator size="large" color="#7b2cff" style={{ marginTop: 22 }} />
       ) : error ? (
-        <Text style={styles.error}>{error}</Text>
+        <View style={styles.errorBlock}>
+          <Text style={styles.error}>{error}</Text>
+          <TouchableOpacity style={styles.retryBtn} onPress={() => void load()} activeOpacity={0.85}>
+            <Text style={styles.retryBtnText}>Retry</Text>
+          </TouchableOpacity>
+        </View>
       ) : (
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Weekly Performance</Text>
@@ -102,7 +112,15 @@ const styles = StyleSheet.create({
   tabActive: { borderColor: '#7b2cff', backgroundColor: '#f5ecff' },
   tabText: { fontSize: 11, color: '#666', fontWeight: '700' },
   tabTextActive: { color: '#7b2cff' },
-  error: { color: '#b91c1c', fontSize: 12, fontWeight: '700' },
+  errorBlock: { marginTop: 22, alignItems: 'center', gap: 10, paddingHorizontal: 16 },
+  retryBtn: {
+    backgroundColor: '#7b2cff',
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 10,
+  },
+  retryBtnText: { color: '#fff', fontSize: 13, fontWeight: '800' },
+  error: { color: '#b91c1c', fontSize: 12, fontWeight: '700', textAlign: 'center' },
   card: { backgroundColor: '#fff', borderWidth: 1, borderColor: '#ececec', borderRadius: 12, padding: 12 },
   cardTitle: { fontSize: 13, color: '#111', fontWeight: '900', marginBottom: 8 },
   barRow: { marginBottom: 9 },

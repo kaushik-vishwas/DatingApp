@@ -1,6 +1,6 @@
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useFocusEffect } from '@react-navigation/native';
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Image, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -9,6 +9,7 @@ import { useCallSignals } from '../../context/CallSignalContext';
 import type { CallerStackParamList } from '../../navigation/CallerStackParamList';
 import { getErrorMessage, profileApi } from '../../services/api';
 import type { CallerCallHistoryRow } from '../../types/api';
+import { SCREEN_FETCH_TIMEOUT_MS, withTimeout } from '../../utils/withTimeout';
 
 type Props = NativeStackScreenProps<CallerStackParamList, 'CallerCalls'>;
 
@@ -21,17 +22,21 @@ export default function CallerCallsTabScreen({ navigation }: Props): React.JSX.E
   const [range, setRange] = useState<'all' | 'week' | 'month'>('all');
   const [rows, setRows] = useState<CallerCallHistoryRow[]>([]);
   const [callingReceiverId, setCallingReceiverId] = useState<string | null>(null);
+  const loadGenRef = useRef(0);
 
   const load = useCallback(async () => {
+    const id = ++loadGenRef.current;
     setLoading(true);
     setError(null);
     try {
-      const { data } = await profileApi.callerCallHistory(range);
+      const { data } = await withTimeout(profileApi.callerCallHistory(range), SCREEN_FETCH_TIMEOUT_MS);
+      if (loadGenRef.current !== id) return;
       setRows(data.calls);
     } catch (e) {
+      if (loadGenRef.current !== id) return;
       setError(getErrorMessage(e));
     } finally {
-      setLoading(false);
+      if (loadGenRef.current === id) setLoading(false);
     }
   }, [range]);
 
@@ -85,7 +90,12 @@ export default function CallerCallsTabScreen({ navigation }: Props): React.JSX.E
         {loading ? (
           <ActivityIndicator size="large" color="#7b2cff" />
         ) : error ? (
-          <Text style={styles.sub}>{error}</Text>
+          <View style={styles.errorBlock}>
+            <Text style={styles.errorMsg}>{error}</Text>
+            <TouchableOpacity style={styles.retryBtn} onPress={() => void load()} activeOpacity={0.85}>
+              <Text style={styles.retryBtnText}>Retry</Text>
+            </TouchableOpacity>
+          </View>
         ) : rows.length === 0 ? (
           <View style={styles.center}>
             <Text style={styles.emoji}>📞</Text>
@@ -168,6 +178,15 @@ const styles = StyleSheet.create({
   filterText: { fontSize: 11, color: '#666', fontWeight: '700' },
   filterTextActive: { color: '#7b2cff' },
   listWrap: { flex: 1, paddingHorizontal: 14 },
+  errorBlock: { marginTop: 20, alignItems: 'center', gap: 12, paddingHorizontal: 24 },
+  errorMsg: { fontSize: 14, color: '#b91c1c', textAlign: 'center', lineHeight: 22, fontWeight: '700' },
+  retryBtn: {
+    backgroundColor: '#7b2cff',
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 10,
+  },
+  retryBtnText: { color: '#fff', fontSize: 13, fontWeight: '800' },
   center: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 32 },
   emoji: { fontSize: 48, marginBottom: 16 },
   head: { fontSize: 18, fontWeight: '900', color: '#111', marginBottom: 8 },

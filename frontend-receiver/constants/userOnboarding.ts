@@ -1,5 +1,6 @@
-import type { Gender } from '../types/user';
 import type { ImageSourcePropType } from 'react-native';
+
+import type { Gender } from '../types/user';
 
 /** Indian states / UTs for caller profile (subset; extend as needed) */
 export const INDIAN_STATES: string[] = [
@@ -67,145 +68,134 @@ export const CALLER_LANGUAGE_OPTIONS: string[] = [
   'Marathi',
 ];
 
-/** Preset profile photos for caller onboarding/edit profile. */
-export const CALLER_MALE_AVATAR_PRESETS: string[] = [
-  'https://randomuser.me/api/portraits/men/1.jpg',
-  'https://randomuser.me/api/portraits/men/2.jpg',
-  'https://randomuser.me/api/portraits/men/3.jpg',
-  'https://randomuser.me/api/portraits/men/4.jpg',
-  'https://randomuser.me/api/portraits/men/5.jpg',
-  'https://randomuser.me/api/portraits/men/6.jpg',
-  'https://randomuser.me/api/portraits/men/7.jpg',
-  'https://randomuser.me/api/portraits/men/8.jpg',
-  'https://randomuser.me/api/portraits/men/9.jpg',
-  'https://randomuser.me/api/portraits/men/10.jpg',
-  'https://randomuser.me/api/portraits/men/11.jpg',
-  'https://randomuser.me/api/portraits/men/12.jpg',
-  'https://randomuser.me/api/portraits/men/13.jpg',
-  'https://randomuser.me/api/portraits/men/14.jpg',
-  'https://randomuser.me/api/portraits/men/15.jpg',
-  'https://randomuser.me/api/portraits/men/16.jpg',
-  'https://randomuser.me/api/portraits/men/17.jpg',
-  'https://randomuser.me/api/portraits/men/18.jpg',
-  'https://randomuser.me/api/portraits/men/19.jpg',
-  'https://randomuser.me/api/portraits/men/20.jpg',
-  'https://randomuser.me/api/portraits/men/21.jpg',
-  'https://randomuser.me/api/portraits/men/22.jpg',
-  'https://randomuser.me/api/portraits/men/23.jpg',
-  'https://randomuser.me/api/portraits/men/24.jpg',
-  'https://randomuser.me/api/portraits/men/25.jpg',
-  'https://randomuser.me/api/portraits/men/26.jpg',
-  'https://randomuser.me/api/portraits/men/27.jpg',
-  'https://randomuser.me/api/portraits/men/28.jpg',
-  'https://randomuser.me/api/portraits/men/29.jpg',
-  'https://randomuser.me/api/portraits/men/30.jpg',
-];
-
-/** Keep type for compatibility, but receiver now uses URL presets. */
 export type CallerAvatarPreset = {
   id: string;
   source: ImageSourcePropType;
 };
 
-/** Female avatars use remote URLs only (no local asset upload). */
-export const CALLER_FEMALE_AVATAR_PRESETS: string[] = [
-  'https://res.cloudinary.com/dfeeqvx3v/image/upload/v1778499409/girlavt/wexwq9wrjzmmjtirknps.png',
-  'https://res.cloudinary.com/dfeeqvx3v/image/upload/v1778499409/girlavt/sca7sjsdkxn3bkkzyk1b.png',
-  'https://res.cloudinary.com/dfeeqvx3v/image/upload/v1778499409/girlavt/s0xonzfkqv92qyrwcvz4.png',
-  'https://res.cloudinary.com/dfeeqvx3v/image/upload/v1778499409/girlavt/s0kpzium3jhfk1mhm2nq.png',
-  'https://res.cloudinary.com/dfeeqvx3v/image/upload/v1778499408/girlavt/kllrg1zosnj0og2uskk7.png',
-  'https://res.cloudinary.com/dfeeqvx3v/image/upload/v1778499408/girlavt/qabvx7hppbiedegicgfm.png',
-  'https://res.cloudinary.com/dfeeqvx3v/image/upload/v1778499408/girlavt/ivcai4nd6vznx2gtgnoz.png',
-  'https://res.cloudinary.com/dfeeqvx3v/image/upload/v1778499408/girlavt/k1daiflhmsipixs88ei3.png',
-  'https://res.cloudinary.com/dfeeqvx3v/image/upload/v1778499408/girlavt/a2wemd1qf4pu94crmzyo.png',
-  'https://res.cloudinary.com/dfeeqvx3v/image/upload/v1778499408/girlavt/dfpifcwevzvpe2ivuhgx.png',
-  'https://res.cloudinary.com/dfeeqvx3v/image/upload/v1778499408/girlavt/yfwuel4gnc1fbaps1adu.png',
-  'https://res.cloudinary.com/dfeeqvx3v/image/upload/v1778499407/girlavt/be7qcpmszpxd0dxvyxyk.png',
-  'https://res.cloudinary.com/dfeeqvx3v/image/upload/v1778499407/girlavt/ihebuaeozubmumklyn0d.png',
-  'https://res.cloudinary.com/dfeeqvx3v/image/upload/v1778499407/girlavt/gmiretont6jdciubcfsl.png',
-  'https://res.cloudinary.com/dfeeqvx3v/image/upload/v1778499407/girlavt/ovg3wbgqrlkdrrrtds5e.png',
-  'https://res.cloudinary.com/dfeeqvx3v/image/upload/v1778499407/girlavt/rlfudwpbrnr6vajmbziq.png',
-  'https://res.cloudinary.com/dfeeqvx3v/image/upload/v1778499407/girlavt/jfnp6izyhpokmxbmuuey.png',
-  'https://res.cloudinary.com/dfeeqvx3v/image/upload/v1778499407/girlavt/cbqv8ya0uk7xe5ldlx8n.png',
-  'https://res.cloudinary.com/dfeeqvx3v/image/upload/v1778499406/girlavt/hdeqf4gtbrp4dsq66u7i.png',
-  'https://res.cloudinary.com/dfeeqvx3v/image/upload/v1778499407/girlavt/vq7k6pmupo5o7fdyktzk.png',
-  'https://res.cloudinary.com/dfeeqvx3v/image/upload/v1778499406/girlavt/c8eb7yyalnyhnvpajyjk.png',
-  'https://res.cloudinary.com/dfeeqvx3v/image/upload/v1778499406/girlavt/wmutjkcvixgpmyprbvwi.png',
-  'https://res.cloudinary.com/dfeeqvx3v/image/upload/v1778499406/girlavt/n11gv4pnrpdfyuku4wlx.png',
-  'https://res.cloudinary.com/dfeeqvx3v/image/upload/v1778499406/girlavt/mmhmarcalyznpr04bksw.png',
-  'https://res.cloudinary.com/dfeeqvx3v/image/upload/v1778499406/girlavt/wjvs2jfvngnkn23cmsej.png',
-  'https://res.cloudinary.com/dfeeqvx3v/image/upload/v1778499405/girlavt/m2ays7unaozygjqlhiwi.png',
-  'https://res.cloudinary.com/dfeeqvx3v/image/upload/v1778499405/girlavt/qr8lrmwqqmhpg153slp7.png',
+const CALLER_MALE_AVATAR_SOURCES: ImageSourcePropType[] = [
+  require('../assets/boyavt/boyavt1.png'),
+  require('../assets/boyavt/boyavt2.png'),
+  require('../assets/boyavt/boyavt3.png'),
+  require('../assets/boyavt/boyavt4.png'),
+  require('../assets/boyavt/boyavt5.png'),
+  require('../assets/boyavt/boyavt6.png'),
+  require('../assets/boyavt/boyavt7.png'),
+  require('../assets/boyavt/boyavt8.png'),
+  require('../assets/boyavt/boyavt9.png'),
+  require('../assets/boyavt/boyavt10.png'),
+  require('../assets/boyavt/boyavt11.png'),
+  require('../assets/boyavt/boyavt12.png'),
+  require('../assets/boyavt/boyavt13.png'),
+  require('../assets/boyavt/boyavt14.png'),
+  require('../assets/boyavt/boyavt15.png'),
+  require('../assets/boyavt/boyavt16.png'),
+  require('../assets/boyavt/boyavt17.png'),
+  require('../assets/boyavt/boyavt18.png'),
+  require('../assets/boyavt/boyavt19.png'),
+  require('../assets/boyavt/boyavt20.png'),
+  require('../assets/boyavt/boyavt21.png'),
+  require('../assets/boyavt/boyavt22.png'),
+  require('../assets/boyavt/boyavt23.png'),
+  require('../assets/boyavt/boyavt24.png'),
+  require('../assets/boyavt/boyavt25.png'),
+  require('../assets/boyavt/boyavt26.png'),
+  require('../assets/boyavt/boyavt27.png'),
 ];
 
-/** Backward compatibility for older saved values like `preset:female:1`. */
-const LEGACY_FEMALE_PRESET_URL_BY_ID = new Map<string, string>(
-  CALLER_FEMALE_AVATAR_PRESETS.map((url, idx) => [`preset:female:${idx + 1}`, url]),
+const CALLER_FEMALE_AVATAR_SOURCES: ImageSourcePropType[] = [
+  require('../assets/girlavt/girlavt1.png'),
+  require('../assets/girlavt/girlavt2.png'),
+  require('../assets/girlavt/girlavt3.png'),
+  require('../assets/girlavt/girlavt4.png'),
+  require('../assets/girlavt/girlavt5.png'),
+  require('../assets/girlavt/girlavt6.png'),
+  require('../assets/girlavt/girlavt7.png'),
+  require('../assets/girlavt/girlavt8.png'),
+  require('../assets/girlavt/girlavt9.png'),
+  require('../assets/girlavt/girlavt10.png'),
+  require('../assets/girlavt/girlavt11.png'),
+  require('../assets/girlavt/girlavt12.png'),
+  require('../assets/girlavt/girlavt13.png'),
+  require('../assets/girlavt/girlavt14.png'),
+  require('../assets/girlavt/girlavt15.png'),
+  require('../assets/girlavt/girlavt16.png'),
+  require('../assets/girlavt/girlavt17.png'),
+  require('../assets/girlavt/girlavt18.png'),
+  require('../assets/girlavt/girlavt19.png'),
+  require('../assets/girlavt/girlavt20.png'),
+  require('../assets/girlavt/girlavt21.png'),
+  require('../assets/girlavt/girlavt22.png'),
+  require('../assets/girlavt/girlavt23.png'),
+  require('../assets/girlavt/girlavt24.png'),
+  require('../assets/girlavt/girlavt25.png'),
+  require('../assets/girlavt/girlavt26.png'),
+  require('../assets/girlavt/girlavt27.png'),
+];
+
+/** Preset profile photos for onboarding / edit profile (bundled assets; stored as `preset:male:N` / `preset:female:N`). */
+export const CALLER_MALE_AVATAR_PRESETS: CallerAvatarPreset[] = CALLER_MALE_AVATAR_SOURCES.map(
+  (source, idx) => ({
+    id: `preset:male:${idx + 1}`,
+    source,
+  }),
 );
 
-export function resolveCallerAvatarPresetSource(
-  presetId: string | null | undefined,
-): ImageSourcePropType | null {
-  if (!presetId) return null;
-  const url = LEGACY_FEMALE_PRESET_URL_BY_ID.get(presetId);
-  return url ? { uri: url } : null;
-}
+export const CALLER_FEMALE_AVATAR_PRESETS: CallerAvatarPreset[] = CALLER_FEMALE_AVATAR_SOURCES.map(
+  (source, idx) => ({
+    id: `preset:female:${idx + 1}`,
+    source,
+  }),
+);
 
-export function isCallerAvatarPresetId(value: string | null | undefined): boolean {
-  if (!value) return false;
-  return LEGACY_FEMALE_PRESET_URL_BY_ID.has(value);
-}
-
-/** Male: HTTPS URL strings. Female: bundled preset objects. */
-export type AvatarPreset = string | CallerAvatarPreset;
-
-export const CALLER_AVATAR_PRESETS: AvatarPreset[] = [
+export const CALLER_AVATAR_PRESETS: CallerAvatarPreset[] = [
   ...CALLER_MALE_AVATAR_PRESETS,
   ...CALLER_FEMALE_AVATAR_PRESETS,
 ];
 
-export function getCallerAvatarPresetsByGender(gender: Gender | null | undefined): AvatarPreset[] {
+const CALLER_AVATAR_PRESET_SOURCE_BY_ID = new Map<string, ImageSourcePropType>(
+  CALLER_AVATAR_PRESETS.map((preset) => [preset.id, preset.source]),
+);
+
+export function getCallerAvatarPresetsByGender(
+  gender: Gender | null | undefined,
+): CallerAvatarPreset[] {
   if (gender === 'male') return CALLER_MALE_AVATAR_PRESETS;
   if (gender === 'female') return CALLER_FEMALE_AVATAR_PRESETS;
   return CALLER_AVATAR_PRESETS;
 }
 
-export function toAvatarImageSource(preset: AvatarPreset): ImageSourcePropType {
-  if (typeof preset === 'object' && preset !== null && 'source' in preset) {
-    return preset.source;
-  }
-  if (typeof preset === 'string') {
-    return { uri: preset };
-  }
-  return preset as ImageSourcePropType;
+export function resolveCallerAvatarPresetSource(
+  presetId: string | null | undefined,
+): ImageSourcePropType | null {
+  if (!presetId) return null;
+  return CALLER_AVATAR_PRESET_SOURCE_BY_ID.get(presetId) ?? null;
 }
 
-/** Stored value: HTTPS for male presets, `preset:female:N` for bundled female avatars. */
-export function toAvatarUri(preset: AvatarPreset): string {
-  if (typeof preset === 'object' && preset !== null && 'id' in preset) {
-    return preset.id;
-  }
-  if (typeof preset === 'string') {
-    return preset;
-  }
-  return '';
+export function isCallerAvatarPresetId(value: string | null | undefined): boolean {
+  if (!value) return false;
+  return CALLER_AVATAR_PRESET_SOURCE_BY_ID.has(value);
 }
 
+/** Accepts bundled preset ids for the selected gender, or legacy HTTPS profile images. */
 export function isAllowedCallerAvatarUri(
   uri: string | null | undefined,
   gender: Gender | null | undefined,
 ): boolean {
   if (!uri) return false;
-  return getCallerAvatarPresetsByGender(gender).some((p) =>
-    typeof p === 'string' ? p === uri : p.id === uri,
-  );
+  const trimmed = uri.trim();
+  if (isCallerAvatarPresetId(trimmed)) {
+    const g = gender === 'male' || gender === 'female' ? gender : null;
+    if (!g) return true;
+    return getCallerAvatarPresetsByGender(g).some((p) => p.id === trimmed);
+  }
+  if (/^https:\/\//i.test(trimmed)) return true;
+  return false;
 }
 
 export function getDefaultCallerAvatarUriForGender(gender: Gender): string | null {
   const presets = getCallerAvatarPresetsByGender(gender);
-  const first = presets[0];
-  if (!first) return null;
-  return typeof first === 'string' ? first : first.id;
+  return presets[0]?.id ?? null;
 }
 
 export const CALLER_AUDIO_VERIFICATION_SCRIPT =

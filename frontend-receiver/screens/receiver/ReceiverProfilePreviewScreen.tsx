@@ -6,6 +6,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '../../context/AuthContext';
 import type { ReceiverStackParamList } from '../../navigation/ReceiverStackParamList';
 import { getErrorMessage, profileApi } from '../../services/api';
+import { resolveProfileImageSource } from '../../utils/avatarSource';
 
 type Nav = NativeStackNavigationProp<ReceiverStackParamList, 'ReceiverProfilePreview'>;
 
@@ -78,13 +79,16 @@ export default function ReceiverProfilePreviewScreen(): React.JSX.Element {
           <View style={styles.cardRow}>
             <View style={styles.leftColumn}>
               <View style={[styles.avatarWrapper, { borderColor: '#22c55e' }]}>
-                {user?.profileImage ? (
-                  <Image source={{ uri: user.profileImage }} style={styles.avatar} />
-                ) : (
-                  <View style={[styles.avatar, styles.avatarPlaceholder]}>
-                    <Text style={styles.avatarGlyph}>👤</Text>
-                  </View>
-                )}
+                {(() => {
+                  const avSrc = user?.profileImage ? resolveProfileImageSource(user.profileImage) : null;
+                  return avSrc ? (
+                    <Image source={avSrc} style={styles.avatar} />
+                  ) : (
+                    <View style={[styles.avatar, styles.avatarPlaceholder]}>
+                      <Text style={styles.avatarGlyph}>👤</Text>
+                    </View>
+                  );
+                })()}
                 <View style={[styles.statusDot, { backgroundColor: '#22c55e' }]} />
               </View>
               <View style={styles.ratingBelow}>

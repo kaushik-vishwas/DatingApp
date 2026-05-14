@@ -18,6 +18,7 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import CallerBottomTabs, { getCallerTabBarContentPadding } from '../../components/caller/CallerBottomTabs';
 import { useAuth } from '../../context/AuthContext';
 import type { CallerStackParamList } from '../../navigation/CallerStackParamList';
+import { resolveProfileImageSource } from '../../utils/avatarSource';
 
 const PURPLE = '#7b2cff';
 const SUPPORT_EMAIL = 'support@selecto.com';
@@ -98,13 +99,16 @@ export default function CallerProfileTabScreen({ navigation }: Props): React.JSX
         showsVerticalScrollIndicator={false}
       >
         <View style={styles.avatarRing}>
-          {user.profileImage ? (
-            <Image source={{ uri: user.profileImage }} style={styles.avatar} />
-          ) : (
-            <View style={[styles.avatar, styles.avatarPh]}>
-              <Text style={styles.avatarGlyph}>{user.name.charAt(0)}</Text>
-            </View>
-          )}
+          {(() => {
+            const avSrc = user.profileImage ? resolveProfileImageSource(user.profileImage) : null;
+            return avSrc ? (
+              <Image source={avSrc} style={styles.avatar} />
+            ) : (
+              <View style={[styles.avatar, styles.avatarPh]}>
+                <Text style={styles.avatarGlyph}>{user.name.charAt(0)}</Text>
+              </View>
+            );
+          })()}
         </View>
         <Text style={styles.name}>{user.name}</Text>
         <Text style={styles.email}>{user.email}</Text>

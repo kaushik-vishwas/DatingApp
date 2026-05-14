@@ -1,17 +1,36 @@
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Ionicons } from '@expo/vector-icons';
-import { ActivityIndicator, Alert, Image, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import {
+  Alert,
+  Animated,
+  Easing,
+  Image,
+  Modal,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Audio } from 'expo-av';
+import { Audio, InterruptionModeAndroid, InterruptionModeIOS } from 'expo-av';
 import Constants from 'expo-constants';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { io, type Socket } from 'socket.io-client';
 import type { CallerStackParamList } from '../../navigation/CallerStackParamList';
 import type { ReceiverStackParamList } from '../../navigation/ReceiverStackParamList';
+import type { VoiceCallScreenParams } from '../../navigation/voiceCallParams';
+import type { VoiceBootstrapResponse } from '../../types/api';
+import { useCallSignals } from '../../context/CallSignalContext';
 import { useAuth } from '../../context/AuthContext';
 import { callApi, getErrorMessage, getJwt, getResolvedApiBaseUrl } from '../../services/api';
-import { resolveProfileImageSource } from '../../utils/avatarSource';
+import { startOutboundRingtoneLoop } from '../../utils/callSounds';
+import { profileImageUrlForStreamOrNetwork, resolveProfileImageSource } from '../../utils/avatarSource';
+
+type Props =
+  | NativeStackScreenProps<CallerStackParamList, 'VoiceCall'>
+  | NativeStackScreenProps<ReceiverStackParamList, 'VoiceCall'>;
 
 type PostCallDetails = {
   durationSec: number;
@@ -36,10 +55,149 @@ function formatCallDurationShort(totalSec: number): string {
   return `${m}m ${String(rem).padStart(2, '0')}s`;
 }
 
+async function applyVoiceCallAudioMode(speaker: boolean): Promise<void> {
+  await Audio.setAudioModeAsync({
+    allowsRecordingIOS: true,
+    playsInSilentModeIOS: true,
+    staysActiveInBackground: true,
+    interruptionModeIOS: InterruptionModeIOS.DoNotMix,
+    interruptionModeAndroid: InterruptionModeAndroid.DoNotMix,
+    shouldDuckAndroid: false,
+    playThroughEarpieceAndroid: !speaker,
+  });
+}
+
+async function resetVoiceCallAudioMode(): Promise<void> {
+  try {
+    await Audio.setAudioModeAsync({
+      allowsRecordingIOS: false,
+      playsInSilentModeIOS: true,
+      staysActiveInBackground: false,
+      interruptionModeIOS: InterruptionModeIOS.MixWithOthers,
+      interruptionModeAndroid: InterruptionModeAndroid.DuckOthers,
+      shouldDuckAndroid: true,
+      playThroughEarpieceAndroid: false,
+    });
+  } catch {
+    // ignore
+  }
+}
+
+/** Concentric animated rings behind the avatar (voice-call visual only). */
+function AvatarSoundWaveRings(): React.JSX.Element {
+  const pulse = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    const loop = Animated.loop(
+      Animated.timing(pulse, {
+        toValue: 1,
+        duration: 2000,
+        easing: Easing.out(Easing.quad),
+        useNativeDriver: true,
+      })
+    );
+    loop.start();
+    return () => {
+      loop.stop();
+      pulse.setValue(0);
+    };
+  }, [pulse]);
+
+  const scale = pulse.interpolate({ inputRange: [0, 1], outputRange: [0.88, 1.38] });
+  const opacity = pulse.interpolate({ inputRange: [0, 0.65, 1], outputRange: [0.55, 0.2, 0] });
+
+  return (
+    <View style={waveStyles.halo} pointerEvents="none">
+      <Animated.View style={[waveStyles.ring, { transform: [{ scale }], opacity }]} />
+      <Animated.View
+        style={[
+          waveStyles.ring,
+          waveStyles.ringDelay,
+          {
+            transform: [
+              {
+                scale: pulse.interpolate({ inputRange: [0, 1], outputRange: [0.92, 1.52] }),
+              },
+            ],
+            opacity: pulse.interpolate({ inputRange: [0, 0.55, 1], outputRange: [0.4, 0.12, 0] }),
+          },
+        ]}
+      />
+    </View>
+  );
+}
+
+const waveStyles = StyleSheet.create({
+  halo: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  ring: {
+    position: 'absolute',
+    width: 104,
+    height: 104,
+    borderRadius: 52,
+    borderWidth: 2,
+    borderColor: 'rgba(196, 181, 253, 0.65)',
+  },
+  ringDelay: {
+    borderColor: 'rgba(167, 139, 250, 0.45)',
+  },
+});
+
+function getOutgoingCallerPhase(params: VoiceCallScreenParams): 'ringing' | 'joining' | undefined {
+  if ('outgoingCallerPhase' in params && params.outgoingCallerPhase) {
+    return params.outgoingCallerPhase;
+  }
+  return undefined;
+}
+
+function getVoiceBootstrap(params: VoiceCallScreenParams): VoiceBootstrapResponse | null {
+  if ('apiKey' in params && typeof params.apiKey === 'string' && params.apiKey.length > 0) {
+    return params as VoiceBootstrapResponse;
+  }
+  return null;
+}
+
+function getReceiverChargeRatePerMinute(params: VoiceCallScreenParams): number {
+  if ('receiverRatePerMinute' in params && typeof params.receiverRatePerMinute === 'number') {
+    return Math.max(0, params.receiverRatePerMinute);
+  }
+  if ('receiverRatePerMinuteHint' in params && typeof params.receiverRatePerMinuteHint === 'number') {
+    return Math.max(0, params.receiverRatePerMinuteHint);
+  }
+  return 0;
+}
+
+function getReceiverEarnRatePerMinute(params: VoiceCallScreenParams): number {
+  if (
+    'receiverEarningRatePerMinute' in params &&
+    typeof params.receiverEarningRatePerMinute === 'number' &&
+    Number.isFinite(params.receiverEarningRatePerMinute)
+  ) {
+    return Math.max(0, params.receiverEarningRatePerMinute);
+  }
+  if (
+    'receiverEarningRatePerMinuteHint' in params &&
+    typeof params.receiverEarningRatePerMinuteHint === 'number' &&
+    Number.isFinite(params.receiverEarningRatePerMinuteHint)
+  ) {
+    return Math.max(0, params.receiverEarningRatePerMinuteHint);
+  }
+  return 0;
+}
+
 export default function VoiceCallScreen({ navigation, route }: Props): React.JSX.Element {
   const MIN_RATING_SECONDS = 55;
   const insets = useSafeAreaInsets();
   const { user } = useAuth();
+  const { cancelOutgoingCallInvite } = useCallSignals();
+  const cancelOutgoingRef = useRef(cancelOutgoingCallInvite);
+  cancelOutgoingRef.current = cancelOutgoingCallInvite;
+
+  const callParams = route.params as VoiceCallScreenParams;
+  const outgoingCallerPhase = getOutgoingCallerPhase(callParams);
+  const streamBootstrap = getVoiceBootstrap(callParams);
   const [sdk, setSdk] = useState<null | {
     StreamVideo: React.ComponentType<{ client: unknown; children: React.ReactNode }>;
     StreamCall: React.ComponentType<{ call: unknown; children: React.ReactNode }>;
@@ -76,6 +234,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
   const [error, setError] = useState<string | null>(null);
   const [elapsedSec, setElapsedSec] = useState(0);
   const [muted, setMuted] = useState(false);
+  const [speakerOn, setSpeakerOn] = useState(true);
   const [liveSettledAmountInr, setLiveSettledAmountInr] = useState(0);
   const [postCallOpen, setPostCallOpen] = useState(false);
   const [postCallThanks, setPostCallThanks] = useState(false);
@@ -92,12 +251,13 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
     disconnectUser: () => Promise<void>;
   } | null>(null);
   const signalSocketRef = useRef<Socket | null>(null);
+  const readyRef = useRef(false);
   const endingRef = useRef(false);
   const endedSessionRef = useRef(false);
   const endedSessionResultRef = useRef<{ canRate: boolean } | null>(null);
   const endSessionPromiseRef = useRef<Promise<{ canRate: boolean } | null> | null>(null);
-  const callIdRef = useRef(route.params.callId);
-  const rawEarnRate = route.params.receiverEarningRatePerMinute;
+  const callIdRef = useRef(getVoiceBootstrap(callParams)?.callId ?? '');
+  const rawEarnRate = getReceiverEarnRatePerMinute(callParams);
   const liveRatePerMinute =
     typeof rawEarnRate === 'number' && Number.isFinite(rawEarnRate) ? Math.max(0, rawEarnRate) : 0;
   const liveEarning = Math.round(((elapsedSec / 60) * liveRatePerMinute) * 100) / 100;
@@ -107,9 +267,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
     user?.role === 'caller' && typeof user.walletBalance === 'number' && Number.isFinite(user.walletBalance)
       ? Math.max(0, user.walletBalance)
       : 0;
-  const callerRatePerMinute = Number.isFinite(route.params.receiverRatePerMinute)
-    ? Math.max(0, route.params.receiverRatePerMinute)
-    : 0;
+  const callerRatePerMinute = getReceiverChargeRatePerMinute(callParams);
   const initialCallerTalkSec =
     user?.role === 'caller' && callerRatePerMinute > 0
       ? Math.floor((callerWalletInr / callerRatePerMinute) * 60)
@@ -120,12 +278,10 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
       : 0;
   const showCallerCountdown = user?.role === 'caller' && callerRatePerMinute > 0;
 
-  const callLabel = useMemo(
-    () => `Voice call with ${route.params.peerName}`,
-    [route.params.peerName]
-  );
   const callerCanRateByDuration = user?.role === 'caller' && elapsedSec >= MIN_RATING_SECONDS;
   const selfAvatarSource = resolveProfileImageSource(user?.profileImage);
+  const peerAvatarPreJoinSource = resolveProfileImageSource(callParams.peerImage);
+  const peerAvatarCallSource = resolveProfileImageSource(route.params.peerImage);
 
   /** Kept in refs so the signaling socket effect does not re-run when duration crosses the rating threshold (that was disconnecting the socket ~55s into the call). */
   const callerCanRateByDurationRef = useRef(callerCanRateByDuration);
@@ -134,6 +290,10 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
     callerCanRateByDurationRef.current = callerCanRateByDuration;
     userRoleRef.current = user?.role;
   }, [callerCanRateByDuration, user?.role]);
+
+  useEffect(() => {
+    readyRef.current = ready;
+  }, [ready]);
 
   const formatHms = (totalSec: number): string => {
     const safe = Math.max(0, Math.floor(totalSec));
@@ -237,6 +397,20 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
     }
   };
 
+  const networkDropMessage =
+    'Call disconnected due to network issues. Please check your internet connection.';
+
+  const ensureSessionEndedRef = useRef(ensureSessionEnded);
+  const leaveMediaRef = useRef(leaveMedia);
+  const openPostCallSummaryRef = useRef(openPostCallSummary);
+  const stopQueueAndExitRef = useRef(stopQueueAndExit);
+  useEffect(() => {
+    ensureSessionEndedRef.current = ensureSessionEnded;
+    leaveMediaRef.current = leaveMedia;
+    openPostCallSummaryRef.current = openPostCallSummary;
+    stopQueueAndExitRef.current = stopQueueAndExit;
+  });
+
   useEffect(() => {
     if (Constants.appOwnership === 'expo') {
       Alert.alert(
@@ -244,6 +418,47 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
         'Voice calling uses native WebRTC modules and will not work in Expo Go. Build and run a development build first.',
         [{ text: 'OK', onPress: () => navigation.goBack() }]
       );
+    }
+  }, [navigation]);
+
+  useEffect(() => {
+    const id = streamBootstrap?.callId;
+    if (id) callIdRef.current = id;
+  }, [streamBootstrap?.callId]);
+
+  useEffect(() => {
+    if (user?.role !== 'caller' || outgoingCallerPhase !== 'ringing') return;
+    let stopFn: (() => Promise<void>) | undefined;
+    void (async () => {
+      try {
+        stopFn = await startOutboundRingtoneLoop();
+      } catch {
+        // ignore ring load failures
+      }
+    })();
+    return () => {
+      void stopFn?.();
+    };
+  }, [user?.role, outgoingCallerPhase]);
+
+  const outgoingPhaseCleanupRef = useRef(outgoingCallerPhase);
+  outgoingPhaseCleanupRef.current = outgoingCallerPhase;
+  useEffect(() => {
+    return () => {
+      if (userRoleRef.current === 'caller' && outgoingPhaseCleanupRef.current === 'ringing') {
+        cancelOutgoingRef.current();
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (Constants.appOwnership === 'expo') {
+      return;
+    }
+
+    const phaseNow = getOutgoingCallerPhase(route.params as VoiceCallScreenParams);
+    const boot = getVoiceBootstrap(route.params as VoiceCallScreenParams);
+    if (phaseNow === 'ringing' || !boot) {
       return;
     }
 
@@ -276,23 +491,24 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
         if (mic.status !== 'granted') {
           throw new Error('Microphone permission is required for voice calls');
         }
+        await applyVoiceCallAudioMode(true);
 
         const nextClient = streamSdk.StreamVideoClient.getOrCreateInstance({
-          apiKey: route.params.apiKey,
+          apiKey: boot.apiKey,
           user: {
-            id: route.params.streamUserId,
+            id: boot.streamUserId,
             name: user?.name ?? 'User',
-            image: user?.profileImage ?? undefined,
+            image: profileImageUrlForStreamOrNetwork(user?.profileImage),
           },
-          token: route.params.token,
+          token: boot.token,
         });
         activeClientRef.current = nextClient;
 
-        const nextCall = nextClient.call(route.params.callType, route.params.callId);
+        const nextCall = nextClient.call(boot.callType, boot.callId);
         activeCallRef.current = nextCall;
         await nextCall.getOrCreate();
         await nextCall.join({ create: true });
-        await callApi.sessionStart(route.params.callId, route.params.peerAccountId);
+        await callApi.sessionStart(boot.callId, boot.peerAccountId);
 
         if (!cancelled) {
           setClient(nextClient);
@@ -311,6 +527,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
 
     return () => {
       cancelled = true;
+      void resetVoiceCallAudioMode();
       void (async () => {
         if (!endingRef.current) {
           await ensureSessionEnded();
@@ -320,19 +537,21 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
     };
   }, [
     navigation,
-    route.params.apiKey,
-    route.params.callId,
-    route.params.callType,
-    route.params.peerAccountId,
-    route.params.peerStreamUserId,
-    route.params.streamUserId,
-    route.params.token,
+    outgoingCallerPhase,
+    streamBootstrap?.apiKey,
+    streamBootstrap?.callId,
+    streamBootstrap?.callType,
+    streamBootstrap?.peerAccountId,
+    streamBootstrap?.peerStreamUserId,
+    streamBootstrap?.streamUserId,
+    streamBootstrap?.token,
     user?.name,
     user?.profileImage,
   ]);
 
   useEffect(() => {
     let cancelled = false;
+    const reconnectFailedHandlerRef: { current: (() => void) | null } = { current: null };
     const base = getResolvedApiBaseUrl();
     void (async () => {
       const token = await getJwt();
@@ -343,6 +562,32 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
         timeout: 20000,
       });
       signalSocketRef.current = socket;
+      const onReconnectFailed = (): void => {
+        if (!readyRef.current || endingRef.current) return;
+        endingRef.current = true;
+        Alert.alert('Connection lost', networkDropMessage, [
+          {
+            text: 'OK',
+            onPress: () => {
+              void (async () => {
+                if (userRoleRef.current === 'caller' && callerCanRateByDurationRef.current) {
+                  await ensureSessionEndedRef.current();
+                  await leaveMediaRef.current();
+                  openPostCallSummaryRef.current();
+                  return;
+                }
+                void ensureSessionEndedRef.current();
+                await leaveMediaRef.current();
+                stopQueueAndExitRef.current();
+              })();
+            },
+          },
+        ]);
+      };
+      reconnectFailedHandlerRef.current = onReconnectFailed;
+      const ioMgr = (socket as unknown as { io?: { on: (ev: string, fn: () => void) => void; off: (ev: string, fn: () => void) => void } }).io;
+      ioMgr?.on('reconnect_failed', onReconnectFailed);
+
       socket.on('call:ended', (payload: { callId: string; fromType: 'u' | 'r'; fromId: string }) => {
         if (!payload || payload.callId !== callIdRef.current) return;
         if (endingRef.current) return;
@@ -365,6 +610,9 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
       cancelled = true;
       const s = signalSocketRef.current;
       if (s) {
+        const ioMgr = (s as unknown as { io?: { off: (ev: string, fn: () => void) => void } }).io;
+        const h = reconnectFailedHandlerRef.current;
+        if (h) ioMgr?.off('reconnect_failed', h);
         s.removeAllListeners();
         s.disconnect();
       }
@@ -397,11 +645,6 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
           ) {
             setLiveSettledAmountInr((prev) => (data.receiverEarnedInr > prev ? data.receiverEarnedInr : prev));
           }
-          if (data.status === 'completed' && !endingRef.current) {
-            endingRef.current = true;
-            await leaveMedia();
-            stopQueueAndExit();
-          }
         } catch {
           // Best-effort live settlement sync.
         }
@@ -424,6 +667,11 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
   }, [callerRemainingTalkSec, ready, showCallerCountdown, user?.role]);
 
   const hangup = async () => {
+    if (user?.role === 'caller' && getOutgoingCallerPhase(route.params as VoiceCallScreenParams) === 'ringing') {
+      cancelOutgoingCallInvite();
+      navigation.goBack();
+      return;
+    }
     if (endingRef.current) return;
     endingRef.current = true;
 
@@ -442,6 +690,16 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
     void ensureSessionEnded();
     await leaveMedia();
     stopQueueAndExit();
+  };
+
+  const toggleSpeaker = async () => {
+    const next = !speakerOn;
+    try {
+      await applyVoiceCallAudioMode(next);
+      setSpeakerOn(next);
+    } catch (e) {
+      Alert.alert('Speaker', getErrorMessage(e));
+    }
   };
 
   const toggleMute = async () => {
@@ -465,41 +723,76 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
     }
   };
 
-  if (!ready || !client || !call || !sdk) {
+  const showStreamChrome = ready && Boolean(client) && Boolean(call) && Boolean(sdk);
+  const showPreJoinUi =
+    !error &&
+    !showStreamChrome &&
+    (outgoingCallerPhase === 'ringing' ||
+      outgoingCallerPhase === 'joining' ||
+      Boolean(streamBootstrap));
+
+  const preJoinStatusLabel = outgoingCallerPhase === 'ringing' ? 'Calling…' : 'Connecting';
+  const preJoinHangupLabel =
+    user?.role === 'caller' && outgoingCallerPhase === 'ringing' ? 'Cancel' : 'Disconnect';
+
+  if (error && !showStreamChrome) {
     return (
       <View style={styles.center}>
-        <ActivityIndicator size="large" color="#7b2cff" />
-        <Text style={styles.loadingText}>{error ?? `Connecting ${callLabel}...`}</Text>
+        <LinearGradient
+          colors={['#0a0014', '#1e0b3d', '#4c1d95', '#6d28d9']}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={StyleSheet.absoluteFillObject}
+        />
+        <Text style={styles.loadingText}>{error}</Text>
+        <TouchableOpacity
+          style={styles.preJoinBackBtn}
+          onPress={() => navigation.goBack()}
+          activeOpacity={0.88}
+        >
+          <Text style={styles.preJoinBackBtnText}>Go back</Text>
+        </TouchableOpacity>
       </View>
     );
   }
 
-  return (
-    <View style={styles.container}>
-      <sdk.StreamVideo client={client}>
-        <sdk.StreamCall call={call}>
-          <View style={[styles.overlay, { paddingTop: Math.max(insets.top + 16, 36) }]}>
-            <View style={styles.statusPill}>
-              <Text style={styles.statusText}>Call Active</Text>
-            </View>
-            <View style={styles.avatarRow}>
-              <View style={styles.avatarCol}>
+  if (showPreJoinUi) {
+    return (
+      <View style={styles.container}>
+        <LinearGradient
+          colors={['#0a0014', '#1e0b3d', '#4c1d95', '#6d28d9', '#7c3aed']}
+          locations={[0, 0.22, 0.48, 0.72, 1]}
+          start={{ x: 0.08, y: 0 }}
+          end={{ x: 0.92, y: 1 }}
+          style={StyleSheet.absoluteFillObject}
+        />
+        <View style={[styles.overlay, { paddingTop: Math.max(insets.top + 16, 36) }]}>
+          <View style={styles.statusPill}>
+            <Text style={styles.statusText}>{preJoinStatusLabel}</Text>
+          </View>
+          <View style={styles.avatarRow}>
+            <View style={styles.avatarCol}>
+              <View style={styles.avatarRingHost}>
+                <AvatarSoundWaveRings />
                 <View style={styles.avatarWrap}>
-                  {route.params.peerImage ? (
-                    <Image source={{ uri: route.params.peerImage }} style={styles.avatar} />
+                  {peerAvatarPreJoinSource ? (
+                    <Image source={peerAvatarPreJoinSource} style={styles.avatar} />
                   ) : (
                     <View style={[styles.avatar, styles.avatarPlaceholder]}>
                       <Text style={styles.avatarInitial}>
-                        {(route.params.peerName || 'U').trim().charAt(0).toUpperCase()}
+                        {(callParams.peerName || 'U').trim().charAt(0).toUpperCase()}
                       </Text>
                     </View>
                   )}
                 </View>
-                <Text style={styles.avatarCaption} numberOfLines={1}>
-                  {route.params.peerName || 'Contact'}
-                </Text>
               </View>
-              <View style={styles.avatarCol}>
+              <Text style={styles.avatarCaption} numberOfLines={1}>
+                {callParams.peerName || 'Contact'}
+              </Text>
+            </View>
+            <View style={styles.avatarCol}>
+              <View style={styles.avatarRingHost}>
+                <AvatarSoundWaveRings />
                 <View style={styles.avatarWrap}>
                   {selfAvatarSource ? (
                     <Image source={selfAvatarSource} style={styles.avatar} />
@@ -510,6 +803,86 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
                       </Text>
                     </View>
                   )}
+                </View>
+              </View>
+              <Text style={styles.avatarCaption}>You</Text>
+            </View>
+          </View>
+          <Text style={styles.peerName}>{callParams.peerName}</Text>
+          {showCallerCountdown ? (
+            <View style={styles.countdownCard}>
+              <Text style={styles.countdownTitle}>Remaining Talk Time</Text>
+              <Text style={styles.countdownValue}>{formatHms(callerRemainingTalkSec)}</Text>
+            </View>
+          ) : null}
+          <TouchableOpacity style={styles.hangup} onPress={() => void hangup()} activeOpacity={0.88}>
+            <LinearGradient
+              colors={['#9d174d', '#be185d', '#db2777']}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={styles.hangupGrad}
+            >
+              <Text style={styles.hangupText}>{preJoinHangupLabel}</Text>
+            </LinearGradient>
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
+  }
+
+  if (!(ready && client && call && sdk)) {
+    return <View style={{ flex: 1, backgroundColor: '#0a0014' }} />;
+  }
+
+  return (
+    <View style={styles.container}>
+      <LinearGradient
+        colors={['#0a0014', '#1e0b3d', '#4c1d95', '#6d28d9', '#7c3aed']}
+        locations={[0, 0.22, 0.48, 0.72, 1]}
+        start={{ x: 0.08, y: 0 }}
+        end={{ x: 0.92, y: 1 }}
+        style={StyleSheet.absoluteFillObject}
+      />
+      <sdk.StreamVideo client={client}>
+        <sdk.StreamCall call={call}>
+          <View style={[styles.overlay, { paddingTop: Math.max(insets.top + 16, 36) }]}>
+            <View style={styles.statusPill}>
+              <Text style={styles.statusText}>Call Active</Text>
+            </View>
+            <View style={styles.avatarRow}>
+              <View style={styles.avatarCol}>
+                <View style={styles.avatarRingHost}>
+                  <AvatarSoundWaveRings />
+                  <View style={styles.avatarWrap}>
+                    {peerAvatarCallSource ? (
+                      <Image source={peerAvatarCallSource} style={styles.avatar} />
+                    ) : (
+                      <View style={[styles.avatar, styles.avatarPlaceholder]}>
+                        <Text style={styles.avatarInitial}>
+                          {(route.params.peerName || 'U').trim().charAt(0).toUpperCase()}
+                        </Text>
+                      </View>
+                    )}
+                  </View>
+                </View>
+                <Text style={styles.avatarCaption} numberOfLines={1}>
+                  {route.params.peerName || 'Contact'}
+                </Text>
+              </View>
+              <View style={styles.avatarCol}>
+                <View style={styles.avatarRingHost}>
+                  <AvatarSoundWaveRings />
+                  <View style={styles.avatarWrap}>
+                    {selfAvatarSource ? (
+                      <Image source={selfAvatarSource} style={styles.avatar} />
+                    ) : (
+                      <View style={[styles.avatar, styles.avatarPlaceholder]}>
+                        <Text style={styles.avatarInitial}>
+                          {(user?.name || 'Y').trim().charAt(0).toUpperCase()}
+                        </Text>
+                      </View>
+                    )}
+                  </View>
                 </View>
                 <Text style={styles.avatarCaption}>You</Text>
               </View>
@@ -526,24 +899,50 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
               </View>
             ) : null}
             {showLiveEarning ? (
-              <View style={styles.earningCard}>
+              <LinearGradient
+                colors={['#5b21b6', '#7c3aed', '#a78bfa']}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={styles.earningCard}
+              >
                 <Text style={styles.earningTitle}>Live Earning</Text>
                 <Text style={styles.earningValue}>₹{shownLiveEarning}</Text>
                 <Text style={styles.earningSub}>Updating every second</Text>
-              </View>
+              </LinearGradient>
             ) : null}
             <View style={styles.controls}>
-              <TouchableOpacity style={styles.roundBtn} onPress={toggleMute}>
+              <TouchableOpacity
+                style={[styles.roundBtn, muted && styles.roundBtnActive]}
+                onPress={() => void toggleMute()}
+                activeOpacity={0.85}
+              >
+                <Ionicons name={muted ? 'mic-off' : 'mic'} size={26} color="#faf5ff" />
                 <Text style={styles.roundText}>{muted ? 'Unmute' : 'Mute'}</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={styles.roundBtn}>
-                <Text style={styles.roundText}>Speaker</Text>
+              <TouchableOpacity
+                style={[styles.roundBtn, speakerOn && styles.roundBtnActive]}
+                onPress={() => void toggleSpeaker()}
+                activeOpacity={0.85}
+              >
+                <Ionicons
+                  name={speakerOn ? 'volume-high' : 'phone-portrait-outline'}
+                  size={26}
+                  color="#faf5ff"
+                />
+                <Text style={styles.roundText}>{speakerOn ? 'Speaker' : 'Earpiece'}</Text>
               </TouchableOpacity>
             </View>
-            <TouchableOpacity style={styles.hangup} onPress={hangup}>
-              <Text style={styles.hangupText}>
-                {user?.role === 'receiver' ? 'Go Offline' : 'Disconnect'}
-              </Text>
+            <TouchableOpacity style={styles.hangup} onPress={hangup} activeOpacity={0.88}>
+              <LinearGradient
+                colors={['#9d174d', '#be185d', '#db2777']}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={styles.hangupGrad}
+              >
+                <Text style={styles.hangupText}>
+                  {user?.role === 'receiver' ? 'Go Offline' : 'Disconnect'}
+                </Text>
+              </LinearGradient>
             </TouchableOpacity>
           </View>
         </sdk.StreamCall>
@@ -560,7 +959,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
                       key={n}
                       name={n <= selectedRating ? 'star' : 'star-outline'}
                       size={34}
-                      color={n <= selectedRating ? '#eab308' : '#d1d5db'}
+                      color={n <= selectedRating ? '#fbbf24' : '#c4b5fd'}
                     />
                   ))}
                 </View>
@@ -588,8 +987,8 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
               keyboardShouldPersistTaps="handled"
             >
               <View style={styles.postHeroAvatar}>
-                {route.params.peerImage ? (
-                  <Image source={{ uri: route.params.peerImage }} style={styles.postHeroAvatarImg} />
+                {peerAvatarCallSource ? (
+                  <Image source={peerAvatarCallSource} style={styles.postHeroAvatarImg} />
                 ) : (
                   <View style={[styles.postHeroAvatarImg, styles.postHeroAvatarPh]}>
                     <Text style={styles.postHeroAvatarInitial}>
@@ -629,7 +1028,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
                     <Ionicons
                       name={n <= selectedRating ? 'star' : 'star-outline'}
                       size={36}
-                      color={n <= selectedRating ? '#f59e0b' : '#d1d5db'}
+                      color={n <= selectedRating ? '#fbbf24' : '#c4b5fd'}
                     />
                   </TouchableOpacity>
                 ))}
@@ -727,21 +1126,23 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f379d9' },
+  container: { flex: 1, backgroundColor: '#0a0014' },
   overlay: {
     flex: 1,
     alignItems: 'center',
     paddingHorizontal: 20,
-    backgroundColor: '#ea78d6',
+    backgroundColor: 'rgba(10, 0, 20, 0.35)',
   },
   statusPill: {
-    backgroundColor: '#2ad07f',
-    borderRadius: 14,
-    paddingHorizontal: 14,
-    paddingVertical: 5,
+    backgroundColor: 'rgba(124, 58, 237, 0.95)',
+    borderRadius: 20,
+    paddingHorizontal: 16,
+    paddingVertical: 7,
     marginBottom: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(233, 213, 255, 0.45)',
   },
-  statusText: { color: '#fff', fontSize: 12, fontWeight: '800' },
+  statusText: { color: '#faf5ff', fontSize: 12, fontWeight: '800' },
   avatarRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
@@ -751,11 +1152,17 @@ const styles = StyleSheet.create({
   },
   avatarCol: {
     alignItems: 'center',
-    maxWidth: 140,
+    maxWidth: 150,
+  },
+  avatarRingHost: {
+    width: 124,
+    height: 124,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   avatarCaption: {
     marginTop: 8,
-    color: '#333',
+    color: '#ede9fe',
     fontSize: 13,
     fontWeight: '800',
     textAlign: 'center',
@@ -765,82 +1172,109 @@ const styles = StyleSheet.create({
     height: 102,
     borderRadius: 51,
     padding: 5,
-    backgroundColor: 'rgba(255,255,255,0.28)',
+    backgroundColor: 'rgba(255,255,255,0.18)',
     alignItems: 'center',
     justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: 'rgba(196, 181, 253, 0.55)',
   },
   avatar: {
     width: 92,
     height: 92,
     borderRadius: 46,
-    backgroundColor: '#fff',
+    backgroundColor: '#1e1b4b',
     borderWidth: 2,
-    borderColor: '#fff',
+    borderColor: 'rgba(250,245,255,0.35)',
   },
   avatarPlaceholder: {
     alignItems: 'center',
     justifyContent: 'center',
   },
   avatarInitial: {
-    color: '#555',
+    color: '#e9d5ff',
     fontSize: 30,
     fontWeight: '900',
   },
-  peerName: { marginTop: 14, color: '#222', fontSize: 30, fontWeight: '900' },
-  durationLabel: { marginTop: 20, color: '#333', fontSize: 13, fontWeight: '700' },
-  durationValue: { marginTop: 4, color: '#222', fontSize: 46, fontWeight: '900' },
+  peerName: { marginTop: 14, color: '#faf5ff', fontSize: 28, fontWeight: '900' },
+  durationLabel: { marginTop: 20, color: '#c4b5fd', fontSize: 13, fontWeight: '700' },
+  durationValue: { marginTop: 4, color: '#f5f3ff', fontSize: 46, fontWeight: '900' },
   earningCard: {
     marginTop: 14,
-    backgroundColor: '#19cf68',
-    borderRadius: 12,
+    borderRadius: 14,
     paddingVertical: 14,
     paddingHorizontal: 28,
     alignItems: 'center',
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: 'rgba(233, 213, 255, 0.35)',
   },
-  earningTitle: { color: '#fff', fontSize: 12, fontWeight: '700' },
+  earningTitle: { color: '#faf5ff', fontSize: 12, fontWeight: '700' },
   earningValue: { color: '#fff', fontSize: 34, fontWeight: '900' },
-  earningSub: { color: '#d0ffe3', fontSize: 10, marginTop: 2, fontWeight: '700' },
-  controls: { flexDirection: 'row', gap: 18, marginTop: 48 },
+  earningSub: { color: 'rgba(245,243,255,0.85)', fontSize: 10, marginTop: 2, fontWeight: '700' },
+  controls: { flexDirection: 'row', gap: 18, marginTop: 44 },
   roundBtn: {
-    width: 72,
-    height: 72,
-    borderRadius: 36,
-    backgroundColor: 'rgba(255,255,255,0.32)',
+    width: 78,
+    minHeight: 78,
+    borderRadius: 39,
+    backgroundColor: 'rgba(91, 33, 182, 0.55)',
     alignItems: 'center',
     justifyContent: 'center',
+    paddingVertical: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(196, 181, 253, 0.35)',
   },
-  roundText: { color: '#fff', fontSize: 11, fontWeight: '800' },
+  roundBtnActive: {
+    backgroundColor: 'rgba(124, 58, 237, 0.85)',
+    borderColor: 'rgba(233, 213, 255, 0.65)',
+  },
+  roundText: { color: '#faf5ff', fontSize: 10, fontWeight: '800', marginTop: 4 },
   hangup: {
     marginTop: 26,
-    backgroundColor: '#ff3048',
-    borderRadius: 12,
-    minWidth: 180,
+    borderRadius: 14,
+    minWidth: 200,
+    overflow: 'hidden',
+    alignSelf: 'center',
+  },
+  hangupGrad: {
     alignItems: 'center',
-    paddingVertical: 14,
+    paddingVertical: 15,
+    paddingHorizontal: 24,
   },
   hangupText: { color: '#fff', fontSize: 16, fontWeight: '900' },
   center: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#111',
+    backgroundColor: '#0a0014',
     paddingHorizontal: 20,
-    gap: 10,
+    gap: 12,
   },
-  loadingText: { color: '#fff', fontSize: 15, textAlign: 'center' },
+  loadingText: { color: '#e9d5ff', fontSize: 15, textAlign: 'center', fontWeight: '600' },
+  preJoinBackBtn: {
+    marginTop: 8,
+    paddingVertical: 12,
+    paddingHorizontal: 28,
+    borderRadius: 12,
+    backgroundColor: 'rgba(124, 58, 237, 0.45)',
+    borderWidth: 1,
+    borderColor: 'rgba(196, 181, 253, 0.5)',
+  },
+  preJoinBackBtnText: { color: '#faf5ff', fontSize: 15, fontWeight: '700' },
   countdownCard: {
     marginTop: 12,
-    backgroundColor: '#111827',
-    borderRadius: 12,
+    backgroundColor: 'rgba(30, 27, 75, 0.88)',
+    borderRadius: 14,
     paddingVertical: 12,
     paddingHorizontal: 20,
     alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(167, 139, 250, 0.35)',
   },
-  countdownTitle: { color: '#d1d5db', fontSize: 11, fontWeight: '700' },
-  countdownValue: { color: '#fff', fontSize: 28, fontWeight: '900', marginTop: 2 },
-  postModalRoot: { flex: 1, backgroundColor: '#fff' },
-  postModalRootDim: { backgroundColor: 'rgba(17, 24, 39, 0.52)' },
-  postScroll: { flex: 1, backgroundColor: '#fff' },
+  countdownTitle: { color: '#c4b5fd', fontSize: 11, fontWeight: '700' },
+  countdownValue: { color: '#faf5ff', fontSize: 28, fontWeight: '900', marginTop: 2 },
+  postModalRoot: { flex: 1, backgroundColor: '#faf5ff' },
+  postModalRootDim: { backgroundColor: 'rgba(46, 16, 101, 0.55)' },
+  postScroll: { flex: 1, backgroundColor: '#faf5ff' },
   postHeroAvatar: {
     alignSelf: 'center',
     width: 88,
@@ -848,25 +1282,27 @@ const styles = StyleSheet.create({
     borderRadius: 44,
     overflow: 'hidden',
     borderWidth: 2,
-    borderColor: '#e5e7eb',
-    backgroundColor: '#f9fafb',
+    borderColor: '#c4b5fd',
+    backgroundColor: '#ede9fe',
   },
   postHeroAvatarImg: { width: '100%', height: '100%' },
   postHeroAvatarPh: { alignItems: 'center', justifyContent: 'center' },
-  postHeroAvatarInitial: { fontSize: 32, fontWeight: '900', color: '#6b7280' },
+  postHeroAvatarInitial: { fontSize: 32, fontWeight: '900', color: '#6d28d9' },
   postPeerTitle: {
     marginTop: 14,
     textAlign: 'center',
     fontSize: 22,
     fontWeight: '800',
-    color: '#111827',
+    color: '#3b0764',
   },
   postDetailBox: {
     marginTop: 22,
-    backgroundColor: '#f3f4f6',
+    backgroundColor: '#ede9fe',
     borderRadius: 14,
     paddingHorizontal: 16,
     paddingVertical: 4,
+    borderWidth: 1,
+    borderColor: '#ddd6fe',
   },
   postDetailRow: {
     flexDirection: 'row',
@@ -874,17 +1310,17 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingVertical: 14,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#e5e7eb',
+    borderBottomColor: '#c4b5fd',
   },
   postDetailRowLast: { borderBottomWidth: 0 },
-  postDetailLabel: { fontSize: 14, fontWeight: '600', color: '#4b5563' },
-  postDetailValue: { fontSize: 15, fontWeight: '800', color: '#111827' },
-  postDetailValueAccent: { color: '#7b2cff' },
+  postDetailLabel: { fontSize: 14, fontWeight: '600', color: '#5b21b6' },
+  postDetailValue: { fontSize: 15, fontWeight: '800', color: '#3b0764' },
+  postDetailValueAccent: { color: '#7c3aed' },
   postSectionTitle: {
     marginTop: 26,
     fontSize: 15,
     fontWeight: '700',
-    color: '#374151',
+    color: '#5b21b6',
   },
   postStarRow: {
     marginTop: 14,
@@ -913,16 +1349,16 @@ const styles = StyleSheet.create({
   postDivider: {
     marginTop: 28,
     height: StyleSheet.hairlineWidth,
-    backgroundColor: '#e5e7eb',
+    backgroundColor: '#c4b5fd',
   },
   postReportHeading: {
     marginTop: 22,
     fontSize: 15,
     fontWeight: '600',
-    color: '#374151',
+    color: '#5b21b6',
     textAlign: 'center',
   },
-  postReportHere: { color: '#ef4444', fontWeight: '800' },
+  postReportHere: { color: '#a21caf', fontWeight: '800' },
   postChipWrap: {
     marginTop: 14,
     flexDirection: 'row',
@@ -935,37 +1371,39 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     borderRadius: 22,
     borderWidth: 1,
-    borderColor: '#e5e7eb',
+    borderColor: '#c4b5fd',
     backgroundColor: '#fff',
   },
   postChipOn: {
-    borderColor: '#7b2cff',
-    backgroundColor: 'rgba(123,44,255,0.08)',
+    borderColor: '#7c3aed',
+    backgroundColor: 'rgba(124, 58, 237, 0.12)',
   },
-  postChipTxt: { fontSize: 13, fontWeight: '600', color: '#4b5563' },
-  postChipTxtOn: { color: '#5b21b6' },
+  postChipTxt: { fontSize: 13, fontWeight: '600', color: '#5b21b6' },
+  postChipTxtOn: { color: '#4c1d95' },
   postIssueBtn: {
     marginTop: 18,
-    backgroundColor: '#ef4444',
+    backgroundColor: '#7c3aed',
     borderRadius: 14,
     paddingVertical: 15,
     alignItems: 'center',
   },
   postIssueBtnTxt: { color: '#fff', fontSize: 16, fontWeight: '800' },
   postSkipBtn: { marginTop: 20, alignSelf: 'center', paddingVertical: 10, paddingHorizontal: 12 },
-  postSkipTxt: { color: '#6b7280', fontSize: 14, fontWeight: '700' },
+  postSkipTxt: { color: '#6d28d9', fontSize: 14, fontWeight: '700' },
   postThanksWrap: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 28 },
   postThanksCard: {
     width: '100%',
     maxWidth: 340,
-    backgroundColor: '#fff',
+    backgroundColor: '#faf5ff',
     borderRadius: 18,
     paddingVertical: 28,
     paddingHorizontal: 22,
     alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#ddd6fe',
   },
-  postThanksTitle: { fontSize: 22, fontWeight: '900', color: '#111827' },
+  postThanksTitle: { fontSize: 22, fontWeight: '900', color: '#3b0764' },
   postThanksStars: { marginTop: 16, flexDirection: 'row', gap: 6 },
-  postThanksSub: { marginTop: 12, fontSize: 15, fontWeight: '700', color: '#4b5563' },
+  postThanksSub: { marginTop: 12, fontSize: 15, fontWeight: '700', color: '#5b21b6' },
   postThanksBtnTouch: { marginTop: 22, alignSelf: 'stretch', borderRadius: 14, overflow: 'hidden' },
 });

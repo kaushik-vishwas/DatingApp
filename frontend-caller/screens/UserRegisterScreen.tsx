@@ -17,10 +17,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import Icon from 'react-native-vector-icons/Ionicons';
 
-import DobPickerField from '../components/DobPickerField';
 import { authApi, getErrorMessage } from '../services/api';
 import type { RootStackParamList } from '../navigation/RootStackParamList';
-import { ageFromLocalCalendarBirthDate, formatDateOnlyLocal, maxDobDateForMinAge } from '../utils/birthDateClient';
 import {
   normalizeIndianMobileDigits,
   validateIndianMobileDigits,
@@ -33,7 +31,6 @@ export default function UserRegisterScreen({ navigation, route }: Props) {
   const [phone, setPhone] = useState<string>(route.params?.mobile ?? '');
   const [agreedToPolicies, setAgreedToPolicies] = useState<boolean>(false);
   const [loading, setLoading] = useState<boolean>(false);
-  const [dob, setDob] = useState<Date | null>(null);
   const [showTermsModal, setShowTermsModal] = useState<boolean>(false);
   const [showPrivacyModal, setShowPrivacyModal] = useState<boolean>(false);
   const scrollRef = useRef<ScrollView | null>(null);
@@ -49,10 +46,6 @@ export default function UserRegisterScreen({ navigation, route }: Props) {
   }, []);
 
   const validate = (): string | null => {
-    if (!dob) return 'Select your date of birth';
-    const age = ageFromLocalCalendarBirthDate(dob);
-    if (age < 18 || age > 120) return 'You must be between 18 and 120 years old';
-
     const digits = normalizeIndianMobileDigits(phone);
     const phoneErr = validateIndianMobileDigits(digits);
     if (phoneErr) return phoneErr;
@@ -68,7 +61,6 @@ export default function UserRegisterScreen({ navigation, route }: Props) {
       Alert.alert('Validation', err);
       return;
     }
-    if (!dob) return;
 
     const phoneDigits = normalizeIndianMobileDigits(phone);
 
@@ -76,7 +68,6 @@ export default function UserRegisterScreen({ navigation, route }: Props) {
     try {
       await authApi.register({
         phone: phoneDigits,
-        dateOfBirth: formatDateOnlyLocal(dob),
         role: 'caller',
       });
 
@@ -120,13 +111,6 @@ export default function UserRegisterScreen({ navigation, route }: Props) {
             <View style={styles.centeredContent}>
               <Text style={styles.title}>Create your account</Text>
               <Text style={styles.subtitle}>We will send a code to verify your mobile number</Text>
-
-              <DobPickerField
-                label="Date of Birth *"
-                value={dob}
-                onChange={setDob}
-                fallbackDate={maxDobDateForMinAge(25)}
-              />
 
               <Text style={styles.label}>Phone Number</Text>
               <TextInput

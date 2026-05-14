@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useRef, useState } from 'react';
 import { ActivityIndicator, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -6,6 +6,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import type { ReceiverStackParamList } from '../../navigation/ReceiverStackParamList';
 import { getErrorMessage, profileApi } from '../../services/api';
 import type { ReceiverCallInsightsResponse } from '../../types/api';
+import { SCREEN_FETCH_TIMEOUT_MS, withTimeout } from '../../utils/withTimeout';
 
 type Nav = NativeStackNavigationProp<ReceiverStackParamList, 'ReceiverCallHistory'>;
 type RangeTab = 'all' | 'week' | 'month';
@@ -20,17 +21,21 @@ export default function ReceiverCallHistoryScreen(): React.JSX.Element {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [data, setData] = useState<ReceiverCallInsightsResponse | null>(null);
+  const loadGenRef = useRef(0);
 
   const load = useCallback(async (range: RangeTab) => {
+    const id = ++loadGenRef.current;
     setLoading(true);
     setError(null);
     try {
-      const { data: res } = await profileApi.receiverCallInsights(range);
+      const { data: res } = await withTimeout(profileApi.receiverCallInsights(range), SCREEN_FETCH_TIMEOUT_MS);
+      if (loadGenRef.current !== id) return;
       setData(res);
     } catch (e) {
+      if (loadGenRef.current !== id) return;
       setError(getErrorMessage(e));
     } finally {
-      setLoading(false);
+      if (loadGenRef.current === id) setLoading(false);
     }
   }, []);
 
@@ -68,7 +73,12 @@ export default function ReceiverCallHistoryScreen(): React.JSX.Element {
       {loading ? (
         <ActivityIndicator size="large" color="#7b2cff" style={{ marginTop: 24 }} />
       ) : error ? (
-        <Text style={styles.error}>{error}</Text>
+        <View style={styles.errorBlock}>
+          <Text style={styles.error}>{error}</Text>
+          <TouchableOpacity style={styles.retryBtn} onPress={() => void load(tab)} activeOpacity={0.85}>
+            <Text style={styles.retryBtnText}>Retry</Text>
+          </TouchableOpacity>
+        </View>
       ) : data ? (
         <>
           <View style={styles.summaryCard}>
@@ -123,7 +133,15 @@ const styles = StyleSheet.create({
   tabBtnActive: { backgroundColor: '#7b2cff', borderColor: '#7b2cff' },
   tabText: { fontSize: 12, color: '#444', fontWeight: '700' },
   tabTextActive: { color: '#fff' },
-  error: { marginTop: 14, color: '#b91c1c', fontSize: 12, fontWeight: '700' },
+  errorBlock: { marginTop: 24, alignItems: 'center', gap: 10, paddingHorizontal: 16 },
+  retryBtn: {
+    backgroundColor: '#7b2cff',
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 10,
+  },
+  retryBtnText: { color: '#fff', fontSize: 13, fontWeight: '800' },
+  error: { marginTop: 0, color: '#b91c1c', fontSize: 12, fontWeight: '700', textAlign: 'center' },
   summaryCard: { marginTop: 14, backgroundColor: '#fff', borderRadius: 10, borderWidth: 1, borderColor: '#eee', padding: 12, gap: 4 },
   summaryText: { color: '#222', fontSize: 12, fontWeight: '700' },
   section: { marginTop: 14, marginBottom: 8, fontSize: 14, color: '#111', fontWeight: '800' },

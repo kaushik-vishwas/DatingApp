@@ -7,8 +7,6 @@ export interface UpdateCallerPayload {
   languages: string[];
   interests: string[];
   gender: Gender;
-  /** `YYYY-MM-DD` */
-  dateOfBirth: string;
   state: string;
 }
 
@@ -19,8 +17,6 @@ export interface RegisterPayload {
   name?: string;
   email?: string;
   phone: string;
-  /** `YYYY-MM-DD` */
-  dateOfBirth: string;
   role?: UserRole;
 }
 
@@ -385,8 +381,6 @@ export interface CompleteProfilePayload {
   languages: string[];
   interests: string[];
   gender: Gender;
-  /** `YYYY-MM-DD` */
-  dateOfBirth: string;
   state: string;
   bankAccountHolderName: string;
   bankAccountType: 'savings' | 'current';
@@ -434,8 +428,6 @@ export interface CompleteCallerPayload {
   languages: string[];
   interests: string[];
   gender: Gender;
-  /** `YYYY-MM-DD` */
-  dateOfBirth: string;
   state: string;
   userAudio?: string;
 }

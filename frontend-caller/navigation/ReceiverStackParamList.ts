@@ -1,4 +1,4 @@
-import type { VoiceBootstrapResponse } from '../types/api';
+import type { VoiceCallScreenParams } from './voiceCallParams';
 
 export type ReceiverStackParamList = {
   ReceiverHome: undefined;
@@ -14,5 +14,5 @@ export type ReceiverStackParamList = {
   ReceiverCallHistory: undefined;
   ReceiverChats: undefined;
   ReceiverChat: { userId: string; userName: string; userImage?: string | null };
-  VoiceCall: VoiceBootstrapResponse & { peerName: string; peerImage?: string | null };
+  VoiceCall: VoiceCallScreenParams;
 };

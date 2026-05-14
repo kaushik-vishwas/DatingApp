@@ -22,7 +22,6 @@ import {
   CALLER_LANGUAGE_OPTIONS,
   INDIAN_STATES,
   getCallerAvatarPresetsByGender,
-  toAvatarUri,
 } from '../../constants/userOnboarding';
 import { useAuth } from '../../context/AuthContext';
 import { useUserOnboarding } from '../../context/UserOnboardingContext';
@@ -44,8 +43,8 @@ export default function UserCompleteProfileScreen({ navigation }: Props): React.
   const { gender, callerAvatarPresetUrl, userAudio, setUserAudio } = useUserOnboarding();
   const { user, refreshUser, applyServerUser } = useAuth();
   const allowedAvatarPresets = getCallerAvatarPresetsByGender(gender);
-  const allowedAvatarPresetUris = React.useMemo(
-    () => allowedAvatarPresets.map((preset) => toAvatarUri(preset)).filter(Boolean),
+  const allowedAvatarPresetIds = React.useMemo(
+    () => allowedAvatarPresets.map((preset) => preset.id),
     [allowedAvatarPresets]
   );
 
@@ -87,14 +86,6 @@ export default function UserCompleteProfileScreen({ navigation }: Props): React.
       Alert.alert('Validation', 'Please enter your full name.');
       return;
     }
-    const dobStr = user?.dateOfBirth?.trim();
-    if (!dobStr) {
-      Alert.alert(
-        'Date of birth required',
-        'Your account is missing a date of birth. Please sign out and register again, or contact support.'
-      );
-      return;
-    }
     if (!state.trim()) {
       Alert.alert('Validation', 'Please select your state.');
       return;
@@ -111,7 +102,7 @@ export default function UserCompleteProfileScreen({ navigation }: Props): React.
       Alert.alert('Validation', 'Please choose an avatar.');
       return;
     }
-    if (!allowedAvatarPresetUris.includes(imageUri)) {
+    if (!allowedAvatarPresetIds.includes(imageUri)) {
       Alert.alert('Validation', 'Please choose a valid avatar for the selected gender.');
       return;
     }
@@ -128,7 +119,6 @@ export default function UserCompleteProfileScreen({ navigation }: Props): React.
         languages,
         interests,
         gender,
-        dateOfBirth: dobStr,
         state: state.trim(),
         ...(gender === 'female' ? { userAudio: userAudio!.trim() } : {}),
       });
@@ -149,15 +139,15 @@ export default function UserCompleteProfileScreen({ navigation }: Props): React.
   }, [
     gender,
     fullName,
-    user?.dateOfBirth,
     state,
     interests,
     languages,
     imageUri,
-    allowedAvatarPresetUris,
+    allowedAvatarPresetIds,
     userAudio,
     refreshUser,
     applyServerUser,
+    user,
   ]);
 
   const chip = (label: string, selected: boolean, onPress: () => void) => (
@@ -197,10 +187,16 @@ export default function UserCompleteProfileScreen({ navigation }: Props): React.
             activeOpacity={0.9}
           >
             {imageUri ? (
-              <Image
-                source={resolveProfileImageSource(imageUri) ?? { uri: imageUri }}
-                style={styles.avatarImg}
-              />
+              (() => {
+                const src = resolveProfileImageSource(imageUri);
+                return src ? (
+                  <Image source={src} style={styles.avatarImg} />
+                ) : (
+                  <View style={styles.avatarPlaceholder}>
+                    <Text style={styles.camera}>📷</Text>
+                  </View>
+                );
+              })()
             ) : (
               <View style={styles.avatarPlaceholder}>
                 <Text style={styles.camera}>📷</Text>

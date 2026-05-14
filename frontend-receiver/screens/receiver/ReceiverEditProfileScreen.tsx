@@ -21,9 +21,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import Icon from 'react-native-vector-icons/Feather';
 import {
-  CALLER_FEMALE_AVATAR_PRESETS,
-  toAvatarImageSource,
-  toAvatarUri,
+  getCallerAvatarPresetsByGender,
+  isAllowedCallerAvatarUri,
 } from '../../constants/userOnboarding';
 import { UploadField } from '../../components/ui/UploadField';
 import { useAuth } from '../../context/AuthContext';
@@ -175,7 +174,7 @@ export default function ReceiverEditProfileScreen(): React.JSX.Element {
         Alert.alert('Validation', 'Please select an avatar.');
         return;
       }
-      const allowedPreset = CALLER_FEMALE_AVATAR_PRESETS.some((p) => toAvatarUri(p) === profileImageUri);
+      const allowedPreset = isAllowedCallerAvatarUri(profileImageUri, user?.gender ?? null);
       const isHttpsAvatar = /^https:\/\//i.test(profileImageUri.trim());
       if (!allowedPreset && !isHttpsAvatar) {
         Alert.alert('Validation', 'Please select one avatar from the available list.');
@@ -310,10 +309,14 @@ export default function ReceiverEditProfileScreen(): React.JSX.Element {
               <View style={styles.photoWrap}>
                 <TouchableOpacity style={styles.photoCircle} onPress={() => setAvatarModal(true)} activeOpacity={0.8}>
                   {profileImageUri ? (
-                    <Image
-                      source={resolveProfileImageSource(profileImageUri) ?? { uri: profileImageUri }}
-                      style={styles.photoImage}
-                    />
+                    (() => {
+                      const src = resolveProfileImageSource(profileImageUri);
+                      return src ? (
+                        <Image source={src} style={styles.photoImage} />
+                      ) : (
+                        <Icon name="camera" size={32} color="#A855F7" />
+                      );
+                    })()
                   ) : (
                     <Icon name="camera" size={32} color="#A855F7" />
                   )}
@@ -438,8 +441,10 @@ export default function ReceiverEditProfileScreen(): React.JSX.Element {
             </View>
             <ScrollView style={styles.modalList} showsVerticalScrollIndicator={false}>
               <View style={styles.avatarGrid}>
-                {CALLER_FEMALE_AVATAR_PRESETS.map((preset) => {
-                  const presetUri = toAvatarUri(preset);
+                {getCallerAvatarPresetsByGender(
+                  user?.gender === 'male' || user?.gender === 'female' ? user.gender : 'female'
+                ).map((preset) => {
+                  const presetUri = preset.id;
                   const active = profileImageUri === presetUri;
                   return (
                     <TouchableOpacity
@@ -451,7 +456,7 @@ export default function ReceiverEditProfileScreen(): React.JSX.Element {
                       }}
                       activeOpacity={0.85}
                     >
-                      <Image source={toAvatarImageSource(preset)} style={styles.avatarThumb} />
+                      <Image source={preset.source} style={styles.avatarThumb} />
                     </TouchableOpacity>
                   );
                 })}

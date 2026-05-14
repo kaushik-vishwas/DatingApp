@@ -75,7 +75,12 @@ export default function ReceiverProfileScreen({ navigation, route }: Props): Rea
     setCalling(true);
     void (async () => {
       try {
-        await startCallInvite(receiver._id, receiver.name, receiver.profileImage ?? null);
+        await startCallInvite(receiver._id, receiver.name, receiver.profileImage ?? null, {
+          receiverRatePerMinuteHint:
+            receiver.audioCallRate != null && Number.isFinite(receiver.audioCallRate)
+              ? receiver.audioCallRate
+              : undefined,
+        });
       } catch (e: unknown) {
         Alert.alert('Call failed', getErrorMessage(e));
       } finally {

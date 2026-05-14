@@ -1,4 +1,5 @@
 import type { ImageSourcePropType } from 'react-native';
+import { Image } from 'react-native';
 
 import { CALLER_AVATAR_PRESETS, resolveCallerAvatarPresetSource } from '../constants/userOnboarding';
 
@@ -11,5 +12,26 @@ export function resolveProfileImageSource(
   }
   const presetSource = resolveCallerAvatarPresetSource(profileImage);
   if (presetSource) return presetSource;
+  if (profileImage.trimStart().startsWith('preset:')) return null;
   return { uri: profileImage };
+}
+
+/**
+ * Stream / native code that only accepts a string URL (not `require()` sources).
+ * Resolves bundled preset ids to a `file://` or Metro asset URI.
+ */
+export function profileImageUrlForStreamOrNetwork(
+  profileImage: string | null | undefined,
+): string | undefined {
+  if (!profileImage?.trim()) return undefined;
+  const t = profileImage.trim();
+  const preset = resolveCallerAvatarPresetSource(t);
+  if (preset != null) {
+    const resolved = Image.resolveAssetSource(preset);
+    return typeof resolved?.uri === 'string' ? resolved.uri : undefined;
+  }
+  if (t.startsWith('file:') || t.startsWith('content:') || /^https?:\/\//i.test(t)) {
+    return t;
+  }
+  return undefined;
 }

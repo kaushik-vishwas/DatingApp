@@ -50,7 +50,7 @@ export default function UserCompleteProfileScreen({
 
   const { gender, callerAvatarPresetUrl } = useUserOnboarding();
 
-  const { user, refreshUser, applyServerUser } = useAuth();
+  const { refreshUser, applyServerUser } = useAuth();
 
   const [fullName, setFullName] = useState('');
   const [state, setState] = useState('');
@@ -83,16 +83,6 @@ export default function UserCompleteProfileScreen({
 
     if (name.length < 2) {
       Alert.alert('Validation', 'Please enter your full name.');
-      return;
-    }
-
-    const dobStr = user?.dateOfBirth?.trim();
-
-    if (!dobStr) {
-      Alert.alert(
-        'Date of birth required',
-        'Your account is missing a date of birth.',
-      );
       return;
     }
 
@@ -129,7 +119,6 @@ export default function UserCompleteProfileScreen({
         languages,
         interests,
         gender,
-        dateOfBirth: dobStr,
         state: state.trim(),
       });
 
@@ -144,7 +133,6 @@ export default function UserCompleteProfileScreen({
   }, [
     gender,
     fullName,
-    user?.dateOfBirth,
     state,
     interests,
     languages,

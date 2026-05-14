@@ -6,7 +6,6 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useCallSignals, type IncomingCallRequest } from '../../context/CallSignalContext';
 import type { ReceiverStackParamList } from '../../navigation/ReceiverStackParamList';
-import { startIncomingRingtone } from '../../utils/callSounds';
 
 type Props = NativeStackScreenProps<ReceiverStackParamList, 'IncomingCall'>;
 
@@ -16,7 +15,7 @@ const AUTO_ACCEPT_MS = 5_000;
 export default function IncomingCallScreen({ navigation, route }: Props): React.JSX.Element {
   const insets = useSafeAreaInsets();
   const { callId, fromType, fromId, peerName, peerImage } = route.params;
-  const { acceptIncomingCall, rejectIncomingCall } = useCallSignals();
+  const { acceptIncomingCall, rejectIncomingCall, stopIncomingRingtone } = useCallSignals();
 
   const req: IncomingCallRequest = useMemo(
     () => ({ callId, fromType, fromId, peerName, peerImage: peerImage ?? null }),
@@ -25,33 +24,12 @@ export default function IncomingCallScreen({ navigation, route }: Props): React.
 
   const [responding, setResponding] = useState(false);
   const respondedRef = useRef(false);
-  const stopRingtoneRef = useRef<(() => Promise<void>) | null>(null);
 
   useEffect(() => {
-    let mounted = true;
-    void (async () => {
-      try {
-        const stop = await startIncomingRingtone();
-        if (!mounted) {
-          await stop();
-          return;
-        }
-        stopRingtoneRef.current = stop;
-      } catch {
-        // Keep the incoming-call UI even if ringtone could not be played.
-      }
-    })();
     return () => {
-      mounted = false;
-      const stop = stopRingtoneRef.current;
-      stopRingtoneRef.current = null;
-      if (stop) {
-        void stop();
-      }
+      void stopIncomingRingtone();
     };
-  }, []);
-
-  const [secondsLeft, setSecondsLeft] = useState(Math.ceil(INCOMING_CALL_UI_TIMEOUT_MS / 1000));
+  }, [stopIncomingRingtone]);
 
   // "Ringtone-like" pulsing rings behind the avatar.
   const pulse = useRef(new Animated.Value(0)).current;
@@ -74,29 +52,12 @@ export default function IncomingCallScreen({ navigation, route }: Props): React.
   const ring2Opacity = pulse.interpolate({ inputRange: [0, 1], outputRange: [0.55, 0], extrapolate: 'clamp' });
   const ring2Scale = pulse.interpolate({ inputRange: [0, 1], outputRange: [0.85, 1.2], extrapolate: 'clamp' });
 
-  useEffect(() => {
-    let interval: ReturnType<typeof setInterval> | null = null;
-    const startedAt = Date.now();
-    interval = setInterval(() => {
-      const elapsed = Date.now() - startedAt;
-      const remaining = Math.max(0, INCOMING_CALL_UI_TIMEOUT_MS - elapsed);
-      setSecondsLeft(Math.ceil(remaining / 1000));
-    }, 250);
-    return () => {
-      if (interval) clearInterval(interval);
-    };
-  }, []);
-
   const onReject = async () => {
     if (respondedRef.current) return;
     respondedRef.current = true;
     setResponding(true);
     try {
-      const stop = stopRingtoneRef.current;
-      stopRingtoneRef.current = null;
-      if (stop) {
-        await stop();
-      }
+      await stopIncomingRingtone();
       rejectIncomingCall(req);
     } finally {
       navigation.goBack();
@@ -108,11 +69,7 @@ export default function IncomingCallScreen({ navigation, route }: Props): React.
     respondedRef.current = true;
     setResponding(true);
     try {
-      const stop = stopRingtoneRef.current;
-      stopRingtoneRef.current = null;
-      if (stop) {
-        await stop();
-      }
+      await stopIncomingRingtone();
       await acceptIncomingCall(req);
     } catch {
       setResponding(false);
@@ -166,7 +123,7 @@ export default function IncomingCallScreen({ navigation, route }: Props): React.
           )}
         </View>
 
-        <Text style={styles.ringingText}>{responding ? 'Please wait…' : `Ringing… ${secondsLeft}s`}</Text>
+        <Text style={styles.ringingText}>{responding ? 'Connecting' : 'Incoming call'}</Text>
 
         <View style={styles.actions}>
           <TouchableOpacity

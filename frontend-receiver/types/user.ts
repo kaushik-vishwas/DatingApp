@@ -16,8 +16,6 @@ export interface UserProfile {
   role: UserRole;
   accountStatus: AccountStatus;
   gender: Gender | null;
-  /** `YYYY-MM-DD` when returned by API */
-  dateOfBirth?: string | null;
   age: number | null;
   state: string | null;
   profileImage: string | null;

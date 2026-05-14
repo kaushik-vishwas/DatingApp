@@ -4,8 +4,27 @@ import { io, type Socket } from 'socket.io-client';
 import { useAuth } from './AuthContext';
 import { callApi, getJwt, getResolvedApiBaseUrl } from '../services/api';
 import type { VoiceBootstrapResponse } from '../types/api';
+import type { VoiceCallScreenParams } from '../navigation/voiceCallParams';
 import { navigationRef } from '../navigation/navigationRef';
-import { startOutgoingCallTone } from '../utils/callSounds';
+import {
+  ensureIncomingRingtoneLoaded,
+  startIncomingRingtone,
+  stopIncomingRingtonePlayback,
+} from '../utils/callSounds';
+
+/** Retry navigation without fixed multi-second delays (nav ref may attach next frame). */
+function scheduleNavigateWhenReady(tryNavigate: () => boolean): void {
+  if (tryNavigate()) return;
+  let frames = 0;
+  const maxFrames = 24;
+  const tick = (): void => {
+    if (tryNavigate()) return;
+    frames += 1;
+    if (frames < maxFrames) requestAnimationFrame(tick);
+    else void tryNavigate();
+  };
+  requestAnimationFrame(tick);
+}
 
 type CallIncomingPayload = {
   callId: string;
@@ -58,11 +77,18 @@ export type IncomingCallRequest = {
 
 type CallSignalContextValue = {
   registerPeer: (peerId: string, peerName: string, peerImage?: string | null) => void;
-  startCallInvite: (peerId: string, peerName: string, peerImage?: string | null) => Promise<void>;
+  startCallInvite: (
+    peerId: string,
+    peerName: string,
+    peerImage?: string | null,
+    options?: { receiverRatePerMinuteHint?: number; receiverEarningRatePerMinuteHint?: number }
+  ) => Promise<void>;
+  cancelOutgoingCallInvite: () => void;
   setIncomingCallHandler: (handler: ((req: IncomingCallRequest) => void) | null) => void;
   acceptIncomingCall: (req: IncomingCallRequest) => Promise<void>;
   rejectIncomingCall: (req: IncomingCallRequest) => void;
   setQueueMode: (active: boolean) => Promise<void>;
+  stopIncomingRingtone: () => Promise<void>;
 };
 
 const CallSignalContext = createContext<CallSignalContextValue | null>(null);
@@ -83,6 +109,7 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   const incomingBootstrapByCallIdRef = useRef<Map<string, VoiceBootstrapResponse>>(new Map());
   const incomingBootstrapPromiseByCallIdRef = useRef<Map<string, Promise<VoiceBootstrapResponse>>>(new Map());
   const userRoleRef = useRef(user?.role ?? null);
+  const outgoingInviteAbortRef = useRef<AbortController | null>(null);
   const incomingCallHandlerRef = useRef<((req: IncomingCallRequest) => void) | null>(null);
   const queueModeRef = useRef<boolean>(false);
 
@@ -90,35 +117,108 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     userRoleRef.current = user?.role ?? null;
   }, [user?.role]);
 
+  const dismissCallerVoiceCallScreen = useCallback((): void => {
+    const nav = navigationRef.current;
+    if (!nav?.isReady()) return;
+    try {
+      if (nav.canGoBack()) {
+        nav.goBack();
+        return;
+      }
+    } catch {
+      // ignore
+    }
+    if (userRoleRef.current === 'caller') {
+      nav.navigate('CallerApp', { screen: 'CallerDiscover' });
+    } else if (userRoleRef.current === 'receiver') {
+      nav.navigate('Home', { screen: 'ReceiverHome' });
+    }
+  }, []);
+
+  const navigateToVoiceCallParams = useCallback((params: VoiceCallScreenParams): boolean => {
+    const nav = navigationRef.current;
+    if (!nav || !nav.isReady()) return false;
+    if (userRoleRef.current === 'caller') {
+      nav.navigate('CallerApp', {
+        screen: 'VoiceCall',
+        params,
+      });
+      return true;
+    }
+    if (userRoleRef.current === 'receiver') {
+      nav.navigate('Home', {
+        screen: 'VoiceCall',
+        params,
+      });
+      return true;
+    }
+    return false;
+  }, []);
+
   const openVoiceCall = useCallback(
-    (bootstrap: VoiceBootstrapResponse, peerName: string, peerImage?: string | null) => {
+    (
+      bootstrap: VoiceBootstrapResponse,
+      peerName: string,
+      peerImage?: string | null,
+      opts?: { outgoingCallerPhase?: 'joining' }
+    ) => {
+      const params: VoiceCallScreenParams = {
+        ...bootstrap,
+        peerName,
+        peerImage: peerImage ?? null,
+        ...(opts?.outgoingCallerPhase ? { outgoingCallerPhase: opts.outgoingCallerPhase } : {}),
+      };
+      const navigate = () => navigateToVoiceCallParams(params);
+      if (navigate()) return;
+      scheduleNavigateWhenReady(navigate);
+    },
+    [navigateToVoiceCallParams]
+  );
+
+  const openVoiceCallRinging = useCallback(
+    (p: {
+      peerAccountId: string;
+      peerName: string;
+      peerImage?: string | null;
+      receiverRatePerMinuteHint?: number;
+      receiverEarningRatePerMinuteHint?: number;
+    }) => {
+      const params: VoiceCallScreenParams = {
+        outgoingCallerPhase: 'ringing',
+        peerAccountId: p.peerAccountId.trim(),
+        peerName: p.peerName.trim(),
+        peerImage: p.peerImage ?? null,
+        receiverRatePerMinuteHint: p.receiverRatePerMinuteHint,
+        receiverEarningRatePerMinuteHint: p.receiverEarningRatePerMinuteHint,
+      };
       const navigate = () => {
         const nav = navigationRef.current;
         if (!nav || !nav.isReady()) return false;
-        if (userRoleRef.current === 'caller') {
-          nav.navigate('CallerApp', {
-            screen: 'VoiceCall',
-            params: { ...bootstrap, peerName, peerImage: peerImage ?? null },
-          });
-          return true;
-        }
-        if (userRoleRef.current === 'receiver') {
-          nav.navigate('Home', {
-            screen: 'VoiceCall',
-            params: { ...bootstrap, peerName, peerImage: peerImage ?? null },
-          });
-          return true;
-        }
-        return false;
+        if (userRoleRef.current !== 'caller') return false;
+        nav.navigate('CallerApp', { screen: 'VoiceCall', params });
+        return true;
       };
-
       if (navigate()) return;
-      setTimeout(() => {
-        void navigate();
-      }, 500);
+      scheduleNavigateWhenReady(navigate);
     },
     []
   );
+
+  const cancelOutgoingCallInvite = useCallback(() => {
+    outgoingInviteAbortRef.current?.abort();
+    outgoingInviteAbortRef.current = null;
+    const socket = socketRef.current;
+    for (const callId of [...pendingOutgoingByCallIdRef.current.keys()]) {
+      pendingOutgoingByCallIdRef.current.delete(callId);
+      socket?.emit('call:end', { callId });
+      const waiter = pendingInviteOutcomeRef.current.get(callId);
+      if (waiter) {
+        clearTimeout(waiter.timeout);
+        pendingInviteOutcomeRef.current.delete(callId);
+        waiter.resolve({ accepted: false, reason: 'ended' });
+      }
+    }
+  }, []);
 
   const openIncomingCall = useCallback((incoming: IncomingCallRequest) => {
     const navigate = () => {
@@ -138,10 +238,7 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     };
 
     if (navigate()) return;
-    setTimeout(() => {
-      // Best-effort; avoid hard failure if navigation isn't ready yet.
-      void navigate();
-    }, 500);
+    scheduleNavigateWhenReady(navigate);
   }, []);
 
   const registerPeer = useCallback((peerId: string, peerName: string, peerImage?: string | null) => {
@@ -167,7 +264,12 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   }, []);
 
   const startCallInvite = useCallback(
-    async (peerId: string, peerName: string, peerImage?: string | null): Promise<void> => {
+    async (
+      peerId: string,
+      peerName: string,
+      peerImage?: string | null,
+      options?: { receiverRatePerMinuteHint?: number; receiverEarningRatePerMinuteHint?: number }
+    ): Promise<void> => {
       const id = peerId.trim();
       const name = peerName.trim();
       if (!id || !name) {
@@ -180,9 +282,33 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         throw new Error('Call signaling is not connected. Check your network and try again.');
       }
 
-      const stopTone = await startOutgoingCallTone();
+      const abort = new AbortController();
+      outgoingInviteAbortRef.current = abort;
+
+      openVoiceCallRinging({
+        peerAccountId: id,
+        peerName: name,
+        peerImage: peerImage ?? null,
+        receiverRatePerMinuteHint: options?.receiverRatePerMinuteHint,
+        receiverEarningRatePerMinuteHint: options?.receiverEarningRatePerMinuteHint,
+      });
+
       try {
         const { data } = await callApi.bootstrap(id);
+        if (abort.signal.aborted) {
+          return;
+        }
+        const ringingParams: VoiceCallScreenParams = {
+          ...data,
+          peerName: name,
+          peerImage: peerImage ?? null,
+          outgoingCallerPhase: 'ringing',
+        };
+        const mergeNavigate = () => navigateToVoiceCallParams(ringingParams);
+        if (!mergeNavigate()) {
+          scheduleNavigateWhenReady(mergeNavigate);
+        }
+
         pendingOutgoingByCallIdRef.current.set(data.callId, {
           callId: data.callId,
           peerId: id,
@@ -196,6 +322,10 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
             resolve(res ?? {});
           });
         });
+
+        if (abort.signal.aborted) {
+          return;
+        }
 
         if (ack.ok === false) {
           pendingOutgoingByCallIdRef.current.delete(data.callId);
@@ -218,14 +348,28 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
           }
           throw new Error('Receiver is not available right now.');
         }
+      } catch (e) {
+        if (abort.signal.aborted) {
+          return;
+        }
+        dismissCallerVoiceCallScreen();
+        throw e;
       } finally {
-        await stopTone();
+        if (outgoingInviteAbortRef.current === abort) {
+          outgoingInviteAbortRef.current = null;
+        }
       }
     },
-    [registerPeer]
+    [
+      dismissCallerVoiceCallScreen,
+      navigateToVoiceCallParams,
+      openVoiceCallRinging,
+      registerPeer,
+    ]
   );
 
   const rejectIncomingCall = useCallback((req: IncomingCallRequest) => {
+    void stopIncomingRingtonePlayback();
     // Block only this exact call attempt after receiver rejects.
     rejectedIncomingCallIdsRef.current.add(req.callId);
     if (activeIncomingCallUiCallIdRef.current === req.callId) {
@@ -238,6 +382,7 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
   const acceptIncomingCall = useCallback(
     async (req: IncomingCallRequest): Promise<void> => {
+      await stopIncomingRingtonePlayback();
       if (activeIncomingCallUiCallIdRef.current === req.callId) {
         activeIncomingCallUiCallIdRef.current = null;
       }
@@ -272,6 +417,8 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     },
     [openVoiceCall]
   );
+
+  const stopIncomingRingtone = useCallback(() => stopIncomingRingtonePlayback(), []);
 
   const setIncomingCallHandler = useCallback((handler: ((req: IncomingCallRequest) => void) | null) => {
     incomingCallHandlerRef.current = handler;
@@ -324,6 +471,9 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       socketRef.current = socket;
       socket.on('connect', () => {
         socket.emit('call:queue:set', { active: queueModeRef.current }, () => {});
+        if (userRoleRef.current === 'receiver') {
+          void ensureIncomingRingtoneLoaded();
+        }
       });
 
       socket.on('call:incoming', (payload: CallIncomingPayload) => {
@@ -365,6 +515,15 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         // Replace the system popup with a dedicated "Incoming Call" screen on receiver devices.
         if (userRoleRef.current === 'receiver') {
           activeIncomingCallUiCallIdRef.current = incoming.callId;
+
+          void (async () => {
+            await stopIncomingRingtonePlayback();
+            try {
+              await startIncomingRingtone();
+            } catch {
+              // Keep UI even if ring fails.
+            }
+          })();
 
           // Prefetch the bootstrap as soon as we get the invite, so "Accept" feels instant.
           if (
@@ -441,7 +600,9 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         }
 
         if (pending) {
-          openVoiceCall(pending.bootstrap, pending.peerName, pending.peerImage);
+          openVoiceCall(pending.bootstrap, pending.peerName, pending.peerImage, {
+            outgoingCallerPhase: 'joining',
+          });
           return;
         }
 
@@ -464,18 +625,17 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         pendingOutgoingByCallIdRef.current.delete(payload.callId);
 
         if (userRoleRef.current === 'receiver' && activeIncomingCallUiCallIdRef.current === payload.callId) {
+          void stopIncomingRingtonePlayback();
           activeIncomingCallUiCallIdRef.current = null;
           incomingBootstrapByCallIdRef.current.delete(payload.callId);
           incomingBootstrapPromiseByCallIdRef.current.delete(payload.callId);
-          const nav = navigationRef.current;
-          if (nav?.isReady()) {
-            nav.navigate('Home', { screen: 'ReceiverHome' });
-          } else {
-            setTimeout(() => {
-              const n = navigationRef.current;
-              if (n?.isReady()) n.navigate('Home', { screen: 'ReceiverHome' });
-            }, 500);
-          }
+          const goHome = (): boolean => {
+            const n = navigationRef.current;
+            if (!n?.isReady()) return false;
+            n.navigate('Home', { screen: 'ReceiverHome' });
+            return true;
+          };
+          if (!goHome()) scheduleNavigateWhenReady(goHome);
         }
 
         const waiter = pendingInviteOutcomeRef.current.get(payload.callId);
@@ -503,18 +663,22 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     () => ({
       registerPeer,
       startCallInvite,
+      cancelOutgoingCallInvite,
       setIncomingCallHandler,
       acceptIncomingCall,
       rejectIncomingCall,
       setQueueMode,
+      stopIncomingRingtone,
     }),
     [
       registerPeer,
       startCallInvite,
+      cancelOutgoingCallInvite,
       setIncomingCallHandler,
       acceptIncomingCall,
       rejectIncomingCall,
       setQueueMode,
+      stopIncomingRingtone,
     ]
   );
 

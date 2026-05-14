@@ -11,7 +11,6 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { getCallerAvatarPresetsByGender } from '../../constants/userOnboarding';
-import { toAvatarImageSource, toAvatarUri } from '../../constants/userOnboarding';
 import { useAuth } from '../../context/AuthContext';
 import { useUserOnboarding } from '../../context/UserOnboardingContext';
 import type { UserOnboardingStackParamList } from '../../navigation/UserOnboardingStackParamList';
@@ -25,19 +24,20 @@ export default function ChooseAvatarScreen({ navigation }: Props): React.JSX.Ele
   const { user } = useAuth();
   const { gender, setCallerAvatarPresetUrl } = useUserOnboarding();
   const avatarPresets = getCallerAvatarPresetsByGender(gender);
-  const [selected, setSelected] = useState(avatarPresets[0]!);
+  const [selected, setSelected] = useState<string>(avatarPresets[0]?.id ?? '');
+
+  const selectedPreset = avatarPresets.find((preset) => preset.id === selected) ?? avatarPresets[0];
 
   React.useEffect(() => {
-    const selectedId = toAvatarUri(selected);
-    if (!avatarPresets.some((p) => toAvatarUri(p) === selectedId)) {
-      setSelected(avatarPresets[0]!);
+    if (!avatarPresets.some((preset) => preset.id === selected)) {
+      setSelected(avatarPresets[0]?.id ?? '');
     }
   }, [avatarPresets, selected]);
 
   const displayLabel = user?.name?.trim() || 'You';
 
   const onProceed = () => {
-    setCallerAvatarPresetUrl(toAvatarUri(selected));
+    setCallerAvatarPresetUrl(selected);
     navigation.navigate('UserCompleteProfile');
   };
 
@@ -56,27 +56,29 @@ export default function ChooseAvatarScreen({ navigation }: Props): React.JSX.Ele
       <Text style={styles.subtitle}>Tell us a bit about yourself</Text>
 
       <View style={styles.featured}>
-        <Image source={toAvatarImageSource(selected)} style={styles.featuredImg} />
+        {selectedPreset ? (
+          <Image source={selectedPreset.source} style={styles.featuredImg} />
+        ) : null}
         <Text style={styles.featuredName}>{displayLabel}</Text>
       </View>
 
       <View style={styles.listWrap}>
         <FlatList
           data={avatarPresets}
-          keyExtractor={(item, index) => `${toAvatarUri(item)}-${index}`}
+          keyExtractor={(item) => item.id}
           numColumns={3}
           columnWrapperStyle={styles.row}
           contentContainerStyle={styles.grid}
           scrollEnabled
           renderItem={({ item }) => {
-            const active = toAvatarUri(item) === toAvatarUri(selected);
+            const active = item.id === selected;
             return (
               <TouchableOpacity
                 style={[styles.cell, active && styles.cellActive]}
-                onPress={() => setSelected(item)}
+                onPress={() => setSelected(item.id)}
                 activeOpacity={0.85}
               >
-                <Image source={toAvatarImageSource(item)} style={styles.thumb} />
+                <Image source={item.source} style={styles.thumb} />
               </TouchableOpacity>
             );
           }}

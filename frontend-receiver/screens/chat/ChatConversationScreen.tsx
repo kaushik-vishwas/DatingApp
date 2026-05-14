@@ -34,6 +34,7 @@ import type { ChatMessageDto } from '../../types/api';
 import { useAuth } from '../../context/AuthContext';
 import { useCallSignals } from '../../context/CallSignalContext';
 import { useChatInbox } from '../../context/ChatInboxContext';
+import { SCREEN_FETCH_TIMEOUT_MS, withTimeout } from '../../utils/withTimeout';
 
 const PURPLE = '#7b2cff';
 const CHAT_FEE_LABEL = '₹0.50';
@@ -139,9 +140,12 @@ export default function ChatConversationScreen({ navigation, route }: Props): Re
     setLoadError(null);
     void (async () => {
       try {
-        const { data } = isCaller
-          ? await chatApi.messages({ receiverId: peerId })
-          : await chatApi.messages({ userId: peerId });
+        const { data } = await withTimeout(
+          isCaller
+            ? chatApi.messages({ receiverId: peerId })
+            : chatApi.messages({ userId: peerId }),
+          SCREEN_FETCH_TIMEOUT_MS
+        );
         if (!cancelled) {
           setMessages(data.messages);
         }

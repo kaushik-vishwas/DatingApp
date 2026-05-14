@@ -24,10 +24,8 @@ import { useCompleteProfile } from '../../context/CompleteProfileContext';
 import { uploadToCloudinary } from '../../lib/cloudinary';
 import { INTEREST_OPTIONS, LANGUAGE_OPTIONS } from '../../constants/profileOptions';
 import {
-  CALLER_FEMALE_AVATAR_PRESETS,
+  getCallerAvatarPresetsByGender,
   INDIAN_STATES,
-  toAvatarImageSource,
-  toAvatarUri,
 } from '../../constants/userOnboarding';
 import type { CompleteProfileStackParamList } from '../../navigation/CompleteProfileStackParamList';
 import { formatApiErrorForAlert, getResolvedApiBaseUrl, profileApi } from '../../services/api';
@@ -94,7 +92,6 @@ export default function ProfileInfoScreen({ navigation }: Props): React.JSX.Elem
     setSubmitting(true);
     try {
       let profileImageUrl: string;
-      // Metro turns require() avatars into http://192.168.x:8081/... — must upload, not save as-is.
       if (!shouldUploadProfileImageToCloudinary(state.profileImageUri)) {
         profileImageUrl = state.profileImageUri.trim();
       } else {
@@ -248,8 +245,8 @@ export default function ProfileInfoScreen({ navigation }: Props): React.JSX.Elem
             <Text style={styles.modalTitle}>Select Avatar</Text>
             <ScrollView style={styles.modalList} keyboardShouldPersistTaps="handled">
               <View style={styles.avatarGrid}>
-                {CALLER_FEMALE_AVATAR_PRESETS.map((avatarUrl) => {
-                  const avatarUri = toAvatarUri(avatarUrl);
+                {getCallerAvatarPresetsByGender(state.gender ?? 'female').map((preset) => {
+                  const avatarUri = preset.id;
                   const active = state.profileImageUri === avatarUri;
                   return (
                     <TouchableOpacity
@@ -261,7 +258,7 @@ export default function ProfileInfoScreen({ navigation }: Props): React.JSX.Elem
                       }}
                       activeOpacity={0.85}
                     >
-                    <Image source={toAvatarImageSource(avatarUrl)} style={styles.avatarThumb} />
+                      <Image source={preset.source} style={styles.avatarThumb} />
                     </TouchableOpacity>
                   );
                 })}

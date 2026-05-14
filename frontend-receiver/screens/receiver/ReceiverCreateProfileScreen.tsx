@@ -1,5 +1,5 @@
 import { useNavigation } from '@react-navigation/native';
-import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import type { NativeStackNavigationProp, NativeStackScreenProps } from '@react-navigation/native-stack';
 import React, { useMemo, useState } from 'react';
 import {
   Alert,
@@ -19,7 +19,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Feather';
 import { LinearGradient } from 'expo-linear-gradient';
 
-import { getCallerAvatarPresetsByGender, toAvatarImageSource, toAvatarUri } from '../../constants/userOnboarding';
+import { getCallerAvatarPresetsByGender } from '../../constants/userOnboarding';
 import { resolveProfileImageSource } from '../../utils/avatarSource';
 import type { ReceiverStackParamList } from '../../navigation/ReceiverStackParamList';
 import { useAuth } from '../../context/AuthContext';
@@ -28,74 +28,6 @@ import type { Gender } from '../../types/user';
 
 type Nav = NativeStackNavigationProp<ReceiverStackParamList, 'ReceiverCreateProfile'>;
 type Props = NativeStackScreenProps<ReceiverStackParamList, 'ReceiverCreateProfile'>;
-
-type EarnStep = {
-  title: string;
-  subtitle: string;
-  bullets: string[];
-};
-
-const EARN_STEPS: EarnStep[] = [
-  {
-    title: '💰 How You Earn',
-    subtitle: 'Your earnings depend on call duration & timing',
-    bullets: [
-      'Calls under 55 seconds = 0 earnings ❌',
-      'Calls 3-10 minutes = 3x score multiplier',
-      'Calls above 10 minutes = 5x score multiplier',
-      'Longer calls = much higher earnings!',
-    ],
-  },
-  {
-    title: '⏰ Best Time to Earn',
-    subtitle: 'Extra bonuses during night hours',
-    bullets: [
-      'Day time (9 AM - 9 PM): 0.5x multiplier',
-      'Night (10 PM - 12 AM): 3x multiplier 🎉',
-      'Late night (12 AM - 2 AM): 10x multiplier 🔥',
-      'Best earning: Take calls after 10 PM!',
-    ],
-  },
-  {
-    title: '🏆 Badge Levels',
-    subtitle: 'Higher badge = higher pay per minute',
-    bullets: [
-      'Bronze (1+ score): ₹1.3/min',
-      'Silver (1648+ score): ₹1.5/min',
-      'Gold (10403+ score): ₹1.7/min',
-      'Pro (16686+ score): ₹1.9/min',
-      'Platinum (below 8000): ₹2.0/min',
-      'Diamond (8000-12000): ₹2.3/min',
-      'Supreme (12000+): ₹2.6/min 👑',
-    ],
-  },
-  {
-    title: '💬 Phone Etiquette',
-    subtitle: 'Best practices for great conversations',
-    bullets: [
-      'Stay respectful and professional.',
-      'Listen actively to customer needs.',
-      'Keep conversations appropriate.',
-      'Never share personal contact info.',
-      'Report inappropriate behavior.',
-      'Respond quickly to incoming calls.',
-      'Build relationships for repeat customers.',
-    ],
-  },
-  {
-    title: '⭐ Pro Tips',
-    subtitle: 'Maximize your daily earnings',
-    bullets: [
-      'Talk for 10+ minutes to get 5x points',
-      'Be active after 10 PM for bonus multipliers',
-      'Avoid calls shorter than 55 seconds',
-      'Higher score = better badge = more ₹ per minute',
-      'Consistent earnings = reach Supreme level!',
-    ],
-  },
-];
-
-type TabId = 'details' | 'earn';
 
 function Field({
   label,
@@ -170,7 +102,6 @@ export default function ReceiverCreateProfileScreen({ route }: Props): React.JSX
   const selectedGender: Gender | null =
     (route.params?.gender as Gender | null) ?? ((user?.gender as Gender | null) ?? null);
 
-  const [tab, setTab] = useState<TabId>('details');
   const [saving, setSaving] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
 
@@ -224,7 +155,7 @@ export default function ReceiverCreateProfileScreen({ route }: Props): React.JSX
     }
     
     // Fixed: Using avatarPresets instead of undefined CALLER_FEMALE_AVATAR_PRESETS
-    const allowedPreset = avatarPresets.some((p) => toAvatarUri(p) === profileImageUri);
+    const allowedPreset = avatarPresets.some((p) => p.id === profileImageUri);
     const isHttpsAvatar = /^https:\/\//i.test(profileImageUri.trim());
     if (!allowedPreset && !isHttpsAvatar) {
       Alert.alert('Validation', 'Please select one avatar from the available list.');
@@ -257,56 +188,7 @@ export default function ReceiverCreateProfileScreen({ route }: Props): React.JSX
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'left', 'right']}>
       <KeyboardAvoidingView style={styles.screen} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
-        {tab === 'earn' ? (
-          <ScrollView style={styles.screen} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-            <View style={styles.header}>
-            <TouchableOpacity onPress={() => navigation.replace('ReceiverSelectGender')} style={styles.backBtn}>
-                <Icon name="chevron-left" size={26} color="#1a1a1a" />
-              </TouchableOpacity>
-              <Text style={styles.headerTitle}>Create Profile</Text>
-              <View style={styles.placeholder} />
-            </View>
-
-            <Text style={styles.subtitle}>
-              How you earn as a receiver. Finish your details in the Details tab and then verify your voice.
-            </Text>
-
-            <View style={styles.tabWrap}>
-              <TouchableOpacity
-                onPress={() => setTab('details')}
-                style={[styles.tabBtn, tab === 'details' && styles.tabBtnActive]}
-                activeOpacity={0.9}
-              >
-                <Text style={[styles.tabText, tab === 'details' && styles.tabTextActive]}>Details</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                onPress={() => setTab('earn')}
-                style={[styles.tabBtn, tab === 'earn' && styles.tabBtnActive]}
-                activeOpacity={0.9}
-              >
-                <Text style={[styles.tabText, tab === 'earn' && styles.tabTextActive]}>How to Earn</Text>
-              </TouchableOpacity>
-            </View>
-
-            <View style={{ gap: 16, marginTop: 16, paddingBottom: 40 }}>
-              {EARN_STEPS.map((s, idx) => (
-                <View key={idx} style={styles.earnCard}>
-                  <Text style={styles.earnTitle}>{s.title}</Text>
-                  <Text style={styles.earnSub}>{s.subtitle}</Text>
-                  <View style={styles.earnBullets}>
-                    {s.bullets.map((b, i) => (
-                      <View key={i} style={styles.earnBulletRow}>
-                        <Text style={styles.earnDot}>•</Text>
-                        <Text style={styles.earnBulletText}>{b}</Text>
-                      </View>
-                    ))}
-                  </View>
-                </View>
-              ))}
-            </View>
-          </ScrollView>
-        ) : (
-          <ScrollView style={styles.screen} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+        <ScrollView style={styles.screen} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
             <View style={styles.header}>
             <TouchableOpacity onPress={() => navigation.replace('ReceiverSelectGender')} style={styles.backBtn}>
                 <Icon name="chevron-left" size={26} color="#1a1a1a" />
@@ -316,23 +198,6 @@ export default function ReceiverCreateProfileScreen({ route }: Props): React.JSX
             </View>
 
             <Text style={styles.subtitle}>Add your profile details, then we’ll verify your voice.</Text>
-
-            <View style={styles.tabWrap}>
-              <TouchableOpacity
-                onPress={() => setTab('details')}
-                style={[styles.tabBtn, tab === 'details' && styles.tabBtnActive]}
-                activeOpacity={0.9}
-              >
-                <Text style={[styles.tabText, tab === 'details' && styles.tabTextActive]}>Details</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                onPress={() => setTab('earn')}
-                style={[styles.tabBtn, tab === 'earn' && styles.tabBtnActive]}
-                activeOpacity={0.9}
-              >
-                <Text style={[styles.tabText, tab === 'earn' && styles.tabTextActive]}>How to Earn</Text>
-              </TouchableOpacity>
-            </View>
 
             {/* Avatar Selection */}
             <View style={styles.formSection}>
@@ -346,10 +211,14 @@ export default function ReceiverCreateProfileScreen({ route }: Props): React.JSX
                   activeOpacity={0.8}
                 >
                   {profileImageUri ? (
-                    <Image
-                      source={resolveProfileImageSource(profileImageUri) ?? { uri: profileImageUri }}
-                      style={styles.photoImage}
-                    />
+                    (() => {
+                      const src = resolveProfileImageSource(profileImageUri);
+                      return src ? (
+                        <Image source={src} style={styles.photoImage} />
+                      ) : (
+                        <Icon name="camera" size={32} color="#A855F7" />
+                      );
+                    })()
                   ) : (
                     <Icon name="camera" size={32} color="#A855F7" />
                   )}
@@ -423,8 +292,7 @@ export default function ReceiverCreateProfileScreen({ route }: Props): React.JSX
                 </View>
               </View>
             ) : null}
-          </ScrollView>
-        )}
+        </ScrollView>
 
         {/* Avatar Modal */}
         <Modal visible={avatarModal} transparent animationType="fade">
@@ -440,7 +308,7 @@ export default function ReceiverCreateProfileScreen({ route }: Props): React.JSX
               <ScrollView style={styles.modalList} showsVerticalScrollIndicator={false}>
                 <View style={styles.avatarGrid}>
                   {avatarPresets.map((preset) => {
-                    const presetUri = toAvatarUri(preset);
+                    const presetUri = preset.id;
                     const active = profileImageUri === presetUri;
                     return (
                       <TouchableOpacity
@@ -452,7 +320,7 @@ export default function ReceiverCreateProfileScreen({ route }: Props): React.JSX
                         }}
                         activeOpacity={0.85}
                       >
-                        <Image source={toAvatarImageSource(preset)} style={styles.avatarThumb} />
+                        <Image source={preset.source} style={styles.avatarThumb} />
                       </TouchableOpacity>
                     );
                   })}
@@ -506,20 +374,6 @@ const styles = StyleSheet.create({
     lineHeight: 18,
     letterSpacing: -0.2,
   },
-
-  tabWrap: { flexDirection: 'row', gap: 10, marginBottom: 16 },
-  tabBtn: {
-    flex: 1,
-    borderWidth: 1,
-    borderColor: '#E8E8E8',
-    backgroundColor: '#fff',
-    borderRadius: 14,
-    paddingVertical: 10,
-    alignItems: 'center',
-  },
-  tabBtnActive: { borderColor: '#A855F7', backgroundColor: '#F3E8FF' },
-  tabText: { fontSize: 13, fontWeight: '800', color: '#666' },
-  tabTextActive: { color: '#A855F7' },
 
   formSection: { marginBottom: 8 },
 
@@ -673,18 +527,4 @@ const styles = StyleSheet.create({
   },
   avatarCellActive: { borderColor: '#A855F7', borderWidth: 3 },
   avatarThumb: { width: '100%', height: '100%' },
-
-  earnCard: {
-    backgroundColor: '#fff',
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: '#ECECEC',
-    padding: 16,
-  },
-  earnTitle: { fontSize: 16, fontWeight: '900', color: '#111', marginBottom: 4 },
-  earnSub: { fontSize: 13, color: '#666', marginBottom: 10 },
-  earnBullets: { gap: 10 },
-  earnBulletRow: { flexDirection: 'row', gap: 10, alignItems: 'flex-start' },
-  earnDot: { fontSize: 18, lineHeight: 20, color: '#A855F7', fontWeight: '900' },
-  earnBulletText: { flex: 1, fontSize: 13, color: '#333', lineHeight: 20, fontWeight: '600' },
 });

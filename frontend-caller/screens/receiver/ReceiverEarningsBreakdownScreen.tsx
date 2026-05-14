@@ -1,11 +1,12 @@
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useRef, useState } from 'react';
 import { ActivityIndicator, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import type { ReceiverStackParamList } from '../../navigation/ReceiverStackParamList';
 import { getErrorMessage, profileApi } from '../../services/api';
 import type { ReceiverEarningsBreakdownResponse } from '../../types/api';
+import { SCREEN_FETCH_TIMEOUT_MS, withTimeout } from '../../utils/withTimeout';
 
 type Nav = NativeStackNavigationProp<ReceiverStackParamList, 'ReceiverEarningsBreakdown'>;
 
@@ -14,17 +15,21 @@ export default function ReceiverEarningsBreakdownScreen(): React.JSX.Element {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [data, setData] = useState<ReceiverEarningsBreakdownResponse | null>(null);
+  const loadGenRef = useRef(0);
 
   const load = useCallback(async () => {
+    const id = ++loadGenRef.current;
     setLoading(true);
     setError(null);
     try {
-      const { data } = await profileApi.receiverEarningsBreakdown('week');
+      const { data } = await withTimeout(profileApi.receiverEarningsBreakdown('week'), SCREEN_FETCH_TIMEOUT_MS);
+      if (loadGenRef.current !== id) return;
       setData(data);
     } catch (e) {
+      if (loadGenRef.current !== id) return;
       setError(getErrorMessage(e));
     } finally {
-      setLoading(false);
+      if (loadGenRef.current === id) setLoading(false);
     }
   }, []);
 
@@ -50,7 +55,12 @@ export default function ReceiverEarningsBreakdownScreen(): React.JSX.Element {
       {loading ? (
         <ActivityIndicator size="large" color="#7b2cff" style={{ marginTop: 20 }} />
       ) : error ? (
-        <Text style={styles.error}>{error}</Text>
+        <View style={styles.errorBlock}>
+          <Text style={styles.error}>{error}</Text>
+          <TouchableOpacity style={styles.retryBtn} onPress={() => void load()} activeOpacity={0.85}>
+            <Text style={styles.retryBtnText}>Retry</Text>
+          </TouchableOpacity>
+        </View>
       ) : data ? (
         <>
           <View style={styles.rowTop}>
@@ -133,7 +143,15 @@ const styles = StyleSheet.create({
   backText: { fontSize: 20, color: '#111', fontWeight: '700' },
   headerTitle: { fontSize: 16, color: '#111', fontWeight: '900' },
   analyticsLink: { fontSize: 12, color: '#7b2cff', fontWeight: '800' },
-  error: { color: '#b91c1c', fontSize: 12, fontWeight: '700' },
+  errorBlock: { marginTop: 20, alignItems: 'center', gap: 10, paddingHorizontal: 16 },
+  retryBtn: {
+    backgroundColor: '#7b2cff',
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 10,
+  },
+  retryBtnText: { color: '#fff', fontSize: 13, fontWeight: '800' },
+  error: { color: '#b91c1c', fontSize: 12, fontWeight: '700', textAlign: 'center' },
   rowTop: { flexDirection: 'row', gap: 10 },
   statCard: { flex: 1, backgroundColor: '#fff', borderRadius: 10, borderWidth: 1, borderColor: '#ececec', padding: 10 },
   statLabel: { fontSize: 11, color: '#777', fontWeight: '700' },

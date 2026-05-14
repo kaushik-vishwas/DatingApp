@@ -1,6 +1,6 @@
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useFocusEffect } from '@react-navigation/native';
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
 
 import {
   ActivityIndicator,
@@ -29,6 +29,7 @@ import type {
   CallerNotificationRow,
   CallerNotificationType,
 } from '../../types/api';
+import { SCREEN_FETCH_TIMEOUT_MS, withTimeout } from '../../utils/withTimeout';
 
 type Props = NativeStackScreenProps<
   CallerStackParamList,
@@ -62,17 +63,22 @@ export default function CallerAlertsTabScreen({
     { key: 'call', title: 'Call' },
   ]);
 
+  const loadGenRef = useRef(0);
+
   const load = useCallback(async () => {
+    const id = ++loadGenRef.current;
     setLoading(true);
     setError(null);
 
     try {
-      const { data } = await profileApi.callerNotifications();
+      const { data } = await withTimeout(profileApi.callerNotifications(), SCREEN_FETCH_TIMEOUT_MS);
+      if (loadGenRef.current !== id) return;
       setRows(data.notifications);
     } catch (e) {
+      if (loadGenRef.current !== id) return;
       setError(getErrorMessage(e));
     } finally {
-      setLoading(false);
+      if (loadGenRef.current === id) setLoading(false);
     }
   }, []);
 
@@ -156,7 +162,12 @@ export default function CallerAlertsTabScreen({
             color="#7b2cff"
           />
         ) : error ? (
-          <Text style={styles.sub}>{error}</Text>
+          <View style={styles.errorBlock}>
+            <Text style={[styles.sub, styles.errorEmphasis]}>{error}</Text>
+            <TouchableOpacity style={styles.retryBtn} onPress={() => void load()} activeOpacity={0.85}>
+              <Text style={styles.retryBtnText}>Retry</Text>
+            </TouchableOpacity>
+          </View>
         ) : filtered.length === 0 ? (
           <View style={styles.center}>
             <Text style={styles.emoji}>🔔</Text>
@@ -314,6 +325,26 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
   },
 
+  errorBlock: {
+    marginTop: 20,
+    alignItems: 'center',
+    gap: 12,
+    paddingHorizontal: 24,
+  },
+
+  retryBtn: {
+    backgroundColor: '#7b2cff',
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 10,
+  },
+
+  retryBtnText: {
+    color: '#fff',
+    fontSize: 13,
+    fontWeight: '800',
+  },
+
   center: {
     flex: 1,
     justifyContent: 'center',
@@ -338,6 +369,11 @@ const styles = StyleSheet.create({
     color: '#666',
     textAlign: 'center',
     lineHeight: 22,
+  },
+
+  errorEmphasis: {
+    color: '#b91c1c',
+    fontWeight: '700',
   },
 
   row: {

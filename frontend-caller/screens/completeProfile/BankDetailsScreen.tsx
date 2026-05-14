@@ -27,7 +27,7 @@ const PURPLE = '#7b2cff';
 export default function BankDetailsScreen({ navigation }: Props): React.JSX.Element {
   const insets = useSafeAreaInsets();
   const { state, update } = useCompleteProfile();
-  const { user, refreshUser, applyServerUser } = useAuth();
+  const { refreshUser, applyServerUser } = useAuth();
   const [submitting, setSubmitting] = useState(false);
 
   const setAccountType = (t: BankAccountType) => update({ bankAccountType: t });
@@ -40,14 +40,6 @@ export default function BankDetailsScreen({ navigation }: Props): React.JSX.Elem
     }
     if (!state.profileImageUri || !state.aadhaarFront || !state.aadhaarBack || !state.panFront) {
       Alert.alert('Validation', 'Missing required files');
-      return;
-    }
-    const dobStr = user?.dateOfBirth?.trim();
-    if (!dobStr) {
-      Alert.alert(
-        'Date of birth required',
-        'Your account is missing a date of birth. Please sign out and register again, or contact support.'
-      );
       return;
     }
 
@@ -91,7 +83,6 @@ export default function BankDetailsScreen({ navigation }: Props): React.JSX.Elem
         languages: state.languages,
         interests: state.interests,
         gender: state.gender!,
-        dateOfBirth: dobStr,
         state: state.state.trim(),
         bankAccountHolderName: state.bankAccountHolderName.trim(),
         bankAccountType: state.bankAccountType,

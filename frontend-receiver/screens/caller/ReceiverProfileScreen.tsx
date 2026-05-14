@@ -18,6 +18,7 @@ import { useCallSignals } from '../../context/CallSignalContext';
 import type { CallerStackParamList } from '../../navigation/CallerStackParamList';
 import { getErrorMessage } from '../../services/api';
 import { getReceiverPresenceInfo } from '../../utils/receiverStatus';
+import { resolveProfileImageSource } from '../../utils/avatarSource';
 
 const PURPLE = '#7b2cff';
 const PINK = '#ff72d2';
@@ -73,7 +74,12 @@ export default function ReceiverProfileScreen({ navigation, route }: Props): Rea
     setCalling(true);
     void (async () => {
       try {
-        await startCallInvite(receiver._id, receiver.name, receiver.profileImage ?? null);
+        await startCallInvite(receiver._id, receiver.name, receiver.profileImage ?? null, {
+          receiverRatePerMinuteHint:
+            receiver.audioCallRate != null && Number.isFinite(receiver.audioCallRate)
+              ? receiver.audioCallRate
+              : undefined,
+        });
       } catch (e: unknown) {
         Alert.alert('Call failed', getErrorMessage(e));
       } finally {
@@ -92,13 +98,16 @@ export default function ReceiverProfileScreen({ navigation, route }: Props): Rea
         <TouchableOpacity style={styles.topRight} onPress={() => navigation.navigate('Wallet')}>
           <Text style={styles.walletIco}>👛</Text>
           <Text style={styles.walletAmt}>₹{wallet.toLocaleString('en-IN')}</Text>
-          {user?.profileImage ? (
-            <Image source={{ uri: user.profileImage }} style={styles.meAv} />
-          ) : (
-            <View style={[styles.meAv, styles.meAvPh]}>
-              <Text style={styles.meAvTxt}>{user?.name?.charAt(0) ?? '?'}</Text>
-            </View>
-          )}
+          {(() => {
+            const meSrc = user?.profileImage ? resolveProfileImageSource(user.profileImage) : null;
+            return meSrc ? (
+              <Image source={meSrc} style={styles.meAv} />
+            ) : (
+              <View style={[styles.meAv, styles.meAvPh]}>
+                <Text style={styles.meAvTxt}>{user?.name?.charAt(0) ?? '?'}</Text>
+              </View>
+            );
+          })()}
         </TouchableOpacity>
       </View>
 
@@ -106,13 +115,18 @@ export default function ReceiverProfileScreen({ navigation, route }: Props): Rea
 
       <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
         <View style={styles.hero}>
-          {receiver.profileImage ? (
-            <Image source={{ uri: receiver.profileImage }} style={[styles.heroImg, { borderColor: presence.color }]} />
-          ) : (
-            <View style={[styles.heroImg, styles.heroPh, { borderColor: presence.color }]}>
-              <Text style={styles.heroGlyph}>👤</Text>
-            </View>
-          )}
+          {(() => {
+            const heroSrc = receiver.profileImage
+              ? resolveProfileImageSource(receiver.profileImage)
+              : null;
+            return heroSrc ? (
+              <Image source={heroSrc} style={[styles.heroImg, { borderColor: presence.color }]} />
+            ) : (
+              <View style={[styles.heroImg, styles.heroPh, { borderColor: presence.color }]}>
+                <Text style={styles.heroGlyph}>👤</Text>
+              </View>
+            );
+          })()}
           <Text style={styles.name}>
             {receiver.name}
             {receiver.age != null ? `, ${receiver.age} Y` : ''}

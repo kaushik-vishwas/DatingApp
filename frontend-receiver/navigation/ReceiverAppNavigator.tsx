@@ -10,6 +10,7 @@ import VoiceCallScreen from '../screens/call/VoiceCallScreen';
 import WithdrawEarningsScreen from '../screens/receiver/WithdrawEarningsScreen';
 import ReceiverCallHistoryScreen from '../screens/receiver/ReceiverCallHistoryScreen';
 import ReceiverSettingsScreen from '../screens/receiver/ReceiverSettingsScreen';
+import ReceiverHowToEarnScreen from '../screens/receiver/ReceiverHowToEarnScreen';
 import ReceiverNotificationsScreen from '../screens/receiver/ReceiverNotificationsScreen';
 import ReceiverBankDetailsScreen from '../screens/receiver/ReceiverBankDetailsScreen';
 import ReceiverEditProfileScreen from '../screens/receiver/ReceiverEditProfileScreen';
@@ -44,6 +45,7 @@ export default function ReceiverAppNavigator({
     >
       <Stack.Screen name="ReceiverHome" component={ReceiverHomeDashboard} />
       <Stack.Screen name="ReceiverSettings" component={ReceiverSettingsScreen} />
+      <Stack.Screen name="ReceiverHowToEarn" component={ReceiverHowToEarnScreen} />
       <Stack.Screen name="ReceiverNotifications" component={ReceiverNotificationsScreen} />
       <Stack.Screen name="ReceiverBankDetails" component={ReceiverBankDetailsScreen} />
       <Stack.Screen name="ReceiverEditProfile" component={ReceiverEditProfileScreen} />

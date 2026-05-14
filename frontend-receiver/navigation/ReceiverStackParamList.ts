@@ -1,4 +1,4 @@
-import type { VoiceBootstrapResponse } from '../types/api';
+import type { VoiceCallScreenParams } from './voiceCallParams';
 import type { Gender } from '../types/user';
 
 export type IncomingCallParams = {
@@ -12,6 +12,7 @@ export type IncomingCallParams = {
 export type ReceiverStackParamList = {
   ReceiverHome: undefined;
   ReceiverSettings: undefined;
+  ReceiverHowToEarn: undefined;
   ReceiverNotifications: undefined;
   ReceiverBankDetails: undefined;
   ReceiverEditProfile: { fromWithdrawKyc?: boolean } | undefined;
@@ -27,5 +28,5 @@ export type ReceiverStackParamList = {
   ReceiverChats: undefined;
   ReceiverChat: { userId: string; userName: string; userImage?: string | null };
   IncomingCall: IncomingCallParams;
-  VoiceCall: VoiceBootstrapResponse & { peerName: string; peerImage?: string | null };
+  VoiceCall: VoiceCallScreenParams;
 };

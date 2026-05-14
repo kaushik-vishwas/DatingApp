@@ -17,7 +17,6 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import DobPickerField from '../../components/DobPickerField';
 import {
   CALLER_INTEREST_OPTIONS,
   CALLER_LANGUAGE_OPTIONS,
@@ -29,7 +28,6 @@ import { useAuth } from '../../context/AuthContext';
 import type { CallerStackParamList } from '../../navigation/CallerStackParamList';
 import { getErrorMessage, profileApi } from '../../services/api';
 import type { Gender } from '../../types/user';
-import { ageFromLocalCalendarBirthDate, formatDateOnlyLocal, maxDobDateForMinAge, parseDateOnlyLocalToDate } from '../../utils/birthDateClient';
 import { resolveProfileImageSource } from '../../utils/avatarSource';
 
 const PURPLE = '#7b2cff';
@@ -59,7 +57,6 @@ function toggleInterest(prev: string[], item: string): string[] {
 export default function CallerEditProfileScreen({ navigation }: Props): React.JSX.Element {
   const { user, refreshUser } = useAuth();
   const [fullName, setFullName] = useState('');
-  const [dob, setDob] = useState<Date | null>(null);
   const [gender, setGender] = useState<Gender>('male');
   const [state, setState] = useState('Karnataka');
   const [stateModal, setStateModal] = useState(false);
@@ -74,7 +71,6 @@ export default function CallerEditProfileScreen({ navigation }: Props): React.JS
   useEffect(() => {
     if (!user) return;
     setFullName(user.name ?? '');
-    setDob(user.dateOfBirth ? parseDateOnlyLocalToDate(user.dateOfBirth) : null);
     if (user.gender === 'male' || user.gender === 'female' || user.gender === 'other') {
       setGender(user.gender);
     }
@@ -114,15 +110,6 @@ export default function CallerEditProfileScreen({ navigation }: Props): React.JS
       Alert.alert('Validation', 'Please enter your full name.');
       return;
     }
-    if (!dob) {
-      Alert.alert('Validation', 'Select your date of birth.');
-      return;
-    }
-    const years = ageFromLocalCalendarBirthDate(dob);
-    if (years < 18 || years > 120) {
-      Alert.alert('Validation', 'You must be between 18 and 120 years old.');
-      return;
-    }
     if (!state.trim()) {
       Alert.alert('Validation', 'Please select your state.');
       return;
@@ -152,7 +139,6 @@ export default function CallerEditProfileScreen({ navigation }: Props): React.JS
         languages,
         interests,
         gender,
-        dateOfBirth: formatDateOnlyLocal(dob),
         state: state.trim(),
       });
       await refreshUser();
@@ -205,13 +191,6 @@ export default function CallerEditProfileScreen({ navigation }: Props): React.JS
             value={fullName}
             onChangeText={setFullName}
             autoCapitalize="words"
-          />
-
-          <DobPickerField
-            label="Date of Birth *"
-            value={dob}
-            onChange={setDob}
-            fallbackDate={maxDobDateForMinAge(25)}
           />
 
           <Text style={styles.label}>Gender *</Text>

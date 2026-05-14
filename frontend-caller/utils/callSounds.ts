@@ -1,7 +1,10 @@
 import { Audio, InterruptionModeAndroid, InterruptionModeIOS, type AVPlaybackStatusSuccess } from 'expo-av';
 
+/** Local ringtone — add `assets/sounds/caller_ringtone.mp3` to this project. */
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const CALLER_RINGTONE = require('../assets/sounds/caller_ringtone.mp3') as number;
+
 const OUTGOING_BEEP_URL = 'https://actions.google.com/sounds/v1/alarms/beep_short.ogg';
-const INCOMING_RING_URL = 'https://actions.google.com/sounds/v1/alarms/phone_alerts_and_rings.ogg';
 /** Random-match search uses the same asset as outgoing beeps, softer volume & slower cadence. */
 
 let audioModePrepared = false;
@@ -110,8 +113,31 @@ export async function startIncomingRingtone(): Promise<() => Promise<void>> {
   await ensureAudioMode();
   const sound = new Audio.Sound();
   await sound.loadAsync(
-    { uri: INCOMING_RING_URL },
+    CALLER_RINGTONE,
     { shouldPlay: true, isLooping: true, volume: 1.0 }
+  );
+
+  return async () => {
+    try {
+      await sound.stopAsync();
+    } catch {
+      // ignore
+    }
+    try {
+      await sound.unloadAsync();
+    } catch {
+      // ignore
+    }
+  };
+}
+
+/** Looping phone-style ring while the caller waits for the receiver to answer. */
+export async function startOutboundRingtoneLoop(): Promise<() => Promise<void>> {
+  await ensureAudioMode();
+  const sound = new Audio.Sound();
+  await sound.loadAsync(
+    CALLER_RINGTONE,
+    { shouldPlay: true, isLooping: true, volume: 0.92 }
   );
 
   return async () => {
