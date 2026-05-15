@@ -1,7 +1,7 @@
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import { LinearGradient } from 'expo-linear-gradient';
 import {
   Alert,
@@ -421,22 +421,27 @@ export default function ReceiverHomeDashboard(): React.JSX.Element {
   <Text style={styles.earningsAmount}>
     {walletSummary
       ? formatInr(
-          typeof walletSummary.callEarningsLifetime === 'number'
-            ? walletSummary.callEarningsLifetime
-            : 0
+          typeof walletSummary.totalEarningsLifetime === 'number'
+            ? walletSummary.totalEarningsLifetime
+            : (typeof walletSummary.callEarningsLifetime === 'number'
+                ? walletSummary.callEarningsLifetime
+                : 0) +
+                (typeof walletSummary.chatEarningsLifetime === 'number'
+                  ? walletSummary.chatEarningsLifetime
+                  : 0)
         )
       : '…'}
   </Text>
   {/* <Text style={styles.earningsPeriod}>
     Score-tier payout from voice calls (your earning rate × talk time)
   </Text> */}
-  {walletSummary &&
+  {/* {walletSummary &&
   typeof walletSummary.walletBalance === 'number' &&
   walletSummary.walletBalance > 0 ? (
     <Text style={styles.earningsWalletNote}>
       Withdrawable chat credits: {formatInr(walletSummary.walletBalance)}
     </Text>
-  ) : null}
+  ) : null} */}
 </LinearGradient>
 
               <View style={styles.smallEarningsRow}>
@@ -445,9 +450,14 @@ export default function ReceiverHomeDashboard(): React.JSX.Element {
                   <Text style={styles.smallEarningsText}>
                     {walletSummary
                       ? formatInr(
-                          typeof walletSummary.callEarningsToday === 'number'
-                            ? walletSummary.callEarningsToday
-                            : 0
+                          typeof walletSummary.totalEarningsToday === 'number'
+                            ? walletSummary.totalEarningsToday
+                            : (typeof walletSummary.callEarningsToday === 'number'
+                                ? walletSummary.callEarningsToday
+                                : 0) +
+                                (typeof walletSummary.chatToday === 'number'
+                                  ? walletSummary.chatToday
+                                  : 0)
                         )
                       : '₹0'}
                   </Text>
@@ -457,9 +467,14 @@ export default function ReceiverHomeDashboard(): React.JSX.Element {
                   <Text style={[styles.smallEarningsText, { color: '#2563eb' }]}>
                     {walletSummary
                       ? formatInr(
-                          typeof walletSummary.callEarningsThisWeek === 'number'
-                            ? walletSummary.callEarningsThisWeek
-                            : 0
+                          typeof walletSummary.totalEarningsThisWeek === 'number'
+                            ? walletSummary.totalEarningsThisWeek
+                            : (typeof walletSummary.callEarningsThisWeek === 'number'
+                                ? walletSummary.callEarningsThisWeek
+                                : 0) +
+                                (typeof walletSummary.chatEarningsThisWeek === 'number'
+                                  ? walletSummary.chatEarningsThisWeek
+                                  : 0)
                         )
                       : '₹0'}
                   </Text>
@@ -942,10 +957,11 @@ function CallRow({
   callerImage?: string | null;
   onMessage: (callerId: string, callerName: string, callerImage?: string | null) => void;
 }) {
+  const avatarSource = useMemo(() => resolveProfileImageSource(callerImage), [callerImage]);
   return (
     <View style={callRowStyles.row}>
-      {callerImage ? (
-        <Image source={{ uri: callerImage }} style={callRowStyles.avatar} />
+      {avatarSource ? (
+        <Image source={avatarSource} style={callRowStyles.avatar} />
       ) : (
         <View style={callRowStyles.avatarPlaceholder}>
           <Text style={callRowStyles.avatarText}>{title.charAt(0).toUpperCase()}</Text>

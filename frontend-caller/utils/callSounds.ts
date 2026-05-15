@@ -131,8 +131,20 @@ export async function startIncomingRingtone(): Promise<() => Promise<void>> {
   };
 }
 
+let activeOutboundRingtoneStop: (() => Promise<void>) | null = null;
+
+/** Stop outbound ringtone immediately (e.g. caller cancelled while ringing). */
+export async function stopOutboundRingtonePlayback(): Promise<void> {
+  const stop = activeOutboundRingtoneStop;
+  activeOutboundRingtoneStop = null;
+  if (stop) {
+    await stop();
+  }
+}
+
 /** Looping phone-style ring while the caller waits for the receiver to answer. */
 export async function startOutboundRingtoneLoop(): Promise<() => Promise<void>> {
+  await stopOutboundRingtonePlayback();
   await ensureAudioMode();
   const sound = new Audio.Sound();
   await sound.loadAsync(
@@ -140,7 +152,10 @@ export async function startOutboundRingtoneLoop(): Promise<() => Promise<void>> 
     { shouldPlay: true, isLooping: true, volume: 0.92 }
   );
 
-  return async () => {
+  const stop = async () => {
+    if (activeOutboundRingtoneStop === stop) {
+      activeOutboundRingtoneStop = null;
+    }
     try {
       await sound.stopAsync();
     } catch {
@@ -152,4 +167,6 @@ export async function startOutboundRingtoneLoop(): Promise<() => Promise<void>> 
       // ignore
     }
   };
+  activeOutboundRingtoneStop = stop;
+  return stop;
 }

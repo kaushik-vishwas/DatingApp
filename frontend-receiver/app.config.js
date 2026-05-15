@@ -54,7 +54,7 @@ module.exports = {
     extra: {
       ...(appJson.expo.extra || {}),
       eas: {
-        projectId: "ca891af6-d9cb-489a-abca-4f4a682847c3",
+        projectId: "dabcef1d-3493-41ea-ac20-ccda57325dc3",
       },
       apiBaseUrl,
       cloudinaryCloudName,

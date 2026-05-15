@@ -7,16 +7,25 @@ import { callApi, getJwt, getResolvedApiBaseUrl } from '../services/api';
 import type { VoiceBootstrapResponse } from '../types/api';
 import type { VoiceCallScreenParams } from '../navigation/voiceCallParams';
 import { navigationRef } from '../navigation/navigationRef';
+import { stopOutboundRingtonePlayback } from '../utils/callSounds';
 
-function scheduleNavigateWhenReady(tryNavigate: () => boolean): void {
+let outgoingNavigateGeneration = 0;
+
+function bumpOutgoingNavigateGeneration(): void {
+  outgoingNavigateGeneration += 1;
+}
+
+function scheduleNavigateWhenReady(tryNavigate: () => boolean, navGeneration: number): void {
+  if (navGeneration !== outgoingNavigateGeneration) return;
   if (tryNavigate()) return;
   let frames = 0;
   const maxFrames = 24;
   const tick = (): void => {
+    if (navGeneration !== outgoingNavigateGeneration) return;
     if (tryNavigate()) return;
     frames += 1;
     if (frames < maxFrames) requestAnimationFrame(tick);
-    else void tryNavigate();
+    else if (navGeneration === outgoingNavigateGeneration) void tryNavigate();
   };
   requestAnimationFrame(tick);
 }
@@ -113,6 +122,10 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   const outgoingInviteAbortRef = useRef<AbortController | null>(null);
   const incomingCallHandlerRef = useRef<((req: IncomingCallRequest) => void) | null>(null);
   const queueModeRef = useRef<boolean>(false);
+  /** Receiver accepted — never re-apply `outgoingCallerPhase: 'ringing'` (race with delayed navigate). */
+  const callerInviteAcceptedCallIdsRef = useRef<Set<string>>(new Set());
+  /** Bootstrap session kept until call ends (survives pending map cleanup on accept). */
+  const outgoingSessionByCallIdRef = useRef<Map<string, PendingOutgoingCall>>(new Map());
 
   useEffect(() => {
     userRoleRef.current = user?.role ?? null;
@@ -181,17 +194,44 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       peerImage?: string | null,
       opts?: { outgoingCallerPhase?: 'joining' }
     ) => {
+      if (opts?.outgoingCallerPhase === 'joining') {
+        callerInviteAcceptedCallIdsRef.current.add(bootstrap.callId);
+      }
       const params: VoiceCallScreenParams = {
         ...bootstrap,
         peerName,
         peerImage: peerImage ?? null,
         ...(opts?.outgoingCallerPhase ? { outgoingCallerPhase: opts.outgoingCallerPhase } : {}),
       };
+      const navGen = outgoingNavigateGeneration;
       const navigate = () => navigateToVoiceCallParams(params);
       if (navigate()) return;
-      scheduleNavigateWhenReady(navigate);
+      scheduleNavigateWhenReady(navigate, navGen);
     },
     [navigateToVoiceCallParams]
+  );
+
+  const openCallerJoiningVoiceCall = useCallback(
+    (session: PendingOutgoingCall) => {
+      openVoiceCall(session.bootstrap, session.peerName, session.peerImage, {
+        outgoingCallerPhase: 'joining',
+      });
+    },
+    [openVoiceCall]
+  );
+
+  const navigateCallerOutboundRinging = useCallback(
+    (callId: string, ringingParams: VoiceCallScreenParams) => {
+      if (callerInviteAcceptedCallIdsRef.current.has(callId)) {
+        const session = outgoingSessionByCallIdRef.current.get(callId);
+        if (session) {
+          openCallerJoiningVoiceCall(session);
+        }
+        return true;
+      }
+      return navigateToVoiceCallParams(ringingParams);
+    },
+    [navigateToVoiceCallParams, openCallerJoiningVoiceCall]
   );
 
   const openVoiceCallRinging = useCallback(
@@ -217,34 +257,47 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         nav.navigate('CallerApp', { screen: 'VoiceCall', params });
         return true;
       };
+      const navGen = outgoingNavigateGeneration;
       if (navigate()) return;
-      scheduleNavigateWhenReady(navigate);
+      scheduleNavigateWhenReady(navigate, navGen);
     },
     []
   );
 
+  const clearOutgoingCallSession = useCallback((callId: string) => {
+    callerInviteAcceptedCallIdsRef.current.delete(callId);
+    outgoingSessionByCallIdRef.current.delete(callId);
+    pendingOutgoingByCallIdRef.current.delete(callId);
+  }, []);
+
   const cancelOutgoingCallInvite = useCallback(() => {
     outgoingInviteAbortRef.current?.abort();
     outgoingInviteAbortRef.current = null;
+    bumpOutgoingNavigateGeneration();
+    void stopOutboundRingtonePlayback();
+
     const socket = socketRef.current;
-    for (const callId of [...pendingOutgoingByCallIdRef.current.keys()]) {
-      pendingOutgoingByCallIdRef.current.delete(callId);
+    const callIds = new Set([
+      ...pendingOutgoingByCallIdRef.current.keys(),
+      ...outgoingSessionByCallIdRef.current.keys(),
+    ]);
+    for (const callId of callIds) {
       socket?.emit('call:end', { callId });
-      const waiter = pendingInviteOutcomeRef.current.get(callId);
-      if (waiter) {
-        clearTimeout(waiter.timeout);
-        pendingInviteOutcomeRef.current.delete(callId);
-        waiter.resolve({ accepted: false, reason: 'ended' });
-      }
+      clearOutgoingCallSession(callId);
     }
-  }, []);
+    for (const [, waiter] of pendingInviteOutcomeRef.current) {
+      clearTimeout(waiter.timeout);
+      waiter.resolve({ accepted: false, reason: 'ended' });
+    }
+    pendingInviteOutcomeRef.current.clear();
+  }, [clearOutgoingCallSession]);
 
   const registerPeer = useCallback((peerId: string, peerName: string, peerImage?: string | null) => {
     const id = peerId.trim();
     const name = peerName.trim();
     if (!id || !name) return;
     peerProfileRef.current.set(id, { name, image: peerImage ?? null });
-  }, []);
+  }, [clearOutgoingCallSession]);
 
   const clearPendingInvites = useCallback((emitEnd: boolean) => {
     const socket = socketRef.current;
@@ -253,6 +306,8 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         socket.emit('call:end', { callId });
       }
     }
+    callerInviteAcceptedCallIdsRef.current.clear();
+    outgoingSessionByCallIdRef.current.clear();
     pendingOutgoingByCallIdRef.current.clear();
     for (const waiter of pendingInviteOutcomeRef.current.values()) {
       clearTimeout(waiter.timeout);
@@ -282,6 +337,7 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
       const abort = new AbortController();
       outgoingInviteAbortRef.current = abort;
+      const navGen = outgoingNavigateGeneration;
 
       openVoiceCallRinging({
         peerAccountId: id,
@@ -296,24 +352,26 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         if (abort.signal.aborted) {
           return;
         }
+        const session: PendingOutgoingCall = {
+          callId: data.callId,
+          peerId: id,
+          peerName: name,
+          peerImage: peerImage ?? null,
+          bootstrap: data,
+        };
+        outgoingSessionByCallIdRef.current.set(data.callId, session);
+        pendingOutgoingByCallIdRef.current.set(data.callId, session);
+
         const ringingParams: VoiceCallScreenParams = {
           ...data,
           peerName: name,
           peerImage: peerImage ?? null,
           outgoingCallerPhase: 'ringing',
         };
-        const mergeNavigate = () => navigateToVoiceCallParams(ringingParams);
+        const mergeNavigate = () => navigateCallerOutboundRinging(data.callId, ringingParams);
         if (!mergeNavigate()) {
-          scheduleNavigateWhenReady(mergeNavigate);
+          scheduleNavigateWhenReady(mergeNavigate, navGen);
         }
-
-        pendingOutgoingByCallIdRef.current.set(data.callId, {
-          callId: data.callId,
-          peerId: id,
-          peerName: name,
-          peerImage: peerImage ?? null,
-          bootstrap: data,
-        });
 
         const ack = await new Promise<CallInviteAck>((resolve) => {
           socket.emit('call:invite', { callId: data.callId, targetId: id }, (res: CallInviteAck) => {
@@ -326,7 +384,7 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         }
 
         if (ack.ok === false) {
-          pendingOutgoingByCallIdRef.current.delete(data.callId);
+          clearOutgoingCallSession(data.callId);
           throw new Error(ack.error || 'Could not ring this user.');
         }
         const outcome = await new Promise<InviteOutcome>((resolve) => {
@@ -337,14 +395,21 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
           pendingInviteOutcomeRef.current.set(data.callId, { resolve, timeout });
         });
         if (!outcome.accepted) {
-          pendingOutgoingByCallIdRef.current.delete(data.callId);
+          clearOutgoingCallSession(data.callId);
           if (socket.connected) {
             socket.emit('call:end', { callId: data.callId });
+          }
+          if (abort.signal.aborted || outcome.reason === 'ended') {
+            return;
           }
           if (outcome.reason === 'rejected') {
             throw new Error('Call was declined by receiver.');
           }
           throw new Error('Receiver is not available right now.');
+        }
+        const joinedSession = outgoingSessionByCallIdRef.current.get(data.callId);
+        if (joinedSession) {
+          openCallerJoiningVoiceCall(joinedSession);
         }
       } catch (e) {
         if (abort.signal.aborted) {
@@ -359,8 +424,10 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       }
     },
     [
+      clearOutgoingCallSession,
       dismissCallerVoiceCallScreen,
-      navigateToVoiceCallParams,
+      navigateCallerOutboundRinging,
+      openCallerJoiningVoiceCall,
       openVoiceCallRinging,
       registerPeer,
     ]
@@ -509,8 +576,9 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
           seenIncomingCallIdsRef.current.delete(payload.callId);
           rejectedIncomingCallIdsRef.current.delete(payload.callId);
         }
-        const pending = pendingOutgoingByCallIdRef.current.get(payload.callId);
-        pendingOutgoingByCallIdRef.current.delete(payload.callId);
+        const pending =
+          pendingOutgoingByCallIdRef.current.get(payload.callId) ??
+          outgoingSessionByCallIdRef.current.get(payload.callId);
         const waiter = pendingInviteOutcomeRef.current.get(payload.callId);
         if (waiter) {
           clearTimeout(waiter.timeout);
@@ -523,16 +591,18 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         }
 
         if (!payload.accepted) {
+          clearOutgoingCallSession(payload.callId);
           if (!waiter) {
             Alert.alert('Call unavailable', 'Receiver is not available right now.');
           }
           return;
         }
 
+        callerInviteAcceptedCallIdsRef.current.add(payload.callId);
+        pendingOutgoingByCallIdRef.current.delete(payload.callId);
+
         if (pending) {
-          openVoiceCall(pending.bootstrap, pending.peerName, pending.peerImage, {
-            outgoingCallerPhase: 'joining',
-          });
+          openCallerJoiningVoiceCall(pending);
           return;
         }
 
@@ -541,7 +611,15 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
             const { data } = await callApi.bootstrap(payload.fromId, payload.callId);
             const fallback = peerProfileRef.current.get(payload.fromId);
             const peerName = fallback?.name ?? 'User';
-            openVoiceCall(data, peerName, fallback?.image ?? null);
+            const session: PendingOutgoingCall = {
+              callId: payload.callId,
+              peerId: payload.fromId,
+              peerName,
+              peerImage: fallback?.image ?? null,
+              bootstrap: data,
+            };
+            outgoingSessionByCallIdRef.current.set(payload.callId, session);
+            openCallerJoiningVoiceCall(session);
           } catch {
             Alert.alert('Call accepted', 'The user accepted, but joining failed. Please try again.');
           }
@@ -552,7 +630,7 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         if (payload.fromType === (userRoleRef.current === 'caller' ? 'u' : 'r')) return;
         seenIncomingCallIdsRef.current.delete(payload.callId);
         rejectedIncomingCallIdsRef.current.delete(payload.callId);
-        pendingOutgoingByCallIdRef.current.delete(payload.callId);
+        clearOutgoingCallSession(payload.callId);
         const waiter = pendingInviteOutcomeRef.current.get(payload.callId);
         if (waiter) {
           clearTimeout(waiter.timeout);
@@ -572,7 +650,7 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       clearPendingInvites(false);
       socketRef.current = null;
     };
-  }, [clearPendingInvites, isSignedIn, openVoiceCall, user]);
+  }, [clearOutgoingCallSession, clearPendingInvites, isSignedIn, openCallerJoiningVoiceCall, user]);
 
   const value = useMemo<CallSignalContextValue>(
     () => ({

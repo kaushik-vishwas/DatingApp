@@ -25,7 +25,7 @@ import type { VoiceBootstrapResponse } from '../../types/api';
 import { useCallSignals } from '../../context/CallSignalContext';
 import { useAuth } from '../../context/AuthContext';
 import { callApi, getErrorMessage, getJwt, getResolvedApiBaseUrl } from '../../services/api';
-import { startOutboundRingtoneLoop } from '../../utils/callSounds';
+import { startOutboundRingtoneLoop, stopOutboundRingtonePlayback } from '../../utils/callSounds';
 import { profileImageUrlForStreamOrNetwork, resolveProfileImageSource } from '../../utils/avatarSource';
 
 type Props =
@@ -237,12 +237,10 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
   const [speakerOn, setSpeakerOn] = useState(true);
   const [liveSettledAmountInr, setLiveSettledAmountInr] = useState(0);
   const [postCallOpen, setPostCallOpen] = useState(false);
-  const [postCallThanks, setPostCallThanks] = useState(false);
   const [postCallDetails, setPostCallDetails] = useState<PostCallDetails | null>(null);
   const [selectedRating, setSelectedRating] = useState(0);
   const [selectedIssueTags, setSelectedIssueTags] = useState<Set<string>>(() => new Set());
-  const [submittingRating, setSubmittingRating] = useState(false);
-  const [submittingIssue, setSubmittingIssue] = useState(false);
+  const [submittingPostCall, setSubmittingPostCall] = useState(false);
   const autoEndByBalanceRef = useRef(false);
   const activeCallRef = useRef<{
     leave: () => Promise<void>;
@@ -348,7 +346,6 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
   const openPostCallSummary = () => {
     setSelectedRating(0);
     setSelectedIssueTags(new Set());
-    setPostCallThanks(false);
     setPostCallOpen(true);
   };
 
@@ -371,8 +368,35 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
 
   const closePostCallAndExit = () => {
     setPostCallOpen(false);
-    setPostCallThanks(false);
     stopQueueAndExit();
+  };
+
+  const canSubmitPostCallFeedback =
+    selectedRating > 0 || selectedIssueTags.size > 0;
+
+  const submitPostCallFeedback = async (): Promise<void> => {
+    const hasRating = selectedRating > 0;
+    const hasReport = selectedIssueTags.size > 0;
+    if (!hasRating && !hasReport) return;
+
+    setSubmittingPostCall(true);
+    try {
+      const tasks: Promise<unknown>[] = [];
+      if (hasRating) {
+        tasks.push(callApi.sessionRate(callIdRef.current, selectedRating));
+      }
+      if (hasReport) {
+        tasks.push(callApi.sessionReport(callIdRef.current, [...selectedIssueTags]));
+      }
+      const results = await Promise.allSettled(tasks);
+      if (results.every((r) => r.status === 'rejected')) {
+        Alert.alert('Could not submit', 'Please try again or skip to go home.');
+        return;
+      }
+      closePostCallAndExit();
+    } finally {
+      setSubmittingPostCall(false);
+    }
   };
 
   const toggleIssueTag = (tag: string) => {
@@ -688,8 +712,13 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
 
   const hangup = async () => {
     if (user?.role === 'caller' && getOutgoingCallerPhase(route.params as VoiceCallScreenParams) === 'ringing') {
+      await stopOutboundRingtonePlayback();
       cancelOutgoingCallInvite();
-      navigateCallerHome();
+      if (navigation.canGoBack()) {
+        navigation.goBack();
+      } else {
+        navigateCallerHome();
+      }
       return;
     }
     if (endingRef.current) return;
@@ -971,177 +1000,116 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
         </sdk.StreamCall>
       </sdk.StreamVideo>
       <Modal visible={postCallOpen} animationType="fade" transparent>
-        <View style={[styles.postModalRoot, postCallThanks && styles.postModalRootDim]}>
-          {postCallThanks ? (
-            <View style={[styles.postThanksWrap, { paddingTop: insets.top + 40 }]}>
-              <View style={styles.postThanksCard}>
-                <Text style={styles.postThanksTitle}>Thanks !</Text>
-                <View style={styles.postThanksStars}>
-                  {[1, 2, 3, 4, 5].map((n) => (
-                    <Ionicons
-                      key={n}
-                      name={n <= selectedRating ? 'star' : 'star-outline'}
-                      size={34}
-                      color={n <= selectedRating ? '#fbbf24' : '#c4b5fd'}
-                    />
-                  ))}
+        <View style={styles.postModalRoot}>
+          <ScrollView
+            style={styles.postScroll}
+            contentContainerStyle={{
+              paddingHorizontal: 22,
+              paddingTop: insets.top + 18,
+              paddingBottom: insets.bottom + 28,
+            }}
+            keyboardShouldPersistTaps="handled"
+          >
+            <View style={styles.postHeroAvatar}>
+              {peerAvatarCallSource ? (
+                <Image source={peerAvatarCallSource} style={styles.postHeroAvatarImg} />
+              ) : (
+                <View style={[styles.postHeroAvatarImg, styles.postHeroAvatarPh]}>
+                  <Text style={styles.postHeroAvatarInitial}>
+                    {(route.params.peerName || 'U').trim().charAt(0).toUpperCase()}
+                  </Text>
                 </View>
-                <Text style={styles.postThanksSub}>for your Reviews !</Text>
-                <TouchableOpacity activeOpacity={0.9} onPress={closePostCallAndExit} style={styles.postThanksBtnTouch}>
-                  <LinearGradient
-                    colors={['#7F00FF', '#7b2cff', '#9333ea']}
-                    start={{ x: 0, y: 0 }}
-                    end={{ x: 1, y: 1 }}
-                    style={styles.postGradBtn}
-                  >
-                    <Text style={styles.postGradBtnText}>Go Back</Text>
-                  </LinearGradient>
-                </TouchableOpacity>
+              )}
+            </View>
+            <Text style={styles.postPeerTitle}>{route.params.peerName || 'Receiver'}</Text>
+
+            <View style={styles.postDetailBox}>
+              <View style={styles.postDetailRow}>
+                <Text style={styles.postDetailLabel}>Total Duration</Text>
+                <Text style={styles.postDetailValue}>{formatCallDurationShort(summaryDurationSec)}</Text>
+              </View>
+              <View style={styles.postDetailRow}>
+                <Text style={styles.postDetailLabel}>Total Cost</Text>
+                <Text style={styles.postDetailValue}>₹{summaryCostInr}</Text>
+              </View>
+              <View style={[styles.postDetailRow, styles.postDetailRowLast]}>
+                <Text style={styles.postDetailLabel}>Remaining Balance</Text>
+                <Text style={[styles.postDetailValue, styles.postDetailValueAccent]}>₹{summaryWalletInr}</Text>
               </View>
             </View>
-          ) : (
-            <ScrollView
-              style={styles.postScroll}
-              contentContainerStyle={{
-                paddingHorizontal: 22,
-                paddingTop: insets.top + 18,
-                paddingBottom: insets.bottom + 28,
-              }}
-              keyboardShouldPersistTaps="handled"
-            >
-              <View style={styles.postHeroAvatar}>
-                {peerAvatarCallSource ? (
-                  <Image source={peerAvatarCallSource} style={styles.postHeroAvatarImg} />
-                ) : (
-                  <View style={[styles.postHeroAvatarImg, styles.postHeroAvatarPh]}>
-                    <Text style={styles.postHeroAvatarInitial}>
-                      {(route.params.peerName || 'U').trim().charAt(0).toUpperCase()}
-                    </Text>
-                  </View>
-                )}
-              </View>
-              <Text style={styles.postPeerTitle}>{route.params.peerName || 'Receiver'}</Text>
 
-              <View style={styles.postDetailBox}>
-                <View style={styles.postDetailRow}>
-                  <Text style={styles.postDetailLabel}>Total Duration</Text>
-                  <Text style={styles.postDetailValue}>{formatCallDurationShort(summaryDurationSec)}</Text>
-                </View>
-                <View style={styles.postDetailRow}>
-                  <Text style={styles.postDetailLabel}>Total Cost</Text>
-                  <Text style={styles.postDetailValue}>₹{summaryCostInr}</Text>
-                </View>
-                <View style={[styles.postDetailRow, styles.postDetailRowLast]}>
-                  <Text style={styles.postDetailLabel}>Remaining Balance</Text>
-                  <Text style={[styles.postDetailValue, styles.postDetailValueAccent]}>₹{summaryWalletInr}</Text>
-                </View>
-              </View>
-
-              <Text style={styles.postSectionTitle}>Rate your experience</Text>
-              <View style={styles.postStarRow}>
-                {[1, 2, 3, 4, 5].map((n) => (
-                  <TouchableOpacity
-                    key={n}
-                    activeOpacity={0.75}
-                    onPress={() => setSelectedRating(n)}
-                    style={styles.postStarHit}
-                    accessibilityRole="button"
-                    accessibilityLabel={`Rate ${n} out of 5`}
-                  >
-                    <Ionicons
-                      name={n <= selectedRating ? 'star' : 'star-outline'}
-                      size={36}
-                      color={n <= selectedRating ? '#fbbf24' : '#c4b5fd'}
-                    />
-                  </TouchableOpacity>
-                ))}
-              </View>
-              <TouchableOpacity
-                activeOpacity={0.9}
-                disabled={selectedRating === 0 || submittingRating}
-                onPress={() => {
-                  void (async () => {
-                    if (!selectedRating) return;
-                    setSubmittingRating(true);
-                    try {
-                      await callApi.sessionRate(callIdRef.current, selectedRating);
-                      setPostCallThanks(true);
-                    } catch {
-                      Alert.alert('Rating', 'Could not submit your rating. You can still report an issue or go home.');
-                    } finally {
-                      setSubmittingRating(false);
-                    }
-                  })();
-                }}
-                style={[styles.postPrimaryBtnOuter, (selectedRating === 0 || submittingRating) && styles.postBtnDisabled]}
-              >
-                <LinearGradient
-                  colors={['#7F00FF', '#7b2cff', '#9333ea']}
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 1, y: 1 }}
-                  style={styles.postGradBtn}
+            <Text style={styles.postSectionTitle}>Rate your experience</Text>
+            <View style={styles.postStarRow}>
+              {[1, 2, 3, 4, 5].map((n) => (
+                <TouchableOpacity
+                  key={n}
+                  activeOpacity={0.75}
+                  onPress={() => setSelectedRating(n)}
+                  style={styles.postStarHit}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Rate ${n} out of 5`}
+                  disabled={submittingPostCall}
                 >
-                  <Text style={styles.postGradBtnText}>
-                    {submittingRating ? 'Submitting...' : 'Submit Review'}
-                  </Text>
-                </LinearGradient>
-              </TouchableOpacity>
+                  <Ionicons
+                    name={n <= selectedRating ? 'star' : 'star-outline'}
+                    size={36}
+                    color={n <= selectedRating ? '#fbbf24' : '#c4b5fd'}
+                  />
+                </TouchableOpacity>
+              ))}
+            </View>
 
-              <View style={styles.postDivider} />
+            <View style={styles.postDivider} />
 
-              <Text style={styles.postReportHeading}>
-                Faced any Issue? <Text style={styles.postReportHere}>Report Here</Text>
-              </Text>
-              <View style={styles.postChipWrap}>
-                {POST_CALL_ISSUE_TAGS.map((tag) => {
-                  const on = selectedIssueTags.has(tag);
-                  return (
-                    <TouchableOpacity
-                      key={tag}
-                      onPress={() => toggleIssueTag(tag)}
-                      activeOpacity={0.85}
-                      style={[styles.postChip, on && styles.postChipOn]}
-                    >
-                      <Text style={[styles.postChipTxt, on && styles.postChipTxtOn]}>{tag}</Text>
-                    </TouchableOpacity>
-                  );
-                })}
-              </View>
-              <TouchableOpacity
-                activeOpacity={0.9}
-                disabled={selectedIssueTags.size === 0 || submittingIssue}
-                onPress={() => {
-                  void (async () => {
-                    if (selectedIssueTags.size === 0) return;
-                    setSubmittingIssue(true);
-                    try {
-                      await callApi.sessionReport(callIdRef.current, [...selectedIssueTags]);
-                      setSelectedIssueTags(new Set());
-                      Alert.alert('Submitted', 'Thank you. Our team will review your report.');
-                    } catch (e) {
-                      Alert.alert('Report', getErrorMessage(e));
-                    } finally {
-                      setSubmittingIssue(false);
-                    }
-                  })();
-                }}
-                style={[
-                  styles.postIssueBtn,
-                  (selectedIssueTags.size === 0 || submittingIssue) && styles.postBtnDisabled,
-                ]}
+            <Text style={styles.postReportHeading}>
+              Faced any Issue? <Text style={styles.postReportHere}>Report Here</Text>
+            </Text>
+            <View style={styles.postChipWrap}>
+              {POST_CALL_ISSUE_TAGS.map((tag) => {
+                const on = selectedIssueTags.has(tag);
+                return (
+                  <TouchableOpacity
+                    key={tag}
+                    onPress={() => toggleIssueTag(tag)}
+                    activeOpacity={0.85}
+                    style={[styles.postChip, on && styles.postChipOn]}
+                    disabled={submittingPostCall}
+                  >
+                    <Text style={[styles.postChipTxt, on && styles.postChipTxtOn]}>{tag}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+
+            <TouchableOpacity
+              activeOpacity={0.9}
+              disabled={!canSubmitPostCallFeedback || submittingPostCall}
+              onPress={() => void submitPostCallFeedback()}
+              style={[
+                styles.postPrimaryBtnOuter,
+                (!canSubmitPostCallFeedback || submittingPostCall) && styles.postBtnDisabled,
+              ]}
+            >
+              <LinearGradient
+                colors={['#7F00FF', '#7b2cff', '#9333ea']}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={styles.postGradBtn}
               >
-                <Text style={styles.postIssueBtnTxt}>{submittingIssue ? 'Submitting...' : 'Submit Issue'}</Text>
-              </TouchableOpacity>
+                <Text style={styles.postGradBtnText}>
+                  {submittingPostCall ? 'Submitting...' : 'Submit'}
+                </Text>
+              </LinearGradient>
+            </TouchableOpacity>
 
-              <TouchableOpacity
-                style={styles.postSkipBtn}
-                disabled={submittingRating}
-                onPress={closePostCallAndExit}
-              >
-                <Text style={styles.postSkipTxt}>Skip, go to home</Text>
-              </TouchableOpacity>
-            </ScrollView>
-          )}
+            <TouchableOpacity
+              style={styles.postSkipBtn}
+              disabled={submittingPostCall}
+              onPress={closePostCallAndExit}
+            >
+              <Text style={styles.postSkipTxt}>Skip, go to home</Text>
+            </TouchableOpacity>
+          </ScrollView>
         </View>
       </Modal>
     </View>
@@ -1296,7 +1264,6 @@ const styles = StyleSheet.create({
   countdownTitle: { color: '#c4b5fd', fontSize: 11, fontWeight: '700' },
   countdownValue: { color: '#faf5ff', fontSize: 28, fontWeight: '900', marginTop: 2 },
   postModalRoot: { flex: 1, backgroundColor: '#faf5ff' },
-  postModalRootDim: { backgroundColor: 'rgba(46, 16, 101, 0.55)' },
   postScroll: { flex: 1, backgroundColor: '#faf5ff' },
   postHeroAvatar: {
     alignSelf: 'center',
@@ -1403,30 +1370,6 @@ const styles = StyleSheet.create({
   },
   postChipTxt: { fontSize: 13, fontWeight: '600', color: '#5b21b6' },
   postChipTxtOn: { color: '#4c1d95' },
-  postIssueBtn: {
-    marginTop: 18,
-    backgroundColor: '#7c3aed',
-    borderRadius: 14,
-    paddingVertical: 15,
-    alignItems: 'center',
-  },
-  postIssueBtnTxt: { color: '#fff', fontSize: 16, fontWeight: '800' },
   postSkipBtn: { marginTop: 20, alignSelf: 'center', paddingVertical: 10, paddingHorizontal: 12 },
   postSkipTxt: { color: '#6d28d9', fontSize: 14, fontWeight: '700' },
-  postThanksWrap: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 28 },
-  postThanksCard: {
-    width: '100%',
-    maxWidth: 340,
-    backgroundColor: '#faf5ff',
-    borderRadius: 18,
-    paddingVertical: 28,
-    paddingHorizontal: 22,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#ddd6fe',
-  },
-  postThanksTitle: { fontSize: 22, fontWeight: '900', color: '#3b0764' },
-  postThanksStars: { marginTop: 16, flexDirection: 'row', gap: 6 },
-  postThanksSub: { marginTop: 12, fontSize: 15, fontWeight: '700', color: '#5b21b6' },
-  postThanksBtnTouch: { marginTop: 22, alignSelf: 'stretch', borderRadius: 14, overflow: 'hidden' },
 });

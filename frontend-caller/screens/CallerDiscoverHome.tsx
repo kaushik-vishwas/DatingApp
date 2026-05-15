@@ -1,4 +1,4 @@
-import { useIsFocused, useNavigation } from '@react-navigation/native';
+import { useFocusEffect, useIsFocused, useNavigation } from '@react-navigation/native';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { LinearGradient } from 'expo-linear-gradient';
 import {
@@ -69,6 +69,12 @@ export default function CallerDiscoverHome(): React.JSX.Element {
   const randomRingPulse1 = useRef(new Animated.Value(0)).current;
   const randomRingPulse2 = useRef(new Animated.Value(0)).current;
   const discoverLoadGenRef = useRef(0);
+
+  useFocusEffect(
+    useCallback(() => {
+      setRandomCalling(false);
+    }, [])
+  );
 
   useEffect(() => {
     const t = setTimeout(() => setDebounced(search.trim()), 350);

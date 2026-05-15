@@ -825,6 +825,47 @@ async function getPendingWithdrawalAmount(receiverId) {
         .lean();
     return roundInr(rows.reduce((sum, row) => sum + Number(row.amount || 0), 0));
 }
+async function sumReceiverDebitedWithdrawals(receiverId) {
+    const rows = await WithdrawalRequest_1.default.find({
+        receiverId,
+        walletDebitedAt: { $ne: null },
+    })
+        .select('amount')
+        .lean();
+    return roundInr(rows.reduce((sum, row) => sum + Number(row.amount || 0), 0));
+}
+async function computeReceiverCallEarningsLifetime(receiverObjectId) {
+    const completedCalls = await CallSession_1.default.find({
+        receiverId: receiverObjectId,
+        status: 'completed',
+        durationSec: { $gt: 0 },
+    })
+        .select('durationSec receiverEarnedInr receiverPayoutRatePerMinute')
+        .lean();
+    let total = 0;
+    for (const row of completedCalls) {
+        total += effectiveCallReceiverEarnedInr(row);
+    }
+    return roundInr(total);
+}
+/**
+ * Withdrawable INR = (voice call earnings + chat credits in wallet + already paid out) − paid out − pending.
+ * Voice earnings live on CallSession; chat credits use `receiver.walletBalance` (debited only after payout success).
+ */
+async function computeReceiverWithdrawableSnapshot(receiverId, receiverWalletBalance) {
+    const ridObj = new mongoose_1.default.Types.ObjectId(receiverId);
+    const wallet = roundInr(typeof receiverWalletBalance === 'number' && Number.isFinite(receiverWalletBalance)
+        ? receiverWalletBalance
+        : 0);
+    const [callEarnings, totalWithdrawn, pendingAmount] = await Promise.all([
+        computeReceiverCallEarningsLifetime(ridObj),
+        sumReceiverDebitedWithdrawals(receiverId),
+        getPendingWithdrawalAmount(receiverId),
+    ]);
+    const totalEarnings = roundInr(callEarnings + wallet + totalWithdrawn);
+    const withdrawableBalance = roundInr(Math.max(0, totalEarnings - totalWithdrawn - pendingAmount));
+    return { withdrawableBalance, pendingAmount, totalEarnings, totalWithdrawn };
+}
 const IST_OFFSET_MINUTES = 330;
 function toIstDate(d) {
     return new Date(d.getTime() + IST_OFFSET_MINUTES * 60 * 1000);
@@ -928,39 +969,21 @@ const getReceiverWalletSummary = async (req, res) => {
         const walletBalance = typeof receiver?.walletBalance === 'number' && Number.isFinite(receiver.walletBalance)
             ? roundInr(receiver.walletBalance)
             : 0;
-        const inMonth = await ChatMessage_1.default.find({ receiverId: rid, createdAt: { $gte: startOfMonth } })
+        const allMessages = await ChatMessage_1.default.find({ receiverId: rid })
             .sort({ createdAt: 1 })
             .select('userId senderType feeInr createdAt')
             .lean();
-        const uidStrs = [...new Set(inMonth.map((m) => String(m.userId)))];
-        const prior = uidStrs.length === 0
-            ? []
-            : await ChatMessage_1.default.find({
-                receiverId: rid,
-                userId: { $in: uidStrs.map((id) => new mongoose_1.default.Types.ObjectId(id)) },
-                createdAt: { $lt: startOfMonth },
-            })
-                .sort({ createdAt: 1 })
-                .select('userId senderType feeInr createdAt')
-                .lean();
         const byUser = new Map();
-        for (const m of prior) {
+        for (const m of allMessages) {
             const k = String(m.userId);
             if (!byUser.has(k))
                 byUser.set(k, []);
             byUser.get(k).push(m);
-        }
-        for (const m of inMonth) {
-            const k = String(m.userId);
-            if (!byUser.has(k))
-                byUser.set(k, []);
-            byUser.get(k).push(m);
-        }
-        for (const list of byUser.values()) {
-            list.sort((a, b) => msgTime(a).getTime() - msgTime(b).getTime());
         }
         let chatToday = 0;
         let chatThisMonth = 0;
+        let chatEarningsThisWeek = 0;
+        let chatEarningsLifetime = 0;
         const recentCandidates = [];
         for (const list of byUser.values()) {
             let receiverHasReplied = false;
@@ -973,8 +996,11 @@ const getReceiverWalletSummary = async (req, res) => {
                 const fee = effectiveCallerFeeInr(m, receiverHasReplied);
                 if (fee <= 0)
                     continue;
+                chatEarningsLifetime += fee;
                 if (t >= startOfToday)
                     chatToday += fee;
+                if (t >= weekStart)
+                    chatEarningsThisWeek += fee;
                 if (t >= startOfMonth) {
                     chatThisMonth += fee;
                     recentCandidates.push({
@@ -988,6 +1014,8 @@ const getReceiverWalletSummary = async (req, res) => {
         }
         chatToday = roundInr(chatToday);
         chatThisMonth = roundInr(chatThisMonth);
+        chatEarningsThisWeek = roundInr(chatEarningsThisWeek);
+        chatEarningsLifetime = roundInr(chatEarningsLifetime);
         const completedCalls = await CallSession_1.default.find({
             receiverId: rid,
             status: 'completed',
@@ -1009,6 +1037,9 @@ const getReceiverWalletSummary = async (req, res) => {
         callEarningsLifetime = roundInr(callEarningsLifetime);
         callEarningsToday = roundInr(callEarningsToday);
         callEarningsThisWeek = roundInr(callEarningsThisWeek);
+        const totalEarningsLifetime = roundInr(callEarningsLifetime + chatEarningsLifetime);
+        const totalEarningsToday = roundInr(callEarningsToday + chatToday);
+        const totalEarningsThisWeek = roundInr(callEarningsThisWeek + chatEarningsThisWeek);
         recentCandidates.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
         const topRecent = recentCandidates.slice(0, 20);
         const userIds = [...new Set(topRecent.map((r) => r.userId))];
@@ -1029,9 +1060,14 @@ const getReceiverWalletSummary = async (req, res) => {
             walletBalance,
             chatToday,
             chatThisMonth,
+            chatEarningsLifetime,
+            chatEarningsThisWeek,
             callEarningsLifetime,
             callEarningsToday,
             callEarningsThisWeek,
+            totalEarningsLifetime,
+            totalEarningsToday,
+            totalEarningsThisWeek,
             recent,
         });
     }
@@ -1065,20 +1101,22 @@ const getReceiverWithdrawalOverview = async (req, res) => {
             res.status(400).json({ message: 'Please complete bank details before requesting a withdrawal' });
             return;
         }
-        const [pendingSumRows, recentRows] = await Promise.all([
-            WithdrawalRequest_1.default.find({ receiverId: rid, status: 'pending' }).select('amount').lean(),
-            WithdrawalRequest_1.default.find({ receiverId: rid, status: { $in: ['pending', 'approved', 'rejected'] } })
-                .sort({ createdAt: -1 })
-                .limit(20)
-                .select('amount status createdAt payoutStatus payoutUtr')
-                .lean(),
-        ]);
-        const pendingAmount = roundInr(pendingSumRows.reduce((sum, row) => sum + Number(row.amount || 0), 0));
+        const recentRows = await WithdrawalRequest_1.default.find({
+            receiverId: rid,
+            status: { $in: ['pending', 'approved', 'rejected'] },
+        })
+            .sort({ createdAt: -1 })
+            .limit(20)
+            .select('amount status createdAt payoutStatus payoutUtr')
+            .lean();
+        const withdrawable = await computeReceiverWithdrawableSnapshot(rid, typeof receiver.walletBalance === 'number' && Number.isFinite(receiver.walletBalance)
+            ? receiver.walletBalance
+            : 0);
         res.status(200).json({
-            walletBalance: typeof receiver.walletBalance === 'number' && Number.isFinite(receiver.walletBalance)
-                ? roundInr(receiver.walletBalance)
-                : 0,
-            pendingAmount,
+            walletBalance: withdrawable.withdrawableBalance,
+            pendingAmount: withdrawable.pendingAmount,
+            totalEarnings: withdrawable.totalEarnings,
+            totalWithdrawn: withdrawable.totalWithdrawn,
             bank: {
                 bankName: receiver.bankName,
                 accountHolderName: receiver.bankAccountHolderName,
@@ -1123,9 +1161,8 @@ const sendReceiverWithdrawalOtp = async (req, res) => {
             res.status(404).json({ message: 'Receiver not found' });
             return;
         }
-        const pendingAmount = await getPendingWithdrawalAmount(rid);
-        const availableForNewRequest = roundInr(Math.max(0, receiver.walletBalance - pendingAmount));
-        if (amount > availableForNewRequest) {
+        const withdrawable = await computeReceiverWithdrawableSnapshot(rid, receiver.walletBalance ?? 0);
+        if (amount > withdrawable.withdrawableBalance) {
             res.status(400).json({ message: 'Insufficient wallet balance' });
             return;
         }
@@ -1210,9 +1247,8 @@ const verifyReceiverWithdrawalOtpAndCreate = async (req, res) => {
             res.status(400).json({ message: 'Incorrect OTP' });
             return;
         }
-        const pendingAmount = await getPendingWithdrawalAmount(rid);
-        const availableForNewRequest = roundInr(Math.max(0, receiver.walletBalance - pendingAmount));
-        if (pendingVerification.amount > availableForNewRequest) {
+        const withdrawable = await computeReceiverWithdrawableSnapshot(rid, receiver.walletBalance ?? 0);
+        if (pendingVerification.amount > withdrawable.withdrawableBalance) {
             res.status(400).json({ message: 'Insufficient wallet balance. Please reduce amount and retry' });
             return;
         }
@@ -1247,7 +1283,7 @@ const verifyReceiverWithdrawalOtpAndCreate = async (req, res) => {
                 payoutStatus: pendingVerification.payoutStatus,
                 createdAt: pendingVerification.createdAt.toISOString(),
             },
-            walletBalance: roundInr(receiver.walletBalance),
+            walletBalance: withdrawable.withdrawableBalance,
         });
     }
     catch (err) {

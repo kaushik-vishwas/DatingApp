@@ -9,6 +9,7 @@ import { useCallSignals } from '../../context/CallSignalContext';
 import type { CallerStackParamList } from '../../navigation/CallerStackParamList';
 import { getErrorMessage, profileApi } from '../../services/api';
 import type { CallerCallHistoryRow } from '../../types/api';
+import { resolveProfileImageSource } from '../../utils/avatarSource';
 import { SCREEN_FETCH_TIMEOUT_MS, withTimeout } from '../../utils/withTimeout';
 
 type Props = NativeStackScreenProps<CallerStackParamList, 'CallerCalls'>;
@@ -103,10 +104,12 @@ export default function CallerCallsTabScreen({ navigation }: Props): React.JSX.E
             <Text style={styles.sub}>Your call history will show up here after you connect with someone.</Text>
           </View>
         ) : (
-          rows.map((row) => (
+          rows.map((row) => {
+            const receiverAvatar = resolveProfileImageSource(row.receiverImage);
+            return (
             <View key={row.id} style={styles.row}>
-              {row.receiverImage ? (
-                <Image source={{ uri: row.receiverImage }} style={styles.avatar} />
+              {receiverAvatar ? (
+                <Image source={receiverAvatar} style={styles.avatar} />
               ) : (
                 <View style={[styles.avatar, styles.avatarPh]}>
                   <Text style={styles.avatarTxt}>{row.receiverName.charAt(0) || '?'}</Text>
@@ -148,7 +151,8 @@ export default function CallerCallsTabScreen({ navigation }: Props): React.JSX.E
                 </TouchableOpacity>
               </View>
             </View>
-          ))
+            );
+          })
         )}
       </View>
       <CallerBottomTabs active="calls" navigation={navigation} />

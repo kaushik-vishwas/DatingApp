@@ -225,10 +225,18 @@ export interface ReceiverWalletSummaryResponse {
   chatToday: number;
   /** Same, since the first day of this calendar month (server local). */
   chatThisMonth: number;
+  /** Lifetime chat message earnings (same fee rules as billing). */
+  chatEarningsLifetime?: number;
+  /** Chat earnings in the rolling last 7 days. */
+  chatEarningsThisWeek?: number;
   /** Lifetime voice-call earnings from score-tier rate × duration (`receiverEarnedInr` per session). */
   callEarningsLifetime: number;
   callEarningsToday: number;
   callEarningsThisWeek: number;
+  /** Chat + call combined totals for earnings summary UI. */
+  totalEarningsLifetime?: number;
+  totalEarningsToday?: number;
+  totalEarningsThisWeek?: number;
   recent: ReceiverWalletRecentRow[];
 }
 
@@ -245,8 +253,11 @@ export interface ReceiverWithdrawalRow {
 }
 
 export interface ReceiverWithdrawalOverviewResponse {
+  /** Withdrawable balance: total lifetime earnings − completed withdrawals − pending requests. */
   walletBalance: number;
   pendingAmount: number;
+  totalEarnings?: number;
+  totalWithdrawn?: number;
   bank: {
     bankName: string;
     accountHolderName: string;
