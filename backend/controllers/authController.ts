@@ -86,11 +86,63 @@ type PendingReceiverSignup = {
 };
 const pendingReceiverSignups = new Map<string, PendingReceiverSignup>();
 
+type PendingMobileSignup = {
+  phone: string;
+  otp: string;
+  otpExpiry: Date;
+};
+
+/** OTP for brand-new numbers before gender-based account creation. */
+const pendingMobileSignups = new Map<string, PendingMobileSignup>();
+/** Phones that passed OTP but still need gender selection (value = expiry). */
+const verifiedMobilePhones = new Map<string, Date>();
+
+const VERIFIED_MOBILE_TTL_MS = 15 * 60 * 1000;
+
 function clearExpiredPendingReceiverSignups(): void {
   const now = Date.now();
   for (const [phone, row] of pendingReceiverSignups.entries()) {
     if (row.otpExpiry.getTime() <= now) pendingReceiverSignups.delete(phone);
   }
+}
+
+function clearExpiredPendingMobileSignups(): void {
+  const now = Date.now();
+  for (const [phone, row] of pendingMobileSignups.entries()) {
+    if (row.otpExpiry.getTime() <= now) pendingMobileSignups.delete(phone);
+  }
+}
+
+function clearExpiredVerifiedMobilePhones(): void {
+  const now = Date.now();
+  for (const [phone, expiry] of verifiedMobilePhones.entries()) {
+    if (expiry.getTime() <= now) verifiedMobilePhones.delete(phone);
+  }
+}
+
+async function resolvePhoneAccountType(
+  phoneDigits: string
+): Promise<'user' | 'receiver' | null> {
+  const [user, receiver] = await Promise.all([
+    User.findOne({ phone: phoneDigits }),
+    Receiver.findOne({ phone: phoneDigits }),
+  ]);
+  if (user) return 'user';
+  if (receiver) return 'receiver';
+  return null;
+}
+
+function generateOtpCode(): string {
+  return String(Math.floor(100000 + Math.random() * 900000));
+}
+
+async function saveOtpOnDoc(doc: UserDocument | ReceiverDocument, label: string): Promise<void> {
+  const otp = generateOtpCode();
+  const otpExpiry = new Date(Date.now() + OTP_TTL_MS);
+  doc.otp = otp;
+  doc.otpExpiry = otpExpiry;
+  await doc.save();
+  console.log(`[OTP TEST] ${label}:${doc.phone} → OTP: ${otp}`);
 }
 
 
@@ -244,13 +296,10 @@ export const register = async (
     const userRole: LegacyRegisterRole = role && allowed.includes(role) ? role : 'receiver';
     const resolvedName =
       typeof name === 'string' && name.trim() ? String(name).trim() : `Member ${phoneDigits.slice(-4)}`;
-    // Keep email optional for old flows/indices; generate unique placeholder when absent.
-    const resolvedEmail = `m_${phoneDigits}@mobile.local`;
 
     if (userRole === 'caller') {
       const user = await User.create({
         name: resolvedName,
-        email: resolvedEmail,
         phone: phoneDigits,
         isVerified: false,
         passwordHash: null,
@@ -265,7 +314,6 @@ export const register = async (
 
     const receiver = await Receiver.create({
       name: resolvedName,
-      email: resolvedEmail,
       phone: phoneDigits,
       isVerified: false,
       passwordHash: null,
@@ -767,10 +815,8 @@ export const verifyOtp = async (
       }
       
       // CREATE ACCOUNT ONLY NOW - after successful OTP verification
-      const resolvedEmail = `m_${phoneDigits}@mobile.local`;
       doc = await Receiver.create({
         name: pending.name,
-        email: resolvedEmail,
         phone: phoneDigits,
         isVerified: true,
         passwordHash: null,
@@ -788,6 +834,333 @@ export const verifyOtp = async (
     const msg = err instanceof Error ? err.message : String(err);
     t.logFullError('verify_otp_unhandled', err, { mongoCode: mongoErrCode(err) });
     t.json(500, { message: msg || 'Server error', error: 'VERIFY_OTP_FAILED' });
+  }
+};
+
+type LookupPhoneBody = { phone: string };
+type MobilePhoneBody = { phone: string };
+type VerifyMobileOtpBody = { phone: string; otp: string };
+type CompleteMobileSignupBody = { phone: string; gender: 'male' | 'female' };
+
+/**
+ * POST /auth/lookup-phone — which table holds this mobile (if any).
+ */
+export const lookupPhone = async (
+  req: Request<{}, {}, LookupPhoneBody>,
+  res: Response
+): Promise<void> => {
+  const t = beginApiTrace('POST /auth/lookup-phone', req, res);
+  try {
+    const phoneDigits = typeof req.body.phone === 'string' ? String(req.body.phone).trim() : '';
+    if (!phoneDigits) {
+      t.json(400, { message: 'phone is required', error: 'LOOKUP_PHONE_MISSING' });
+      return;
+    }
+    const accountType = await resolvePhoneAccountType(phoneDigits);
+    t.json(200, { accountType, isRegistered: accountType !== null });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    t.logFullError('lookup_phone_unhandled', err, { mongoCode: mongoErrCode(err) });
+    t.json(500, { message: msg || 'Server error', error: 'LOOKUP_PHONE_FAILED' });
+  }
+};
+
+/**
+ * POST /auth/send-otp-mobile — send OTP without choosing caller/receiver first.
+ */
+export const sendOtpMobile = async (
+  req: Request<{}, {}, MobilePhoneBody>,
+  res: Response
+): Promise<void> => {
+  const t = beginApiTrace('POST /auth/send-otp-mobile', req, res);
+  try {
+    const phoneDigits = typeof req.body.phone === 'string' ? String(req.body.phone).trim() : '';
+    if (!phoneDigits) {
+      t.json(400, { message: 'phone is required', error: 'SEND_MOBILE_OTP_MISSING_PHONE' });
+      return;
+    }
+
+    clearExpiredPendingReceiverSignups();
+    clearExpiredPendingMobileSignups();
+
+    const accountType = await resolvePhoneAccountType(phoneDigits);
+
+    if (accountType === 'user') {
+      const doc = await User.findOne({ phone: phoneDigits });
+      if (!doc) {
+        t.json(404, { message: 'User not found', error: 'SEND_MOBILE_OTP_USER_NOT_FOUND' });
+        return;
+      }
+      await saveOtpOnDoc(doc, 'user');
+      t.json(200, { message: 'OTP sent', sent: true, accountType: 'user', isNewUser: false });
+      return;
+    }
+
+    if (accountType === 'receiver') {
+      const doc = await Receiver.findOne({ phone: phoneDigits });
+      if (!doc) {
+        t.json(404, { message: 'Receiver not found', error: 'SEND_MOBILE_OTP_RECEIVER_NOT_FOUND' });
+        return;
+      }
+      await saveOtpOnDoc(doc, 'receiver');
+      t.json(200, { message: 'OTP sent', sent: true, accountType: 'receiver', isNewUser: false });
+      return;
+    }
+
+    const otp = generateOtpCode();
+    const otpExpiry = new Date(Date.now() + OTP_TTL_MS);
+    pendingMobileSignups.set(phoneDigits, { phone: phoneDigits, otp, otpExpiry });
+    console.log(`[OTP TEST] new-mobile:${phoneDigits} → OTP: ${otp}`);
+    t.json(200, { message: 'OTP sent', sent: true, accountType: null, isNewUser: true });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    t.logFullError('send_otp_mobile_unhandled', err, { mongoCode: mongoErrCode(err) });
+    t.json(500, { message: msg || 'Server error', error: 'SEND_MOBILE_OTP_FAILED' });
+  }
+};
+
+/**
+ * POST /auth/verify-otp-mobile — verify OTP; login existing user or require gender for new numbers.
+ */
+export const verifyOtpMobile = async (
+  req: Request<{}, {}, VerifyMobileOtpBody>,
+  res: Response
+): Promise<void> => {
+  const t = beginApiTrace('POST /auth/verify-otp-mobile', req, res);
+  try {
+    const otpBypass = process.env.OTP_BYPASS?.toLowerCase() === 'true';
+    const phoneDigits = typeof req.body.phone === 'string' ? String(req.body.phone).trim() : '';
+    const otp = req.body.otp;
+
+    if (!phoneDigits || !otp) {
+      t.json(400, { message: 'phone and otp are required', error: 'VERIFY_MOBILE_OTP_MISSING_FIELDS' });
+      return;
+    }
+
+    clearExpiredPendingMobileSignups();
+    clearExpiredVerifiedMobilePhones();
+
+    const accountType = await resolvePhoneAccountType(phoneDigits);
+    const trimmedOtp = String(otp).trim();
+    const isBypassOtp = /^\d{6}$/.test(trimmedOtp);
+
+    const finishLogin = async (
+      doc: UserDocument | ReceiverDocument,
+      typ: 'user' | 'receiver'
+    ): Promise<void> => {
+      if (typ === 'user' && (doc as UserDocument).suspended) {
+        t.json(403, { message: PAUSED_MSG, error: 'VERIFY_OTP_ACCOUNT_SUSPENDED' });
+        return;
+      }
+      if (typ === 'receiver' && (doc as ReceiverDocument).suspended) {
+        t.json(403, { message: PAUSED_MSG, error: 'VERIFY_OTP_ACCOUNT_SUSPENDED' });
+        return;
+      }
+      const sv =
+        typ === 'user'
+          ? await bumpUserAuthSession(String(doc._id))
+          : await bumpReceiverAuthSession(String(doc._id));
+      emitAuthSessionSuperseded(typ === 'user' ? 'u' : 'r', String(doc._id), sv);
+      const token = signAppAccessToken(String(doc._id), typ === 'user' ? 'u' : 'r', sv);
+      const userJson = typ === 'user' ? toApiUser(doc as UserDocument) : toApiReceiver(doc as ReceiverDocument);
+      pendingMobileSignups.delete(phoneDigits);
+      verifiedMobilePhones.delete(phoneDigits);
+      t.json(200, {
+        status: 'authenticated',
+        message: otpBypass ? 'Login successful (OTP bypass)' : 'Login successful',
+        token,
+        user: userJson,
+        accountType: typ,
+      });
+    };
+
+    const verifyExistingDoc = async (
+      doc: UserDocument | ReceiverDocument,
+      typ: 'user' | 'receiver'
+    ): Promise<void> => {
+      if (otpBypass || isBypassOtp) {
+        doc.isVerified = true;
+        doc.otp = null;
+        doc.otpExpiry = null;
+        await doc.save();
+        await finishLogin(doc, typ);
+        return;
+      }
+      if (!doc.otp || !doc.otpExpiry) {
+        t.json(400, {
+          message: 'No OTP pending. Request a new code.',
+          error: 'VERIFY_OTP_NO_CODE_PENDING',
+        });
+        return;
+      }
+      if (new Date() > doc.otpExpiry) {
+        t.json(400, { message: 'OTP expired. Request a new code.', error: 'VERIFY_OTP_CODE_EXPIRED' });
+        return;
+      }
+      if (trimmedOtp !== doc.otp) {
+        t.json(400, { message: 'Invalid OTP', error: 'VERIFY_OTP_INVALID_CODE' });
+        return;
+      }
+      doc.isVerified = true;
+      doc.otp = null;
+      doc.otpExpiry = null;
+      await doc.save();
+      await finishLogin(doc, typ);
+    };
+
+    if (accountType === 'user') {
+      const doc = await User.findOne({ phone: phoneDigits });
+      if (!doc) {
+        t.json(404, { message: 'User not found', error: 'VERIFY_MOBILE_OTP_USER_NOT_FOUND' });
+        return;
+      }
+      await verifyExistingDoc(doc, 'user');
+      return;
+    }
+
+    if (accountType === 'receiver') {
+      const doc = await Receiver.findOne({ phone: phoneDigits });
+      if (!doc) {
+        t.json(404, { message: 'Receiver not found', error: 'VERIFY_MOBILE_OTP_RECEIVER_NOT_FOUND' });
+        return;
+      }
+      await verifyExistingDoc(doc, 'receiver');
+      return;
+    }
+
+    const pending = pendingMobileSignups.get(phoneDigits);
+    if (!pending) {
+      t.json(404, {
+        message: 'No OTP pending for this number. Request a new code.',
+        error: 'VERIFY_MOBILE_OTP_NO_PENDING',
+      });
+      return;
+    }
+
+    if (new Date() > pending.otpExpiry && !otpBypass && !isBypassOtp) {
+      pendingMobileSignups.delete(phoneDigits);
+      t.json(400, { message: 'OTP expired. Request a new code.', error: 'VERIFY_OTP_CODE_EXPIRED' });
+      return;
+    }
+
+    if (!otpBypass && !isBypassOtp && trimmedOtp !== pending.otp) {
+      t.json(400, { message: 'Invalid OTP', error: 'VERIFY_OTP_INVALID_CODE' });
+      return;
+    }
+
+    if (await phoneTaken(phoneDigits)) {
+      pendingMobileSignups.delete(phoneDigits);
+      t.json(409, {
+        message: 'Mobile number already registered',
+        error: 'REGISTER_PHONE_TAKEN',
+      });
+      return;
+    }
+
+    pendingMobileSignups.delete(phoneDigits);
+    verifiedMobilePhones.set(phoneDigits, new Date(Date.now() + VERIFIED_MOBILE_TTL_MS));
+    t.json(200, {
+      status: 'needs_gender',
+      message: 'OTP verified. Select gender to continue.',
+      phone: phoneDigits,
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    t.logFullError('verify_otp_mobile_unhandled', err, { mongoCode: mongoErrCode(err) });
+    t.json(500, { message: msg || 'Server error', error: 'VERIFY_MOBILE_OTP_FAILED' });
+  }
+};
+
+/**
+ * POST /auth/complete-mobile-signup — after OTP + gender: male → users (caller), female → receivers.
+ */
+export const completeMobileSignup = async (
+  req: Request<{}, {}, CompleteMobileSignupBody>,
+  res: Response
+): Promise<void> => {
+  const t = beginApiTrace('POST /auth/complete-mobile-signup', req, res);
+  try {
+    const phoneDigits = typeof req.body.phone === 'string' ? String(req.body.phone).trim() : '';
+    const gender = req.body.gender;
+
+    if (!phoneDigits) {
+      t.json(400, { message: 'phone is required', error: 'COMPLETE_MOBILE_SIGNUP_MISSING_PHONE' });
+      return;
+    }
+    if (gender !== 'male' && gender !== 'female') {
+      t.json(400, {
+        message: 'gender must be male or female',
+        error: 'COMPLETE_MOBILE_SIGNUP_INVALID_GENDER',
+      });
+      return;
+    }
+
+    clearExpiredVerifiedMobilePhones();
+    const verifiedUntil = verifiedMobilePhones.get(phoneDigits);
+    if (!verifiedUntil || new Date() > verifiedUntil) {
+      t.json(400, {
+        message: 'Verify OTP before completing signup.',
+        error: 'COMPLETE_MOBILE_SIGNUP_NOT_VERIFIED',
+      });
+      return;
+    }
+
+    if (await phoneTaken(phoneDigits)) {
+      verifiedMobilePhones.delete(phoneDigits);
+      t.json(409, {
+        message: 'Mobile number already registered',
+        error: 'REGISTER_PHONE_TAKEN',
+      });
+      return;
+    }
+
+    const resolvedName = `Member ${phoneDigits.slice(-4)}`;
+
+    if (gender === 'male') {
+      const user = await User.create({
+        name: resolvedName,
+        phone: phoneDigits,
+        gender: 'male',
+        isVerified: true,
+        passwordHash: null,
+        accountStatus: 'pending_profile',
+      });
+      verifiedMobilePhones.delete(phoneDigits);
+      const sv = await bumpUserAuthSession(String(user._id));
+      emitAuthSessionSuperseded('u', String(user._id), sv);
+      const token = signAppAccessToken(String(user._id), 'u', sv);
+      t.json(201, {
+        message: 'Account created',
+        token,
+        user: toApiUser(user),
+        accountType: 'user',
+      });
+      return;
+    }
+
+    const receiver = await Receiver.create({
+      name: resolvedName,
+      phone: phoneDigits,
+      gender: 'female',
+      isVerified: true,
+      passwordHash: null,
+      audioCallRate: RECEIVER_AUDIO_CALL_RATE_INR_PER_MIN,
+      accountStatus: 'pending_profile',
+    });
+    verifiedMobilePhones.delete(phoneDigits);
+    const sv = await bumpReceiverAuthSession(String(receiver._id));
+    emitAuthSessionSuperseded('r', String(receiver._id), sv);
+    const token = signAppAccessToken(String(receiver._id), 'r', sv);
+    t.json(201, {
+      message: 'Account created',
+      token,
+      user: toApiReceiver(receiver),
+      accountType: 'receiver',
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    t.logFullError('complete_mobile_signup_unhandled', err, { mongoCode: mongoErrCode(err) });
+    t.json(500, { message: msg || 'Server error', error: 'COMPLETE_MOBILE_SIGNUP_FAILED' });
   }
 };
 

@@ -19,7 +19,6 @@ import { CALLER_INTEREST_ALLOWLIST, CALLER_LANGUAGE_ALLOWLIST } from '../constan
 import { toApiReceiver, toApiUser } from './authController';
 import { blockReceiverUntilApproved } from '../utils/accountAccess';
 import { CHAT_TEXT_FEE_INR } from '../constants/chatPricing';
-import { sendOtpEmail } from '../config/email';
 import { scheduleReceiverAvailabilityNotifications } from '../services/receiverAvailabilityNotifier';
 import { syncReceiverQueueState } from '../services/callQueue';
 import { trackAndFinalizeRazorpayXPayout } from '../services/razorpayXPayoutService';
@@ -117,6 +116,7 @@ type UpdateReceiverBody = {
   gender?: Gender | null;
   /** Voice sample URL (https). When profile fields are complete, promotes `pending_profile` → `approved`. */
   userAudio?: string;
+  age?: number;
 };
 
 function receiverOnboardingProfileFieldsComplete(r: ReceiverDocument): boolean {
@@ -1105,11 +1105,14 @@ function generateOtpCode(): string {
   return String(n);
 }
 
-function maskEmail(email: string): string {
-  const [local, domain] = email.split('@');
-  if (!local || !domain) return email;
-  if (local.length <= 2) return `${local[0] ?? '*'}***@${domain}`;
-  return `${local.slice(0, 2)}***@${domain}`;
+function maskPhone(phone: string): string {
+  const d = phone.replace(/\D/g, '');
+  if (d.length < 4) return '******';
+  return `******${d.slice(-4)}`;
+}
+
+function logReceiverMobileOtp(context: string, phone: string, code: string): void {
+  console.log(`[OTP] ${context} +91${phone.replace(/\D/g, '').slice(-10)} → ${code}`);
 }
 
 type MsgLean = {
@@ -1316,7 +1319,7 @@ export const getReceiverWithdrawalOverview = async (req: Request, res: Response)
 
     const rid = String(req.receiver!._id);
     const receiver = await Receiver.findById(rid).select(
-      'walletBalance email bankName bankAccountHolderName bankAccountNumber'
+      'walletBalance phone bankName bankAccountHolderName bankAccountNumber'
     );
     if (!receiver) {
       res.status(404).json({ message: 'Receiver not found' });
@@ -1365,7 +1368,7 @@ export const getReceiverWithdrawalOverview = async (req: Request, res: Response)
         accountHolderName: receiver.bankAccountHolderName,
         accountMasked: maskAccountNumber(receiver.bankAccountNumber),
       },
-      otpEmail: receiver.email,
+      phoneMasked: receiver.phone ? maskPhone(receiver.phone) : '',
       recent: recentRows.map((row) => ({
         id: String(row._id),
         amount: roundInr(row.amount),
@@ -1403,7 +1406,7 @@ export const sendReceiverWithdrawalOtp = async (
 
     const rid = String(req.receiver!._id);
     const receiver = await Receiver.findById(rid).select(
-      'email walletBalance bankName bankAccountHolderName bankAccountNumber'
+      'phone walletBalance bankName bankAccountHolderName bankAccountNumber'
     );
     if (!receiver) {
       res.status(404).json({ message: 'Receiver not found' });
@@ -1446,13 +1449,15 @@ export const sendReceiverWithdrawalOtp = async (
       { upsert: true, new: true, setDefaultsOnInsert: true }
     );
 
-    if (receiver.email) {
-      await sendOtpEmail(receiver.email, code, 'verification');
+    if (!receiver.phone?.trim()) {
+      res.status(400).json({ message: 'Mobile number is required for OTP verification' });
+      return;
     }
+    logReceiverMobileOtp('withdrawal', receiver.phone, code);
 
     res.status(200).json({
-      message: 'OTP sent',
-      otpEmail: receiver.email ?? null,
+      message: 'OTP sent to your mobile number',
+      phoneMasked: maskPhone(receiver.phone),
       expiresInSec: 300,
     });
   } catch (err) {
@@ -1988,6 +1993,12 @@ export const updateReceiverProfile = async (
         receiver.gender = g;
       }
     }
+    if (typeof req.body.age === 'number' && Number.isFinite(req.body.age)) {
+      const age = Math.round(req.body.age);
+      if (age >= 18 && age <= 120) {
+        receiver.age = age;
+      }
+    }
     if (Array.isArray(req.body.languages)) {
       receiver.languages = req.body.languages.map((x) => String(x).trim()).filter(Boolean);
     }
@@ -2238,9 +2249,13 @@ export const sendReceiverBankUpdateOtp = async (
       return;
     }
 
-    const receiver = await Receiver.findById(String(req.receiver!._id)).select('email');
+    const receiver = await Receiver.findById(String(req.receiver!._id)).select('phone');
     if (!receiver) {
       res.status(404).json({ message: 'Receiver not found' });
+      return;
+    }
+    if (!receiver.phone?.trim()) {
+      res.status(400).json({ message: 'Mobile number is required for OTP verification' });
       return;
     }
 
@@ -2254,12 +2269,10 @@ export const sendReceiverBankUpdateOtp = async (
     receiver.pendingBankName = String(bankName).trim();
     await receiver.save();
 
-    if (receiver.email) {
-      await sendOtpEmail(receiver.email, otpCode, 'verification');
-    }
+    logReceiverMobileOtp('bank_update', receiver.phone, otpCode);
     res.status(200).json({
-      message: 'OTP sent',
-      emailMasked: receiver.email ? maskEmail(receiver.email) : null,
+      message: 'OTP sent to your mobile number',
+      phoneMasked: maskPhone(receiver.phone),
       expiresInSec: 300,
     });
   } catch (err) {

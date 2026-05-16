@@ -157,7 +157,6 @@ export const createRazorpayWalletOrder = async (
       currency: order.currency ?? 'INR',
       keyId: process.env.RAZORPAY_KEY_ID,
       businessName: process.env.RAZORPAY_BUSINESS_NAME?.trim() || 'Nesthama',
-      prefillEmail: authUser.email ?? '',
       prefillContact: authUser.phone ?? '',
       prefillName: authUser.name ?? 'User',
     });

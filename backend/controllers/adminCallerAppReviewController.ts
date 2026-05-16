@@ -20,7 +20,7 @@ export const listCallerAppStoreReviews = async (req: Request, res: Response): Pr
     if (q) {
       const rx = new RegExp(escapeRegex(q), 'i');
       const matchingUsers = await User.find({
-        $or: [{ name: rx }, { email: rx }, { phone: rx }],
+        $or: [{ name: rx }, { phone: rx }],
       })
         .select('_id')
         .lean();
@@ -45,7 +45,7 @@ export const listCallerAppStoreReviews = async (req: Request, res: Response): Pr
     const users =
       userIds.length > 0
         ? await User.find({ _id: { $in: userIds.map((id) => new mongoose.Types.ObjectId(id)) } })
-            .select('name email phone')
+            .select('name phone')
             .lean()
         : [];
     const uMap = new Map(users.map((u) => [String(u._id), u]));
@@ -56,7 +56,6 @@ export const listCallerAppStoreReviews = async (req: Request, res: Response): Pr
         _id: String(r._id),
         userId: String(r.userId),
         userName: u?.name ?? 'Unknown',
-        email: u?.email ?? '',
         phone: u?.phone ?? '',
         stars: r.stars,
         review: (r.review ?? '').trim() || '—',

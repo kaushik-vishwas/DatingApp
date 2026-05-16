@@ -1,0 +1,35 @@
+import type { DiscoverReceiverSummary } from '../types/api';
+import type { VoiceCallScreenParams } from './voiceCallParams';
+
+export type CallerStackParamList = {
+  CallerDiscover: undefined;
+  CallerCalls: undefined;
+  CallerAlerts: undefined;
+  CallerProfile: undefined;
+  CallerRateUs: undefined;
+  CallerShareApp: undefined;
+  CallerFaq: undefined;
+  CallerEditProfile: undefined;
+  CallerTerms: undefined;
+  CallerPrivacyPolicy: undefined;
+  CallerHelp: undefined;
+  CallerChats: undefined;
+  CallerChat: {
+    receiverId: string;
+    receiverName: string;
+    receiverImage?: string | null;
+  };
+  VoiceCall: VoiceCallScreenParams;
+  ReceiverProfile: { receiver: DiscoverReceiverSummary };
+  Wallet: undefined;
+  WalletTransactions: undefined;
+  PaymentMethod: {
+    payAmount: number;
+    bonusPercent: number;
+    creditAmount: number;
+    gstAmount: number;
+    totalAmount: number;
+    walletAmount: number;
+  };
+  WalletSuccess: { creditAdded: number; newBalance: number };
+};

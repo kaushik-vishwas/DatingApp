@@ -7,8 +7,6 @@ export type Gender = 'male' | 'female' | 'other';
 /** App members (callers) — dating user profile only (collection: `users`) */
 export interface IUser {
   name: string;
-  /** Optional legacy field (older accounts). New auth is phone-based. */
-  email: string | null;
   phone: string;
   isVerified: boolean;
   otp: string | null;
@@ -40,7 +38,6 @@ export type UserDocument = HydratedDocument<IUser>;
 const userSchema = new Schema<IUser>(
   {
     name: { type: String, required: true, trim: true },
-    email: { type: String, required: false, unique: true, sparse: true, lowercase: true, trim: true, default: null },
     phone: { type: String, required: true, trim: true, unique: true },
     isVerified: { type: Boolean, default: false },
     otp: { type: String, default: null },

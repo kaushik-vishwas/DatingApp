@@ -8,6 +8,7 @@ const mongoose_1 = __importDefault(require("mongoose"));
 const WithdrawalRequest_1 = __importDefault(require("../models/WithdrawalRequest"));
 const Receiver_1 = __importDefault(require("../models/Receiver"));
 const socketRegistry_1 = require("../socket/socketRegistry");
+const razorpayContact_1 = require("../utils/razorpayContact");
 function roundInrToPaise(n) {
     return Math.round(n * 100);
 }
@@ -143,7 +144,6 @@ async function trackAndFinalizeRazorpayXPayout(withdrawalId) {
     if (!safeTrim(receiver.bankAccountNumber) ||
         !safeTrim(receiver.bankIfsc) ||
         !safeTrim(receiver.bankAccountHolderName) ||
-        !safeTrim(receiver.email) ||
         !safeTrim(receiver.phone)) {
         await WithdrawalRequest_1.default.findByIdAndUpdate(withdrawalId, {
             status: 'rejected',
@@ -202,7 +202,7 @@ async function trackAndFinalizeRazorpayXPayout(withdrawalId) {
                     },
                     contact: {
                         name: safeTrim(receiver.bankAccountHolderName) || 'Receiver',
-                        email: safeTrim(receiver.email),
+                        email: (0, razorpayContact_1.razorpayContactEmailFromPhone)(safeTrim(receiver.phone)),
                         contact: safeTrim(receiver.phone),
                         type: 'customer',
                         reference_id: `recv_${String(receiver._id).slice(-10)}`.slice(0, 40),

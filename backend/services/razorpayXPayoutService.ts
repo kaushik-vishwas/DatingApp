@@ -2,6 +2,7 @@ import mongoose from 'mongoose';
 import WithdrawalRequest, { type PayoutStatus } from '../models/WithdrawalRequest';
 import Receiver from '../models/Receiver';
 import { emitReceiverWithdrawalUpdate } from '../socket/socketRegistry';
+import { razorpayContactEmailFromPhone } from '../utils/razorpayContact';
 
 type RazorpayPayoutCreateResponse = {
   id?: string;
@@ -194,7 +195,6 @@ export async function trackAndFinalizeRazorpayXPayout(withdrawalId: string): Pro
     !safeTrim(receiver.bankAccountNumber) ||
     !safeTrim(receiver.bankIfsc) ||
     !safeTrim(receiver.bankAccountHolderName) ||
-    !safeTrim(receiver.email) ||
     !safeTrim(receiver.phone)
   ) {
     await WithdrawalRequest.findByIdAndUpdate(withdrawalId, {
@@ -258,7 +258,7 @@ export async function trackAndFinalizeRazorpayXPayout(withdrawalId: string): Pro
           },
           contact: {
             name: safeTrim(receiver.bankAccountHolderName) || 'Receiver',
-            email: safeTrim(receiver.email),
+            email: razorpayContactEmailFromPhone(safeTrim(receiver.phone)),
             contact: safeTrim(receiver.phone),
             type: 'customer',
             reference_id: `recv_${String(receiver._id).slice(-10)}`.slice(0, 40),
