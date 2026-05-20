@@ -36,6 +36,22 @@ export function emitCallerRejected(accountId: string, reason: string): void {
   ioInstance.to(room).emit('rejected', { reason });
 }
 
+export function emitCallerOnlineToReceiver(
+  receiverId: string,
+  payload: {
+    id: string;
+    callerIds: string[];
+    callerName: string;
+    title: string;
+    subtitle: string;
+    at: string;
+  }
+): void {
+  if (!ioInstance) return;
+  const room = `account:r:${String(receiverId).trim()}`;
+  ioInstance.to(room).emit('caller:online', payload);
+}
+
 export function emitReceiverWithdrawalUpdate(
   accountId: string,
   payload: {

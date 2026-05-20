@@ -5,6 +5,7 @@ import ChatBlock from '../models/ChatBlock';
 import ChatReadState from '../models/ChatReadState';
 import UserReport, { REPORT_REASONS, type ReportReason } from '../models/UserReport';
 import { blockCallerUntilApproved, blockReceiverUntilApproved } from '../utils/accountAccess';
+import { callerHasSuccessfulCallWithReceiver } from '../utils/callerMessageEligibility';
 
 const HISTORY_LIMIT = 200;
 
@@ -30,6 +31,13 @@ export async function getMessages(req: Request, res: Response): Promise<void> {
       const userId = String(req.user!._id);
       if (await ChatBlock.exists({ userId, receiverId })) {
         res.status(403).json({ message: 'This conversation is blocked.' });
+        return;
+      }
+      if (!(await callerHasSuccessfulCallWithReceiver(userId, receiverId))) {
+        res.status(403).json({
+          message: 'Complete at least one successful call with this receiver before messaging.',
+          code: 'CALL_REQUIRED',
+        });
         return;
       }
       const rows = await ChatMessage.find({ userId, receiverId })

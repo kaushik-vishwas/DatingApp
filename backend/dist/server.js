@@ -121,6 +121,7 @@ const cors_1 = __importDefault(require("cors"));
 const mongoose_1 = __importDefault(require("mongoose"));
 const email_1 = require("./config/email");
 const superAdminSync_1 = require("./services/superAdminSync");
+const dropLegacyEmailIndexes_1 = require("./services/dropLegacyEmailIndexes");
 const authRoutes_1 = __importDefault(require("./routes/authRoutes"));
 const profileRoutes_1 = __importDefault(require("./routes/profileRoutes"));
 const adminRoutes_1 = __importDefault(require("./routes/adminRoutes"));
@@ -191,6 +192,7 @@ const start = async () => {
             family: 4, // Force IPv4
         });
         console.log('✅ MongoDB connected successfully');
+        await (0, dropLegacyEmailIndexes_1.dropLegacyEmailIndexes)();
         await (0, superAdminSync_1.syncSuperAdminFromEnv)();
         void (0, email_1.verifyEmailConfig)().then((r) => {
             if (!r.ok && process.env.OTP_BYPASS?.toLowerCase() !== 'true') {

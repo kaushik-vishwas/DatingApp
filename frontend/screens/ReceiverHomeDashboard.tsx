@@ -31,6 +31,7 @@ import { formatCallDurationCompact, leaderboardMinutesFromSeconds } from '../uti
 import { type ReceiverPresenceInfo } from '../utils/receiverStatus';
 import { resolveProfileImageSource } from '../utils/avatarSource';
 import SelectoLogo from '../assets/SelectoLogo.png';
+import { useReceiverTabBarBottomInset } from '../utils/receiverTabBarInset';
 
 const PURPLE = '#7b2cff';
 const PINK = '#ff72d2';
@@ -63,48 +64,29 @@ function getReceiverPublicPresence(isOnline: boolean, isAvailable: boolean): Rec
 }
 
 /** Receiver (call earner) home — availability, earnings demo, etc. */
-type ReceiverHomeNav = NativeStackNavigationProp<ReceiverStackParamList, 'ReceiverHome'>;
+type ReceiverHomeNav = NativeStackNavigationProp<ReceiverStackParamList>;
 
 export default function ReceiverHomeDashboard(): React.JSX.Element {
   const navigation = useNavigation<ReceiverHomeNav>();
   const { signOut, user, refreshUser } = useAuth();
   const { totalUnread, refreshUnreadFromServer } = useChatInbox();
   const [refreshing, setRefreshing] = useState<boolean>(false);
-  const [available, setAvailable] = useState<boolean>(Boolean(user?.isAvailable ?? true));
+  const [available, setAvailable] = useState<boolean>(Boolean(user?.isAvailable ?? false));
   const [walletSummary, setWalletSummary] = useState<ReceiverWalletSummaryResponse | null>(null);
   const [callInsights, setCallInsights] = useState<ReceiverCallInsightsResponse | null>(null);
   const [summaryError, setSummaryError] = useState<string | null>(null);
   const [notificationUnread, setNotificationUnread] = useState(0);
+  const scrollBottomInset = useReceiverTabBarBottomInset();
 
   /** Use stable `user._id` only — `refreshUser()` replaces `user` with a new object each time and would
    *  recreate this callback forever when combined with `useFocusEffect`. */
   const receiverId = user?.role === 'receiver' ? user._id : undefined;
-  const autoAvailabilityAppliedForRef = React.useRef<string | null>(null);
-
-  const availabilityFromServer = user?.role === 'receiver' ? Boolean(user.isAvailable ?? true) : true;
+  const availabilityFromServer =
+    user?.role === 'receiver' ? Boolean(user.isAvailable ?? false) : false;
 
   React.useEffect(() => {
     setAvailable(availabilityFromServer);
   }, [availabilityFromServer]);
-
-  React.useEffect(() => {
-    if (!receiverId || user?.role !== 'receiver') return;
-    if (user.isAvailable === true) {
-      autoAvailabilityAppliedForRef.current = receiverId;
-      return;
-    }
-    if (autoAvailabilityAppliedForRef.current === receiverId) return;
-    autoAvailabilityAppliedForRef.current = receiverId;
-    setAvailable(true);
-    void (async () => {
-      try {
-        await profileApi.updateReceiverProfile({ isAvailable: true });
-        await refreshUser();
-      } catch {
-        setAvailable(Boolean(user.isAvailable ?? false));
-      }
-    })();
-  }, [receiverId, user?.role, user?.isAvailable, refreshUser]);
 
   const loadWalletSummary = useCallback(async () => {
     if (!receiverId) return;
@@ -130,18 +112,22 @@ export default function ReceiverHomeDashboard(): React.JSX.Element {
   const loadReceiverNotificationUnread = useCallback(async () => {
     if (!receiverId) return;
     try {
-      const [lastSeenAt, { data: conversations }, { data: calls }, { data: withdrawals }] =
+      const [lastSeenAt, { data: conversations }, { data: calls }, { data: withdrawals }, { data: online }] =
         await Promise.all([
           getNotificationLastSeenAt('receiver'),
           // Mirror same data sources as ReceiverNotificationsScreen for consistent count.
           chatApi.conversations(),
           profileApi.receiverCallInsights('all'),
           profileApi.receiverWithdrawalOverview(),
+          profileApi.receiverCallerOnlineNotifications(),
         ]);
+      const callerOnline = online.notifications;
       const rows = [
         ...conversations.conversations.map((c) => ({ at: c.lastAt })),
         ...calls.recentCalls.map((c) => ({ at: c.startedAt })),
-        ...calls.recentCalls.map((c) => ({ at: c.startedAt })),
+        ...calls.missedCallGroups.map((g) => ({ at: g.lastAt })),
+        ...calls.incompleteCallGroups.map((g) => ({ at: g.lastAt })),
+        ...callerOnline.map((n) => ({ at: n.at })),
         ...withdrawals.recent.map((w) => ({ at: w.createdAt })),
       ];
       setNotificationUnread(countUnreadByTimestamp(rows, lastSeenAt));
@@ -173,6 +159,9 @@ export default function ReceiverHomeDashboard(): React.JSX.Element {
     try {
       await profileApi.updateReceiverProfile({ isAvailable: next });
       await refreshUser();
+      if (next) {
+        navigation.navigate('ReceiverAvailabilityWaiting');
+      }
     } catch (e) {
       setAvailable(prev);
       Alert.alert('Update failed', getErrorMessage(e));
@@ -205,14 +194,14 @@ export default function ReceiverHomeDashboard(): React.JSX.Element {
     <SafeAreaView style={styles.safe} edges={['top', 'left', 'right']}>
       <ScrollView
         style={styles.scroll}
-        contentContainerStyle={styles.content}
+        contentContainerStyle={[styles.content, { paddingBottom: scrollBottomInset }]}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
       >
         {/* Enhanced Top Section */}
         <View style={styles.topSection}>
           <View style={styles.topBar}>
-            <Image 
-              source={SelectoLogo} 
+            <Image
+              source={SelectoLogo}
               style={styles.brandLogo}
               resizeMode="contain"
             />
@@ -611,7 +600,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#f6f6f7',
   },
   content: {
-    paddingBottom: 48,
+    paddingBottom: 16,
   },
   centered: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   

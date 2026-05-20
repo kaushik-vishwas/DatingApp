@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Eye, RefreshCw, Star } from 'lucide-react';
+import { Edit2, Eye, RefreshCw, Star } from 'lucide-react';
 import { fetchAllReceivers, type ReceiverRecord } from '../api/client';
 import { ReceiverDetailModal } from '../components/ReceiverDetailModal';
+import { ReceiverEditModal } from '../components/ReceiverEditModal';
 import { formatINR, pseudoMetrics, receiverCode } from '../utils/receiverDisplay';
 
 type Tab = 'all' | 'approved' | 'pending';
@@ -20,6 +21,7 @@ export function ReceiversPage() {
   const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>('all');
   const [detail, setDetail] = useState<ReceiverRecord | null>(null);
+  const [editReceiver, setEditReceiver] = useState<ReceiverRecord | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -230,14 +232,24 @@ export function ReceiversPage() {
                         </span>
                       </td>
                       <td className="px-4 py-3">
-                        <button
-                          type="button"
-                          onClick={() => setDetail(r)}
-                          className="rounded-lg p-2 text-[#7b2cff] hover:bg-[var(--color-brand-muted)]"
-                          title="View"
-                        >
-                          <Eye className="h-5 w-5" />
-                        </button>
+                        <div className="flex items-center gap-1">
+                          <button
+                            type="button"
+                            onClick={() => setDetail(r)}
+                            className="rounded-lg p-2 text-[#7b2cff] hover:bg-[var(--color-brand-muted)]"
+                            title="View"
+                          >
+                            <Eye className="h-5 w-5" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setEditReceiver(r)}
+                            className="rounded-lg p-2 text-[#7b2cff] hover:bg-[var(--color-brand-muted)]"
+                            title="Edit"
+                          >
+                            <Edit2 className="h-5 w-5" />
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   );
@@ -248,7 +260,19 @@ export function ReceiversPage() {
         )}
       </div>
 
-      <ReceiverDetailModal receiver={detail} onClose={() => setDetail(null)} />
+      <ReceiverDetailModal
+        receiver={detail}
+        onClose={() => setDetail(null)}
+        onEdit={(r) => {
+          setDetail(null);
+          setEditReceiver(r);
+        }}
+      />
+      <ReceiverEditModal
+        receiver={editReceiver}
+        onClose={() => setEditReceiver(null)}
+        onSaved={() => void load()}
+      />
     </div>
   );
 }

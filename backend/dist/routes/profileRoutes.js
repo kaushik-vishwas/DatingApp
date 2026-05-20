@@ -24,9 +24,11 @@ router.post('/receiver/complete-audio-onboarding', auth_1.protect, profileContro
 router.post('/receiver/reopen-kyc', auth_1.protect, profileController_1.reopenRejectedReceiverKyc);
 router.delete('/receiver', auth_1.protect, profileController_1.deleteReceiverAccount);
 router.get('/caller-call-history', auth_1.protect, profileController_1.getCallerCallHistory);
+router.get('/caller-message-eligible-receivers', auth_1.protect, profileController_1.getCallerMessageEligibleReceivers);
 router.get('/caller-app-review', auth_1.protect, callerAppReviewController_1.getMyCallerAppReview);
 router.put('/caller-app-review', auth_1.protect, callerAppReviewController_1.upsertMyCallerAppReview);
 router.get('/caller-notifications', auth_1.protect, profileController_1.getCallerNotifications);
+router.get('/receiver-caller-online-notifications', auth_1.protect, profileController_1.getReceiverCallerOnlineNotifications);
 router.post('/receiver/bank/send-otp', auth_1.protect, profileController_1.sendReceiverBankUpdateOtp);
 router.post('/receiver/bank/verify', auth_1.protect, profileController_1.verifyReceiverBankUpdateOtp);
 router.get('/receiver-earnings-breakdown', auth_1.protect, profileController_1.getReceiverEarningsBreakdown);

@@ -41,8 +41,10 @@ import type {
   SendWithdrawalOtpResponse,
   VerifyWithdrawalOtpResponse,
   CallerCallHistoryResponse,
+  CallerMessageEligibleReceiversResponse,
   CallerAppReviewMeResponse,
   CallerNotificationsResponse,
+  ReceiverCallerOnlineNotificationsResponse,
   ReceiverEarningsBreakdownResponse,
   ReceiverNotifyCandidatesResponse,
   ReceiverNotifyUserResponse,
@@ -257,6 +259,11 @@ export const profileApi = {
       params: { range },
     }),
 
+  callerMessageEligibleReceivers: () =>
+    api.get<CallerMessageEligibleReceiversResponse>(
+      '/profile/caller-message-eligible-receivers'
+    ),
+
   getCallerAppReview: () =>
     api.get<CallerAppReviewMeResponse>('/profile/caller-app-review'),
 
@@ -265,6 +272,11 @@ export const profileApi = {
 
   callerNotifications: () =>
     api.get<CallerNotificationsResponse>('/profile/caller-notifications'),
+
+  receiverCallerOnlineNotifications: () =>
+    api.get<ReceiverCallerOnlineNotificationsResponse>(
+      '/profile/receiver-caller-online-notifications'
+    ),
 
   sendReceiverBankUpdateOtp: (payload: ReceiverBankDetailsPayload) =>
     api.post<ReceiverBankOtpSendResponse>('/profile/receiver/bank/send-otp', payload),
@@ -360,7 +372,11 @@ export const callApi = {
     }),
   randomReceiver: () => api.get<RandomReceiverMatchResponse>('/calls/random-receiver'),
   sessionStart: (callId: string, peerId: string) =>
-    api.post<{ ok: boolean }>('/calls/session/start', { callId, peerId }),
+    api.post<{
+      ok: boolean;
+      talkStartedAt: string | null;
+      talkActive: boolean;
+    }>('/calls/session/start', { callId, peerId }),
   sessionSync: (callId: string) =>
     api.post<{
       ok: boolean;
@@ -369,6 +385,8 @@ export const callApi = {
       receiverEarnedInr: number;
       canRate: boolean;
       status: string;
+      talkStartedAt: string | null;
+      talkActive: boolean;
     }>(
       '/calls/session/sync',
       { callId }

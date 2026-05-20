@@ -223,6 +223,26 @@ export type ReceiverCallInsightRow = {
   rating: number | null;
 };
 
+/** One card per caller for ring-only / not-connected calls. */
+export type ReceiverMissedCallGroupRow = {
+  callerId: string;
+  callerName: string;
+  callerImage: string | null;
+  missedCount: number;
+  lastAt: string;
+  lastDurationSec: number;
+};
+
+/** One card per caller for connected calls under minimum duration. */
+export type ReceiverIncompleteCallGroupRow = {
+  callerId: string;
+  callerName: string;
+  callerImage: string | null;
+  incompleteCount: number;
+  lastAt: string;
+  lastDurationSec: number;
+};
+
 export type ReceiverCallerHistoryRow = {
   callerId: string;
   callerName: string;
@@ -243,6 +263,8 @@ export interface ReceiverCallInsightsResponse {
     thisMonthMinutes: number;
   };
   recentCalls: ReceiverCallInsightRow[];
+  missedCallGroups: ReceiverMissedCallGroupRow[];
+  incompleteCallGroups: ReceiverIncompleteCallGroupRow[];
   callerHistory: ReceiverCallerHistoryRow[];
   receiverRatingAvg: number;
   receiverRatingCount: number;
@@ -350,7 +372,7 @@ export interface VerifyWithdrawalOtpResponse {
   withdrawal: ReceiverWithdrawalRow;
 }
 
-export type CallerCallStatus = 'completed' | 'missed' | 'failed';
+export type CallerCallStatus = 'completed' | 'missed' | 'incomplete';
 
 export interface CallerCallHistoryRow {
   id: string;
@@ -366,6 +388,10 @@ export interface CallerCallHistoryResponse {
   calls: CallerCallHistoryRow[];
 }
 
+export interface CallerMessageEligibleReceiversResponse {
+  receiverIds: string[];
+}
+
 /** GET /profile/caller-app-review */
 export interface CallerAppReviewMeResponse {
   exists: boolean;
@@ -373,6 +399,20 @@ export interface CallerAppReviewMeResponse {
   review: string | null;
   createdAt: string | null;
   updatedAt: string | null;
+}
+
+export interface ReceiverCallerOnlineNotificationRow {
+  id: string;
+  callerIds: string[];
+  callerName: string;
+  callerImage: string | null;
+  title: string;
+  subtitle: string;
+  at: string;
+}
+
+export interface ReceiverCallerOnlineNotificationsResponse {
+  notifications: ReceiverCallerOnlineNotificationRow[];
 }
 
 export type CallerNotificationType = 'transaction' | 'chat' | 'call';

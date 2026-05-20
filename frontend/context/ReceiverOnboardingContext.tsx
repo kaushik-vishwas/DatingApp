@@ -14,7 +14,7 @@ export const RECEIVER_ONBOARDING_LANGUAGE_OPTIONS = [
 ] as const;
 
 /** Satisfies backend `receiverOnboardingProfileFieldsComplete` when not collected in UI. */
-export const RECEIVER_ONBOARDING_DEFAULT_STATE = 'India';
+export const RECEIVER_ONBOARDING_DEFAULT_STATE = '';
 export const RECEIVER_ONBOARDING_DEFAULT_INTERESTS = ['Friendship'];
 
 type ReceiverOnboardingContextValue = {

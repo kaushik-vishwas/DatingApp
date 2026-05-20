@@ -1,5 +1,6 @@
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import React, { useState } from 'react';
+import { useFocusEffect } from '@react-navigation/native';
+import React, { useCallback, useState } from 'react';
 import {
   Alert,
   Image,
@@ -18,6 +19,8 @@ import { useCallSignals } from '../../context/CallSignalContext';
 import type { CallerStackParamList } from '../../navigation/CallerStackParamList';
 import { getErrorMessage } from '../../services/api';
 import { resolveProfileImageSource } from '../../utils/avatarSource';
+import { CALLER_MESSAGE_REQUIRES_CALL } from '../../constants/callerMessaging';
+import { useCallerMessageEligibility } from '../../context/CallerMessageEligibilityContext';
 import { getReceiverPresenceInfo } from '../../utils/receiverStatus';
 
 const PURPLE = '#7b2cff';
@@ -46,7 +49,16 @@ export default function ReceiverProfileScreen({ navigation, route }: Props): Rea
 
   const wallet = typeof user?.walletBalance === 'number' && Number.isFinite(user.walletBalance) ? user.walletBalance : 0;
   const rate = receiver.audioCallRate;
+  const { canMessageReceiver, refresh: refreshMessageEligibility } =
+    useCallerMessageEligibility();
   const presence = getReceiverPresenceInfo(receiver);
+  const canMessage = canMessageReceiver(receiver._id);
+
+  useFocusEffect(
+    useCallback(() => {
+      void refreshMessageEligibility();
+    }, [refreshMessageEligibility])
+  );
   const selfProfileImageSource = resolveProfileImageSource(user?.profileImage);
   const receiverHeroSource = resolveProfileImageSource(receiver.profileImage);
 
@@ -81,6 +93,7 @@ export default function ReceiverProfileScreen({ navigation, route }: Props): Rea
             receiver.audioCallRate != null && Number.isFinite(receiver.audioCallRate)
               ? receiver.audioCallRate
               : undefined,
+          redirectToRandomOnMissed: true,
         });
       } catch (e: unknown) {
         Alert.alert('Call failed', getErrorMessage(e));
@@ -175,18 +188,23 @@ export default function ReceiverProfileScreen({ navigation, route }: Props): Rea
           <Text style={styles.outlineLbl}>{calling ? 'Calling…' : 'Voice Call'}</Text>
         </TouchableOpacity>
         <TouchableOpacity
-          style={[styles.outlineBtn, styles.outlineBtnLast]}
-          onPress={() =>
+          style={[styles.outlineBtn, styles.outlineBtnLast, !canMessage && styles.outlineBtnDisabled]}
+          onPress={() => {
+            if (!canMessage) {
+              Alert.alert('Messaging locked', CALLER_MESSAGE_REQUIRES_CALL);
+              return;
+            }
             navigation.navigate('CallerChat', {
               receiverId: receiver._id,
               receiverName: receiver.name,
               receiverImage: receiver.profileImage,
-            })
-          }
-          activeOpacity={0.9}
+            });
+          }}
+          activeOpacity={canMessage ? 0.9 : 1}
+          disabled={!canMessage}
         >
           <Text style={styles.outlineIcon}>💬</Text>
-          <Text style={styles.outlineLbl}>Message</Text>
+          <Text style={[styles.outlineLbl, !canMessage && styles.outlineLblDisabled]}>Message</Text>
         </TouchableOpacity>
       </ScrollView>
 
@@ -281,6 +299,7 @@ const styles = StyleSheet.create({
   outlineBtnLast: { marginBottom: 0 },
   outlineIcon: { fontSize: 18 },
   outlineLbl: { fontSize: 16, fontWeight: '900', color: PURPLE },
+  outlineLblDisabled: { color: '#9ca3af' },
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.45)',

@@ -16,6 +16,7 @@ import {
   TextInput,
   TouchableOpacity,
   View,
+  FlatList,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -23,6 +24,7 @@ import Icon from 'react-native-vector-icons/Feather';
 import {
   getCallerAvatarPresetsByGender,
   isAllowedCallerAvatarUri,
+  INDIAN_STATES,
 } from '../../constants/userOnboarding';
 import { UploadField } from '../../components/ui/UploadField';
 import { useAuth } from '../../context/AuthContext';
@@ -104,6 +106,7 @@ export default function ReceiverEditProfileScreen(): React.JSX.Element {
 
   const [name, setName] = useState(user?.name ?? '');
   const [stateValue, setStateValue] = useState(user?.state ?? '');
+  const [showStateDropdown, setShowStateDropdown] = useState(false);
   const [languages, setLanguages] = useState<string[]>(user?.languages ?? []);
   const [interests, setInterests] = useState<string[]>(user?.interests ?? []);
   const [aadhaarNumber, setAadhaarNumber] = useState(String(user?.aadhaarNumber ?? ''));
@@ -121,6 +124,12 @@ export default function ReceiverEditProfileScreen(): React.JSX.Element {
   const [profileImageUri, setProfileImageUri] = useState<string | null>(user?.profileImage ?? null);
   const [avatarModal, setAvatarModal] = useState(false);
   const isWithdrawKycMode = fromWithdrawKyc;
+
+  // Filter states based on search input
+  const [stateSearch, setStateSearch] = useState('');
+  const filteredStates = INDIAN_STATES.filter(state =>
+    state.toLowerCase().includes(stateSearch.toLowerCase())
+  );
 
   // Check if all required fields are filled (non-KYC mode only)
   const isProfileComplete = () => {
@@ -159,7 +168,7 @@ export default function ReceiverEditProfileScreen(): React.JSX.Element {
         return;
       }
       if (!stateValue.trim()) {
-        Alert.alert('Validation', 'Please enter your state.');
+        Alert.alert('Validation', 'Please select your state.');
         return;
       }
       if (languages.length === 0) {
@@ -224,26 +233,24 @@ export default function ReceiverEditProfileScreen(): React.JSX.Element {
           showsVerticalScrollIndicator={false}
         >
           {/* Header */}
-       {/* Header */}
-<View style={styles.header}>
-<TouchableOpacity 
-  onPress={() => {
-    // Just go back - no sign out
-    if (navigation.canGoBack()) {
-      navigation.goBack();
-    } else {
-      navigation.replace('ReceiverHome');
-    }
-  }} 
-  style={styles.backBtn}
->
-  <Icon name="chevron-left" size={26} color="#1a1a1a" />
-</TouchableOpacity>
-  <Text style={styles.headerTitle}>
-    {isWithdrawKycMode ? 'Verify Identity' : 'Complete Profile'}
-  </Text>
-  <View style={styles.placeholder} />
-</View>
+          <View style={styles.header}>
+            <TouchableOpacity 
+              onPress={() => {
+                if (navigation.canGoBack()) {
+                  navigation.goBack();
+                } else {
+                  navigation.replace('ReceiverMainTabs', { screen: 'ReceiverHome' });
+                }
+              }} 
+              style={styles.backBtn}
+            >
+              <Icon name="chevron-left" size={26} color="#1a1a1a" />
+            </TouchableOpacity>
+            <Text style={styles.headerTitle}>
+              {isWithdrawKycMode ? 'Verify Identity' : 'Complete Profile'}
+            </Text>
+            <View style={styles.placeholder} />
+          </View>
 
           {/* Subtitle */}
           <Text style={styles.subtitle}>
@@ -334,13 +341,20 @@ export default function ReceiverEditProfileScreen(): React.JSX.Element {
                 required
               />
               
-              <Field 
-                label="State" 
-                value={stateValue} 
-                onChangeText={setStateValue} 
-                placeholder="Enter your state"
-                required
-              />
+              {/* State Dropdown */}
+              <View style={styles.fieldWrap}>
+                <Text style={styles.fieldLabel}>State <Text style={styles.requiredStar}>*</Text></Text>
+                <TouchableOpacity 
+                  style={styles.dropdown}
+                  onPress={() => setShowStateDropdown(true)}
+                  activeOpacity={0.7}
+                >
+                  <Text style={[styles.dropdownText, !stateValue && styles.placeholderText]}>
+                    {stateValue || 'Select your state'}
+                  </Text>
+                  <Icon name="chevron-down" size={20} color="#666" />
+                </TouchableOpacity>
+              </View>
 
               {/* Languages */}
               <Text style={styles.fieldLabel}>Languages <Text style={styles.requiredStar}>*</Text> (max 4)</Text>
@@ -386,47 +400,100 @@ export default function ReceiverEditProfileScreen(): React.JSX.Element {
 
           {/* Success Modal */}
           {showSuccess ? (
-  <View style={styles.successOverlay}>
-    <View style={styles.successCard}>
-      <View style={styles.successIconContainer}>
-        <Text style={styles.successIcon}>✓</Text>
-      </View>
-      <Text style={styles.successTitle}>Success!</Text>
-      <Text style={styles.successSub}>
-        {isWithdrawKycMode ? 'Identity verified successfully' : 'Profile updated successfully'}
-      </Text>
-      <TouchableOpacity
-  style={styles.successBtn}
-  onPress={async () => {
-    setShowSuccess(false);
-    
-    if (fromWithdrawKyc) {
-      navigation.replace('ReceiverBankDetails');
-    } else {
-      // ALWAYS go back - no audio verification check
-      if (navigation.canGoBack()) {
-        navigation.goBack();
-      } else {
-        navigation.replace('ReceiverHome');
-      }
-    }
-  }}
-  activeOpacity={0.8}
->
-  <LinearGradient
-    colors={['#7F00FF', '#A855F7', '#E100FF']}
-    start={{ x: 0, y: 0 }}
-    end={{ x: 1, y: 0 }}
-    style={styles.successBtnGradient}
-  >
-    <Text style={styles.successBtnText}>{fromWithdrawKyc ? 'Continue to Bank' : 'Done'}</Text>
-  </LinearGradient>
-</TouchableOpacity>
-    </View>
-  </View>
-) : null}
+            <View style={styles.successOverlay}>
+              <View style={styles.successCard}>
+                <View style={styles.successIconContainer}>
+                  <Text style={styles.successIcon}>✓</Text>
+                </View>
+                <Text style={styles.successTitle}>Success!</Text>
+                <Text style={styles.successSub}>
+                  {isWithdrawKycMode ? 'Identity verified successfully' : 'Profile updated successfully'}
+                </Text>
+                <TouchableOpacity
+                  style={styles.successBtn}
+                  onPress={async () => {
+                    setShowSuccess(false);
+                    
+                    if (fromWithdrawKyc) {
+                      navigation.replace('ReceiverBankDetails');
+                    } else {
+                      if (navigation.canGoBack()) {
+                        navigation.goBack();
+                      } else {
+                        navigation.replace('ReceiverMainTabs', { screen: 'ReceiverHome' });
+                      }
+                    }
+                  }}
+                  activeOpacity={0.8}
+                >
+                  <LinearGradient
+                    colors={['#7F00FF', '#A855F7', '#E100FF']}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 0 }}
+                    style={styles.successBtnGradient}
+                  >
+                    <Text style={styles.successBtnText}>{fromWithdrawKyc ? 'Continue to Bank' : 'Done'}</Text>
+                  </LinearGradient>
+                </TouchableOpacity>
+              </View>
+            </View>
+          ) : null}
         </ScrollView>
       </KeyboardAvoidingView>
+
+      {/* State Dropdown Modal */}
+      <Modal visible={showStateDropdown} transparent animationType="fade">
+        <View style={styles.modalOverlay}>
+          <Pressable style={styles.modalDismiss} onPress={() => setShowStateDropdown(false)} />
+          <View style={styles.modalCard}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Select State</Text>
+              <TouchableOpacity onPress={() => setShowStateDropdown(false)} style={styles.closeBtn} activeOpacity={0.7}>
+                <Icon name="x" size={20} color="#666" />
+              </TouchableOpacity>
+            </View>
+            
+            {/* Search Input */}
+            <View style={styles.searchContainer}>
+              <Icon name="search" size={20} color="#999" style={styles.searchIcon} />
+              <TextInput
+                style={styles.searchInput}
+                placeholder="Search state..."
+                value={stateSearch}
+                onChangeText={setStateSearch}
+                placeholderTextColor="#999"
+              />
+              {stateSearch.length > 0 && (
+                <TouchableOpacity onPress={() => setStateSearch('')}>
+                  <Icon name="x" size={20} color="#999" />
+                </TouchableOpacity>
+              )}
+            </View>
+            
+            <FlatList
+              data={filteredStates}
+              keyExtractor={(item) => item}
+              style={styles.modalList}
+              showsVerticalScrollIndicator={false}
+              renderItem={({ item }) => (
+                <TouchableOpacity
+                  style={[styles.stateItem, stateValue === item && styles.stateItemActive]}
+                  onPress={() => {
+                    setStateValue(item);
+                    setShowStateDropdown(false);
+                    setStateSearch('');
+                  }}
+                >
+                  <Text style={[styles.stateText, stateValue === item && styles.stateTextActive]}>
+                    {item}
+                  </Text>
+                  {stateValue === item && <Icon name="check" size={20} color="#A855F7" />}
+                </TouchableOpacity>
+              )}
+            />
+          </View>
+        </View>
+      </Modal>
 
       {/* Avatar Modal */}
       <Modal visible={avatarModal} transparent animationType="fade">
@@ -541,7 +608,6 @@ const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: '#F8F9FA' },
   content: { paddingHorizontal: 20, paddingBottom: 40, paddingTop: 8 },
 
-
   placeholder: {
     width: 40,
     height: 40,
@@ -609,6 +675,25 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#1a1a1a',
     fontWeight: '500',
+  },
+  dropdown: {
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#E8E8E8',
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  dropdownText: {
+    fontSize: 14,
+    color: '#1a1a1a',
+    fontWeight: '500',
+  },
+  placeholderText: {
+    color: '#999',
   },
   
   saveBtnWrapper: {
@@ -706,7 +791,7 @@ const styles = StyleSheet.create({
   modalCard: {
     backgroundColor: '#FFFFFF',
     borderRadius: 20,
-    maxHeight: '70%',
+    maxHeight: '80%',
     overflow: 'hidden',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 4 },
@@ -738,6 +823,44 @@ const styles = StyleSheet.create({
   },
   modalList: { 
     padding: 16,
+  },
+  searchContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F0F0F0',
+    backgroundColor: '#FFFFFF',
+  },
+  searchIcon: {
+    marginRight: 10,
+  },
+  searchInput: {
+    flex: 1,
+    fontSize: 14,
+    color: '#1a1a1a',
+    paddingVertical: 8,
+  },
+  stateItem: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F5F5F5',
+  },
+  stateItemActive: {
+    backgroundColor: '#F3E8FF',
+  },
+  stateText: {
+    fontSize: 14,
+    color: '#333',
+  },
+  stateTextActive: {
+    color: '#A855F7',
+    fontWeight: '600',
   },
   avatarGrid: {
     flexDirection: 'row',

@@ -25,6 +25,7 @@ router.get('/receivers/pending', adminAuth_1.adminProtect, adminController_1.lis
 router.get('/kyc/stats', adminAuth_1.adminProtect, adminController_1.getKycStats);
 router.patch('/receivers/:id/approve', adminAuth_1.adminProtect, adminController_1.approveReceiver);
 router.patch('/receivers/:id/reject', adminAuth_1.adminProtect, adminController_1.rejectReceiver);
+router.patch('/receivers/:id', adminAuth_1.adminProtect, adminController_1.updateReceiver);
 router.get('/reports', adminAuth_1.adminProtect, adminController_1.listModerationReports);
 router.patch('/reports/:id', adminAuth_1.adminProtect, adminController_1.resolveModerationReport);
 router.get('/caller-app-reviews', adminAuth_1.adminProtect, adminCallerAppReviewController_1.listCallerAppStoreReviews);

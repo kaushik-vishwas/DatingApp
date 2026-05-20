@@ -2,9 +2,6 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import React from 'react';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import CallerDiscoverHome from '../screens/CallerDiscoverHome';
-import CallerAlertsTabScreen from '../screens/caller/CallerAlertsTabScreen';
-import CallerCallsTabScreen from '../screens/caller/CallerCallsTabScreen';
 import CallerChatsScreen from '../screens/caller/CallerChatsScreen';
 import CallerEditProfileScreen from '../screens/caller/CallerEditProfileScreen';
 import CallerFaqScreen from '../screens/caller/CallerFaqScreen';
@@ -21,6 +18,8 @@ import VoiceCallScreen from '../screens/call/VoiceCallScreen';
 import WalletScreen from '../screens/caller/WalletScreen';
 import WalletTransactionsScreen from '../screens/caller/WalletTransactionsScreen';
 import WalletSuccessScreen from '../screens/caller/WalletSuccessScreen';
+import { CallerMessageEligibilityProvider } from '../context/CallerMessageEligibilityContext';
+import CallerMainTabsNavigator from './CallerMainTabsNavigator';
 import type { CallerStackParamList } from './CallerStackParamList';
 
 const Stack = createNativeStackNavigator<CallerStackParamList>();
@@ -29,17 +28,20 @@ export default function CallerAppNavigator(): React.JSX.Element {
   const insets = useSafeAreaInsets();
   const bottomGap = Math.max(10, insets.bottom);
   return (
+    <CallerMessageEligibilityProvider>
     <Stack.Navigator
-      initialRouteName="CallerDiscover"
+      initialRouteName="CallerMainTabs"
       screenOptions={{
         headerShown: false,
         animation: 'slide_from_right',
         contentStyle: { paddingBottom: bottomGap },
       }}
     >
-      <Stack.Screen name="CallerDiscover" component={CallerDiscoverHome} />
-      <Stack.Screen name="CallerCalls" component={CallerCallsTabScreen} />
-      <Stack.Screen name="CallerAlerts" component={CallerAlertsTabScreen} />
+      <Stack.Screen
+        name="CallerMainTabs"
+        component={CallerMainTabsNavigator}
+        options={{ contentStyle: { paddingBottom: 0 } }}
+      />
       <Stack.Screen name="CallerProfile" component={CallerProfileTabScreen} />
       <Stack.Screen name="CallerRateUs" component={CallerRateUsScreen} />
       <Stack.Screen name="CallerShareApp" component={CallerShareAppScreen} />
@@ -65,5 +67,6 @@ export default function CallerAppNavigator(): React.JSX.Element {
         options={{ presentation: 'transparentModal', animation: 'fade' }}
       />
     </Stack.Navigator>
+    </CallerMessageEligibilityProvider>
   );
 }

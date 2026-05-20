@@ -107,7 +107,7 @@ const receiverSchema = new Schema<IReceiver>(
     userAudio: { type: String, default: null },
     walletBalance: { type: Number, default: 0 },
     suspended: { type: Boolean, default: false },
-    isAvailable: { type: Boolean, default: true },
+    isAvailable: { type: Boolean, default: false },
     isOnline: { type: Boolean, default: false },
     moderationWarningAt: { type: Date, default: null },
     rejectionReason: { type: String, default: null },

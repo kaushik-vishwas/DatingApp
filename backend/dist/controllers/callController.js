@@ -36,7 +36,10 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.reportVoiceSessionIssue = exports.rateVoiceSession = exports.syncVoiceSession = exports.endVoiceSession = exports.startVoiceSession = exports.getVoiceBootstrap = exports.getRandomQueuedReceiver = void 0;
+exports.reportVoiceSessionIssue = exports.rateVoiceSession = exports.syncVoiceSession = exports.endVoiceSession = exports.startVoiceSession = exports.getVoiceBootstrap = exports.getRandomQueuedReceiver = exports.MISSED_OR_INCOMPLETE_MAX_SEC = void 0;
+exports.callTalkStartedAt = callTalkStartedAt;
+exports.callTalkDurationSec = callTalkDurationSec;
+exports.ensureCallEndedAndSettled = ensureCallEndedAndSettled;
 exports.settleCallSession = settleCallSession;
 const mongoose_1 = __importDefault(require("mongoose"));
 const ChatBlock_1 = __importDefault(require("../models/ChatBlock"));
@@ -56,6 +59,106 @@ function sleep(ms) {
     return new Promise((resolve) => {
         setTimeout(resolve, ms);
     });
+}
+/** Completed calls shorter than this count as missed/incomplete for receiver history. */
+exports.MISSED_OR_INCOMPLETE_MAX_SEC = 55;
+/** Anchor for live/ settled talk duration (both sides connected). */
+function callTalkStartedAt(call) {
+    if (call.talkStartedAt)
+        return call.talkStartedAt;
+    if (call.callerJoinedAt && call.receiverJoinedAt) {
+        return new Date(Math.max(call.callerJoinedAt.getTime(), call.receiverJoinedAt.getTime()));
+    }
+    // Legacy rows before per-party join tracking.
+    if (!call.callerJoinedAt && !call.receiverJoinedAt) {
+        return call.startedAt;
+    }
+    return null;
+}
+function callTalkDurationSec(call, now = new Date()) {
+    const anchor = callTalkStartedAt(call);
+    if (!anchor)
+        return 0;
+    return Math.max(0, Math.round((now.getTime() - anchor.getTime()) / 1000));
+}
+async function recordVoiceParticipantJoined(callId, accountKind) {
+    const now = new Date();
+    const joinField = accountKind === 'user' ? 'callerJoinedAt' : 'receiverJoinedAt';
+    let session = await CallSession_1.default.findOneAndUpdate({ callId, [joinField]: null }, { $set: { [joinField]: now } }, { new: true });
+    if (!session) {
+        session = await CallSession_1.default.findOne({ callId });
+    }
+    if (!session) {
+        throw new Error('Call session not found');
+    }
+    if (session.callerJoinedAt && session.receiverJoinedAt && !session.talkStartedAt) {
+        const talkStartedAt = new Date(Math.max(session.callerJoinedAt.getTime(), session.receiverJoinedAt.getTime()));
+        session = await CallSession_1.default.findOneAndUpdate({ callId }, { $set: { talkStartedAt } }, { new: true });
+        if (!session) {
+            throw new Error('Call session not found');
+        }
+    }
+    return session;
+}
+function callTalkApiFields(session) {
+    const anchor = callTalkStartedAt(session);
+    return {
+        talkStartedAt: anchor ? anchor.toISOString() : null,
+        talkActive: anchor != null,
+    };
+}
+/**
+ * End a call for history/billing. If no voice session was started (ring-only hang-up),
+ * records a zero-duration completed session so receiver missed-call insights work.
+ */
+async function ensureCallEndedAndSettled(callId, opts) {
+    const existing = await CallSession_1.default.findOne({ callId });
+    if (!existing) {
+        const receiver = await Receiver_1.default.findById(opts.receiverId).select('earningRatePerMinute');
+        if (!receiver)
+            throw new Error('Receiver not found');
+        const receiverPayoutRatePerMinute = typeof receiver.earningRatePerMinute === 'number' && Number.isFinite(receiver.earningRatePerMinute)
+            ? Math.max(0, receiver.earningRatePerMinute)
+            : 0;
+        const now = new Date();
+        const startedAt = opts.startedAt ?? now;
+        await CallSession_1.default.create({
+            callId,
+            callerId: new mongoose_1.default.Types.ObjectId(opts.callerId),
+            receiverId: new mongoose_1.default.Types.ObjectId(opts.receiverId),
+            startedAt,
+            endedAt: now,
+            durationSec: 0,
+            status: 'completed',
+            ratePerMinute: Receiver_1.RECEIVER_AUDIO_CALL_RATE_INR_PER_MIN,
+            receiverPayoutRatePerMinute,
+            settledAmountInr: 0,
+            receiverEarnedInr: 0,
+        });
+        return {
+            durationSec: 0,
+            settledAmountInr: 0,
+            receiverEarnedInr: 0,
+            status: 'completed',
+            receiverId: opts.receiverId,
+            callerId: opts.callerId,
+            startedAt,
+            justCompleted: true,
+        };
+    }
+    if (existing.status === 'ongoing') {
+        return settleCallSession(callId, true);
+    }
+    return {
+        durationSec: existing.durationSec,
+        settledAmountInr: roundInr(existing.settledAmountInr || 0),
+        receiverEarnedInr: roundInr(existing.receiverEarnedInr || 0),
+        status: 'completed',
+        receiverId: String(existing.receiverId),
+        callerId: String(existing.callerId),
+        startedAt: existing.startedAt,
+        justCompleted: false,
+    };
 }
 async function settleCallSession(callId, complete) {
     const dbSession = await mongoose_1.default.startSession();
@@ -79,7 +182,7 @@ async function settleCallSession(callId, complete) {
                 return;
             }
             const now = new Date();
-            const durationSec = Math.max(0, Math.round((now.getTime() - call.startedAt.getTime()) / 1000));
+            const durationSec = callTalkDurationSec(call, now);
             const grossAmountInr = roundInr((durationSec / 60) * Math.max(0, call.ratePerMinute));
             const alreadySettled = roundInr(call.settledAmountInr || 0);
             const dueAmount = roundInr(Math.max(0, grossAmountInr - alreadySettled));
@@ -318,8 +421,9 @@ const startVoiceSession = async (req, res) => {
                 ratePerMinute,
                 receiverPayoutRatePerMinute,
             },
-        }, { upsert: true, new: true, setDefaultsOnInsert: true });
-        res.status(200).json({ ok: true });
+        }, { upsert: true, setDefaultsOnInsert: true });
+        const session = await recordVoiceParticipantJoined(callId, accountKind);
+        res.status(200).json({ ok: true, ...callTalkApiFields(session) });
     }
     catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
@@ -372,6 +476,11 @@ const endVoiceSession = async (req, res) => {
                     ? roundInr(Math.max(0, callerDoc.walletBalance))
                     : 0;
         }
+        const endedSession = await CallSession_1.default.findOne({ callId }).lean();
+        const talkFields = endedSession ? callTalkApiFields(endedSession) : {
+            talkStartedAt: null,
+            talkActive: false,
+        };
         res.status(200).json({
             ok: true,
             durationSec: settled.durationSec,
@@ -379,6 +488,7 @@ const endVoiceSession = async (req, res) => {
             settledAmountInr: settled.settledAmountInr,
             receiverEarnedInr: settled.receiverEarnedInr,
             canRate: settled.durationSec >= 30,
+            ...talkFields,
             ...(callerWalletBalanceInr !== undefined ? { callerWalletBalanceInr } : {}),
         });
         (0, callQueue_2.releaseReceiverReservation)(settled.receiverId);
@@ -415,6 +525,7 @@ const syncVoiceSession = async (req, res) => {
             return;
         }
         const settled = await settleCallSession(callId, false);
+        const talkFields = callTalkApiFields(current);
         res.status(200).json({
             ok: true,
             durationSec: settled.durationSec,
@@ -422,6 +533,7 @@ const syncVoiceSession = async (req, res) => {
             receiverEarnedInr: settled.receiverEarnedInr,
             canRate: settled.durationSec >= 30,
             status: settled.status,
+            ...talkFields,
         });
     }
     catch (err) {

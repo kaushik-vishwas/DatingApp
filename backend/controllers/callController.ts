@@ -3,7 +3,7 @@ import mongoose from 'mongoose';
 import ChatBlock from '../models/ChatBlock';
 import User from '../models/User';
 import Receiver, { RECEIVER_AUDIO_CALL_RATE_INR_PER_MIN } from '../models/Receiver';
-import CallSession from '../models/CallSession';
+import CallSession, { type CallSessionDocument } from '../models/CallSession';
 import ReceiverRating from '../models/ReceiverRating';
 import UserReport from '../models/UserReport';
 import {
@@ -40,6 +40,146 @@ export type SettledCallSnapshot = {
   justCompleted: boolean;
 };
 
+/** Completed calls shorter than this count as missed/incomplete for receiver history. */
+export const MISSED_OR_INCOMPLETE_MAX_SEC = 55;
+
+type CallTalkTimingFields = {
+  talkStartedAt?: Date | null;
+  callerJoinedAt?: Date | null;
+  receiverJoinedAt?: Date | null;
+  startedAt: Date;
+};
+
+/** Anchor for live/ settled talk duration (both sides connected). */
+export function callTalkStartedAt(call: CallTalkTimingFields): Date | null {
+  if (call.talkStartedAt) return call.talkStartedAt;
+  if (call.callerJoinedAt && call.receiverJoinedAt) {
+    return new Date(Math.max(call.callerJoinedAt.getTime(), call.receiverJoinedAt.getTime()));
+  }
+  // Legacy rows before per-party join tracking.
+  if (!call.callerJoinedAt && !call.receiverJoinedAt) {
+    return call.startedAt;
+  }
+  return null;
+}
+
+export function callTalkDurationSec(call: CallTalkTimingFields, now: Date = new Date()): number {
+  const anchor = callTalkStartedAt(call);
+  if (!anchor) return 0;
+  return Math.max(0, Math.round((now.getTime() - anchor.getTime()) / 1000));
+}
+
+async function recordVoiceParticipantJoined(
+  callId: string,
+  accountKind: 'user' | 'receiver'
+): Promise<CallSessionDocument> {
+  const now = new Date();
+  const joinField = accountKind === 'user' ? 'callerJoinedAt' : 'receiverJoinedAt';
+
+  let session = await CallSession.findOneAndUpdate(
+    { callId, [joinField]: null },
+    { $set: { [joinField]: now } },
+    { new: true }
+  );
+
+  if (!session) {
+    session = await CallSession.findOne({ callId });
+  }
+
+  if (!session) {
+    throw new Error('Call session not found');
+  }
+
+  if (session.callerJoinedAt && session.receiverJoinedAt && !session.talkStartedAt) {
+    const talkStartedAt = new Date(
+      Math.max(session.callerJoinedAt.getTime(), session.receiverJoinedAt.getTime())
+    );
+    session = await CallSession.findOneAndUpdate(
+      { callId },
+      { $set: { talkStartedAt } },
+      { new: true }
+    );
+    if (!session) {
+      throw new Error('Call session not found');
+    }
+  }
+
+  return session;
+}
+
+function callTalkApiFields(session: CallSessionDocument): {
+  talkStartedAt: string | null;
+  talkActive: boolean;
+} {
+  const anchor = callTalkStartedAt(session);
+  return {
+    talkStartedAt: anchor ? anchor.toISOString() : null,
+    talkActive: anchor != null,
+  };
+}
+
+/**
+ * End a call for history/billing. If no voice session was started (ring-only hang-up),
+ * records a zero-duration completed session so receiver missed-call insights work.
+ */
+export async function ensureCallEndedAndSettled(
+  callId: string,
+  opts: { callerId: string; receiverId: string; startedAt?: Date }
+): Promise<SettledCallSnapshot> {
+  const existing = await CallSession.findOne({ callId });
+  if (!existing) {
+    const receiver = await Receiver.findById(opts.receiverId).select('earningRatePerMinute');
+    if (!receiver) throw new Error('Receiver not found');
+
+    const receiverPayoutRatePerMinute =
+      typeof receiver.earningRatePerMinute === 'number' && Number.isFinite(receiver.earningRatePerMinute)
+        ? Math.max(0, receiver.earningRatePerMinute)
+        : 0;
+
+    const now = new Date();
+    const startedAt = opts.startedAt ?? now;
+    await CallSession.create({
+      callId,
+      callerId: new mongoose.Types.ObjectId(opts.callerId),
+      receiverId: new mongoose.Types.ObjectId(opts.receiverId),
+      startedAt,
+      endedAt: now,
+      durationSec: 0,
+      status: 'completed',
+      ratePerMinute: RECEIVER_AUDIO_CALL_RATE_INR_PER_MIN,
+      receiverPayoutRatePerMinute,
+      settledAmountInr: 0,
+      receiverEarnedInr: 0,
+    });
+
+    return {
+      durationSec: 0,
+      settledAmountInr: 0,
+      receiverEarnedInr: 0,
+      status: 'completed',
+      receiverId: opts.receiverId,
+      callerId: opts.callerId,
+      startedAt,
+      justCompleted: true,
+    };
+  }
+
+  if (existing.status === 'ongoing') {
+    return settleCallSession(callId, true);
+  }
+
+  return {
+    durationSec: existing.durationSec,
+    settledAmountInr: roundInr(existing.settledAmountInr || 0),
+    receiverEarnedInr: roundInr(existing.receiverEarnedInr || 0),
+    status: 'completed',
+    receiverId: String(existing.receiverId),
+    callerId: String(existing.callerId),
+    startedAt: existing.startedAt,
+    justCompleted: false,
+  };
+}
+
 export async function settleCallSession(
   callId: string,
   complete: boolean
@@ -66,7 +206,7 @@ export async function settleCallSession(
       }
 
       const now = new Date();
-      const durationSec = Math.max(0, Math.round((now.getTime() - call.startedAt.getTime()) / 1000));
+      const durationSec = callTalkDurationSec(call, now);
       const grossAmountInr = roundInr((durationSec / 60) * Math.max(0, call.ratePerMinute));
       const alreadySettled = roundInr(call.settledAmountInr || 0);
       const dueAmount = roundInr(Math.max(0, grossAmountInr - alreadySettled));
@@ -344,10 +484,12 @@ export const startVoiceSession = async (
           receiverPayoutRatePerMinute,
         },
       },
-      { upsert: true, new: true, setDefaultsOnInsert: true }
+      { upsert: true, setDefaultsOnInsert: true }
     );
 
-    res.status(200).json({ ok: true });
+    const session = await recordVoiceParticipantJoined(callId, accountKind);
+
+    res.status(200).json({ ok: true, ...callTalkApiFields(session) });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error('startVoiceSession error:', msg);
@@ -408,6 +550,12 @@ export const endVoiceSession = async (
           : 0;
     }
 
+    const endedSession = await CallSession.findOne({ callId }).lean();
+    const talkFields = endedSession ? callTalkApiFields(endedSession as CallSessionDocument) : {
+      talkStartedAt: null,
+      talkActive: false,
+    };
+
     res.status(200).json({
       ok: true,
       durationSec: settled.durationSec,
@@ -415,6 +563,7 @@ export const endVoiceSession = async (
       settledAmountInr: settled.settledAmountInr,
       receiverEarnedInr: settled.receiverEarnedInr,
       canRate: settled.durationSec >= 30,
+      ...talkFields,
       ...(callerWalletBalanceInr !== undefined ? { callerWalletBalanceInr } : {}),
     });
     releaseReceiverReservation(settled.receiverId);
@@ -456,6 +605,7 @@ export const syncVoiceSession = async (
     }
 
     const settled = await settleCallSession(callId, false);
+    const talkFields = callTalkApiFields(current);
     res.status(200).json({
       ok: true,
       durationSec: settled.durationSec,
@@ -463,6 +613,7 @@ export const syncVoiceSession = async (
       receiverEarnedInr: settled.receiverEarnedInr,
       canRate: settled.durationSec >= 30,
       status: settled.status,
+      ...talkFields,
     });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);

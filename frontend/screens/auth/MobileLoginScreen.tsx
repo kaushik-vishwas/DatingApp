@@ -1,5 +1,5 @@
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import React, { useCallback, useRef, useState } from 'react';
+import React, { useCallback, useRef, useState, useEffect } from 'react';
 import {
   Alert,
   Image,
@@ -12,6 +12,8 @@ import {
   TextInput,
   TouchableOpacity,
   View,
+  Dimensions,
+  FlatList,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -19,12 +21,62 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useAuth } from '../../context/AuthContext';
 import type { RootStackParamList } from '../../navigation/RootStackParamList';
 import { authApi, getErrorMessage, saveJwt } from '../../services/api';
-import { normalizeIndianMobileDigits, validateIndianMobileDigits } from '../../utils/validation';
+import { normalizeIndianMobileDigits } from '../../utils/validation';
 import SelectoLogo from '../../assets/SelectoLogo.png';
+
+
+
+
+// Add these imports with your existing ones
+import BannerImage1 from '../../assets/LoginPic/loginPic1.png';
+import BannerImage2 from '../../assets/LoginPic/loginPic2.png';
+import BannerImage3 from '../../assets/LoginPic/loginPic3.png';
+import BannerImage4 from '../../assets/LoginPic/loginPic4.png';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'MobileLogin'>;
 
 type Step = 'mobile' | 'otp';
+
+interface CountryCode {
+  code: string;
+  dialCode: string;
+  flag: string;
+  name: string;
+}
+
+const countryCodes: CountryCode[] = [
+  { code: 'IN', dialCode: '+91', flag: '🇮🇳', name: 'India' },
+  { code: 'US', dialCode: '+1', flag: '🇺🇸', name: 'USA' },
+  { code: 'GB', dialCode: '+44', flag: '🇬🇧', name: 'UK' },
+  { code: 'CA', dialCode: '+1', flag: '🇨🇦', name: 'Canada' },
+  { code: 'AU', dialCode: '+61', flag: '🇦🇺', name: 'Australia' },
+  { code: 'AE', dialCode: '+971', flag: '🇦🇪', name: 'UAE' },
+  { code: 'SG', dialCode: '+65', flag: '🇸🇬', name: 'Singapore' },
+  { code: 'MY', dialCode: '+60', flag: '🇲🇾', name: 'Malaysia' },
+  { code: 'NZ', dialCode: '+64', flag: '🇳🇿', name: 'New Zealand' },
+  { code: 'DE', dialCode: '+49', flag: '🇩🇪', name: 'Germany' },
+  { code: 'FR', dialCode: '+33', flag: '🇫🇷', name: 'France' },
+  { code: 'IT', dialCode: '+39', flag: '🇮🇹', name: 'Italy' },
+  { code: 'ES', dialCode: '+34', flag: '🇪🇸', name: 'Spain' },
+  { code: 'BR', dialCode: '+55', flag: '🇧🇷', name: 'Brazil' },
+  { code: 'MX', dialCode: '+52', flag: '🇲🇽', name: 'Mexico' },
+  { code: 'JP', dialCode: '+81', flag: '🇯🇵', name: 'Japan' },
+  { code: 'KR', dialCode: '+82', flag: '🇰🇷', name: 'South Korea' },
+  { code: 'CN', dialCode: '+86', flag: '🇨🇳', name: 'China' },
+  { code: 'ZA', dialCode: '+27', flag: '🇿🇦', name: 'South Africa' },
+  { code: 'NG', dialCode: '+234', flag: '🇳🇬', name: 'Nigeria' },
+];
+
+const bannerImages = [
+  { id: '1', image: BannerImage1, title: 'Welcome to Your New Circle' },
+  { id: '2', image: BannerImage2, title: 'Share, Chat, Connect' },
+  { id: '3', image: BannerImage3, title: 'Friendship Has No Boundaries' },
+  { id: '4', image: BannerImage4, title: 'Start Meaningful Conversations' },
+];
+
+const { width } = Dimensions.get('window');
+const HORIZONTAL_PADDING = 20;
+const BANNER_WIDTH = width - (HORIZONTAL_PADDING * 2);
 
 export default function MobileLoginScreen({ navigation }: Props): React.JSX.Element {
   const insets = useSafeAreaInsets();
@@ -33,9 +85,58 @@ export default function MobileLoginScreen({ navigation }: Props): React.JSX.Elem
   const [step, setStep] = useState<Step>('mobile');
   const [otp, setOtp] = useState('');
   const [loading, setLoading] = useState(false);
+  const [selectedCountry, setSelectedCountry] = useState<CountryCode>(countryCodes[0]);
+  const [showCountryDropdown, setShowCountryDropdown] = useState(false);
+  const [activeBannerIndex, setActiveBannerIndex] = useState(0);
+  const [resendEnabled, setResendEnabled] = useState(false);
+  const [resendTimer, setResendTimer] = useState(0);
   const scrollRef = useRef<ScrollView | null>(null);
+  const flatListRef = useRef<FlatList>(null);
+  const timerRef = useRef<NodeJS.Timeout | null>(null);
+  const autoSlideRef = useRef<NodeJS.Timeout | null>(null);
 
-  const digits = normalizeIndianMobileDigits(mobile);
+  // Auto-slide effect
+  useEffect(() => {
+    if (flatListRef.current && bannerImages.length > 1) {
+      autoSlideRef.current = setInterval(() => {
+        let nextIndex = activeBannerIndex + 1;
+        if (nextIndex >= bannerImages.length) {
+          nextIndex = 0;
+        }
+        flatListRef.current?.scrollToIndex({
+          index: nextIndex,
+          animated: true,
+        });
+        setActiveBannerIndex(nextIndex);
+      }, 3000);
+    }
+
+    return () => {
+      if (autoSlideRef.current) {
+        clearInterval(autoSlideRef.current);
+      }
+    };
+  }, [activeBannerIndex]);
+
+  // Resend timer effect
+  useEffect(() => {
+    if (resendTimer > 0) {
+      timerRef.current = setTimeout(() => {
+        setResendTimer(resendTimer - 1);
+      }, 1000);
+    } else if (resendTimer === 0 && resendEnabled === false) {
+      setResendEnabled(true);
+    }
+
+    return () => {
+      if (timerRef.current) {
+        clearTimeout(timerRef.current);
+      }
+    };
+  }, [resendTimer, resendEnabled]);
+
+  /** API uses canonical 10-digit Indian mobile (matches DB and other auth screens). */
+  const getPhoneForApi = useCallback(() => normalizeIndianMobileDigits(mobile), [mobile]);
 
   const scrollToFocusedInput = useCallback(() => {
     requestAnimationFrame(() => {
@@ -48,16 +149,21 @@ export default function MobileLoginScreen({ navigation }: Props): React.JSX.Elem
   }, []);
 
   const onSendOtp = async () => {
-    const err = validateIndianMobileDigits(digits);
-    if (err) {
-      Alert.alert('Validation', err);
+    const digitsOnly = mobile.replace(/\D/g, '');
+    // Restrict to exactly 10 digits
+    if (digitsOnly.length !== 10) {
+      Alert.alert('Validation', `Please enter exactly 10 digits (currently ${digitsOnly.length} digits).`);
       return;
     }
     setLoading(true);
     try {
-      await authApi.sendMobileOtp(digits);
+      const phone = getPhoneForApi();
+      await authApi.sendMobileOtp(phone);
       setOtp('');
       setStep('otp');
+      // Reset resend timer
+      setResendEnabled(false);
+      setResendTimer(60);
     } catch (e) {
       Alert.alert('Could not send OTP', getErrorMessage(e));
     } finally {
@@ -73,7 +179,8 @@ export default function MobileLoginScreen({ navigation }: Props): React.JSX.Elem
     }
     setLoading(true);
     try {
-      const { data } = await authApi.verifyMobileOtp(digits, code);
+      const phone = getPhoneForApi();
+      const { data } = await authApi.verifyMobileOtp(phone, code);
       if (data.status === 'needs_gender') {
         navigation.navigate('AuthGender', { phone: data.phone });
         return;
@@ -91,8 +198,72 @@ export default function MobileLoginScreen({ navigation }: Props): React.JSX.Elem
     }
   };
 
+  const onResendOtp = async () => {
+    if (!resendEnabled) {
+      Alert.alert('Please wait', `You can resend OTP after ${resendTimer} seconds`);
+      return;
+    }
+    await onSendOtp();
+  };
+
+  const renderBannerItem = ({ item }: { item: typeof bannerImages[0] }) => (
+    <View style={[styles.bannerSlide, { width: BANNER_WIDTH }]}>
+      <Image source={item.image} style={styles.bannerImage} />
+      <LinearGradient
+        colors={['transparent', 'rgba(0,0,0,0.7)']}
+        style={styles.bannerOverlay}
+      >
+        <Text style={styles.bannerTitle}>{item.title}</Text>
+      </LinearGradient>
+    </View>
+  );
+  const onScrollBanner = (event: any) => {
+    const index = Math.round(event.nativeEvent.contentOffset.x / BANNER_WIDTH);
+    if (activeBannerIndex !== index) {
+      setActiveBannerIndex(index);
+    }
+  };
+
+  const onMomentumScrollEnd = (event: any) => {
+    const index = Math.round(event.nativeEvent.contentOffset.x / BANNER_WIDTH);
+    setActiveBannerIndex(index);
+  };
+
+  const renderDotsWithText = () => {
+    return (
+      <View style={styles.dotsWithTextContainer}>
+        {/* Dots Row */}
+        <View style={styles.dotsRow}>
+          {bannerImages.map((_, index) => (
+            <View
+              key={index}
+              style={[
+                styles.dot,
+                activeBannerIndex === index ? styles.dotActive : styles.dotInactive,
+              ]}
+            />
+          ))}
+        </View>
+      </View>
+    );
+  };
+
+  const formatResendTime = (seconds: number): string => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    if (mins > 0) {
+      return `${mins}:${secs.toString().padStart(2, '0')}`;
+    }
+    return `${secs}s`;
+  };
+
   return (
     <View style={styles.bg}>
+      {/* Logo at Absolute Top */}
+      <View style={[styles.absoluteLogoContainer, { paddingTop: Math.max(insets.top, 10) }]}>
+        <Image source={SelectoLogo} style={styles.logo} resizeMode="contain" />
+      </View>
+
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         style={styles.keyboardView}
@@ -105,7 +276,6 @@ export default function MobileLoginScreen({ navigation }: Props): React.JSX.Elem
           contentContainerStyle={[
             styles.scrollContent,
             {
-              paddingTop: Math.max(insets.top, 20),
               paddingBottom: Math.max(insets.bottom, 20),
             },
           ]}
@@ -114,95 +284,149 @@ export default function MobileLoginScreen({ navigation }: Props): React.JSX.Elem
           onScrollBeginDrag={Keyboard.dismiss}
           showsVerticalScrollIndicator={false}
         >
-          <View style={styles.card}>
-            <View style={styles.logoContainer}>
-              <Image source={SelectoLogo} style={styles.logo} resizeMode="contain" />
+          {/* Centered Content */}
+          <View style={styles.centerContainer}>
+            {/* Banner Slider with auto-slide */}
+            <View style={styles.bannerContainer}>
+              <FlatList
+                ref={flatListRef}
+                data={bannerImages}
+                renderItem={renderBannerItem}
+                horizontal
+                pagingEnabled
+                showsHorizontalScrollIndicator={false}
+                onScroll={onScrollBanner}
+                onMomentumScrollEnd={onMomentumScrollEnd}
+                scrollEventThrottle={16}
+                keyExtractor={(item) => item.id}
+                decelerationRate="fast"
+                snapToInterval={BANNER_WIDTH}
+                snapToAlignment="start"
+                contentContainerStyle={styles.flatListContent}
+              />
+              {renderDotsWithText()}
             </View>
 
-            <Text style={styles.title}>Sign in</Text>
-            <Text style={styles.subtitle}>
-              {step === 'mobile'
-                ? 'Enter your mobile number to continue'
-                : `Enter the code sent to ${digits}`}
-            </Text>
+            {/* Centered Form Container */}
+            <View style={styles.formContainer}>
+              {step === 'mobile' ? (
+                <>
+                  <View style={styles.phoneInputContainer}>
+                    <TouchableOpacity
+                      style={styles.countrySelector}
+                      onPress={() => setShowCountryDropdown(!showCountryDropdown)}
+                      activeOpacity={0.7}
+                    >
+                      <Text style={styles.countryFlag}>{selectedCountry.flag}</Text>
+                      <Text style={styles.countryDialCode}>{selectedCountry.dialCode}</Text>
+                      <Text style={styles.dropdownArrow}>▼</Text>
+                    </TouchableOpacity>
+                    <TextInput
+                      style={styles.phoneInput}
+                      placeholder="Enter mobile number (10 digits)"
+                      placeholderTextColor="#999"
+                      keyboardType="phone-pad"
+                      maxLength={10}
+                      autoCapitalize="none"
+                      autoCorrect={false}
+                      value={mobile}
+                      onChangeText={(text) => {
+                        // Only allow digits
+                        const cleaned = text.replace(/[^0-9]/g, '');
+                        setMobile(cleaned);
+                      }}
+                      onFocus={scrollToFocusedInput}
+                    />
+                  </View>
 
-            {step === 'mobile' ? (
-              <>
-                <Text style={styles.label}>Mobile number</Text>
-                <TextInput
-                  style={styles.input}
-                  placeholder="10-digit mobile"
-                  placeholderTextColor="#999"
-                  keyboardType="phone-pad"
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                  value={mobile}
-                  onChangeText={setMobile}
-                  onFocus={scrollToFocusedInput}
-                />
-              </>
-            ) : (
-              <>
-                <Text style={styles.label}>OTP</Text>
-                <TextInput
-                  style={styles.input}
-                  placeholder="6-digit OTP"
-                  placeholderTextColor="#999"
-                  keyboardType="number-pad"
-                  maxLength={6}
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                  value={otp}
-                  onChangeText={setOtp}
-                  onFocus={scrollToFocusedInput}
-                />
-                <TouchableOpacity
-                  onPress={() => {
-                    setStep('mobile');
-                    setOtp('');
-                  }}
-                  style={styles.changeNumber}
-                >
-                  <Text style={styles.changeNumberText}>Change number</Text>
-                </TouchableOpacity>
-              </>
-            )}
+                  {showCountryDropdown && (
+                    <View style={styles.countryDropdown}>
+                      <ScrollView style={styles.countryScroll} nestedScrollEnabled>
+                        {countryCodes.map((country) => (
+                          <TouchableOpacity
+                            key={country.code}
+                            style={styles.countryOption}
+                            onPress={() => {
+                              setSelectedCountry(country);
+                              setShowCountryDropdown(false);
+                            }}
+                          >
+                            <Text style={styles.countryFlagOption}>{country.flag}</Text>
+                            <Text style={styles.countryName}>{country.name}</Text>
+                            <Text style={styles.countryDialCodeOption}>{country.dialCode}</Text>
+                          </TouchableOpacity>
+                        ))}
+                      </ScrollView>
+                    </View>
+                  )}
+                </>
+              ) : (
+                <>
+                  <TextInput
+                    style={styles.input}
+                    placeholder="Enter 6-digit OTP"
+                    placeholderTextColor="#999"
+                    keyboardType="number-pad"
+                    maxLength={6}
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    value={otp}
+                    onChangeText={setOtp}
+                    onFocus={scrollToFocusedInput}
+                  />
+                  <TouchableOpacity
+                    onPress={() => {
+                      setStep('mobile');
+                      setOtp('');
+                      setResendEnabled(false);
+                      setResendTimer(0);
+                      if (timerRef.current) {
+                        clearTimeout(timerRef.current);
+                      }
+                    }}
+                    style={styles.changeNumber}
+                  >
+                    <Text style={styles.changeNumberText}>Change number</Text>
+                  </TouchableOpacity>
+                </>
+              )}
 
-            <TouchableOpacity
-              style={[styles.buttonWrapper, loading && styles.buttonDisabled]}
-              onPress={() => void (step === 'mobile' ? onSendOtp() : onVerifyOtp())}
-              disabled={loading}
-              activeOpacity={0.8}
-            >
-              <LinearGradient
-                colors={['#7F00FF', '#A855F7', '#E100FF']}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 0 }}
-                style={styles.button}
-              >
-                <Text style={styles.buttonText}>
-                  {loading ? 'Please wait…' : step === 'mobile' ? 'Send OTP' : 'Verify & continue'}
-                </Text>
-              </LinearGradient>
-            </TouchableOpacity>
-
-            {step === 'otp' ? (
               <TouchableOpacity
-                style={styles.resend}
-                onPress={() => void onSendOtp()}
+                style={[styles.buttonWrapper, loading && styles.buttonDisabled]}
+                onPress={() => void (step === 'mobile' ? onSendOtp() : onVerifyOtp())}
                 disabled={loading}
+                activeOpacity={0.8}
               >
-                <Text style={styles.resendText}>Resend code</Text>
+                <LinearGradient
+                  colors={['#7F00FF', '#A855F7', '#E100FF']}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 0 }}
+                  style={styles.button}
+                >
+                  <Text style={styles.buttonText}>
+                    {loading ? 'Please wait…' : step === 'mobile' ? 'Get OTP' : 'Verify & continue'}
+                  </Text>
+                </LinearGradient>
               </TouchableOpacity>
-            ) : null}
+
+              {step === 'otp' ? (
+                <TouchableOpacity
+                  style={[styles.resend, !resendEnabled && styles.resendDisabled]}
+                  onPress={() => void onResendOtp()}
+                  disabled={!resendEnabled}
+                >
+                  <Text style={[styles.resendText, !resendEnabled && styles.resendTextDisabled]}>
+                    {resendEnabled ? 'Resend code' : `Resend code in ${formatResendTime(resendTimer)}`}
+                  </Text>
+                </TouchableOpacity>
+              ) : null}
+            </View>
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
     </View>
   );
 }
-
-const PURPLE = '#7b2cff';
 
 const styles = StyleSheet.create({
   bg: {
@@ -212,64 +436,194 @@ const styles = StyleSheet.create({
   keyboardView: {
     flex: 1,
   },
-  scrollContent: {
-    flexGrow: 1,
-    justifyContent: 'center',
-    paddingHorizontal: 20,
-  },
-  card: {
-    width: '100%',
-    padding: 22,
-  },
-  logoContainer: {
-    alignItems: 'flex-start',
-    marginBottom: 10,
+  absoluteLogoContainer: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    zIndex: 10,
+    alignItems: 'center',
   },
   logo: {
-    width: 150,
+    width: 140,
+    height: 45,
+    marginTop: 20,
+  },
+  scrollContent: {
+    flexGrow: 1,
+    paddingHorizontal: HORIZONTAL_PADDING,
+  },
+  centerContainer: {
+    flex: 1,
+    justifyContent: 'center',
+  },
+  bannerContainer: {
+    marginBottom: 32,
+    width: '100%',
+  },
+  flatListContent: {
+    paddingHorizontal: 0,
+  },
+  bannerSlide: {
+    height: 200,
+    borderRadius: 20,
+    overflow: 'hidden',
+    marginHorizontal: 0,
+  },
+  bannerImage: {
+    width: '100%',
+    height: '100%',
+  },
+  bannerOverlay: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    padding: 16,
+  },
+  bannerTitle: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: 'bold',
+    textAlign: 'center',
+  },
+  dotsWithTextContainer: {
+    alignItems: 'center',
+    marginTop: 16,
+  },
+  dotsRow: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  dot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    marginHorizontal: 4,
+  },
+  dotActive: {
+    backgroundColor: 'pink',
+    width: 10,
+  },
+  dotInactive: {
+    backgroundColor: '#ccc',
+  },
+  formContainer: {
+    width: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  phoneInputContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    width: '100%',
+    marginBottom: 16,
+  },
+  countrySelector: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#f5f5f5',
+    paddingHorizontal: 12,
+    paddingVertical: 14,
+    borderRadius: 12,
+    marginRight: 10,
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
     height: 50,
   },
-  title: {
-    fontSize: 22,
-    fontWeight: '800',
-    color: '#111',
-    marginBottom: 4,
+  countryFlag: {
+    fontSize: 20,
+    marginRight: 6,
   },
-  subtitle: {
-    color: '#666',
-    fontSize: 13,
-    marginBottom: 18,
-    lineHeight: 18,
-  },
-  label: {
-    fontSize: 12,
-    fontWeight: '700',
+  countryDialCode: {
+    fontSize: 14,
+    fontWeight: '500',
     color: '#333',
-    marginBottom: 8,
-    marginTop: 6,
+    marginRight: 4,
+  },
+  dropdownArrow: {
+    fontSize: 12,
+    color: '#999',
+  },
+  phoneInput: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+    fontSize: 14,
+    backgroundColor: '#fff',
+    height: 50,
   },
   input: {
+    width: '100%',
     borderWidth: 1,
-    borderColor: '#e5e5e5',
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 12,
+    borderColor: '#e0e0e0',
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 14,
     fontSize: 14,
     marginBottom: 14,
     backgroundColor: '#fff',
+    textAlign: 'center',
+  },
+  countryDropdown: {
+    position: 'absolute',
+    top: 70,
+    left: 0,
+    right: 0,
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+    maxHeight: 250,
+    zIndex: 1000,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 5,
+  },
+  countryScroll: {
+    maxHeight: 250,
+  },
+  countryOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
+  },
+  countryFlagOption: {
+    fontSize: 24,
+    marginRight: 12,
+  },
+  countryName: {
+    flex: 1,
+    fontSize: 14,
+    color: '#333',
+  },
+  countryDialCodeOption: {
+    fontSize: 14,
+    color: '#666',
+    fontWeight: '500',
   },
   changeNumber: {
-    marginTop: -6,
-    marginBottom: 8,
+    marginTop: 0,
+    alignSelf: 'center',
   },
   changeNumberText: {
-    color: PURPLE,
-    fontSize: 12,
+    color: '#7F00FF',
+    fontSize: 14,
     fontWeight: '600',
   },
   buttonWrapper: {
-    marginTop: 6,
-    borderRadius: 10,
+    width: '100%',
+    marginTop: 16,
+    borderRadius: 26,
     overflow: 'hidden',
   },
   button: {
@@ -281,16 +635,22 @@ const styles = StyleSheet.create({
   },
   buttonText: {
     color: '#fff',
-    fontSize: 15,
-    fontWeight: '800',
+    fontSize: 16,
+    fontWeight: '700',
   },
   resend: {
-    marginTop: 16,
+    marginTop: 14,
     alignItems: 'center',
   },
+  resendDisabled: {
+    opacity: 0.6,
+  },
   resendText: {
-    color: PURPLE,
-    fontSize: 13,
-    fontWeight: '700',
+    color: '#7F00FF',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  resendTextDisabled: {
+    color: '#999',
   },
 });

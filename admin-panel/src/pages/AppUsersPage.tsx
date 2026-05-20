@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Check, ChevronLeft, ChevronRight, Download, RefreshCw, Search, X } from 'lucide-react';
+import { Check, ChevronLeft, ChevronRight, Download, Edit2, RefreshCw, Search, X } from 'lucide-react';
 import {
   approveAppUser,
   fetchAppUsers,
@@ -9,6 +9,7 @@ import {
   type AppUserStatusTab,
 } from '../api/client';
 import { AppUserDetailModal } from '../components/AppUserDetailModal';
+import { AppUserEditModal } from '../components/AppUserEditModal';
 import { appUserRowCode, formatJoinedDate, formatPhoneIN } from '../utils/userDisplay';
 
 const PAGE_SIZE = 20;
@@ -40,6 +41,7 @@ export function AppUsersPage() {
   const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [detail, setDetail] = useState<AppUserRecord | null>(null);
+  const [editUser, setEditUser] = useState<AppUserRecord | null>(null);
 
   useEffect(() => {
     const t = window.setTimeout(() => setDebouncedSearch(search.trim()), 350);
@@ -109,7 +111,7 @@ export function AppUsersPage() {
         rows.push([
           `U${String(i + 1).padStart(4, '0')}`,
           u.name,
-          u.email,
+          u.email ?? '',
           formatPhoneIN(u.phone),
           String(u.walletBalance),
           u.userAudio ?? '',
@@ -313,7 +315,7 @@ export function AppUsersPage() {
                         <p className="font-semibold text-neutral-900">{u.name}</p>
                         <p className="text-xs text-neutral-500">Joined {formatJoinedDate(u.createdAt)}</p>
                       </td>
-                      <td className="px-4 py-3 text-neutral-700">{u.email}</td>
+                      <td className="px-4 py-3 text-neutral-700">{u.email ?? '—'}</td>
                       <td className="px-4 py-3 text-neutral-700">{formatPhoneIN(u.phone)}</td>
                       <td className="px-4 py-3 font-medium text-neutral-900">
                         ₹{u.walletBalance.toLocaleString('en-IN')}
@@ -341,6 +343,14 @@ export function AppUsersPage() {
                       </td>
                       <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
                         <div className="flex flex-wrap items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setEditUser(u)}
+                            className="inline-flex h-10 w-10 items-center justify-center rounded-full border-2 border-[#e9ddff] bg-[var(--color-brand-muted)] text-[#7b2cff] shadow-sm hover:bg-[#ede5ff]"
+                            title="Edit user"
+                          >
+                            <Edit2 className="h-4 w-4" />
+                          </button>
                           <button
                             type="button"
                             disabled={busyId === u._id || !canTickEnable}
@@ -408,7 +418,16 @@ export function AppUsersPage() {
         </div>
       </div>
 
-      <AppUserDetailModal user={detail} onClose={() => setDetail(null)} onChanged={() => void load()} />
+      <AppUserDetailModal
+        user={detail}
+        onClose={() => setDetail(null)}
+        onChanged={() => void load()}
+        onEdit={(u) => {
+          setDetail(null);
+          setEditUser(u);
+        }}
+      />
+      <AppUserEditModal user={editUser} onClose={() => setEditUser(null)} onSaved={() => void load()} />
     </div>
   );
 }

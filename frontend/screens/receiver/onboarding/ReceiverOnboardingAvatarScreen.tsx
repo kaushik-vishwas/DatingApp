@@ -61,7 +61,7 @@ export default function ReceiverOnboardingAvatarScreen({
           );
         })}
       </View>
-      {selected ? (
+      {/* {selected ? (
         <View style={styles.previewWrap}>
           <Text style={styles.previewLabel}>Preview</Text>
           {(() => {
@@ -69,7 +69,7 @@ export default function ReceiverOnboardingAvatarScreen({
             return src ? <Image source={src} style={styles.preview} /> : null;
           })()}
         </View>
-      ) : null}
+      ) : null} */}
     </ReceiverOnboardingStepLayout>
   );
 }
@@ -78,24 +78,25 @@ const styles = StyleSheet.create({
   grid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    justifyContent: 'space-between',
-    gap: 12,
+    justifyContent: 'center',
+    gap: 16, // Adjust this value for more/less space between avatars
     marginBottom: 16,
   },
   cell: {
-    width: '30%',
+    width: '40%',
     aspectRatio: 1,
     borderRadius: 999,
     overflow: 'hidden',
     borderWidth: 2,
     borderColor: '#E8E8E8',
+    margin: 8, // Adds gap on all sides
   },
   cellActive: {
     borderColor: '#A855F7',
     borderWidth: 3,
   },
-  thumb: { width: '100%', height: '100%' },
+  thumb: { width: '100%', height: '100%', resizeMode: 'cover' },
   previewWrap: { alignItems: 'center', marginTop: 8 },
   previewLabel: { fontSize: 12, color: '#888', marginBottom: 8, fontWeight: '600' },
-  preview: { width: 88, height: 88, borderRadius: 44 },
-});
+  preview: { width: 60, height: 60, borderRadius: 30 },
+}); 

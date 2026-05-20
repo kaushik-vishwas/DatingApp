@@ -1,5 +1,7 @@
+import type { NavigatorScreenParams } from '@react-navigation/native';
 import type { VoiceCallScreenParams } from './voiceCallParams';
 import type { Gender } from '../types/user';
+import type { ReceiverTabParamList } from './ReceiverTabParamList';
 
 export type IncomingCallParams = {
   callId: string;
@@ -10,7 +12,9 @@ export type IncomingCallParams = {
 };
 
 export type ReceiverStackParamList = {
-  ReceiverHome: undefined;
+  ReceiverMainTabs: NavigatorScreenParams<ReceiverTabParamList> | undefined;
+  /** Shown after turning availability on — display only; calls still work as before. */
+  ReceiverAvailabilityWaiting: undefined;
   ReceiverSettings: undefined;
   ReceiverHowToEarn: undefined;
   ReceiverNotifications: undefined;

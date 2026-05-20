@@ -157,7 +157,7 @@ export default function AppNavigator(): React.JSX.Element {
             name="Home"
             children={() => {
               if (accountStatus === 'approved') {
-                return <ReceiverAppNavigator initialRouteName="ReceiverHome" />;
+                return <ReceiverAppNavigator initialRouteName="ReceiverMainTabs" />;
               }
               if (accountStatus === 'pending_profile') {
                 const genderMissing = !user.gender || String(user.gender).trim().length === 0;

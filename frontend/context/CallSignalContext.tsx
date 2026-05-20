@@ -1,9 +1,12 @@
-import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert } from 'react-native';
 import { CommonActions } from '@react-navigation/native';
 import { io, type Socket } from 'socket.io-client';
+import RandomCallMatchingOverlay from '../components/caller/RandomCallMatchingOverlay';
 import { useAuth } from './AuthContext';
-import { callApi, getJwt, getResolvedApiBaseUrl } from '../services/api';
+import { callApi, getErrorMessage, getJwt, getResolvedApiBaseUrl } from '../services/api';
+import { MAX_RANDOM_CALL_RETRIES, isRetryableRandomInviteError } from '../utils/randomCallMatch';
+import { startRandomMatchingTone } from '../utils/callSounds';
 import type { VoiceBootstrapResponse } from '../types/api';
 import type { VoiceCallScreenParams } from '../navigation/voiceCallParams';
 import { navigationRef } from '../navigation/navigationRef';
@@ -84,14 +87,24 @@ export type IncomingCallRequest = {
   peerImage?: string | null;
 };
 
+export type StartCallInviteOptions = {
+  receiverRatePerMinuteHint?: number;
+  receiverEarningRatePerMinuteHint?: number;
+  /** After no-answer / decline / hang-up before connect, open random matching (manual calls only). */
+  redirectToRandomOnMissed?: boolean;
+};
+
 type CallSignalContextValue = {
   registerPeer: (peerId: string, peerName: string, peerImage?: string | null) => void;
   startCallInvite: (
     peerId: string,
     peerName: string,
     peerImage?: string | null,
-    options?: { receiverRatePerMinuteHint?: number; receiverEarningRatePerMinuteHint?: number }
+    options?: StartCallInviteOptions
   ) => Promise<void>;
+  startRandomCallEngagement: () => Promise<void>;
+  cancelRandomCallEngagement: () => void;
+  randomCallMatchingVisible: boolean;
   cancelOutgoingCallInvite: () => void;
   setIncomingCallHandler: (handler: ((req: IncomingCallRequest) => void) | null) => void;
   acceptIncomingCall: (req: IncomingCallRequest) => Promise<void>;
@@ -108,7 +121,8 @@ function getFallbackPeerName(fromType: 'u' | 'r'): string {
 
 /** Outbound ringing UI must not sit under active VoiceCall (back would return to "Calling…"). */
 function callerShouldResetStackForVoiceCall(params: VoiceCallScreenParams): boolean {
-  if ('outgoingCallerPhase' in params && params.outgoingCallerPhase === 'ringing') {
+  // Outbound ringing → joining stays on one VoiceCall screen (avoids Stream client teardown mid-call).
+  if ('outgoingCallerPhase' in params && params.outgoingCallerPhase) {
     return false;
   }
   return Boolean(
@@ -118,6 +132,11 @@ function callerShouldResetStackForVoiceCall(params: VoiceCallScreenParams): bool
 
 export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { isSignedIn, user } = useAuth();
+  const [randomCallMatchingVisible, setRandomCallMatchingVisible] = useState(false);
+  const randomMatchAbortRef = useRef<AbortController | null>(null);
+  const randomMatchStopSoundRef = useRef<(() => Promise<void>) | null>(null);
+  const randomMatchRunningRef = useRef(false);
+  const scheduleRandomAfterMissedManualCallRef = useRef<() => void>(() => {});
   const socketRef = useRef<Socket | null>(null);
   const peerProfileRef = useRef<Map<string, { name: string; image?: string | null }>>(new Map());
   const pendingOutgoingByCallIdRef = useRef<Map<string, PendingOutgoingCall>>(new Map());
@@ -152,9 +171,12 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       // ignore
     }
     if (userRoleRef.current === 'caller') {
-      nav.navigate('CallerApp', { screen: 'CallerDiscover' });
+      nav.navigate('CallerApp', {
+        screen: 'CallerMainTabs',
+        params: { screen: 'CallerHome' },
+      });
     } else if (userRoleRef.current === 'receiver') {
-      nav.navigate('Home', { screen: 'ReceiverHome' });
+      nav.navigate('Home', { screen: 'ReceiverMainTabs', params: { screen: 'ReceiverHome' } });
     }
   }, []);
 
@@ -171,7 +193,10 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
                 name: 'CallerApp',
                 state: {
                   routes: [
-                    { name: 'CallerDiscover' },
+                    {
+                      name: 'CallerMainTabs',
+                      state: { routes: [{ name: 'CallerHome' }], index: 0 },
+                    },
                     { name: 'VoiceCall', params },
                   ],
                   index: 1,
@@ -196,7 +221,10 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
             {
               name: 'Home',
               state: {
-                routes: [{ name: 'ReceiverHome' }, { name: 'VoiceCall', params }],
+                routes: [
+                  { name: 'ReceiverMainTabs', state: { routes: [{ name: 'ReceiverHome' }], index: 0 } },
+                  { name: 'VoiceCall', params },
+                ],
                 index: 1,
               },
             },
@@ -362,7 +390,7 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       peerId: string,
       peerName: string,
       peerImage?: string | null,
-      options?: { receiverRatePerMinuteHint?: number; receiverEarningRatePerMinuteHint?: number }
+      options?: StartCallInviteOptions
     ): Promise<void> => {
       const id = peerId.trim();
       const name = peerName.trim();
@@ -440,7 +468,12 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
           if (socket.connected) {
             socket.emit('call:end', { callId: data.callId });
           }
-          if (abort.signal.aborted || outcome.reason === 'ended') {
+          if (options?.redirectToRandomOnMissed && !abort.signal.aborted) {
+            dismissCallerVoiceCallScreen();
+            scheduleRandomAfterMissedManualCallRef.current();
+            return;
+          }
+          if (abort.signal.aborted) {
             return;
           }
           if (outcome.reason === 'rejected') {
@@ -473,6 +506,92 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       registerPeer,
     ]
   );
+
+  const startRandomCallEngagement = useCallback(async (): Promise<void> => {
+    if (userRoleRef.current !== 'caller') return;
+    if (randomMatchRunningRef.current) return;
+
+    const wallet =
+      typeof user?.walletBalance === 'number' && Number.isFinite(user.walletBalance)
+        ? Math.max(0, user.walletBalance)
+        : 0;
+
+    const abort = new AbortController();
+    randomMatchAbortRef.current = abort;
+    randomMatchRunningRef.current = true;
+    setRandomCallMatchingVisible(true);
+
+    let stopMatchSound: (() => Promise<void>) | undefined;
+    try {
+      stopMatchSound = await startRandomMatchingTone();
+      randomMatchStopSoundRef.current = stopMatchSound;
+      let lastErr: unknown = null;
+      for (let attempt = 0; attempt < MAX_RANDOM_CALL_RETRIES; attempt += 1) {
+        if (abort.signal.aborted) return;
+        try {
+          const { data } = await callApi.randomReceiver();
+          if (abort.signal.aborted) return;
+          const rate =
+            typeof data.audioCallRate === 'number' && Number.isFinite(data.audioCallRate)
+              ? data.audioCallRate
+              : null;
+          if (rate != null && wallet < rate) {
+            setRandomCallMatchingVisible(false);
+            const nav = navigationRef.current;
+            if (nav?.isReady()) {
+              nav.navigate('CallerApp', { screen: 'Wallet' });
+            }
+            return;
+          }
+          await stopMatchSound?.();
+          stopMatchSound = undefined;
+          setRandomCallMatchingVisible(false);
+          await startCallInvite(data.receiverId, data.name, data.profileImage ?? null, {
+            receiverRatePerMinuteHint:
+              rate != null && Number.isFinite(rate) ? rate : undefined,
+          });
+          return;
+        } catch (e: unknown) {
+          lastErr = e;
+          const msg = getErrorMessage(e);
+          if (!isRetryableRandomInviteError(msg) || attempt === MAX_RANDOM_CALL_RETRIES - 1) {
+            throw e;
+          }
+        }
+      }
+      throw lastErr ?? new Error('No available receiver found right now. Please try again shortly.');
+    } catch (e: unknown) {
+      if (!abort.signal.aborted) {
+        Alert.alert('Random call', getErrorMessage(e));
+      }
+    } finally {
+      await stopMatchSound?.();
+      randomMatchStopSoundRef.current = null;
+      if (randomMatchAbortRef.current === abort) {
+        randomMatchAbortRef.current = null;
+      }
+      randomMatchRunningRef.current = false;
+      if (!abort.signal.aborted) {
+        setRandomCallMatchingVisible(false);
+      }
+    }
+  }, [startCallInvite, user?.walletBalance]);
+
+  const cancelRandomCallEngagement = useCallback(() => {
+    randomMatchAbortRef.current?.abort();
+    randomMatchAbortRef.current = null;
+    randomMatchRunningRef.current = false;
+    void randomMatchStopSoundRef.current?.();
+    randomMatchStopSoundRef.current = null;
+    setRandomCallMatchingVisible(false);
+    void stopOutboundRingtonePlayback();
+  }, []);
+
+  useEffect(() => {
+    scheduleRandomAfterMissedManualCallRef.current = () => {
+      void startRandomCallEngagement();
+    };
+  }, [startRandomCallEngagement]);
 
   const rejectIncomingCall = useCallback((req: IncomingCallRequest) => {
     void stopIncomingRingtonePlayback();
@@ -744,7 +863,7 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
           const goHome = (): boolean => {
             const n = navigationRef.current;
             if (!n?.isReady()) return false;
-            n.navigate('Home', { screen: 'ReceiverHome' });
+            n.navigate('Home', { screen: 'ReceiverMainTabs', params: { screen: 'ReceiverHome' } });
             return true;
           };
           if (!goHome()) scheduleNavigateWhenReady(goHome, outgoingNavigateGeneration);
@@ -775,6 +894,9 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     () => ({
       registerPeer,
       startCallInvite,
+      startRandomCallEngagement,
+      cancelRandomCallEngagement,
+      randomCallMatchingVisible,
       cancelOutgoingCallInvite,
       setIncomingCallHandler,
       acceptIncomingCall,
@@ -785,6 +907,9 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     [
       registerPeer,
       startCallInvite,
+      startRandomCallEngagement,
+      cancelRandomCallEngagement,
+      randomCallMatchingVisible,
       cancelOutgoingCallInvite,
       setIncomingCallHandler,
       acceptIncomingCall,
@@ -794,7 +919,17 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     ]
   );
 
-  return <CallSignalContext.Provider value={value}>{children}</CallSignalContext.Provider>;
+  return (
+    <CallSignalContext.Provider value={value}>
+      {children}
+      <RandomCallMatchingOverlay
+        visible={randomCallMatchingVisible}
+        onCancel={cancelRandomCallEngagement}
+        userName={user?.name}
+        userProfileImage={user?.profileImage}
+      />
+    </CallSignalContext.Provider>
+  );
 };
 
 export const useCallSignals = (): CallSignalContextValue => {

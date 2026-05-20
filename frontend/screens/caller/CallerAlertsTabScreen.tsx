@@ -1,9 +1,9 @@
-import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useFocusEffect } from '@react-navigation/native';
 import React, { useCallback, useMemo, useRef, useState } from 'react';
 
 import {
   ActivityIndicator,
+  Alert,
   ScrollView,
   StyleSheet,
   Text,
@@ -12,15 +12,16 @@ import {
   Dimensions,
 } from 'react-native';
 
-import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { TabView, SceneMap } from 'react-native-tab-view';
 
-import CallerBottomTabs, {
-  getCallerTabBarContentPadding,
-} from '../../components/caller/CallerBottomTabs';
-
-import type { CallerStackParamList } from '../../navigation/CallerStackParamList';
+import CallerTabScreenHeader from '../../components/caller/CallerTabScreenHeader';
+import ReceiverTabBody from '../../components/receiver/ReceiverTabBody';
+import { CALLER_MESSAGE_REQUIRES_CALL } from '../../constants/callerMessaging';
+import { useCallerMessageEligibility } from '../../context/CallerMessageEligibilityContext';
+import { useCallerAppNavigation } from '../../utils/callerAppNavigation';
+import { useReceiverTabBarBottomInset } from '../../utils/receiverTabBarInset';
 
 import { markNotificationsSeenNow } from '../../services/notificationUnread';
 import { getErrorMessage, profileApi } from '../../services/api';
@@ -31,22 +32,14 @@ import type {
 } from '../../types/api';
 import { SCREEN_FETCH_TIMEOUT_MS, withTimeout } from '../../utils/withTimeout';
 
-type Props = NativeStackScreenProps<
-  CallerStackParamList,
-  'CallerAlerts'
->;
-
 const initialLayout = {
   width: Dimensions.get('window').width,
 };
 
-export default function CallerAlertsTabScreen({
-  navigation,
-}: Props): React.JSX.Element {
-  const insets = useSafeAreaInsets();
-
-  const contentBottomPadding =
-    getCallerTabBarContentPadding(insets.bottom);
+export default function CallerAlertsTabScreen(): React.JSX.Element {
+  const navigation = useCallerAppNavigation();
+  const { canMessageReceiver } = useCallerMessageEligibility();
+  const contentBottomPadding = useReceiverTabBarBottomInset();
 
   const [loading, setLoading] = useState(true);
 
@@ -114,7 +107,7 @@ export default function CallerAlertsTabScreen({
 
   const onOpenNotification = (row: CallerNotificationRow) => {
     if (row.type === 'call') {
-      navigation.navigate('CallerCalls');
+      navigation.navigate('CallerRecents');
       return;
     }
 
@@ -122,6 +115,10 @@ export default function CallerAlertsTabScreen({
       const chatTarget = parseChatNotification(row);
 
       if (chatTarget) {
+        if (!canMessageReceiver(chatTarget.receiverId)) {
+          Alert.alert('Messaging locked', CALLER_MESSAGE_REQUIRES_CALL);
+          return;
+        }
         navigation.navigate('CallerChat', {
           receiverId: chatTarget.receiverId,
           receiverName: chatTarget.receiverName,
@@ -130,7 +127,7 @@ export default function CallerAlertsTabScreen({
         return;
       }
 
-      navigation.navigate('CallerChats');
+      navigation.navigate('CallerChatsTab');
       return;
     }
 
@@ -225,8 +222,8 @@ export default function CallerAlertsTabScreen({
       style={styles.safe}
       edges={['top', 'left', 'right']}
     >
-      <Text style={styles.title}>Notifications</Text>
-
+      <CallerTabScreenHeader title="Alerts" subtitle="Notifications" backTarget="home" />
+      <ReceiverTabBody style={styles.tabBody}>
       <TabView
         navigationState={{ index, routes }}
         renderScene={renderScene}
@@ -265,11 +262,7 @@ export default function CallerAlertsTabScreen({
           </View>
         )}
       />
-
-      <CallerBottomTabs
-        active="alerts"
-        navigation={navigation}
-      />
+      </ReceiverTabBody>
     </SafeAreaView>
   );
 }
@@ -280,14 +273,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#f6f6f7',
   },
 
-  title: {
-    fontSize: 20,
-    fontWeight: '900',
-    color: '#111',
-    textAlign: 'center',
-    paddingVertical: 16,
-  },
-
+  tabBody: { flex: 1 },
   filters: {
     flexDirection: 'row',
     flexWrap: 'wrap',

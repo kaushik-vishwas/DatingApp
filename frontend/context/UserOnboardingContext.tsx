@@ -1,5 +1,6 @@
-import React, { createContext, useCallback, useContext, useMemo, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 
+import { useAuth } from './AuthContext';
 import type { Gender } from '../types/user';
 
 type UserOnboardingContextValue = {
@@ -17,9 +18,16 @@ type UserOnboardingContextValue = {
 const UserOnboardingContext = createContext<UserOnboardingContextValue | null>(null);
 
 export const UserOnboardingProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [gender, setGenderState] = useState<Gender | null>(null);
+  const { user } = useAuth();
+  const [gender, setGenderState] = useState<Gender | null>(() => user?.gender ?? null);
   const [callerAvatarPresetUrl, setCallerAvatarPresetUrl] = useState<string | null>(null);
   const [userAudio, setUserAudio] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (user?.gender) {
+      setGenderState(user.gender);
+    }
+  }, [user?.gender]);
 
   const setGender = useCallback((g: Gender) => {
     setGenderState(g);

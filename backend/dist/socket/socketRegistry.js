@@ -6,6 +6,7 @@ exports.emitReceiverApproved = emitReceiverApproved;
 exports.emitReceiverRejected = emitReceiverRejected;
 exports.emitCallerApproved = emitCallerApproved;
 exports.emitCallerRejected = emitCallerRejected;
+exports.emitCallerOnlineToReceiver = emitCallerOnlineToReceiver;
 exports.emitReceiverWithdrawalUpdate = emitReceiverWithdrawalUpdate;
 let ioInstance = null;
 function registerSocketIOServer(io) {
@@ -40,6 +41,12 @@ function emitCallerRejected(accountId, reason) {
         return;
     const room = `account:u:${String(accountId).trim()}`;
     ioInstance.to(room).emit('rejected', { reason });
+}
+function emitCallerOnlineToReceiver(receiverId, payload) {
+    if (!ioInstance)
+        return;
+    const room = `account:r:${String(receiverId).trim()}`;
+    ioInstance.to(room).emit('caller:online', payload);
 }
 function emitReceiverWithdrawalUpdate(accountId, payload) {
     if (!ioInstance)

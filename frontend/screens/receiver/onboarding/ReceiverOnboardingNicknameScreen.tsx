@@ -1,24 +1,16 @@
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import { Alert, StyleSheet, TextInput } from 'react-native';
 
 import ReceiverOnboardingStepLayout from '../../../components/receiver/onboarding/ReceiverOnboardingStepLayout';
-import { useAuth } from '../../../context/AuthContext';
 import { useReceiverOnboarding } from '../../../context/ReceiverOnboardingContext';
 import type { ReceiverOnboardingStackParamList } from '../../../navigation/ReceiverOnboardingStackParamList';
 
 type Props = NativeStackScreenProps<ReceiverOnboardingStackParamList, 'ReceiverOnboardingNickname'>;
 
 export default function ReceiverOnboardingNicknameScreen({ navigation }: Props): React.JSX.Element {
-  const { user } = useAuth();
   const { nickname, setNickname } = useReceiverOnboarding();
-  const [value, setValue] = useState(nickname || user?.name || '');
-
-  useEffect(() => {
-    if (!nickname && user?.name?.trim()) {
-      setValue(user.name.trim());
-    }
-  }, [nickname, user?.name]);
+  const [value, setValue] = useState('');
 
   const onContinue = () => {
     const trimmed = value.trim();

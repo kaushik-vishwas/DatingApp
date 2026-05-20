@@ -142,6 +142,7 @@ import cors from 'cors';
 import mongoose from 'mongoose';
 import { verifyEmailConfig } from './config/email';
 import { syncSuperAdminFromEnv } from './services/superAdminSync';
+import { dropLegacyEmailIndexes } from './services/dropLegacyEmailIndexes';
 import authRoutes from './routes/authRoutes';
 import profileRoutes from './routes/profileRoutes';
 import adminRoutes from './routes/adminRoutes';
@@ -228,7 +229,8 @@ const start = async (): Promise<void> => {
     });
     
     console.log('✅ MongoDB connected successfully');
-    
+
+    await dropLegacyEmailIndexes();
     await syncSuperAdminFromEnv();
 
     void verifyEmailConfig().then((r) => {

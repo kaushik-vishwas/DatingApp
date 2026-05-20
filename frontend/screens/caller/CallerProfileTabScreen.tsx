@@ -17,7 +17,6 @@ import {
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Feather, MaterialIcons, Ionicons, FontAwesome5 } from '@expo/vector-icons';
 
-import CallerBottomTabs, { getCallerTabBarContentPadding } from '../../components/caller/CallerBottomTabs';
 import { useAuth } from '../../context/AuthContext';
 import type { CallerStackParamList } from '../../navigation/CallerStackParamList';
 import { profileApi } from '../../services/api';
@@ -37,7 +36,7 @@ function formatWalletShort(inr: number): string {
 
 export default function CallerProfileTabScreen({ navigation }: Props): React.JSX.Element {
   const insets = useSafeAreaInsets();
-  const contentBottomPadding = getCallerTabBarContentPadding(insets.bottom);
+  const contentBottomPadding = Math.max(insets.bottom, 16) + 16;
   const { user, signOut } = useAuth();
   const [logoutOpen, setLogoutOpen] = useState(false);
   const [calls, setCalls] = useState(0);
@@ -114,10 +113,15 @@ export default function CallerProfileTabScreen({ navigation }: Props): React.JSX
 
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'left', 'right']}>
-      <Text style={styles.title}>Profile</Text>
+      <View style={styles.topRow}>
+        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn} activeOpacity={0.7}>
+          <Ionicons name="chevron-back" size={26} color="#111" />
+        </TouchableOpacity>
+        <Text style={styles.title}>Profile</Text>
+        <View style={styles.backBtn} />
+      </View>
 
       <ScrollView
-        style={{ marginBottom: contentBottomPadding }}
         contentContainerStyle={[styles.scroll, { paddingBottom: contentBottomPadding }]}
         showsVerticalScrollIndicator={false}
       >
@@ -175,7 +179,9 @@ export default function CallerProfileTabScreen({ navigation }: Props): React.JSX
         <View style={styles.menuBlock}>
           {menuRow(<Feather name="user" size={18} color="#222" />, 'Edit Profile', () => navigation.navigate('CallerEditProfile'))}
           {menuRow(<MaterialIcons name="star-outline" size={18} color="#222" />, 'Rate Us', () => navigation.navigate('CallerRateUs'))}
-          {menuRow(<Feather name="message-circle" size={18} color="#222" />, 'Chats', () => navigation.navigate('CallerChats'))}
+          {menuRow(<Feather name="message-circle" size={18} color="#222" />, 'Chats', () =>
+            navigation.navigate('CallerMainTabs', { screen: 'CallerChatsTab' })
+          )}
           {menuRow(<Feather name="help-circle" size={18} color="#222" />, 'Help & Support', () => navigation.navigate('CallerHelp'))}
           {menuRow(<Feather name="file-text" size={18} color="#222" />, 'Terms & Privacy', () => navigation.navigate('CallerTerms'))}
           {menuRow(<Feather name="lock" size={18} color="#222" />, 'Privacy Policy', () => navigation.navigate('CallerPrivacyPolicy'))}
@@ -185,8 +191,6 @@ export default function CallerProfileTabScreen({ navigation }: Props): React.JSX
 
         <Text style={styles.version}>Version {appVersion}</Text>
       </ScrollView>
-
-      <CallerBottomTabs active="profile" navigation={navigation} />
 
       <Modal visible={logoutOpen} transparent animationType="fade">
         <Pressable style={styles.modalBg} onPress={() => setLogoutOpen(false)}>
@@ -209,12 +213,24 @@ export default function CallerProfileTabScreen({ navigation }: Props): React.JSX
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: '#fff' },
+  topRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 8,
+    paddingBottom: 4,
+  },
+  backBtn: {
+    width: 40,
+    height: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   title: {
-    fontSize: 20,
+    flex: 1,
+    fontSize: 17,
     fontWeight: '900',
     color: '#111',
     textAlign: 'center',
-    paddingVertical: 14,
   },
   scroll: { paddingHorizontal: 20 },
   avatarRing: {

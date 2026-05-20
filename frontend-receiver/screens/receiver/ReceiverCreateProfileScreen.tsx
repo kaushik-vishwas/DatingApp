@@ -194,7 +194,7 @@ export default function ReceiverCreateProfileScreen({ route }: Props): React.JSX
                 <Icon name="chevron-left" size={26} color="#1a1a1a" />
               </TouchableOpacity>
               <Text style={styles.headerTitle}>Create Profile</Text>
-              <View style={styles.placeholder} />
+              {/* <View style={styles.placeholder} /> */}
             </View>
 
             <Text style={styles.subtitle}>Add your profile details, then we’ll verify your voice.</Text>

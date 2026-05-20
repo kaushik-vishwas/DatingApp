@@ -3,7 +3,7 @@ import React from 'react';
 
 import AudioVerificationScreen from '../screens/userOnboarding/AudioVerificationScreen';
 import ChooseAvatarScreen from '../screens/userOnboarding/ChooseAvatarScreen';
-import SelectGenderScreen from '../screens/userOnboarding/SelectGenderScreen';
+import OnboardingSelectGenderScreen from '../screens/userOnboarding/OnboardingSelectGenderScreen';
 import UserCompleteProfileScreen from '../screens/userOnboarding/UserCompleteProfileScreen';
 import WelcomeOnboardScreen from '../screens/userOnboarding/WelcomeOnboardScreen';
 import type { UserOnboardingStackParamList } from './UserOnboardingStackParamList';
@@ -13,7 +13,7 @@ const Stack = createNativeStackNavigator<UserOnboardingStackParamList>();
 export default function UserOnboardingNavigator(): React.JSX.Element {
   return (
     <Stack.Navigator
-      initialRouteName="SelectGender"
+      initialRouteName="ChooseAvatar"
       screenOptions={{
         headerShown: false,
         gestureEnabled: true,
@@ -21,8 +21,8 @@ export default function UserOnboardingNavigator(): React.JSX.Element {
         animation: 'slide_from_right',
       }}
     >
-      <Stack.Screen name="SelectGender" component={SelectGenderScreen} />
       <Stack.Screen name="AudioVerification" component={AudioVerificationScreen} />
+      <Stack.Screen name="SelectGender" component={OnboardingSelectGenderScreen} />
       <Stack.Screen name="ChooseAvatar" component={ChooseAvatarScreen} />
       <Stack.Screen name="UserCompleteProfile" component={UserCompleteProfileScreen} />
       <Stack.Screen name="WelcomeOnboard" component={WelcomeOnboardScreen} />

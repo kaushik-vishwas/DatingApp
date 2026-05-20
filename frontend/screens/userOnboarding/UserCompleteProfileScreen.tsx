@@ -15,6 +15,7 @@ import {
   TextInput,
   TouchableOpacity,
   View,
+  FlatList,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -23,6 +24,7 @@ import Icon from 'react-native-vector-icons/Ionicons';
 import {
   CALLER_INTEREST_OPTIONS,
   CALLER_LANGUAGE_OPTIONS,
+  INDIAN_STATES,
   resolveCallerAvatarPresetSource,
 } from '../../constants/userOnboarding';
 import { useAuth } from '../../context/AuthContext';
@@ -54,6 +56,8 @@ export default function UserCompleteProfileScreen({
 
   const [fullName, setFullName] = useState('');
   const [state, setState] = useState('');
+  const [showStateDropdown, setShowStateDropdown] = useState(false);
+  const [stateSearch, setStateSearch] = useState('');
   const [interests, setInterests] = useState<string[]>([]);
   const [languages, setLanguages] = useState<string[]>([]);
 
@@ -62,9 +66,13 @@ export default function UserCompleteProfileScreen({
 
   const [submitting, setSubmitting] = useState(false);
 
+  const filteredStates = INDIAN_STATES.filter(stateOption =>
+    stateOption.toLowerCase().includes(stateSearch.toLowerCase())
+  );
+
   React.useEffect(() => {
     if (!gender) {
-      navigation.replace('SelectGender');
+      navigation.replace('ChooseAvatar');
     }
   }, [gender, navigation]);
 
@@ -87,7 +95,7 @@ export default function UserCompleteProfileScreen({
     }
 
     if (!state.trim()) {
-      Alert.alert('Validation', 'Please enter your state.');
+      Alert.alert('Validation', 'Please select your state.');
       return;
     }
 
@@ -217,7 +225,7 @@ export default function UserCompleteProfileScreen({
             <Text style={styles.changePhoto}>Change avatar</Text>
           </TouchableOpacity>
 
-          <Text style={styles.label}>Full Name</Text>
+          <Text style={styles.label}>Display Name</Text>
 
           <TextInput
             style={styles.input}
@@ -258,14 +266,16 @@ export default function UserCompleteProfileScreen({
 
           <Text style={styles.label}>State</Text>
 
-          <TextInput
-            style={styles.input}
-            placeholder="Enter your state"
-            placeholderTextColor="#999"
-            value={state}
-            onChangeText={setState}
-            autoCapitalize="words"
-          />
+          <TouchableOpacity 
+            style={styles.dropdown}
+            onPress={() => setShowStateDropdown(true)}
+            activeOpacity={0.7}
+          >
+            <Text style={[styles.dropdownText, !state && styles.placeholderText]}>
+              {state || 'Select your state'}
+            </Text>
+            <Icon name="chevron-down" size={20} color="#666" />
+          </TouchableOpacity>
 
           <Text style={styles.label}>Languages (max 4)</Text>
 
@@ -311,6 +321,60 @@ export default function UserCompleteProfileScreen({
           </LinearGradient>
         </TouchableOpacity>
       </KeyboardAvoidingView>
+
+      {/* State Dropdown Modal */}
+      <Modal visible={showStateDropdown} transparent animationType="fade">
+        <View style={styles.modalOverlay}>
+          <Pressable style={styles.modalDismiss} onPress={() => setShowStateDropdown(false)} />
+          <View style={styles.modalCard}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Select State</Text>
+              <TouchableOpacity onPress={() => setShowStateDropdown(false)} style={styles.closeBtn} activeOpacity={0.7}>
+                <Icon name="close" size={20} color="#666" />
+              </TouchableOpacity>
+            </View>
+            
+            {/* Search Input */}
+            <View style={styles.searchContainer}>
+              <Icon name="search" size={20} color="#999" style={styles.searchIcon} />
+              <TextInput
+                style={styles.searchInput}
+                placeholder="Search state..."
+                value={stateSearch}
+                onChangeText={setStateSearch}
+                placeholderTextColor="#999"
+              />
+              {stateSearch.length > 0 && (
+                <TouchableOpacity onPress={() => setStateSearch('')}>
+                  <Icon name="close" size={20} color="#999" />
+                </TouchableOpacity>
+              )}
+            </View>
+            
+            <FlatList
+              data={filteredStates}
+              keyExtractor={(item) => item}
+              style={styles.modalList}
+              showsVerticalScrollIndicator={false}
+              renderItem={({ item }) => (
+                <TouchableOpacity
+                  style={[styles.stateItem, state === item && styles.stateItemActive]}
+                  onPress={() => {
+                    setState(item);
+                    setShowStateDropdown(false);
+                    setStateSearch('');
+                  }}
+                >
+                  <Text style={[styles.stateText, state === item && styles.stateTextActive]}>
+                    {item}
+                  </Text>
+                  {state === item && <Icon name="checkmark" size={20} color={PURPLE} />}
+                </TouchableOpacity>
+              )}
+            />
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -422,6 +486,28 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
   },
 
+  dropdown: {
+    borderWidth: 1,
+    borderColor: '#e5e5e5',
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    fontSize: 15,
+    backgroundColor: '#fff',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+
+  dropdownText: {
+    fontSize: 15,
+    color: '#111',
+  },
+
+  placeholderText: {
+    color: '#999',
+  },
+
   chipGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -474,5 +560,89 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 16,
     fontWeight: '800',
+  },
+
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    padding: 20,
+  },
+  modalDismiss: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  modalCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 20,
+    maxHeight: '80%',
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
+    elevation: 8,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F0F0F0',
+  },
+  modalTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#1a1a1a',
+  },
+  closeBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#F5F5F5',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modalList: {
+    padding: 16,
+  },
+  searchContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F0F0F0',
+    backgroundColor: '#FFFFFF',
+  },
+  searchIcon: {
+    marginRight: 10,
+  },
+  searchInput: {
+    flex: 1,
+    fontSize: 14,
+    color: '#1a1a1a',
+    paddingVertical: 8,
+  },
+  stateItem: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F5F5F5',
+  },
+  stateItemActive: {
+    backgroundColor: '#F3E8FF',
+  },
+  stateText: {
+    fontSize: 14,
+    color: '#333',
+  },
+  stateTextActive: {
+    color: PURPLE,
+    fontWeight: '600',
   },
 });

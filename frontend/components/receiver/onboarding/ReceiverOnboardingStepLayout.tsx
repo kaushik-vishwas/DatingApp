@@ -102,8 +102,8 @@ const styles = StyleSheet.create({
   },
   backPlaceholder: { height: 40, marginBottom: 16 },
   title: {
-    fontSize: 24,
-    fontWeight: '800',
+    fontSize: 20,
+    fontWeight: '600',
     color: '#111',
     marginBottom: 8,
   },

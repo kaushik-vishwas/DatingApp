@@ -150,7 +150,7 @@ export default function ProfileInfoScreen({ navigation }: Props): React.JSX.Elem
             navigation={navigation}
             showBack
           />
-          <Text style={styles.lead}>All fields are required to continue</Text>
+          <Text style={styles.lead}>All fieldsjjj are required to continue</Text>
 
           <UploadField
             label="Profile avatar *"

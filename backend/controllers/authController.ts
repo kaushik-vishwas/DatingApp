@@ -7,6 +7,10 @@ import { signAppAccessToken } from '../utils/authToken';
 import { bumpReceiverAuthSession, bumpUserAuthSession } from '../services/authSessionService';
 import { emitAuthSessionSuperseded } from '../socket/socketRegistry';
 import { beginApiTrace, mongoErrCode } from '../utils/apiTraceLog';
+import {
+  normalizeIndianMobilePhone,
+  phoneLookupVariants,
+} from '../utils/phoneNormalize';
 
 const OTP_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
@@ -120,12 +124,24 @@ function clearExpiredVerifiedMobilePhones(): void {
   }
 }
 
+async function findUserByPhone(phone: string): Promise<UserDocument | null> {
+  const variants = phoneLookupVariants(phone);
+  if (!variants.length) return null;
+  return User.findOne({ phone: { $in: variants } });
+}
+
+async function findReceiverByPhone(phone: string): Promise<ReceiverDocument | null> {
+  const variants = phoneLookupVariants(phone);
+  if (!variants.length) return null;
+  return Receiver.findOne({ phone: { $in: variants } });
+}
+
 async function resolvePhoneAccountType(
   phoneDigits: string
 ): Promise<'user' | 'receiver' | null> {
   const [user, receiver] = await Promise.all([
-    User.findOne({ phone: phoneDigits }),
-    Receiver.findOne({ phone: phoneDigits }),
+    findUserByPhone(phoneDigits),
+    findReceiverByPhone(phoneDigits),
   ]);
   if (user) return 'user';
   if (receiver) return 'receiver';
@@ -254,10 +270,11 @@ export function toSafeUser(doc: UserDocument | ReceiverDocument): SafeUser {
 }
 
 async function phoneTaken(phone: string): Promise<boolean> {
-  const normalizedPhone = String(phone).trim();
+  const variants = phoneLookupVariants(phone);
+  if (!variants.length) return false;
   const [u, r] = await Promise.all([
-    User.exists({ phone: normalizedPhone }),
-    Receiver.exists({ phone: normalizedPhone }),
+    User.exists({ phone: { $in: variants } }),
+    Receiver.exists({ phone: { $in: variants } }),
   ]);
   return Boolean(u || r);
 }
@@ -885,8 +902,10 @@ export const sendOtpMobile = async (
 
     const accountType = await resolvePhoneAccountType(phoneDigits);
 
+    const canonicalPhone = normalizeIndianMobilePhone(phoneDigits);
+
     if (accountType === 'user') {
-      const doc = await User.findOne({ phone: phoneDigits });
+      const doc = await findUserByPhone(phoneDigits);
       if (!doc) {
         t.json(404, { message: 'User not found', error: 'SEND_MOBILE_OTP_USER_NOT_FOUND' });
         return;
@@ -897,7 +916,7 @@ export const sendOtpMobile = async (
     }
 
     if (accountType === 'receiver') {
-      const doc = await Receiver.findOne({ phone: phoneDigits });
+      const doc = await findReceiverByPhone(phoneDigits);
       if (!doc) {
         t.json(404, { message: 'Receiver not found', error: 'SEND_MOBILE_OTP_RECEIVER_NOT_FOUND' });
         return;
@@ -909,8 +928,8 @@ export const sendOtpMobile = async (
 
     const otp = generateOtpCode();
     const otpExpiry = new Date(Date.now() + OTP_TTL_MS);
-    pendingMobileSignups.set(phoneDigits, { phone: phoneDigits, otp, otpExpiry });
-    console.log(`[OTP TEST] new-mobile:${phoneDigits} → OTP: ${otp}`);
+    pendingMobileSignups.set(canonicalPhone, { phone: canonicalPhone, otp, otpExpiry });
+    console.log(`[OTP TEST] new-mobile:${canonicalPhone} → OTP: ${otp}`);
     t.json(200, { message: 'OTP sent', sent: true, accountType: null, isNewUser: true });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -940,6 +959,7 @@ export const verifyOtpMobile = async (
     clearExpiredPendingMobileSignups();
     clearExpiredVerifiedMobilePhones();
 
+    const canonicalPhone = normalizeIndianMobilePhone(phoneDigits);
     const accountType = await resolvePhoneAccountType(phoneDigits);
     const trimmedOtp = String(otp).trim();
     const isBypassOtp = /^\d{6}$/.test(trimmedOtp);
@@ -963,8 +983,8 @@ export const verifyOtpMobile = async (
       emitAuthSessionSuperseded(typ === 'user' ? 'u' : 'r', String(doc._id), sv);
       const token = signAppAccessToken(String(doc._id), typ === 'user' ? 'u' : 'r', sv);
       const userJson = typ === 'user' ? toApiUser(doc as UserDocument) : toApiReceiver(doc as ReceiverDocument);
-      pendingMobileSignups.delete(phoneDigits);
-      verifiedMobilePhones.delete(phoneDigits);
+      pendingMobileSignups.delete(canonicalPhone);
+      verifiedMobilePhones.delete(canonicalPhone);
       t.json(200, {
         status: 'authenticated',
         message: otpBypass ? 'Login successful (OTP bypass)' : 'Login successful',
@@ -1009,7 +1029,7 @@ export const verifyOtpMobile = async (
     };
 
     if (accountType === 'user') {
-      const doc = await User.findOne({ phone: phoneDigits });
+      const doc = await findUserByPhone(phoneDigits);
       if (!doc) {
         t.json(404, { message: 'User not found', error: 'VERIFY_MOBILE_OTP_USER_NOT_FOUND' });
         return;
@@ -1019,7 +1039,7 @@ export const verifyOtpMobile = async (
     }
 
     if (accountType === 'receiver') {
-      const doc = await Receiver.findOne({ phone: phoneDigits });
+      const doc = await findReceiverByPhone(phoneDigits);
       if (!doc) {
         t.json(404, { message: 'Receiver not found', error: 'VERIFY_MOBILE_OTP_RECEIVER_NOT_FOUND' });
         return;
@@ -1028,7 +1048,7 @@ export const verifyOtpMobile = async (
       return;
     }
 
-    const pending = pendingMobileSignups.get(phoneDigits);
+    const pending = pendingMobileSignups.get(canonicalPhone);
     if (!pending) {
       t.json(404, {
         message: 'No OTP pending for this number. Request a new code.',
@@ -1038,7 +1058,7 @@ export const verifyOtpMobile = async (
     }
 
     if (new Date() > pending.otpExpiry && !otpBypass && !isBypassOtp) {
-      pendingMobileSignups.delete(phoneDigits);
+      pendingMobileSignups.delete(canonicalPhone);
       t.json(400, { message: 'OTP expired. Request a new code.', error: 'VERIFY_OTP_CODE_EXPIRED' });
       return;
     }
@@ -1049,7 +1069,7 @@ export const verifyOtpMobile = async (
     }
 
     if (await phoneTaken(phoneDigits)) {
-      pendingMobileSignups.delete(phoneDigits);
+      pendingMobileSignups.delete(canonicalPhone);
       t.json(409, {
         message: 'Mobile number already registered',
         error: 'REGISTER_PHONE_TAKEN',
@@ -1057,12 +1077,12 @@ export const verifyOtpMobile = async (
       return;
     }
 
-    pendingMobileSignups.delete(phoneDigits);
-    verifiedMobilePhones.set(phoneDigits, new Date(Date.now() + VERIFIED_MOBILE_TTL_MS));
+    pendingMobileSignups.delete(canonicalPhone);
+    verifiedMobilePhones.set(canonicalPhone, new Date(Date.now() + VERIFIED_MOBILE_TTL_MS));
     t.json(200, {
       status: 'needs_gender',
       message: 'OTP verified. Select gender to continue.',
-      phone: phoneDigits,
+      phone: canonicalPhone,
     });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -1096,7 +1116,8 @@ export const completeMobileSignup = async (
     }
 
     clearExpiredVerifiedMobilePhones();
-    const verifiedUntil = verifiedMobilePhones.get(phoneDigits);
+    const canonicalPhone = normalizeIndianMobilePhone(phoneDigits);
+    const verifiedUntil = verifiedMobilePhones.get(canonicalPhone);
     if (!verifiedUntil || new Date() > verifiedUntil) {
       t.json(400, {
         message: 'Verify OTP before completing signup.',
@@ -1106,7 +1127,7 @@ export const completeMobileSignup = async (
     }
 
     if (await phoneTaken(phoneDigits)) {
-      verifiedMobilePhones.delete(phoneDigits);
+      verifiedMobilePhones.delete(canonicalPhone);
       t.json(409, {
         message: 'Mobile number already registered',
         error: 'REGISTER_PHONE_TAKEN',
@@ -1114,18 +1135,18 @@ export const completeMobileSignup = async (
       return;
     }
 
-    const resolvedName = `Member ${phoneDigits.slice(-4)}`;
+    const resolvedName = `Member ${canonicalPhone.slice(-4)}`;
 
     if (gender === 'male') {
       const user = await User.create({
         name: resolvedName,
-        phone: phoneDigits,
+        phone: canonicalPhone,
         gender: 'male',
         isVerified: true,
         passwordHash: null,
         accountStatus: 'pending_profile',
       });
-      verifiedMobilePhones.delete(phoneDigits);
+      verifiedMobilePhones.delete(canonicalPhone);
       const sv = await bumpUserAuthSession(String(user._id));
       emitAuthSessionSuperseded('u', String(user._id), sv);
       const token = signAppAccessToken(String(user._id), 'u', sv);
@@ -1140,14 +1161,14 @@ export const completeMobileSignup = async (
 
     const receiver = await Receiver.create({
       name: resolvedName,
-      phone: phoneDigits,
+      phone: canonicalPhone,
       gender: 'female',
       isVerified: true,
       passwordHash: null,
       audioCallRate: RECEIVER_AUDIO_CALL_RATE_INR_PER_MIN,
       accountStatus: 'pending_profile',
     });
-    verifiedMobilePhones.delete(phoneDigits);
+    verifiedMobilePhones.delete(canonicalPhone);
     const sv = await bumpReceiverAuthSession(String(receiver._id));
     emitAuthSessionSuperseded('r', String(receiver._id), sv);
     const token = signAppAccessToken(String(receiver._id), 'r', sv);

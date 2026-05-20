@@ -80,7 +80,7 @@ export default function ProfileInfoScreen({ navigation }: Props): React.JSX.Elem
           />
 
           <Input
-            label="Display name *"
+            label="Displajjy name *"
             value={state.displayName}
             onChangeText={(t) => update({ displayName: t })}
             placeholder="How should users call you?"

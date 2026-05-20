@@ -22,6 +22,10 @@ import {
   emitReceiverRejected,
 } from '../socket/socketRegistry';
 import { bumpReceiverAuthSession } from '../services/authSessionService';
+import {
+  normalizeIndianMobilePhone,
+  phoneLookupVariants,
+} from '../utils/phoneNormalize';
 
 type AdminJwtPayload = { adminId: string; typ: 'admin' };
 const OTP_TTL_MS = 5 * 60 * 1000; // 5 minutes
@@ -884,30 +888,324 @@ export const listAppUsers = async (req: Request, res: Response): Promise<void> =
   }
 };
 
+type AdminAppUserPatchBody = {
+  suspended?: boolean;
+  name?: string;
+  phone?: string;
+  walletBalance?: number;
+  profileImage?: string | null;
+  userAudio?: string | null;
+  gender?: string;
+  age?: number;
+  state?: string | null;
+};
+
+function isValidIndianMobile(ten: string): boolean {
+  return /^[6-9]\d{9}$/.test(ten);
+}
+
+const PRESET_PROFILE_IMAGE_RE = /^preset:(male|female):\d+$/i;
+
+function optionalHttpsUrl(raw: unknown, field: string): string | null | undefined {
+  if (raw === null) return null;
+  if (typeof raw !== 'string') return undefined;
+  const v = raw.trim();
+  if (!v) return null;
+  if (!/^https?:\/\//i.test(v)) {
+    throw new Error(`${field} must be a valid http(s) URL`);
+  }
+  return v;
+}
+
+/** App stores bundled avatars as `preset:male:1` / `preset:female:15` — not Cloudinary URLs. */
+function optionalProfileImageValue(raw: unknown, field: string): string | null | undefined {
+  if (raw === null) return null;
+  if (typeof raw !== 'string') return undefined;
+  const v = raw.trim();
+  if (!v) return null;
+  if (PRESET_PROFILE_IMAGE_RE.test(v)) return v;
+  if (/^https?:\/\//i.test(v)) return v;
+  throw new Error(`${field} must be a valid http(s) URL or a bundled preset id (preset:male:N / preset:female:N)`);
+}
+
 /**
- * PATCH /admin/users/:id — body: { suspended: boolean }
+ * PATCH /admin/users/:id — partial profile update (includes legacy `{ suspended }` only).
  */
 export const updateAppUser = async (
-  req: Request<{ id: string }, {}, { suspended?: boolean }>,
+  req: Request<{ id: string }, {}, AdminAppUserPatchBody>,
   res: Response
 ): Promise<void> => {
   try {
-    const { suspended } = req.body;
-    if (typeof suspended !== 'boolean') {
-      res.status(400).json({ message: 'suspended (boolean) is required' });
+    const body = req.body ?? {};
+    const keys = Object.keys(body).filter((k) => body[k as keyof AdminAppUserPatchBody] !== undefined);
+    if (keys.length === 0) {
+      res.status(400).json({ message: 'At least one field to update is required' });
       return;
     }
+
     const user = await User.findById(req.params.id);
     if (!user) {
       res.status(404).json({ message: 'User not found' });
       return;
     }
-    user.suspended = suspended;
+
+    if (typeof body.name === 'string') {
+      const name = body.name.trim();
+      if (!name) {
+        res.status(400).json({ message: 'name cannot be empty' });
+        return;
+      }
+      user.name = name;
+    }
+
+    if (typeof body.phone === 'string') {
+      const canonical = normalizeIndianMobilePhone(body.phone);
+      if (!isValidIndianMobile(canonical)) {
+        res.status(400).json({ message: 'phone must be a valid 10-digit Indian mobile number' });
+        return;
+      }
+      const variants = phoneLookupVariants(canonical);
+      const dup = await User.findOne({
+        _id: { $ne: user._id },
+        phone: { $in: variants },
+      }).select('_id');
+      if (dup) {
+        res.status(409).json({ message: 'Another user already uses this phone number' });
+        return;
+      }
+      user.phone = canonical;
+    }
+
+    if (typeof body.walletBalance === 'number' && Number.isFinite(body.walletBalance)) {
+      user.walletBalance = Math.max(0, Math.round(body.walletBalance));
+    }
+
+    if (body.profileImage !== undefined) {
+      try {
+        const url = optionalProfileImageValue(body.profileImage, 'profileImage');
+        if (url !== undefined) user.profileImage = url;
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        res.status(400).json({ message: msg });
+        return;
+      }
+    }
+
+    if (body.userAudio !== undefined) {
+      try {
+        const url = optionalHttpsUrl(body.userAudio, 'userAudio');
+        if (url !== undefined) user.userAudio = url;
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        res.status(400).json({ message: msg });
+        return;
+      }
+    }
+
+    if (typeof body.gender === 'string') {
+      const g = body.gender.trim();
+      if (g === 'male' || g === 'female' || g === 'other') {
+        user.gender = g;
+      } else {
+        res.status(400).json({ message: 'gender must be male, female, or other' });
+        return;
+      }
+    }
+
+    if (typeof body.age === 'number' && Number.isFinite(body.age)) {
+      const age = Math.round(body.age);
+      if (age < 18 || age > 120) {
+        res.status(400).json({ message: 'age must be between 18 and 120' });
+        return;
+      }
+      user.age = age;
+    }
+
+    if (body.state !== undefined) {
+      user.state = typeof body.state === 'string' && body.state.trim() ? body.state.trim() : null;
+    }
+
+    if (typeof body.suspended === 'boolean') {
+      user.suspended = body.suspended;
+    }
+
     await user.save();
     res.status(200).json({ user: toApiUser(user) });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error('updateAppUser error:', msg);
+    res.status(500).json({ message: msg || 'Server error' });
+  }
+};
+
+type AdminReceiverPatchBody = {
+  name?: string;
+  phone?: string;
+  walletBalance?: number;
+  profileImage?: string | null;
+  userAudio?: string | null;
+  aadhaarNumber?: string;
+  panNumber?: string;
+  aadhaarFront?: string | null;
+  aadhaarBack?: string | null;
+  panFront?: string | null;
+  gender?: string;
+  age?: number;
+  state?: string | null;
+  isAvailable?: boolean;
+  suspended?: boolean;
+};
+
+/**
+ * PATCH /admin/receivers/:id — partial receiver profile update (admin only).
+ */
+export const updateReceiver = async (
+  req: Request<{ id: string }, {}, AdminReceiverPatchBody>,
+  res: Response
+): Promise<void> => {
+  try {
+    const body = req.body ?? {};
+    const keys = Object.keys(body).filter((k) => body[k as keyof AdminReceiverPatchBody] !== undefined);
+    if (keys.length === 0) {
+      res.status(400).json({ message: 'At least one field to update is required' });
+      return;
+    }
+
+    const receiver = await Receiver.findById(req.params.id);
+    if (!receiver) {
+      res.status(404).json({ message: 'Receiver not found' });
+      return;
+    }
+
+    if (typeof body.name === 'string') {
+      const name = body.name.trim();
+      if (!name) {
+        res.status(400).json({ message: 'name cannot be empty' });
+        return;
+      }
+      receiver.name = name;
+    }
+
+    if (typeof body.phone === 'string') {
+      const canonical = normalizeIndianMobilePhone(body.phone);
+      if (!isValidIndianMobile(canonical)) {
+        res.status(400).json({ message: 'phone must be a valid 10-digit Indian mobile number' });
+        return;
+      }
+      const variants = phoneLookupVariants(canonical);
+      const dup = await Receiver.findOne({
+        _id: { $ne: receiver._id },
+        phone: { $in: variants },
+      }).select('_id');
+      if (dup) {
+        res.status(409).json({ message: 'Another receiver already uses this phone number' });
+        return;
+      }
+      receiver.phone = canonical;
+    }
+
+    if (typeof body.walletBalance === 'number' && Number.isFinite(body.walletBalance)) {
+      receiver.walletBalance = Math.max(0, Math.round(body.walletBalance));
+    }
+
+    if (body.profileImage !== undefined) {
+      try {
+        const url = optionalProfileImageValue(body.profileImage, 'profileImage');
+        if (url !== undefined) receiver.profileImage = url;
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        res.status(400).json({ message: msg });
+        return;
+      }
+    }
+
+    if (body.userAudio !== undefined) {
+      try {
+        const url = optionalHttpsUrl(body.userAudio, 'userAudio');
+        if (url !== undefined) receiver.userAudio = url;
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        res.status(400).json({ message: msg });
+        return;
+      }
+    }
+
+    if (typeof body.aadhaarNumber === 'string' && body.aadhaarNumber.trim()) {
+      const aadhaarDigits = body.aadhaarNumber.replace(/\D/g, '').trim();
+      if (!/^\d{12}$/.test(aadhaarDigits)) {
+        res.status(400).json({ message: 'aadhaarNumber must be a valid 12-digit number' });
+        return;
+      }
+      receiver.aadhaarNumber = aadhaarDigits;
+    }
+
+    if (typeof body.panNumber === 'string' && body.panNumber.trim()) {
+      const pan = body.panNumber.trim().toUpperCase();
+      if (!/^[A-Z]{5}[0-9]{4}[A-Z]$/.test(pan)) {
+        res.status(400).json({ message: 'panNumber must be valid (e.g. ABCDE1234F)' });
+        return;
+      }
+      receiver.panNumber = pan;
+    }
+
+    for (const [key, field] of [
+      ['aadhaarFront', 'aadhaarFront'],
+      ['aadhaarBack', 'aadhaarBack'],
+      ['panFront', 'panFront'],
+    ] as const) {
+      const raw = body[key];
+      if (raw !== undefined) {
+        try {
+          const url = optionalHttpsUrl(raw, field);
+          if (url !== undefined) receiver[field] = url;
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e);
+          res.status(400).json({ message: msg });
+          return;
+        }
+      }
+    }
+
+    if (receiver.aadhaarFront && receiver.aadhaarBack && receiver.panFront) {
+      receiver.documents = [receiver.aadhaarFront, receiver.aadhaarBack, receiver.panFront];
+    }
+
+    if (typeof body.gender === 'string') {
+      const g = body.gender.trim();
+      if (g === 'male' || g === 'female' || g === 'other') {
+        receiver.gender = g;
+      } else {
+        res.status(400).json({ message: 'gender must be male, female, or other' });
+        return;
+      }
+    }
+
+    if (typeof body.age === 'number' && Number.isFinite(body.age)) {
+      const age = Math.round(body.age);
+      if (age < 18 || age > 120) {
+        res.status(400).json({ message: 'age must be between 18 and 120' });
+        return;
+      }
+      receiver.age = age;
+    }
+
+    if (body.state !== undefined) {
+      receiver.state = typeof body.state === 'string' && body.state.trim() ? body.state.trim() : null;
+    }
+
+    if (typeof body.isAvailable === 'boolean') {
+      receiver.isAvailable = body.isAvailable;
+    }
+
+    if (typeof body.suspended === 'boolean') {
+      receiver.suspended = body.suspended;
+    }
+
+    await receiver.save();
+    res.status(200).json({ receiver: toApiReceiver(receiver) });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error('updateReceiver error:', msg);
     res.status(500).json({ message: msg || 'Server error' });
   }
 };

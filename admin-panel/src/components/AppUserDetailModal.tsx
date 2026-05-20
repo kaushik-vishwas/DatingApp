@@ -1,16 +1,18 @@
 import { useState } from 'react';
-import { Check, X } from 'lucide-react';
+import { Check, Pencil, X } from 'lucide-react';
 
 import { approveAppUser, rejectAppUser, type AppUserRecord } from '../api/client';
+import { ProfileImagePreview } from './ProfileImagePreview';
 import { formatJoinedDate, formatPhoneIN } from '../utils/userDisplay';
 
 type Props = {
   user: AppUserRecord | null;
   onClose: () => void;
   onChanged?: () => void;
+  onEdit?: (user: AppUserRecord) => void;
 };
 
-export function AppUserDetailModal({ user, onClose, onChanged }: Props) {
+export function AppUserDetailModal({ user, onClose, onChanged, onEdit }: Props) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -106,19 +108,7 @@ export function AppUserDetailModal({ user, onClose, onChanged }: Props) {
           </div>
         </dl>
 
-        {user.profileImage ? (
-          <div className="mt-4">
-            <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">Profile photo</p>
-            <a
-              href={user.profileImage}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="mt-1 inline-block text-sm font-semibold text-[#7b2cff] hover:underline"
-            >
-              Open image
-            </a>
-          </div>
-        ) : null}
+        <ProfileImagePreview profileImage={user.profileImage} alt={user.name} />
 
         {user.userAudio ? (
           <div className="mt-6">
@@ -142,8 +132,22 @@ export function AppUserDetailModal({ user, onClose, onChanged }: Props) {
           </p>
         ) : null}
 
+        <div className="mt-6 flex flex-wrap gap-2">
+          {onEdit ? (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => onEdit(user)}
+              className="inline-flex flex-1 items-center justify-center gap-2 rounded-xl border border-neutral-200 bg-white px-4 py-2.5 text-sm font-semibold text-neutral-800 hover:bg-neutral-50 disabled:opacity-50"
+            >
+              <Pencil className="h-4 w-4" />
+              Edit
+            </button>
+          ) : null}
+        </div>
+
         {showApprove || showSuspend ? (
-          <div className="mt-6 flex flex-wrap gap-2">
+          <div className="mt-3 flex flex-wrap gap-2">
             {showApprove ? (
               <button
                 type="button"

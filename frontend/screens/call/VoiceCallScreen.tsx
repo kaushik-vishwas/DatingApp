@@ -22,6 +22,7 @@ import type { ReceiverStackParamList } from '../../navigation/ReceiverStackParam
 import type { VoiceCallScreenParams } from '../../navigation/voiceCallParams';
 import type { VoiceBootstrapResponse } from '../../types/api';
 import { useCallSignals } from '../../context/CallSignalContext';
+import { useCallerMessageEligibilityOptional } from '../../context/CallerMessageEligibilityContext';
 import { useAuth } from '../../context/AuthContext';
 import { callApi, getErrorMessage, getJwt, getResolvedApiBaseUrl } from '../../services/api';
 import { startOutboundRingtoneLoop } from '../../utils/callSounds';
@@ -166,6 +167,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
   const MIN_RATING_SECONDS = 55;
   const insets = useSafeAreaInsets();
   const { user } = useAuth();
+  const messageEligibility = useCallerMessageEligibilityOptional();
   const { cancelOutgoingCallInvite } = useCallSignals();
   const cancelOutgoingRef = useRef(cancelOutgoingCallInvite);
   cancelOutgoingRef.current = cancelOutgoingCallInvite;
@@ -208,6 +210,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
   const [ready, setReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [elapsedSec, setElapsedSec] = useState(0);
+  const [talkActive, setTalkActive] = useState(false);
   const [muted, setMuted] = useState(false);
   const [speakerOn, setSpeakerOn] = useState(true);
   const [liveSettledAmountInr, setLiveSettledAmountInr] = useState(0);
@@ -228,6 +231,13 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
   const endedSessionResultRef = useRef<{ canRate: boolean } | null>(null);
   const endSessionPromiseRef = useRef<Promise<{ canRate: boolean } | null> | null>(null);
   const callIdRef = useRef(getVoiceBootstrap(callParams)?.callId ?? '');
+  const streamJoinAttemptRef = useRef(0);
+  const displayNameRef = useRef(user?.name ?? 'User');
+  const displayImageRef = useRef(user?.profileImage);
+  useEffect(() => {
+    displayNameRef.current = user?.name ?? 'User';
+    displayImageRef.current = user?.profileImage;
+  }, [user?.name, user?.profileImage]);
   const rawEarnRate = getReceiverEarnRatePerMinute(callParams);
   const liveRatePerMinute =
     typeof rawEarnRate === 'number' && Number.isFinite(rawEarnRate) ? Math.max(0, rawEarnRate) : 0;
@@ -262,6 +272,41 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
   useEffect(() => {
     readyRef.current = ready;
   }, [ready]);
+
+  useEffect(() => {
+    return () => {
+      if (user?.role === 'caller') {
+        void messageEligibility?.refresh();
+      }
+    };
+  }, [messageEligibility, user?.role]);
+
+  const applyTalkTimingFromServer = (payload: {
+    talkStartedAt?: string | null;
+    talkActive?: boolean;
+    durationSec?: number;
+  }): void => {
+    const active = Boolean(payload.talkActive) || Boolean(payload.talkStartedAt);
+    if (active) {
+      setTalkActive(true);
+    }
+    if (typeof payload.talkStartedAt === 'string' && payload.talkStartedAt.trim()) {
+      const anchorMs = new Date(payload.talkStartedAt).getTime();
+      if (Number.isFinite(anchorMs)) {
+        const fromAnchor = Math.max(0, Math.floor((Date.now() - anchorMs) / 1000));
+        setElapsedSec((prev) => Math.max(prev, fromAnchor));
+        return;
+      }
+    }
+    if (
+      active &&
+      typeof payload.durationSec === 'number' &&
+      Number.isFinite(payload.durationSec) &&
+      payload.durationSec >= 0
+    ) {
+      setElapsedSec((prev) => (payload.durationSec! > prev ? payload.durationSec! : prev));
+    }
+  };
 
   const formatHms = (totalSec: number): string => {
     const safe = Math.max(0, Math.floor(totalSec));
@@ -311,23 +356,33 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
       // ignore signaling failures
     }
     if (user?.role === 'caller') {
-      (navigation as any).navigate('CallerDiscover');
+      (navigation as any).navigate('CallerMainTabs', { screen: 'CallerHome' });
       return;
     }
-    (navigation as any).navigate('ReceiverHome');
+    (navigation as any).navigate('ReceiverMainTabs', { screen: 'ReceiverHome' });
   };
 
-  const leaveMedia = async () => {
+  const leaveCallOnly = async (): Promise<void> => {
     try {
       if (activeCallRef.current) await activeCallRef.current.leave();
     } catch {
       // Ignore leave failures.
     }
+    activeCallRef.current = null;
+  };
+
+  const leaveMedia = async () => {
+    await leaveCallOnly();
     try {
       if (activeClientRef.current) await activeClientRef.current.disconnectUser();
     } catch {
       // Ignore disconnect failures.
     }
+    activeClientRef.current = null;
+    setClient(null);
+    setCall(null);
+    setReady(false);
+    setTalkActive(false);
   };
 
   const networkDropMessage =
@@ -393,6 +448,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
       return;
     }
 
+    const attemptId = ++streamJoinAttemptRef.current;
     let cancelled = false;
 
     void (async () => {
@@ -428,42 +484,57 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
           apiKey: boot.apiKey,
           user: {
             id: boot.streamUserId,
-            name: user?.name ?? 'User',
-            image: profileImageUrlForStreamOrNetwork(user?.profileImage),
+            name: displayNameRef.current,
+            image: profileImageUrlForStreamOrNetwork(displayImageRef.current),
           },
           token: boot.token,
         });
+        if (cancelled || attemptId !== streamJoinAttemptRef.current) {
+          return;
+        }
         activeClientRef.current = nextClient;
 
         const nextCall = nextClient.call(boot.callType, boot.callId);
         activeCallRef.current = nextCall;
         await nextCall.getOrCreate();
-        await nextCall.join({ create: true });
-        await callApi.sessionStart(boot.callId, boot.peerAccountId);
-
-        if (!cancelled) {
-          setClient(nextClient);
-          setCall(nextCall);
-          setReady(true);
-          setError(null);
+        if (cancelled || attemptId !== streamJoinAttemptRef.current) {
+          return;
         }
+        await nextCall.join({ create: true });
+        if (cancelled || attemptId !== streamJoinAttemptRef.current) {
+          return;
+        }
+        const { data: startData } = await callApi.sessionStart(boot.callId, boot.peerAccountId);
+        if (cancelled || attemptId !== streamJoinAttemptRef.current) {
+          return;
+        }
+        applyTalkTimingFromServer(startData);
+
+        setClient(nextClient);
+        setCall(nextCall);
+        setReady(true);
+        setError(null);
       } catch (e: unknown) {
         const msg = e instanceof Error ? e.message : 'Failed to join call';
-        if (!cancelled) {
-          setError(msg);
-          Alert.alert('Voice call error', msg, [{ text: 'OK', onPress: () => navigation.goBack() }]);
+        if (cancelled || attemptId !== streamJoinAttemptRef.current) {
+          return;
         }
+        setError(msg);
+        Alert.alert('Voice call error', msg, [{ text: 'OK', onPress: () => navigation.goBack() }]);
       }
     })();
 
     return () => {
       cancelled = true;
-      void resetVoiceCallAudioMode();
+      const closedAttempt = attemptId;
       void (async () => {
-        if (!endingRef.current) {
-          await ensureSessionEnded();
-          await leaveMedia();
+        void resetVoiceCallAudioMode();
+        if (closedAttempt !== streamJoinAttemptRef.current) {
+          // Effect re-ran (e.g. ringing → joining). Leave call only — keep Stream user connected.
+          await leaveCallOnly();
+          return;
         }
+        await leaveMedia();
       })();
     };
   }, [
@@ -472,12 +543,8 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
     streamBootstrap?.apiKey,
     streamBootstrap?.callId,
     streamBootstrap?.callType,
-    streamBootstrap?.peerAccountId,
-    streamBootstrap?.peerStreamUserId,
-    streamBootstrap?.streamUserId,
     streamBootstrap?.token,
-    user?.name,
-    user?.profileImage,
+    streamBootstrap?.streamUserId,
   ]);
 
   useEffect(() => {
@@ -553,22 +620,21 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
   }, []);
 
   useEffect(() => {
-    if (!ready) return;
+    if (!ready || !talkActive) return;
     const timer = setInterval(() => setElapsedSec((prev) => prev + 1), 1000);
     return () => clearInterval(timer);
-  }, [ready]);
+  }, [ready, talkActive]);
 
   useEffect(() => {
     if (!ready || endingRef.current) return;
+    const pollMs = talkActive ? 5000 : 1500;
     const poll = setInterval(() => {
       if (endingRef.current) return;
       void (async () => {
         try {
           const { data } = await callApi.sessionSync(callIdRef.current);
           if (!data?.ok) return;
-          if (typeof data.durationSec === 'number' && Number.isFinite(data.durationSec) && data.durationSec >= 0) {
-            setElapsedSec((prev) => (data.durationSec > prev ? data.durationSec : prev));
-          }
+          applyTalkTimingFromServer(data);
           if (
             typeof data.receiverEarnedInr === 'number' &&
             Number.isFinite(data.receiverEarnedInr) &&
@@ -580,9 +646,9 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
           // Best-effort live settlement sync.
         }
       })();
-    }, 5000);
+    }, pollMs);
     return () => clearInterval(poll);
-  }, [ready]);
+  }, [ready, talkActive]);
 
   useEffect(() => {
     if (!ready) return;
@@ -839,9 +905,11 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
               </View>
             </View>
             <Text style={styles.peerName}>{route.params.peerName}</Text>
-            <Text style={styles.durationLabel}>Duration</Text>
+            <Text style={styles.durationLabel}>Talk time</Text>
             <Text style={styles.durationValue}>
-              {`${String(Math.floor(elapsedSec / 60)).padStart(2, '0')}:${String(elapsedSec % 60).padStart(2, '0')}`}
+              {talkActive
+                ? `${String(Math.floor(elapsedSec / 60)).padStart(2, '0')}:${String(elapsedSec % 60).padStart(2, '0')}`
+                : 'Connecting…'}
             </Text>
             {showCallerCountdown ? (
               <View style={styles.countdownCard}>

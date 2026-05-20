@@ -6,7 +6,9 @@ import {
   completeReceiverAudioOnboarding,
   deleteReceiverAccount,
   getCallerCallHistory,
+  getCallerMessageEligibleReceivers,
   getCallerNotifications,
+  getReceiverCallerOnlineNotifications,
   getReceiverWithdrawalOverview,
   getReceiverEarningsBreakdown,
   updateReceiverProfile,
@@ -48,9 +50,15 @@ router.post('/receiver/complete-audio-onboarding', protect, completeReceiverAudi
 router.post('/receiver/reopen-kyc', protect, reopenRejectedReceiverKyc);
 router.delete('/receiver', protect, deleteReceiverAccount);
 router.get('/caller-call-history', protect, getCallerCallHistory);
+router.get('/caller-message-eligible-receivers', protect, getCallerMessageEligibleReceivers);
 router.get('/caller-app-review', protect, getMyCallerAppReview);
 router.put('/caller-app-review', protect, upsertMyCallerAppReview);
 router.get('/caller-notifications', protect, getCallerNotifications);
+router.get(
+  '/receiver-caller-online-notifications',
+  protect,
+  getReceiverCallerOnlineNotifications
+);
 router.post('/receiver/bank/send-otp', protect, sendReceiverBankUpdateOtp);
 router.post('/receiver/bank/verify', protect, verifyReceiverBankUpdateOtp);
 router.get('/receiver-earnings-breakdown', protect, getReceiverEarningsBreakdown);

@@ -36,7 +36,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getCallerNotifications = exports.getCallerCallHistory = exports.getReceiverEarningsBreakdown = exports.verifyReceiverBankUpdateOtp = exports.sendReceiverBankUpdateOtp = exports.deleteReceiverAccount = exports.reopenRejectedReceiverKyc = exports.completeReceiverAudioOnboarding = exports.updateReceiverProfile = exports.notifyReceiverRecentUser = exports.getReceiverNotifyCandidates = exports.getReceiverCallInsights = exports.verifyReceiverWithdrawalOtpAndCreate = exports.sendReceiverWithdrawalOtp = exports.getReceiverWithdrawalOverview = exports.getReceiverWalletSummary = exports.updateCallerProfile = exports.completeCallerProfile = exports.saveCallerUserAudio = exports.saveReceiverKycBankFinalize = exports.saveReceiverKycDocuments = exports.saveReceiverKycProfileInfo = exports.completeProfile = void 0;
+exports.getCallerNotifications = exports.getReceiverCallerOnlineNotifications = exports.getCallerMessageEligibleReceivers = exports.getCallerCallHistory = exports.getReceiverEarningsBreakdown = exports.verifyReceiverBankUpdateOtp = exports.sendReceiverBankUpdateOtp = exports.deleteReceiverAccount = exports.reopenRejectedReceiverKyc = exports.completeReceiverAudioOnboarding = exports.updateReceiverProfile = exports.notifyReceiverRecentUser = exports.getReceiverNotifyCandidates = exports.getReceiverCallInsights = exports.verifyReceiverWithdrawalOtpAndCreate = exports.sendReceiverWithdrawalOtp = exports.getReceiverWithdrawalOverview = exports.getReceiverWalletSummary = exports.updateCallerProfile = exports.completeCallerProfile = exports.saveCallerUserAudio = exports.saveReceiverKycBankFinalize = exports.saveReceiverKycDocuments = exports.saveReceiverKycProfileInfo = exports.completeProfile = void 0;
 const crypto_1 = __importDefault(require("crypto"));
 const mongoose_1 = __importDefault(require("mongoose"));
 const User_1 = __importDefault(require("../models/User"));
@@ -47,6 +47,7 @@ const CallSession_1 = __importDefault(require("../models/CallSession"));
 const ChatBlock_1 = __importDefault(require("../models/ChatBlock"));
 const UserReport_1 = __importDefault(require("../models/UserReport"));
 const WalletTopup_1 = __importDefault(require("../models/WalletTopup"));
+const CallerOnlineNotification_1 = __importDefault(require("../models/CallerOnlineNotification"));
 const ReceiverAvailabilityNotification_1 = __importDefault(require("../models/ReceiverAvailabilityNotification"));
 const ReceiverPriorityNotification_1 = __importDefault(require("../models/ReceiverPriorityNotification"));
 const ReceiverRating_1 = __importDefault(require("../models/ReceiverRating"));
@@ -59,6 +60,17 @@ const callQueue_1 = require("../services/callQueue");
 const razorpayXPayoutService_1 = require("../services/razorpayXPayoutService");
 const socketRegistry_1 = require("../socket/socketRegistry");
 const apiTraceLog_1 = require("../utils/apiTraceLog");
+const callerMessageEligibility_1 = require("../utils/callerMessageEligibility");
+const callController_1 = require("./callController");
+function callerCallNotificationSubtitle(durationSec) {
+    const d = Math.max(0, Math.floor(Number(durationSec) || 0));
+    if (d <= 0)
+        return 'Missed call · not connected';
+    if (d < callController_1.MISSED_OR_INCOMPLETE_MAX_SEC)
+        return `Incomplete call · ${d}s`;
+    const mins = Math.max(1, Math.round(d / 60));
+    return `Completed · ${mins} min`;
+}
 function receiverOnboardingProfileFieldsComplete(r) {
     return Boolean(r.name?.trim() &&
         r.profileImage?.trim() &&
@@ -1325,36 +1337,51 @@ const getReceiverCallInsights = async (req, res) => {
         const monthStart = new Date(now);
         monthStart.setDate(1);
         monthStart.setHours(0, 0, 0, 0);
+        /** Align with `MIN_VALID_CALL_SECONDS` in receiverScore — shorter calls are missed/incomplete. */
+        const MISSED_OR_INCOMPLETE_MAX_SEC = 55;
         const completed = await CallSession_1.default.find({
             receiverId: rid,
             status: 'completed',
-            durationSec: { $gt: 0 },
         })
             .sort({ startedAt: -1 })
             .lean();
-        const callerIds = [...new Set(completed.map((c) => String(c.callerId)))];
+        const safeDur = (row) => Math.max(0, Math.floor(Number(row.durationSec) || 0));
+        const completedValid = completed.filter((row) => safeDur(row) >= MISSED_OR_INCOMPLETE_MAX_SEC);
+        const missedOrIncomplete = completed.filter((row) => safeDur(row) < MISSED_OR_INCOMPLETE_MAX_SEC);
+        const callerIds = [
+            ...new Set([
+                ...completedValid.map((c) => String(c.callerId)),
+                ...missedOrIncomplete.map((c) => String(c.callerId)),
+            ]),
+        ];
         const callers = callerIds.length === 0
             ? []
             : await User_1.default.find({ _id: { $in: callerIds.map((id) => new mongoose_1.default.Types.ObjectId(id)) } })
                 .select('_id name profileImage')
                 .lean();
         const callerById = new Map(callers.map((c) => [String(c._id), { name: c.name, profileImage: c.profileImage ?? null }]));
-        const safeDur = (row) => Math.max(0, Math.floor(Number(row.durationSec) || 0));
-        const totalDurationSec = completed.reduce((sum, row) => sum + safeDur(row), 0);
-        const weekDurationSec = completed
+        const totalDurationSec = completedValid.reduce((sum, row) => sum + safeDur(row), 0);
+        const weekDurationSec = completedValid
             .filter((row) => row.startedAt >= weekStart)
             .reduce((sum, row) => sum + safeDur(row), 0);
-        const monthDurationSec = completed
+        const monthDurationSec = completedValid
             .filter((row) => row.startedAt >= monthStart)
             .reduce((sum, row) => sum + safeDur(row), 0);
-        const filtered = completed.filter((row) => {
+        const filteredValid = completedValid.filter((row) => {
             if (range === 'week')
                 return row.startedAt >= weekStart;
             if (range === 'month')
                 return row.startedAt >= monthStart;
             return true;
         });
-        const recentCalls = filtered.slice(0, 20).map((row) => ({
+        const filteredMissed = missedOrIncomplete.filter((row) => {
+            if (range === 'week')
+                return row.startedAt >= weekStart;
+            if (range === 'month')
+                return row.startedAt >= monthStart;
+            return true;
+        });
+        const recentCalls = filteredValid.slice(0, 20).map((row) => ({
             id: String(row._id),
             callerId: String(row.callerId),
             callerName: callerById.get(String(row.callerId))?.name ?? 'Caller',
@@ -1370,8 +1397,71 @@ const getReceiverCallInsights = async (req, res) => {
                         : 0)),
             rating: typeof row.callerRating === 'number' ? row.callerRating : null,
         }));
+        const missedByCaller = new Map();
+        const incompleteByCaller = new Map();
+        for (const row of filteredMissed) {
+            const callerId = String(row.callerId);
+            const dur = safeDur(row);
+            if (dur <= 0) {
+                const existing = missedByCaller.get(callerId);
+                if (!existing) {
+                    missedByCaller.set(callerId, {
+                        callerId,
+                        callerName: callerById.get(callerId)?.name ?? 'Caller',
+                        callerImage: callerById.get(callerId)?.profileImage ?? null,
+                        missedCount: 1,
+                        lastAt: row.startedAt,
+                        lastDurationSec: dur,
+                    });
+                    continue;
+                }
+                existing.missedCount += 1;
+                if (row.startedAt >= existing.lastAt) {
+                    existing.lastAt = row.startedAt;
+                    existing.lastDurationSec = dur;
+                }
+                continue;
+            }
+            const existingIncomplete = incompleteByCaller.get(callerId);
+            if (!existingIncomplete) {
+                incompleteByCaller.set(callerId, {
+                    callerId,
+                    callerName: callerById.get(callerId)?.name ?? 'Caller',
+                    callerImage: callerById.get(callerId)?.profileImage ?? null,
+                    incompleteCount: 1,
+                    lastAt: row.startedAt,
+                    lastDurationSec: dur,
+                });
+                continue;
+            }
+            existingIncomplete.incompleteCount += 1;
+            if (row.startedAt >= existingIncomplete.lastAt) {
+                existingIncomplete.lastAt = row.startedAt;
+                existingIncomplete.lastDurationSec = dur;
+            }
+        }
+        const missedCallGroups = [...missedByCaller.values()]
+            .sort((a, b) => b.lastAt.getTime() - a.lastAt.getTime())
+            .map((row) => ({
+            callerId: row.callerId,
+            callerName: row.callerName,
+            callerImage: row.callerImage,
+            missedCount: row.missedCount,
+            lastAt: row.lastAt.toISOString(),
+            lastDurationSec: row.lastDurationSec,
+        }));
+        const incompleteCallGroups = [...incompleteByCaller.values()]
+            .sort((a, b) => b.lastAt.getTime() - a.lastAt.getTime())
+            .map((row) => ({
+            callerId: row.callerId,
+            callerName: row.callerName,
+            callerImage: row.callerImage,
+            incompleteCount: row.incompleteCount,
+            lastAt: row.lastAt.toISOString(),
+            lastDurationSec: row.lastDurationSec,
+        }));
         const byCaller = new Map();
-        for (const row of completed) {
+        for (const row of completedValid) {
             const callerId = String(row.callerId);
             if (!byCaller.has(callerId)) {
                 byCaller.set(callerId, {
@@ -1433,6 +1523,8 @@ const getReceiverCallInsights = async (req, res) => {
                 thisMonthMinutes: secToLeaderboardMinutes(monthDurationSec),
             },
             recentCalls,
+            missedCallGroups,
+            incompleteCallGroups,
             callerHistory,
             receiverRatingAvg: ratingSummary && Number.isFinite(ratingSummary.avg) ? roundInr(ratingSummary.avg) : 0,
             receiverRatingCount: ratingSummary?.count ?? 0,
@@ -2147,10 +2239,11 @@ const getCallerCallHistory = async (req, res) => {
                 .lean();
         const byReceiver = new Map(receivers.map((r) => [String(r._id), r]));
         const statusFor = (durationSec) => {
-            if (durationSec <= 0)
+            const d = Math.max(0, Math.floor(Number(durationSec) || 0));
+            if (d <= 0)
                 return 'missed';
-            if (durationSec < 15)
-                return 'failed';
+            if (d < callController_1.MISSED_OR_INCOMPLETE_MAX_SEC)
+                return 'incomplete';
             return 'completed';
         };
         res.status(200).json({
@@ -2172,6 +2265,89 @@ const getCallerCallHistory = async (req, res) => {
     }
 };
 exports.getCallerCallHistory = getCallerCallHistory;
+/**
+ * GET /profile/caller-message-eligible-receivers — receiver ids the caller may message.
+ */
+const getCallerMessageEligibleReceivers = async (req, res) => {
+    try {
+        if (req.accountKind !== 'user') {
+            res.status(403).json({ message: 'Only callers can view message eligibility' });
+            return;
+        }
+        const authUser = req.user;
+        if (!authUser?._id) {
+            res.status(401).json({ message: 'Not authorized' });
+            return;
+        }
+        const uid = new mongoose_1.default.Types.ObjectId(String(authUser._id));
+        const receiverIds = await CallSession_1.default.distinct('receiverId', {
+            callerId: uid,
+            status: 'completed',
+            durationSec: { $gte: callerMessageEligibility_1.CALLER_MESSAGE_MIN_DURATION_SEC },
+        });
+        res.status(200).json({
+            receiverIds: receiverIds.map((id) => String(id)),
+        });
+    }
+    catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error('getCallerMessageEligibleReceivers error:', msg);
+        res.status(500).json({ message: msg || 'Server error' });
+    }
+};
+exports.getCallerMessageEligibleReceivers = getCallerMessageEligibleReceivers;
+/**
+ * GET /profile/receiver-caller-online-notifications — persisted "caller is online" alerts.
+ */
+const getReceiverCallerOnlineNotifications = async (req, res) => {
+    try {
+        if (req.accountKind !== 'receiver') {
+            res.status(403).json({ message: 'Only receivers can view these notifications' });
+            return;
+        }
+        if ((0, accountAccess_1.blockReceiverUntilApproved)(req, res))
+            return;
+        const receiverId = new mongoose_1.default.Types.ObjectId(String(req.receiver._id));
+        const rows = await CallerOnlineNotification_1.default.find({ receiverId })
+            .sort({ createdAt: -1 })
+            .limit(20)
+            .lean();
+        const callerIds = [
+            ...new Set(rows.flatMap((r) => r.callerIds.map((id) => String(id)))),
+        ];
+        const callers = callerIds.length === 0
+            ? []
+            : await User_1.default.find({ _id: { $in: callerIds.map((id) => new mongoose_1.default.Types.ObjectId(id)) } })
+                .select('_id name profileImage')
+                .lean();
+        const callerById = new Map(callers.map((c) => [
+            String(c._id),
+            { name: c.name?.trim() || 'Caller', profileImage: c.profileImage ?? null },
+        ]));
+        res.status(200).json({
+            notifications: rows.map((row) => {
+                const ids = row.callerIds.map((id) => String(id));
+                const primaryId = ids[0] ?? '';
+                const primary = callerById.get(primaryId);
+                return {
+                    id: String(row._id),
+                    callerIds: ids,
+                    callerName: primary?.name ?? 'Caller',
+                    callerImage: primary?.profileImage ?? null,
+                    title: row.title,
+                    subtitle: row.subtitle,
+                    at: row.createdAt.toISOString(),
+                };
+            }),
+        });
+    }
+    catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error('getReceiverCallerOnlineNotifications error:', msg);
+        res.status(500).json({ message: msg || 'Server error' });
+    }
+};
+exports.getReceiverCallerOnlineNotifications = getReceiverCallerOnlineNotifications;
 /**
  * GET /profile/caller-notifications — caller notifications (transaction/chat/call).
  */
@@ -2247,7 +2423,7 @@ const getCallerNotifications = async (req, res) => {
                 id: `call-${String(row._id)}`,
                 type: 'call',
                 title: `Call with ${receiverNameById.get(String(row.receiverId)) ?? 'Receiver'}`,
-                subtitle: `Duration ${Math.max(1, Math.round(row.durationSec / 60))} min`,
+                subtitle: callerCallNotificationSubtitle(row.durationSec),
                 at: row.startedAt.toISOString(),
             })),
             ...convoRows.map((row) => ({

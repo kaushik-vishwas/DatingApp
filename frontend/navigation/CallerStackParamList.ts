@@ -1,10 +1,10 @@
+import type { NavigatorScreenParams } from '@react-navigation/native';
 import type { DiscoverReceiverSummary } from '../types/api';
+import type { CallerTabParamList } from './CallerTabParamList';
 import type { VoiceCallScreenParams } from './voiceCallParams';
 
 export type CallerStackParamList = {
-  CallerDiscover: undefined;
-  CallerCalls: undefined;
-  CallerAlerts: undefined;
+  CallerMainTabs: NavigatorScreenParams<CallerTabParamList> | undefined;
   CallerProfile: undefined;
   CallerRateUs: undefined;
   CallerShareApp: undefined;

@@ -58,7 +58,7 @@ export default function ReceiverDeleteAccountScreen(): React.JSX.Element {
         <View style={styles.backBtn} />
       </View>
 
-      <Text style={styles.title}>Delete Account</Text>
+      {/* <Text style={styles.title}>Delete Account</Text> */}
       <Text style={styles.note}>
         We're really sorry to see you go. Are you sure you want to delete your account? Once you confirm, your data will be gone.
       </Text>
@@ -93,8 +93,9 @@ const styles = StyleSheet.create({
   backText: { fontSize: 20, color: '#111', fontWeight: '700' },
   headerTitle: { fontSize: 16, color: '#111', fontWeight: '900' },
   title: { fontSize: 22, color: '#b91c1c', fontWeight: '900', marginBottom: 12 },
-  note: { fontSize: 12, color: '#555', fontWeight: '700', marginBottom: 6 },
+  note: { fontSize: 12, color: '#555', fontWeight: '700', marginBottom: 6, marginTop: 16 },
   reasonRow: {
+    marginTop: 8,
     backgroundColor: '#fff',
     borderWidth: 1,
     borderColor: '#ececec',

@@ -9,6 +9,7 @@ import {
 } from '../api/client';
 import { ReceiverDetailModal } from '../components/ReceiverDetailModal';
 import { kycCode } from '../utils/receiverDisplay';
+import { resolveAdminProfileImageUrl } from '../utils/resolveProfileImageUrl';
 
 type Tab = 'all' | 'approved' | 'pending';
 type Range = '7d' | '30d' | 'all';
@@ -311,8 +312,9 @@ export function KycApprovalsPage() {
                   );
                   const panFallbackFromDocuments =
                     documentUrls.find((url) => !knownDocumentUrls.has(url)) ?? null;
+                  const profileDocUrl = resolveAdminProfileImageUrl(r.profileImage);
                   const docs = [
-                    r.profileImage ? { label: 'Profile', url: r.profileImage, Icon: ImageIcon } : null,
+                    profileDocUrl ? { label: 'Profile', url: profileDocUrl, Icon: ImageIcon } : null,
                     r.aadhaarFront ? { label: 'Aadhaar front', url: r.aadhaarFront, Icon: FileText } : null,
                     r.aadhaarBack ? { label: 'Aadhaar back', url: r.aadhaarBack, Icon: FileText } : null,
                     (r.panFront ?? panFallbackFromDocuments)

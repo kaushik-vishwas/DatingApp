@@ -19,7 +19,7 @@ export default function WalletSuccessScreen({ navigation, route }: Props): React
     navigation.dispatch(
       CommonActions.reset({
         index: 0,
-        routes: [{ name: 'CallerDiscover' }],
+        routes: [{ name: 'CallerMainTabs', params: { screen: 'CallerHome' } }],
       })
     );
   };

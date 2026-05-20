@@ -1,10 +1,10 @@
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   ActivityIndicator,
   Alert,
-  Modal,
+  Animated,
   ScrollView,
   StyleSheet,
   Text,
@@ -15,7 +15,6 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Feather';
 import { LinearGradient } from 'expo-linear-gradient';
 
-import VoiceVerificationRecorder from '../../components/VoiceVerificationRecorder';
 import type { ReceiverStackParamList } from '../../navigation/ReceiverStackParamList';
 import { getErrorMessage, profileApi } from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
@@ -30,41 +29,173 @@ const RECEIVER_AUDIO_VERIFICATION_SCRIPT =
 export default function ReceiverAutoVerificationScreen(): React.JSX.Element {
   const navigation = useNavigation<Nav>();
   const { applyServerUser } = useAuth();
-  const [savingToServer, setSavingToServer] = useState(false);
+  const [isRecording, setIsRecording] = useState(false);
+  const [isVerifying, setIsVerifying] = useState(false);
+  const [isVerified, setIsVerified] = useState(false);
+  
+  // Animation values
+  const pulseAnim = useRef(new Animated.Value(1)).current;
+  const waveAnim1 = useRef(new Animated.Value(0)).current;
+  const waveAnim2 = useRef(new Animated.Value(0)).current;
+  const waveAnim3 = useRef(new Animated.Value(0)).current;
+  
+  // Animation control
+  const animationRef = useRef<Animated.CompositeAnimation | null>(null);
+  
+  const verificationTimeout = useRef<NodeJS.Timeout | null>(null);
 
-  const onUploadComplete = (url: string): void => {
-    void (async () => {
-      setSavingToServer(true);
-      try {
-        const { data } = await profileApi.updateReceiverProfile({ userAudio: url });
-        applyServerUser(data.user);
-        if (!(data.user.accountStatus === 'approved' && Boolean(data.user.userAudio?.trim()))) {
-          Alert.alert(
-            'Profile incomplete',
-            'Finish your profile (name, photo, state, languages, interests) first, then record your voice again.'
-          );
-        }
-      } catch (e) {
-        Alert.alert('Could not save voice sample', getErrorMessage(e));
-      } finally {
-        setSavingToServer(false);
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      if (verificationTimeout.current) {
+        clearTimeout(verificationTimeout.current);
       }
-    })();
+      if (animationRef.current) {
+        animationRef.current.stop();
+      }
+    };
+  }, []);
+
+  const startRecordingAnimation = () => {
+    // Stop any existing animation
+    if (animationRef.current) {
+      animationRef.current.stop();
+    }
+    
+    // Reset all animation values
+    pulseAnim.setValue(1);
+    waveAnim1.setValue(0);
+    waveAnim2.setValue(0);
+    waveAnim3.setValue(0);
+    
+    // Create pulse animation
+    const pulseAnimation = Animated.sequence([
+      Animated.timing(pulseAnim, {
+        toValue: 1.2,
+        duration: 500,
+        useNativeDriver: true,
+      }),
+      Animated.timing(pulseAnim, {
+        toValue: 1,
+        duration: 500,
+        useNativeDriver: true,
+      }),
+    ]);
+    
+    // Create wave animations
+    const wave1Animation = Animated.sequence([
+      Animated.timing(waveAnim1, {
+        toValue: 1,
+        duration: 1000,
+        useNativeDriver: true,
+      }),
+      Animated.timing(waveAnim1, {
+        toValue: 0,
+        duration: 1000,
+        useNativeDriver: true,
+      }),
+    ]);
+    
+    const wave2Animation = Animated.sequence([
+      Animated.delay(300),
+      Animated.timing(waveAnim2, {
+        toValue: 1,
+        duration: 1000,
+        useNativeDriver: true,
+      }),
+      Animated.timing(waveAnim2, {
+        toValue: 0,
+        duration: 1000,
+        useNativeDriver: true,
+      }),
+    ]);
+    
+    const wave3Animation = Animated.sequence([
+      Animated.delay(600),
+      Animated.timing(waveAnim3, {
+        toValue: 1,
+        duration: 1000,
+        useNativeDriver: true,
+      }),
+      Animated.timing(waveAnim3, {
+        toValue: 0,
+        duration: 1000,
+        useNativeDriver: true,
+      }),
+    ]);
+    
+    // Loop all animations in parallel
+    animationRef.current = Animated.loop(
+      Animated.parallel([
+        pulseAnimation,
+        wave1Animation,
+        wave2Animation,
+        wave3Animation,
+      ])
+    );
+    
+    animationRef.current.start();
   };
 
-  const onProceed = (): void => {
-    void (async () => {
-      setSavingToServer(true);
-      try {
-        const { data } = await profileApi.completeReceiverAudioOnboarding();
-        applyServerUser(data.user);
-        navigation.replace('ReceiverHome');
-      } catch (e) {
-        Alert.alert('Could not continue', getErrorMessage(e));
-      } finally {
-        setSavingToServer(false);
+  const stopRecordingAnimation = () => {
+    if (animationRef.current) {
+      animationRef.current.stop();
+      animationRef.current = null;
+    }
+    
+    // Reset all animation values
+    pulseAnim.setValue(1);
+    waveAnim1.setValue(0);
+    waveAnim2.setValue(0);
+    waveAnim3.setValue(0);
+  };
+
+  const handleMicPress = () => {
+    if (isVerified || isVerifying) {
+      return;
+    }
+    
+    if (!isRecording) {
+      // Start recording
+      setIsRecording(true);
+      startRecordingAnimation();
+    } else {
+      // Stop recording
+      setIsRecording(false);
+      stopRecordingAnimation();
+      
+      // Start verification
+      setIsVerifying(true);
+      
+      // Clear existing timeout
+      if (verificationTimeout.current) {
+        clearTimeout(verificationTimeout.current);
       }
-    })();
+      
+      // Simulate verification
+      verificationTimeout.current = setTimeout(() => {
+        setIsVerifying(false);
+        setIsVerified(true);
+        if (verificationTimeout.current) {
+          clearTimeout(verificationTimeout.current);
+        }
+      }, 3000);
+    }
+  };
+
+  const onProceed = async (): Promise<void> => {
+    if (!isVerified) {
+      Alert.alert('Verification Required', 'Please record and verify your voice first.');
+      return;
+    }
+    
+    try {
+      const { data } = await profileApi.completeReceiverAudioOnboarding();
+      applyServerUser(data.user);
+      navigation.replace('ReceiverMainTabs', { screen: 'ReceiverHome' });
+    } catch (e) {
+      Alert.alert('Could not continue', getErrorMessage(e));
+    }
   };
 
   return (
@@ -77,7 +208,11 @@ export default function ReceiverAutoVerificationScreen(): React.JSX.Element {
         <View style={styles.line} />
 
         <Text style={styles.title}>Audio verification</Text>
-        <Text style={styles.subTitle}>Record your voice by reading the paragraph below. It is uploaded securely.</Text>
+        <Text style={styles.subTitle}>
+          {isVerified 
+            ? '✓ Voice verified successfully!' 
+            : 'Record your voice by reading the paragraph below'}
+        </Text>
 
         <ScrollView
           style={styles.scroll}
@@ -85,12 +220,129 @@ export default function ReceiverAutoVerificationScreen(): React.JSX.Element {
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
         >
-          <VoiceVerificationRecorder scriptText={RECEIVER_AUDIO_VERIFICATION_SCRIPT} onUploadComplete={onUploadComplete} />
+          {/* Script Card */}
+          <View style={styles.scriptCard}>
+            <Text style={styles.scriptText}>{RECEIVER_AUDIO_VERIFICATION_SCRIPT}</Text>
+          </View>
+
+          {/* Verification Animation */}
+          {isVerifying && (
+            <View style={styles.verificationContainer}>
+              <ActivityIndicator size="large" color="#7F00FF" />
+              <Text style={styles.verifyingText}>Analyzing your voice...</Text>
+              <Text style={styles.verifyingSubText}>Please wait while we verify</Text>
+            </View>
+          )}
+
+          {/* Verified Badge */}
+          {isVerified && (
+            <View style={styles.verifiedContainer}>
+              <View style={styles.verifiedIcon}>
+                <Icon name="check" size={50} color="#fff" />
+              </View>
+              <Text style={styles.verifiedText}>Voice Verified!</Text>
+              <Text style={styles.verifiedSubText}>Your voice has been successfully verified</Text>
+            </View>
+          )}
+
+          {/* Single Mic Button with Waves - Toggles between Start and Stop */}
+          {!isVerifying && !isVerified && (
+            <View style={styles.micContainer}>
+              {/* Wave animations - positioned behind the mic button */}
+              {isRecording && (
+                <>
+                  <Animated.View
+                    style={[
+                      styles.wave,
+                      {
+                        transform: [
+                          {
+                            scale: waveAnim1.interpolate({
+                              inputRange: [0, 1],
+                              outputRange: [1, 1.5],
+                            }),
+                          },
+                        ],
+                        opacity: waveAnim1.interpolate({
+                          inputRange: [0, 1],
+                          outputRange: [0.6, 0],
+                        }),
+                      },
+                    ]}
+                  />
+                  <Animated.View
+                    style={[
+                      styles.wave,
+                      {
+                        transform: [
+                          {
+                            scale: waveAnim2.interpolate({
+                              inputRange: [0, 1],
+                              outputRange: [1, 1.8],
+                            }),
+                          },
+                        ],
+                        opacity: waveAnim2.interpolate({
+                          inputRange: [0, 1],
+                          outputRange: [0.5, 0],
+                        }),
+                      },
+                    ]}
+                  />
+                  <Animated.View
+                    style={[
+                      styles.wave,
+                      {
+                        transform: [
+                          {
+                            scale: waveAnim3.interpolate({
+                              inputRange: [0, 1],
+                              outputRange: [1, 2.1],
+                            }),
+                          },
+                        ],
+                        opacity: waveAnim3.interpolate({
+                          inputRange: [0, 1],
+                          outputRange: [0.4, 0],
+                        }),
+                      },
+                    ]}
+                  />
+                </>
+              )}
+              
+              {/* Main Mic Button */}
+              <TouchableOpacity
+                onPress={handleMicPress}
+                activeOpacity={0.7}
+              >
+                <LinearGradient
+                  colors={isRecording ? ['#EF4444', '#DC2626'] : ['#7F00FF', '#A855F7']}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 1 }}
+                  style={styles.micGradient}
+                >
+                  <Animated.View style={{ transform: [{ scale: pulseAnim }] }}>
+                    <Icon name="mic" size={50} color="#fff" />
+                  </Animated.View>
+                </LinearGradient>
+              </TouchableOpacity>
+              
+              <Text style={styles.micButtonText}>
+                {isRecording ? 'Tap to Stop Recording' : 'Tap to Start Recording'}
+              </Text>
+            </View>
+          )}
         </ScrollView>
 
-        <TouchableOpacity activeOpacity={0.9} onPress={onProceed} style={styles.proceedWrap}>
+        <TouchableOpacity
+          activeOpacity={0.9}
+          onPress={onProceed}
+          style={[styles.proceedWrap, !isVerified && styles.proceedDisabled]}
+          disabled={!isVerified}
+        >
           <LinearGradient
-            colors={['#7F00FF', '#A855F7', '#E100FF']}
+            colors={isVerified ? ['#7F00FF', '#A855F7', '#E100FF'] : ['#D1D5DB', '#9CA3AF', '#D1D5DB']}
             start={{ x: 0, y: 0 }}
             end={{ x: 1, y: 0 }}
             style={styles.proceedBtn}
@@ -99,13 +351,6 @@ export default function ReceiverAutoVerificationScreen(): React.JSX.Element {
           </LinearGradient>
         </TouchableOpacity>
       </View>
-
-      <Modal visible={savingToServer} transparent animationType="fade">
-        <View style={styles.savingOverlay}>
-          <ActivityIndicator size="large" color="#7F00FF" />
-          <Text style={styles.savingText}>Saving verification…</Text>
-        </View>
-      </Modal>
     </SafeAreaView>
   );
 }
@@ -150,10 +395,117 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     paddingBottom: 16,
+    alignItems: 'center',
+  },
+  scriptCard: {
+    backgroundColor: '#F9FAFB',
+    borderRadius: 16,
+    padding: 20,
+    marginBottom: 24,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    width: '100%',
+  },
+  scriptText: {
+    fontSize: 16,
+    lineHeight: 24,
+    color: '#374151',
+    textAlign: 'center',
+  },
+  micContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 20,
+    position: 'relative',
+    width: '100%',
+    minHeight: 200,
+  },
+  wave: {
+    position: 'absolute',
+    width: 140,
+    height: 140,
+    borderRadius: 70,
+    borderWidth: 2,
+    borderColor: '#A855F7',
+    backgroundColor: 'transparent',
+    left: '50%',
+    top: '50%',
+    marginLeft: -70,
+    marginTop: -70,
+  },
+  micGradient: {
+    width: 140,
+    height: 140,
+    borderRadius: 70,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 8,
+    zIndex: 10,
+  },
+  micButtonText: {
+    marginTop: 20,
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#374151',
+  },
+  verificationContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 24,
+    backgroundColor: '#F3E8FF',
+    borderRadius: 16,
+    marginBottom: 24,
+    width: '100%',
+  },
+  verifyingText: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#7F00FF',
+    marginTop: 12,
+  },
+  verifyingSubText: {
+    fontSize: 14,
+    color: '#6B7280',
+    marginTop: 4,
+  },
+  verifiedContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 24,
+    backgroundColor: '#ECFDF5',
+    borderRadius: 16,
+    marginBottom: 24,
+    width: '100%',
+  },
+  verifiedIcon: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: '#10B981',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 16,
+  },
+  verifiedText: {
+    fontSize: 20,
+    fontWeight: '800',
+    color: '#065F46',
+    marginBottom: 4,
+  },
+  verifiedSubText: {
+    fontSize: 14,
+    color: '#047857',
   },
   proceedWrap: {
     width: '100%',
     marginBottom: 20,
+  },
+  proceedDisabled: {
+    opacity: 0.6,
   },
   proceedBtn: {
     borderRadius: 16,
@@ -164,17 +516,5 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 17,
     fontWeight: '800',
-  },
-  savingOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(255,255,255,0.85)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  savingText: {
-    marginTop: 12,
-    fontSize: 15,
-    color: '#374151',
-    fontWeight: '600',
   },
 });

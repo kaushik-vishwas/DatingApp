@@ -21,7 +21,7 @@ export default function ReceiverSettingsScreen(): React.JSX.Element {
             <Icon name="chevron-left" size={24} color="#1a1a1a" />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>Profile</Text>
-          <View style={styles.backBtn} />
+          <View style={styles.placeholder} />
         </View>
 
         <Text style={styles.sectionTitle}>ACCOUNT</Text>
@@ -119,6 +119,10 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.05,
     shadowRadius: 4,
     elevation: 2,
+  },
+  placeholder: {
+    width: 36,
+    height: 36,
   },
   headerTitle: { fontSize: 18, fontWeight: '900', color: '#111' },
   sectionTitle: { fontSize: 11, color: '#9a9a9a', fontWeight: '800', marginBottom: 8, letterSpacing: 0.5 },

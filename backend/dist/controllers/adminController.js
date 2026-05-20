@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.resolveWithdrawal = exports.listWithdrawals = exports.resolveModerationReport = exports.listModerationReports = exports.rejectAppUser = exports.approveAppUser = exports.listPendingAppUsers = exports.rejectReceiver = exports.approveReceiver = exports.listPendingReceivers = exports.getKycStats = exports.listAllReceivers = exports.updateAppUser = exports.listAppUsers = exports.getOverviewDashboard = exports.getRevenueDashboard = exports.updateAdminRole = exports.updateAdminNotificationControls = exports.getAdminSettings = exports.adminConfirmEmailChange = exports.adminRequestEmailChange = exports.adminResetPassword = exports.adminForgotPassword = exports.adminMe = exports.adminLogin = void 0;
+exports.resolveWithdrawal = exports.listWithdrawals = exports.resolveModerationReport = exports.listModerationReports = exports.rejectAppUser = exports.approveAppUser = exports.listPendingAppUsers = exports.rejectReceiver = exports.approveReceiver = exports.listPendingReceivers = exports.getKycStats = exports.listAllReceivers = exports.updateReceiver = exports.updateAppUser = exports.listAppUsers = exports.getOverviewDashboard = exports.getRevenueDashboard = exports.updateAdminRole = exports.updateAdminNotificationControls = exports.getAdminSettings = exports.adminConfirmEmailChange = exports.adminRequestEmailChange = exports.adminResetPassword = exports.adminForgotPassword = exports.adminMe = exports.adminLogin = void 0;
 const bcryptjs_1 = __importDefault(require("bcryptjs"));
 const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
 const mongoose_1 = __importDefault(require("mongoose"));
@@ -21,6 +21,7 @@ const superAdminSync_1 = require("../services/superAdminSync");
 const razorpayXPayoutService_1 = require("../services/razorpayXPayoutService");
 const socketRegistry_1 = require("../socket/socketRegistry");
 const authSessionService_1 = require("../services/authSessionService");
+const phoneNormalize_1 = require("../utils/phoneNormalize");
 const OTP_TTL_MS = 5 * 60 * 1000; // 5 minutes
 const PLATFORM_COMMISSION_RATE = 0.2;
 const signAdminToken = (adminId) => {
@@ -764,14 +765,47 @@ const listAppUsers = async (req, res) => {
     }
 };
 exports.listAppUsers = listAppUsers;
+function isValidIndianMobile(ten) {
+    return /^[6-9]\d{9}$/.test(ten);
+}
+const PRESET_PROFILE_IMAGE_RE = /^preset:(male|female):\d+$/i;
+function optionalHttpsUrl(raw, field) {
+    if (raw === null)
+        return null;
+    if (typeof raw !== 'string')
+        return undefined;
+    const v = raw.trim();
+    if (!v)
+        return null;
+    if (!/^https?:\/\//i.test(v)) {
+        throw new Error(`${field} must be a valid http(s) URL`);
+    }
+    return v;
+}
+/** App stores bundled avatars as `preset:male:1` / `preset:female:15` — not Cloudinary URLs. */
+function optionalProfileImageValue(raw, field) {
+    if (raw === null)
+        return null;
+    if (typeof raw !== 'string')
+        return undefined;
+    const v = raw.trim();
+    if (!v)
+        return null;
+    if (PRESET_PROFILE_IMAGE_RE.test(v))
+        return v;
+    if (/^https?:\/\//i.test(v))
+        return v;
+    throw new Error(`${field} must be a valid http(s) URL or a bundled preset id (preset:male:N / preset:female:N)`);
+}
 /**
- * PATCH /admin/users/:id — body: { suspended: boolean }
+ * PATCH /admin/users/:id — partial profile update (includes legacy `{ suspended }` only).
  */
 const updateAppUser = async (req, res) => {
     try {
-        const { suspended } = req.body;
-        if (typeof suspended !== 'boolean') {
-            res.status(400).json({ message: 'suspended (boolean) is required' });
+        const body = req.body ?? {};
+        const keys = Object.keys(body).filter((k) => body[k] !== undefined);
+        if (keys.length === 0) {
+            res.status(400).json({ message: 'At least one field to update is required' });
             return;
         }
         const user = await User_1.default.findById(req.params.id);
@@ -779,7 +813,82 @@ const updateAppUser = async (req, res) => {
             res.status(404).json({ message: 'User not found' });
             return;
         }
-        user.suspended = suspended;
+        if (typeof body.name === 'string') {
+            const name = body.name.trim();
+            if (!name) {
+                res.status(400).json({ message: 'name cannot be empty' });
+                return;
+            }
+            user.name = name;
+        }
+        if (typeof body.phone === 'string') {
+            const canonical = (0, phoneNormalize_1.normalizeIndianMobilePhone)(body.phone);
+            if (!isValidIndianMobile(canonical)) {
+                res.status(400).json({ message: 'phone must be a valid 10-digit Indian mobile number' });
+                return;
+            }
+            const variants = (0, phoneNormalize_1.phoneLookupVariants)(canonical);
+            const dup = await User_1.default.findOne({
+                _id: { $ne: user._id },
+                phone: { $in: variants },
+            }).select('_id');
+            if (dup) {
+                res.status(409).json({ message: 'Another user already uses this phone number' });
+                return;
+            }
+            user.phone = canonical;
+        }
+        if (typeof body.walletBalance === 'number' && Number.isFinite(body.walletBalance)) {
+            user.walletBalance = Math.max(0, Math.round(body.walletBalance));
+        }
+        if (body.profileImage !== undefined) {
+            try {
+                const url = optionalProfileImageValue(body.profileImage, 'profileImage');
+                if (url !== undefined)
+                    user.profileImage = url;
+            }
+            catch (e) {
+                const msg = e instanceof Error ? e.message : String(e);
+                res.status(400).json({ message: msg });
+                return;
+            }
+        }
+        if (body.userAudio !== undefined) {
+            try {
+                const url = optionalHttpsUrl(body.userAudio, 'userAudio');
+                if (url !== undefined)
+                    user.userAudio = url;
+            }
+            catch (e) {
+                const msg = e instanceof Error ? e.message : String(e);
+                res.status(400).json({ message: msg });
+                return;
+            }
+        }
+        if (typeof body.gender === 'string') {
+            const g = body.gender.trim();
+            if (g === 'male' || g === 'female' || g === 'other') {
+                user.gender = g;
+            }
+            else {
+                res.status(400).json({ message: 'gender must be male, female, or other' });
+                return;
+            }
+        }
+        if (typeof body.age === 'number' && Number.isFinite(body.age)) {
+            const age = Math.round(body.age);
+            if (age < 18 || age > 120) {
+                res.status(400).json({ message: 'age must be between 18 and 120' });
+                return;
+            }
+            user.age = age;
+        }
+        if (body.state !== undefined) {
+            user.state = typeof body.state === 'string' && body.state.trim() ? body.state.trim() : null;
+        }
+        if (typeof body.suspended === 'boolean') {
+            user.suspended = body.suspended;
+        }
         await user.save();
         res.status(200).json({ user: (0, authController_1.toApiUser)(user) });
     }
@@ -790,6 +899,149 @@ const updateAppUser = async (req, res) => {
     }
 };
 exports.updateAppUser = updateAppUser;
+/**
+ * PATCH /admin/receivers/:id — partial receiver profile update (admin only).
+ */
+const updateReceiver = async (req, res) => {
+    try {
+        const body = req.body ?? {};
+        const keys = Object.keys(body).filter((k) => body[k] !== undefined);
+        if (keys.length === 0) {
+            res.status(400).json({ message: 'At least one field to update is required' });
+            return;
+        }
+        const receiver = await Receiver_1.default.findById(req.params.id);
+        if (!receiver) {
+            res.status(404).json({ message: 'Receiver not found' });
+            return;
+        }
+        if (typeof body.name === 'string') {
+            const name = body.name.trim();
+            if (!name) {
+                res.status(400).json({ message: 'name cannot be empty' });
+                return;
+            }
+            receiver.name = name;
+        }
+        if (typeof body.phone === 'string') {
+            const canonical = (0, phoneNormalize_1.normalizeIndianMobilePhone)(body.phone);
+            if (!isValidIndianMobile(canonical)) {
+                res.status(400).json({ message: 'phone must be a valid 10-digit Indian mobile number' });
+                return;
+            }
+            const variants = (0, phoneNormalize_1.phoneLookupVariants)(canonical);
+            const dup = await Receiver_1.default.findOne({
+                _id: { $ne: receiver._id },
+                phone: { $in: variants },
+            }).select('_id');
+            if (dup) {
+                res.status(409).json({ message: 'Another receiver already uses this phone number' });
+                return;
+            }
+            receiver.phone = canonical;
+        }
+        if (typeof body.walletBalance === 'number' && Number.isFinite(body.walletBalance)) {
+            receiver.walletBalance = Math.max(0, Math.round(body.walletBalance));
+        }
+        if (body.profileImage !== undefined) {
+            try {
+                const url = optionalProfileImageValue(body.profileImage, 'profileImage');
+                if (url !== undefined)
+                    receiver.profileImage = url;
+            }
+            catch (e) {
+                const msg = e instanceof Error ? e.message : String(e);
+                res.status(400).json({ message: msg });
+                return;
+            }
+        }
+        if (body.userAudio !== undefined) {
+            try {
+                const url = optionalHttpsUrl(body.userAudio, 'userAudio');
+                if (url !== undefined)
+                    receiver.userAudio = url;
+            }
+            catch (e) {
+                const msg = e instanceof Error ? e.message : String(e);
+                res.status(400).json({ message: msg });
+                return;
+            }
+        }
+        if (typeof body.aadhaarNumber === 'string' && body.aadhaarNumber.trim()) {
+            const aadhaarDigits = body.aadhaarNumber.replace(/\D/g, '').trim();
+            if (!/^\d{12}$/.test(aadhaarDigits)) {
+                res.status(400).json({ message: 'aadhaarNumber must be a valid 12-digit number' });
+                return;
+            }
+            receiver.aadhaarNumber = aadhaarDigits;
+        }
+        if (typeof body.panNumber === 'string' && body.panNumber.trim()) {
+            const pan = body.panNumber.trim().toUpperCase();
+            if (!/^[A-Z]{5}[0-9]{4}[A-Z]$/.test(pan)) {
+                res.status(400).json({ message: 'panNumber must be valid (e.g. ABCDE1234F)' });
+                return;
+            }
+            receiver.panNumber = pan;
+        }
+        for (const [key, field] of [
+            ['aadhaarFront', 'aadhaarFront'],
+            ['aadhaarBack', 'aadhaarBack'],
+            ['panFront', 'panFront'],
+        ]) {
+            const raw = body[key];
+            if (raw !== undefined) {
+                try {
+                    const url = optionalHttpsUrl(raw, field);
+                    if (url !== undefined)
+                        receiver[field] = url;
+                }
+                catch (e) {
+                    const msg = e instanceof Error ? e.message : String(e);
+                    res.status(400).json({ message: msg });
+                    return;
+                }
+            }
+        }
+        if (receiver.aadhaarFront && receiver.aadhaarBack && receiver.panFront) {
+            receiver.documents = [receiver.aadhaarFront, receiver.aadhaarBack, receiver.panFront];
+        }
+        if (typeof body.gender === 'string') {
+            const g = body.gender.trim();
+            if (g === 'male' || g === 'female' || g === 'other') {
+                receiver.gender = g;
+            }
+            else {
+                res.status(400).json({ message: 'gender must be male, female, or other' });
+                return;
+            }
+        }
+        if (typeof body.age === 'number' && Number.isFinite(body.age)) {
+            const age = Math.round(body.age);
+            if (age < 18 || age > 120) {
+                res.status(400).json({ message: 'age must be between 18 and 120' });
+                return;
+            }
+            receiver.age = age;
+        }
+        if (body.state !== undefined) {
+            receiver.state = typeof body.state === 'string' && body.state.trim() ? body.state.trim() : null;
+        }
+        if (typeof body.isAvailable === 'boolean') {
+            receiver.isAvailable = body.isAvailable;
+        }
+        if (typeof body.suspended === 'boolean') {
+            receiver.suspended = body.suspended;
+        }
+        await receiver.save();
+        res.status(200).json({ receiver: (0, authController_1.toApiReceiver)(receiver) });
+    }
+    catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error('updateReceiver error:', msg);
+        res.status(500).json({ message: msg || 'Server error' });
+    }
+};
+exports.updateReceiver = updateReceiver;
 /**
  * GET /admin/receivers — all rows in `receivers` collection.
  */

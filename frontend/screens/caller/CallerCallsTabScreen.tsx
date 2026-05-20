@@ -1,22 +1,25 @@
-import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useFocusEffect } from '@react-navigation/native';
 import React, { useCallback, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Image, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { ActivityIndicator, Alert, Image, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
-import CallerBottomTabs, { getCallerTabBarContentPadding } from '../../components/caller/CallerBottomTabs';
+import CallerTabScreenHeader from '../../components/caller/CallerTabScreenHeader';
+import ReceiverTabBody from '../../components/receiver/ReceiverTabBody';
+import { CALLER_MESSAGE_REQUIRES_CALL } from '../../constants/callerMessaging';
+import { useCallerMessageEligibility } from '../../context/CallerMessageEligibilityContext';
 import { useCallSignals } from '../../context/CallSignalContext';
-import type { CallerStackParamList } from '../../navigation/CallerStackParamList';
+import { useCallerAppNavigation } from '../../utils/callerAppNavigation';
+import { useReceiverTabBarBottomInset } from '../../utils/receiverTabBarInset';
 import { getErrorMessage, profileApi } from '../../services/api';
 import type { CallerCallHistoryRow } from '../../types/api';
+import { callerCallMetaLine, callerCallStatusLabel } from '../../utils/callerCallLabels';
 import { resolveProfileImageSource } from '../../utils/avatarSource';
 import { SCREEN_FETCH_TIMEOUT_MS, withTimeout } from '../../utils/withTimeout';
 
-type Props = NativeStackScreenProps<CallerStackParamList, 'CallerCalls'>;
-
-export default function CallerCallsTabScreen({ navigation }: Props): React.JSX.Element {
-  const insets = useSafeAreaInsets();
-  const contentBottomPadding = getCallerTabBarContentPadding(insets.bottom);
+export default function CallerCallsTabScreen(): React.JSX.Element {
+  const navigation = useCallerAppNavigation();
+  const scrollPaddingBottom = useReceiverTabBarBottomInset();
+  const { canMessageReceiver } = useCallerMessageEligibility();
   const { startCallInvite } = useCallSignals();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -51,7 +54,7 @@ export default function CallerCallsTabScreen({ navigation }: Props): React.JSX.E
     () => ({
       completed: '#17a34a',
       missed: '#6b7280',
-      failed: '#dc2626',
+      incomplete: '#d97706',
     }),
     []
   );
@@ -72,7 +75,8 @@ export default function CallerCallsTabScreen({ navigation }: Props): React.JSX.E
 
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'left', 'right']}>
-      <Text style={styles.title}>Calls</Text>
+      <CallerTabScreenHeader title="Recents" subtitle="Your calls" backTarget="home" />
+      <ReceiverTabBody>
       <View style={styles.filters}>
         {(['all', 'week', 'month'] as const).map((r) => (
           <TouchableOpacity
@@ -87,7 +91,11 @@ export default function CallerCallsTabScreen({ navigation }: Props): React.JSX.E
         ))}
       </View>
 
-      <View style={[styles.listWrap, { paddingBottom: contentBottomPadding, marginBottom: contentBottomPadding }]}>
+      <ScrollView
+        style={styles.listWrap}
+        contentContainerStyle={{ paddingBottom: scrollPaddingBottom }}
+        showsVerticalScrollIndicator={false}
+      >
         {loading ? (
           <ActivityIndicator size="large" color="#7b2cff" />
         ) : error ? (
@@ -101,11 +109,12 @@ export default function CallerCallsTabScreen({ navigation }: Props): React.JSX.E
           <View style={styles.center}>
             <Text style={styles.emoji}>📞</Text>
             <Text style={styles.head}>No calls yet</Text>
-            <Text style={styles.sub}>Your call history will show up here after you connect with someone.</Text>
+            <Text style={styles.sub}>Your call history will show talk time here after you connect with someone.</Text>
           </View>
         ) : (
           rows.map((row) => {
             const receiverAvatar = resolveProfileImageSource(row.receiverImage);
+            const canMessage = canMessageReceiver(row.receiverId);
             return (
             <View key={row.id} style={styles.row}>
               {receiverAvatar ? (
@@ -118,9 +127,9 @@ export default function CallerCallsTabScreen({ navigation }: Props): React.JSX.E
               <View style={{ flex: 1 }}>
                 <Text style={styles.rowName}>{row.receiverName}</Text>
                 <Text style={styles.rowMeta}>
-                  {Math.max(0, row.durationSec)}s •{' '}
+                  {callerCallMetaLine(row.durationSec, row.status)} •{' '}
                   <Text style={{ color: statusTone[row.status], fontWeight: '800' }}>
-                    {row.status[0].toUpperCase() + row.status.slice(1)}
+                    {callerCallStatusLabel(row.status)}
                   </Text>
                 </Text>
                 <Text style={styles.rowAt}>{new Date(row.startedAt).toLocaleString()}</Text>
@@ -137,38 +146,36 @@ export default function CallerCallsTabScreen({ navigation }: Props): React.JSX.E
                   </Text>
                 </TouchableOpacity>
                 <TouchableOpacity
-                  style={styles.actionBtn}
-                  onPress={() =>
+                  style={[styles.actionBtn, !canMessage && styles.actionBtnDisabled]}
+                  onPress={() => {
+                    if (!canMessage) {
+                      Alert.alert('Messaging locked', CALLER_MESSAGE_REQUIRES_CALL);
+                      return;
+                    }
                     navigation.navigate('CallerChat', {
                       receiverId: row.receiverId,
                       receiverName: row.receiverName,
                       receiverImage: row.receiverImage,
-                    })
-                  }
-                  activeOpacity={0.85}
+                    });
+                  }}
+                  activeOpacity={canMessage ? 0.85 : 1}
+                  disabled={!canMessage}
                 >
-                  <Text style={styles.actionTxt}>💬</Text>
+                  <Text style={[styles.actionTxt, !canMessage && styles.actionTxtDisabled]}>💬</Text>
                 </TouchableOpacity>
               </View>
             </View>
             );
           })
         )}
-      </View>
-      <CallerBottomTabs active="calls" navigation={navigation} />
+      </ScrollView>
+      </ReceiverTabBody>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: '#f6f6f7' },
-  title: {
-    fontSize: 20,
-    fontWeight: '900',
-    color: '#111',
-    textAlign: 'center',
-    paddingVertical: 16,
-  },
   filters: { flexDirection: 'row', gap: 8, paddingHorizontal: 14, marginBottom: 8 },
   filterBtn: {
     borderWidth: 1,
@@ -221,6 +228,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  actionBtnDisabled: { opacity: 0.45 },
   callBtn: { backgroundColor: '#e7f9ee' },
   actionTxt: { fontSize: 15 },
+  actionTxtDisabled: { opacity: 0.7 },
 });

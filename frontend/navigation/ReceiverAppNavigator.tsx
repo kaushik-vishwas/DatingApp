@@ -2,8 +2,9 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import React from 'react';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import ReceiverHomeDashboard from '../screens/ReceiverHomeDashboard';
 import ReceiverChatsScreen from '../screens/receiver/ReceiverChatsScreen';
+import { ReceiverNotificationDataProvider } from '../context/ReceiverNotificationDataContext';
+import ReceiverMainTabsNavigator from './ReceiverMainTabsNavigator';
 import ChatConversationScreen from '../screens/chat/ChatConversationScreen';
 import IncomingCallScreen from '../screens/call/IncomingCallScreen';
 import VoiceCallScreen from '../screens/call/VoiceCallScreen';
@@ -22,6 +23,7 @@ import ReceiverProfilePreviewScreen from '../screens/receiver/ReceiverProfilePre
 import ReceiverDeleteAccountScreen from '../screens/receiver/ReceiverDeleteAccountScreen';
 import ReceiverEarningsBreakdownScreen from '../screens/receiver/ReceiverEarningsBreakdownScreen';
 import ReceiverEarningsAnalyticsScreen from '../screens/receiver/ReceiverEarningsAnalyticsScreen';
+import ReceiverAvailabilityWaitingScreen from '../screens/receiver/ReceiverAvailabilityWaitingScreen';
 import type { ReceiverStackParamList } from './ReceiverStackParamList';
 
 const Stack = createNativeStackNavigator<ReceiverStackParamList>();
@@ -31,11 +33,12 @@ type Props = {
 };
 
 export default function ReceiverAppNavigator({
-  initialRouteName = 'ReceiverHome',
+  initialRouteName = 'ReceiverMainTabs',
 }: Props): React.JSX.Element {
   const insets = useSafeAreaInsets();
   const bottomGap = Math.max(10, insets.bottom);
   return (
+    <ReceiverNotificationDataProvider>
     <Stack.Navigator
       initialRouteName={initialRouteName}
       screenOptions={{
@@ -44,7 +47,16 @@ export default function ReceiverAppNavigator({
         contentStyle: { paddingBottom: bottomGap },
       }}
     >
-      <Stack.Screen name="ReceiverHome" component={ReceiverHomeDashboard} />
+      <Stack.Screen
+        name="ReceiverMainTabs"
+        component={ReceiverMainTabsNavigator}
+        options={{ contentStyle: { paddingBottom: 0 } }}
+      />
+      <Stack.Screen
+        name="ReceiverAvailabilityWaiting"
+        component={ReceiverAvailabilityWaitingScreen}
+        options={{ animation: 'fade', gestureEnabled: false, contentStyle: { paddingBottom: 0 } }}
+      />
       <Stack.Screen name="ReceiverSettings" component={ReceiverSettingsScreen} />
       <Stack.Screen name="ReceiverHowToEarn" component={ReceiverHowToEarnScreen} />
       <Stack.Screen name="ReceiverNotifications" component={ReceiverNotificationsScreen} />
@@ -75,5 +87,6 @@ export default function ReceiverAppNavigator({
         options={{ contentStyle: { paddingBottom: 0 } }}
       />
     </Stack.Navigator>
+    </ReceiverNotificationDataProvider>
   );
 }

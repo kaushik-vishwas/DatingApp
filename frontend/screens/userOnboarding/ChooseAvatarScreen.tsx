@@ -64,6 +64,14 @@ export default function ChooseAvatarScreen({
     navigation.navigate('UserCompleteProfile');
   };
 
+  const onBack = () => {
+    if (navigation.canGoBack()) {
+      navigation.goBack();
+      return;
+    }
+    navigation.navigate('SelectGender');
+  };
+
   return (
     <View
       style={[
@@ -79,7 +87,7 @@ export default function ChooseAvatarScreen({
       {/* Back Button */}
       <TouchableOpacity
         style={styles.backWrap}
-        onPress={() => navigation.goBack()}
+        onPress={onBack}
         activeOpacity={0.7}
       >
         <Icon

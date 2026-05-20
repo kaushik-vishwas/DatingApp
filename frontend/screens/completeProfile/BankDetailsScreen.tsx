@@ -116,7 +116,7 @@ export default function BankDetailsScreen({ navigation }: Props): React.JSX.Elem
             navigation={navigation}
           />
           <Text style={styles.title}>Add Bank Account</Text>
-          <Text style={styles.subtitle}>Your earnings will be transferred to this account</Text>
+          <Text style={styles.subtitle}>Your earnings will bejj transferred to this account</Text>
 
           <Input
             label="Account holder name *"

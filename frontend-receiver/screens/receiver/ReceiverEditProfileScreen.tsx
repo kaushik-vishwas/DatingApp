@@ -242,7 +242,7 @@ export default function ReceiverEditProfileScreen(): React.JSX.Element {
   <Text style={styles.headerTitle}>
     {isWithdrawKycMode ? 'Verify Identity' : 'Complete Profile'}
   </Text>
-  <View style={styles.placeholder} />
+  {/* <View style={styles.placeholder} /> */}
 </View>
 
           {/* Subtitle */}

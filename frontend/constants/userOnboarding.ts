@@ -128,9 +128,6 @@ const CALLER_FEMALE_AVATAR_SOURCES: ImageSourcePropType[] = [
   require('../assets/girlavt/girlavt22.png'),
   require('../assets/girlavt/girlavt23.png'),
   require('../assets/girlavt/girlavt24.png'),
-  require('../assets/girlavt/girlavt25.png'),
-  require('../assets/girlavt/girlavt26.png'),
-  require('../assets/girlavt/girlavt27.png'),
 ];
 
 /** Preset profile photos for onboarding / edit profile (bundled assets; stored as `preset:male:N` / `preset:female:N`). */

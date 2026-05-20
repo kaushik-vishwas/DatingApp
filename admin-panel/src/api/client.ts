@@ -49,7 +49,7 @@ api.interceptors.request.use((config) => {
 export type ReceiverRecord = {
   _id: string;
   name: string;
-  email: string;
+  email?: string;
   phone: string;
   isVerified: boolean;
   role: string;
@@ -65,6 +65,30 @@ export type ReceiverRecord = {
   updatedAt: string;
   audioCallRate?: number | null;
   userAudio?: string | null;
+  walletBalance?: number;
+  suspended?: boolean;
+  isAvailable?: boolean;
+  gender?: string | null;
+  age?: number | null;
+  state?: string | null;
+};
+
+export type AdminReceiverUpdatePayload = {
+  name?: string;
+  phone?: string;
+  walletBalance?: number;
+  profileImage?: string | null;
+  userAudio?: string | null;
+  aadhaarNumber?: string;
+  panNumber?: string;
+  aadhaarFront?: string | null;
+  aadhaarBack?: string | null;
+  panFront?: string | null;
+  gender?: string;
+  age?: number;
+  state?: string | null;
+  isAvailable?: boolean;
+  suspended?: boolean;
 };
 
 export type AppUserStatusTab = 'all' | 'active' | 'suspended';
@@ -73,7 +97,7 @@ export type AppUserRange = '7d' | '30d' | 'all';
 export type AppUserRecord = {
   _id: string;
   name: string;
-  email: string;
+  email?: string;
   phone: string;
   isVerified: boolean;
   role: string;
@@ -84,6 +108,21 @@ export type AppUserRecord = {
   createdAt: string;
   updatedAt: string;
   userAudio?: string | null;
+  gender?: string | null;
+  age?: number | null;
+  state?: string | null;
+};
+
+export type AdminAppUserUpdatePayload = {
+  name?: string;
+  phone?: string;
+  walletBalance?: number;
+  profileImage?: string | null;
+  userAudio?: string | null;
+  gender?: string;
+  age?: number;
+  state?: string | null;
+  suspended?: boolean;
 };
 
 /** ================= WALLET OFFERS ================= */
@@ -298,6 +337,19 @@ export async function updateAppUserSuspension(
   const { data } = await api.patch<{ user: AppUserRecord }>(
     `/admin/users/${userId}`,
     { suspended }
+  );
+  return data;
+}
+
+export async function updateAppUserProfile(userId: string, payload: AdminAppUserUpdatePayload) {
+  const { data } = await api.patch<{ user: AppUserRecord }>(`/admin/users/${userId}`, payload);
+  return data;
+}
+
+export async function updateReceiverProfile(receiverId: string, payload: AdminReceiverUpdatePayload) {
+  const { data } = await api.patch<{ receiver: ReceiverRecord }>(
+    `/admin/receivers/${receiverId}`,
+    payload
   );
   return data;
 }

@@ -48,6 +48,7 @@ const ChatBlock_1 = __importDefault(require("../models/ChatBlock"));
 const ChatReadState_1 = __importDefault(require("../models/ChatReadState"));
 const UserReport_1 = __importStar(require("../models/UserReport"));
 const accountAccess_1 = require("../utils/accountAccess");
+const callerMessageEligibility_1 = require("../utils/callerMessageEligibility");
 const HISTORY_LIMIT = 200;
 function iso(d) {
     return d instanceof Date ? d.toISOString() : new Date(d).toISOString();
@@ -70,6 +71,13 @@ async function getMessages(req, res) {
             const userId = String(req.user._id);
             if (await ChatBlock_1.default.exists({ userId, receiverId })) {
                 res.status(403).json({ message: 'This conversation is blocked.' });
+                return;
+            }
+            if (!(await (0, callerMessageEligibility_1.callerHasSuccessfulCallWithReceiver)(userId, receiverId))) {
+                res.status(403).json({
+                    message: 'Complete at least one successful call with this receiver before messaging.',
+                    code: 'CALL_REQUIRED',
+                });
                 return;
             }
             const rows = await ChatMessage_1.default.find({ userId, receiverId })

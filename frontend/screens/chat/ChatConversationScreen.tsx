@@ -1,5 +1,5 @@
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { useNavigation } from '@react-navigation/native';
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -31,8 +31,10 @@ import {
   getResolvedApiBaseUrl,
 } from '../../services/api';
 import type { ChatMessageDto } from '../../types/api';
+import { CALLER_MESSAGE_REQUIRES_CALL } from '../../constants/callerMessaging';
 import { useAuth } from '../../context/AuthContext';
 import { useCallSignals } from '../../context/CallSignalContext';
+import { useCallerMessageEligibilityOptional } from '../../context/CallerMessageEligibilityContext';
 import { useChatInbox } from '../../context/ChatInboxContext';
 import { resolveProfileImageSource } from '../../utils/avatarSource';
 import { SCREEN_FETCH_TIMEOUT_MS, withTimeout } from '../../utils/withTimeout';
@@ -70,7 +72,10 @@ export default function ChatConversationScreen({ navigation, route }: Props): Re
   const { markPeerReadLocal, setActivePeer } = useChatInbox();
   const callerNav = useNavigation<NativeStackNavigationProp<CallerStackParamList>>();
   const isCaller = route.name === 'CallerChat';
+  const messageEligibility = useCallerMessageEligibilityOptional();
   const peerId = isCaller ? route.params.receiverId : route.params.userId;
+  const canMessage =
+    !isCaller || (messageEligibility?.canMessageReceiver(peerId) ?? false);
   const peerName = isCaller ? route.params.receiverName : route.params.userName;
   const peerImage = isCaller
     ? route.params.receiverImage ?? null
@@ -123,6 +128,12 @@ export default function ChatConversationScreen({ navigation, route }: Props): Re
     });
   }, []);
 
+  useFocusEffect(
+    useCallback(() => {
+      if (isCaller) void messageEligibility?.refresh();
+    }, [isCaller, messageEligibility])
+  );
+
   useEffect(() => {
     registerPeer(peerId, peerName, peerImage);
   }, [peerId, peerName, peerImage, registerPeer]);
@@ -155,7 +166,12 @@ export default function ChatConversationScreen({ navigation, route }: Props): Re
         if (!cancelled) {
           const status = (e as { response?: { status?: number } })?.response?.status;
           if (status === 403) {
-            setLoadError('This conversation is blocked or unavailable.');
+            const code = (e as { response?: { data?: { code?: string } } })?.response?.data?.code;
+            setLoadError(
+              code === 'CALL_REQUIRED'
+                ? CALLER_MESSAGE_REQUIRES_CALL
+                : 'This conversation is blocked or unavailable.'
+            );
           } else {
             setLoadError('Could not load messages.');
           }
@@ -315,6 +331,10 @@ export default function ChatConversationScreen({ navigation, route }: Props): Re
   };
 
   const onSend = (): void => {
+    if (isCaller && !canMessage) {
+      Alert.alert('Messaging locked', CALLER_MESSAGE_REQUIRES_CALL);
+      return;
+    }
     const text = input.trim();
     if (!text) return;
     const s = socketRef.current;
@@ -334,6 +354,12 @@ export default function ChatConversationScreen({ navigation, route }: Props): Re
         if (res.code === 'INSUFFICIENT_WALLET' && isCaller) {
           setContinueOpen(true);
           setSocketError(null);
+          setInput((prev) => (prev.trim().length > 0 ? prev : sentText));
+          return;
+        }
+        if (res.code === 'CALL_REQUIRED') {
+          setSocketError(CALLER_MESSAGE_REQUIRES_CALL);
+          void messageEligibility?.refresh();
           setInput((prev) => (prev.trim().length > 0 ? prev : sentText));
           return;
         }
@@ -476,6 +502,9 @@ export default function ChatConversationScreen({ navigation, route }: Props): Re
         ) : null}
 
         {loadError ? <Text style={styles.bannerErr}>{loadError}</Text> : null}
+        {isCaller && !canMessage && !loadError ? (
+          <Text style={styles.bannerInfo}>{CALLER_MESSAGE_REQUIRES_CALL}</Text>
+        ) : null}
         {socketError ? <Text style={styles.bannerErr}>{socketError}</Text> : null}
 
         {loading ? (
@@ -495,19 +524,24 @@ export default function ChatConversationScreen({ navigation, route }: Props): Re
 
         <View style={styles.inputRow}>
           <TextInput
-            style={styles.input}
+            style={[styles.input, isCaller && !canMessage && styles.inputDisabled]}
             value={input}
             onChangeText={onChangeInput}
-            placeholder="Type a message…"
+            placeholder={
+              isCaller && !canMessage ? 'Call first to unlock messaging' : 'Type a message…'
+            }
             placeholderTextColor="#999"
             multiline
             maxLength={2000}
-            editable
+            editable={canMessage || !isCaller}
           />
           <TouchableOpacity
-            style={[styles.sendBtn, !input.trim() && styles.sendBtnOff]}
+            style={[
+              styles.sendBtn,
+              (!input.trim() || (isCaller && !canMessage)) && styles.sendBtnOff,
+            ]}
             onPress={onSend}
-            disabled={!input.trim()}
+            disabled={!input.trim() || (isCaller && !canMessage)}
           >
             <Text style={styles.sendTxt}>Send</Text>
           </TouchableOpacity>
@@ -653,6 +687,20 @@ const styles = StyleSheet.create({
     color: '#b91c1c',
     fontSize: 13,
     fontWeight: '600',
+  },
+  bannerInfo: {
+    marginHorizontal: 12,
+    marginTop: 6,
+    padding: 8,
+    borderRadius: 8,
+    backgroundColor: '#f3f4f6',
+    color: '#4b5563',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  inputDisabled: {
+    backgroundColor: '#f3f4f6',
+    color: '#9ca3af',
   },
   centerFill: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   listContent: { paddingHorizontal: 12, paddingVertical: 12, flexGrow: 1 },

@@ -5,15 +5,20 @@ import mongoose from 'mongoose';
 import ChatMessage, { type ChatMessageDocument } from '../models/ChatMessage';
 import ChatBlock from '../models/ChatBlock';
 import CallSession from '../models/CallSession';
+import { callerHasSuccessfulCallWithReceiver } from '../utils/callerMessageEligibility';
 import User from '../models/User';
 import Receiver from '../models/Receiver';
 import { getPayloadSessionVersion, type AppJwtPayload } from '../utils/authToken';
 import { registerSocketIOServer } from './socketRegistry';
 import { CHAT_TEXT_FEE_INR } from '../constants/chatPricing';
 import { finalizeReceiverOnlineSession, recordReceiverCallScore } from '../services/receiverScore';
+import { scheduleCallerOnlineNotifications } from '../services/callerOnlineNotifier';
 import { scheduleReceiverAvailabilityNotifications } from '../services/receiverAvailabilityNotifier';
 import { registerPendingCallInvite, unregisterPendingCallInvite } from '../services/callInviteRegistry';
-import { settleCallSession } from '../controllers/callController';
+import {
+  ensureCallEndedAndSettled,
+  MISSED_OR_INCOMPLETE_MAX_SEC,
+} from '../controllers/callController';
 import {
   isReceiverBusy,
   releaseIfStaleReceiverBusy,
@@ -38,8 +43,13 @@ type ActiveCallInvite = {
   targetId: string;
   targetType: AccountType;
   receiverId: string;
+  invitedAt: Date;
   timeoutHandle: NodeJS.Timeout | null;
 };
+
+function inviteCallerId(invite: ActiveCallInvite): string {
+  return invite.inviterType === 'u' ? invite.inviterId : invite.targetId;
+}
 
 export function roomKey(userId: string, receiverId: string): string {
   return `chat:${userId}:${receiverId}`;
@@ -85,9 +95,30 @@ export function attachChatSocket(httpServer: HTTPServer): Server {
   const queueKey = (typ: AccountType, accountId: string): string => `${typ}:${String(accountId).trim()}`;
   const hasActiveSocketForAccount = (typ: AccountType, accountId: string): boolean =>
     (io.sockets.adapter.rooms.get(accountRoom(typ, accountId))?.size ?? 0) > 0;
-  const settleAndReleaseCall = async (callId: string, receiverId: string): Promise<void> => {
+  const emitReceiverMissedCall = async (callerId: string, receiverId: string): Promise<void> => {
+    const caller = await User.findById(callerId).select('name profileImage').lean<{
+      name?: string;
+      profileImage?: string | null;
+    } | null>();
+    io.to(accountRoom('r', receiverId)).emit('call:missed', {
+      callerId,
+      callerName: caller?.name?.trim() || 'Caller',
+      callerImage: caller?.profileImage ?? null,
+      at: new Date().toISOString(),
+    });
+  };
+
+  const settleAndReleaseCall = async (
+    callId: string,
+    receiverId: string,
+    callerId: string,
+    startedAt?: Date
+  ): Promise<void> => {
     try {
-      const settled = await settleCallSession(callId, true);
+      const settled = await ensureCallEndedAndSettled(callId, { callerId, receiverId, startedAt });
+      if (settled.justCompleted && settled.durationSec < MISSED_OR_INCOMPLETE_MAX_SEC) {
+        await emitReceiverMissedCall(settled.callerId, settled.receiverId);
+      }
       if (settled.justCompleted) {
         void recordReceiverCallScore({
           callId,
@@ -119,7 +150,7 @@ export function attachChatSocket(httpServer: HTTPServer): Server {
         invite.timeoutHandle = null;
       }
       activeCallInvites.delete(callId);
-      void settleAndReleaseCall(callId, invite.receiverId);
+      void settleAndReleaseCall(callId, invite.receiverId, inviteCallerId(invite), invite.invitedAt);
       io.to(accountRoom(invite.inviterType, invite.inviterId)).emit('call:ended', {
         callId,
         fromType: typ,
@@ -190,6 +221,8 @@ export function attachChatSocket(httpServer: HTTPServer): Server {
     const socketAccountId = String(socket.data.accountId);
     const selfRoom = accountRoom(socketType, socketAccountId);
     // Socket.IO v4: join() is async; callers must not see an empty account room while DB already shows online.
+    const hadActiveSocketBeforeJoin =
+      (io.sockets.adapter.rooms.get(selfRoom)?.size ?? 0) > 0;
     try {
       await socket.join(selfRoom);
     } catch (e) {
@@ -197,6 +230,16 @@ export function attachChatSocket(httpServer: HTTPServer): Server {
       console.error('socket join account room failed:', msg);
       socket.disconnect(true);
       return;
+    }
+    if (socketType === 'u' && !hadActiveSocketBeforeJoin) {
+      void (async () => {
+        try {
+          await scheduleCallerOnlineNotifications(socketAccountId);
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e);
+          console.error('caller online notify error:', msg);
+        }
+      })();
     }
     if (socketType === 'r') {
       void (async () => {
@@ -249,9 +292,12 @@ export function attachChatSocket(httpServer: HTTPServer): Server {
               invite.timeoutHandle = null;
             }
             activeCallInvites.delete(callId);
-            unregisterPendingCallInvite(invite.receiverId);
-            releaseReceiverReservation(invite.receiverId);
-            void syncReceiverQueueState(invite.receiverId);
+            void settleAndReleaseCall(
+              callId,
+              invite.receiverId,
+              inviteCallerId(invite),
+              invite.invitedAt
+            );
           }
         }
       }, DISCONNECT_GRACE_MS);
@@ -333,6 +379,14 @@ export function attachChatSocket(httpServer: HTTPServer): Server {
             ack?.({ ok: false, error: 'This chat is blocked.' });
             return;
           }
+          if (typ === 'u' && !(await callerHasSuccessfulCallWithReceiver(userHex, receiverHex))) {
+            ack?.({
+              ok: false,
+              code: 'CALL_REQUIRED',
+              error: 'Complete at least one successful call with this receiver before messaging.',
+            });
+            return;
+          }
 
           const room = roomKey(userHex, receiverHex);
           await socket.join(room);
@@ -403,6 +457,17 @@ export function attachChatSocket(httpServer: HTTPServer): Server {
 
           if (await ChatBlock.exists({ userId: parsed.userId, receiverId: parsed.receiverId })) {
             ack?.({ ok: false, error: 'This chat is blocked.' });
+            return;
+          }
+          if (
+            typ === 'u' &&
+            !(await callerHasSuccessfulCallWithReceiver(parsed.userId, parsed.receiverId))
+          ) {
+            ack?.({
+              ok: false,
+              code: 'CALL_REQUIRED',
+              error: 'Complete at least one successful call with this receiver before messaging.',
+            });
             return;
           }
 
@@ -714,13 +779,17 @@ export function attachChatSocket(httpServer: HTTPServer): Server {
         }
         registerPendingCallInvite(receiverForInviteId);
         removeReceiverFromQueue(receiverForInviteId);
+        const invitedAt = new Date();
         const timeoutHandle = setTimeout(() => {
           const invite = activeCallInvites.get(callId);
           if (!invite) return;
           activeCallInvites.delete(callId);
-          unregisterPendingCallInvite(invite.receiverId);
-          releaseReceiverReservation(invite.receiverId);
-          void syncReceiverQueueState(invite.receiverId);
+          void settleAndReleaseCall(
+            callId,
+            invite.receiverId,
+            inviteCallerId(invite),
+            invite.invitedAt
+          );
           io.to(accountRoom(invite.inviterType, invite.inviterId)).emit('call:response', {
             callId,
             accepted: false,
@@ -736,6 +805,7 @@ export function attachChatSocket(httpServer: HTTPServer): Server {
           targetId,
           targetType,
           receiverId: receiverForInviteId,
+          invitedAt,
           timeoutHandle,
         });
 
@@ -807,9 +877,12 @@ export function attachChatSocket(httpServer: HTTPServer): Server {
       });
       if (!accepted) {
         activeCallInvites.delete(callId);
-        unregisterPendingCallInvite(invite.receiverId);
-        releaseReceiverReservation(invite.receiverId);
-        void syncReceiverQueueState(invite.receiverId);
+        void settleAndReleaseCall(
+          callId,
+          invite.receiverId,
+          inviteCallerId(invite),
+          invite.invitedAt
+        );
       }
       ack?.({ ok: true });
     });
@@ -839,16 +912,21 @@ export function attachChatSocket(httpServer: HTTPServer): Server {
           fromId: endedById,
         });
         activeCallInvites.delete(callId);
-        void settleAndReleaseCall(callId, invite.receiverId);
+        void settleAndReleaseCall(
+          callId,
+          invite.receiverId,
+          inviteCallerId(invite),
+          invite.invitedAt
+        );
         ack?.({ ok: true });
         return;
       }
 
       void (async () => {
         try {
-          const session = await CallSession.findOne({ callId, status: 'ongoing' })
-            .select('callerId receiverId')
-            .lean<{ callerId: unknown; receiverId: unknown } | null>();
+          const session = await CallSession.findOne({ callId })
+            .select('callerId receiverId status')
+            .lean<{ callerId: unknown; receiverId: unknown; status: string } | null>();
           if (!session) {
             ack?.({ ok: true });
             return;
@@ -872,9 +950,7 @@ export function attachChatSocket(httpServer: HTTPServer): Server {
             fromType: endedByType,
             fromId: endedById,
           });
-          unregisterPendingCallInvite(receiverId);
-          releaseReceiverReservation(receiverId);
-          void syncReceiverQueueState(receiverId);
+          await settleAndReleaseCall(callId, receiverId, callerId);
         } catch {
           ack?.({ ok: false, error: 'Server error' });
           return;

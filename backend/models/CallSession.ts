@@ -7,6 +7,12 @@ export interface ICallSession {
   callerId: mongoose.Types.ObjectId;
   receiverId: mongoose.Types.ObjectId;
   startedAt: Date;
+  /** When the caller joined the voice session (Stream). */
+  callerJoinedAt: Date | null;
+  /** When the receiver joined the voice session (Stream). */
+  receiverJoinedAt: Date | null;
+  /** When both sides were connected — billing/UI talk time starts here. */
+  talkStartedAt: Date | null;
   endedAt: Date | null;
   durationSec: number;
   status: CallSessionStatus;
@@ -30,6 +36,9 @@ const callSessionSchema = new Schema<ICallSession>(
     callerId: { type: Schema.Types.ObjectId, ref: 'User', required: true, index: true },
     receiverId: { type: Schema.Types.ObjectId, ref: 'Receiver', required: true, index: true },
     startedAt: { type: Date, required: true, default: Date.now },
+    callerJoinedAt: { type: Date, default: null },
+    receiverJoinedAt: { type: Date, default: null },
+    talkStartedAt: { type: Date, default: null },
     endedAt: { type: Date, default: null },
     durationSec: { type: Number, default: 0, min: 0 },
     status: { type: String, enum: ['ongoing', 'completed'], default: 'ongoing', index: true },

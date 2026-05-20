@@ -11,7 +11,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "seed:admin": "tsx scripts/seedAdmin.ts",
     "migrate:split-users": "tsx scripts/migrateSplitUsersReceivers.ts",
-    "migrate:caller-suspended": "tsx scripts/migrateCallerAccessSuspendedOnly.ts"
+    "migrate:caller-suspended": "tsx scripts/migrateCallerAccessSuspendedOnly.ts",
+    "migrate:drop-email-indexes": "tsx scripts/migrateDropEmailIndexes.ts"
   },
   "engines": {
     "node": ">=18"

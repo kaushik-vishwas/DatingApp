@@ -30,7 +30,6 @@ export default function ReceiverBankDetailsScreen(): React.JSX.Element {
   const [busy, setBusy] = useState(false);
   const [otp, setOtp] = useState('');
   const [holderName, setHolderName] = useState(user?.bankAccountHolderName ?? '');
-  // Account type hardcoded to 'savings'
   const accountType = 'savings';
   const [accountNumber, setAccountNumber] = useState(user?.bankAccountNumber ?? '');
   const [confirmAccountNumber, setConfirmAccountNumber] = useState(user?.bankAccountNumber ?? '');
@@ -60,7 +59,7 @@ export default function ReceiverBankDetailsScreen(): React.JSX.Element {
     try {
       await profileApi.sendReceiverBankUpdateOtp({
         bankAccountHolderName: holderName.trim(),
-        bankAccountType: accountType, // Always 'savings'
+        bankAccountType: accountType,
         bankAccountNumber: accountNumber.trim(),
         bankIfsc: ifsc.trim().toUpperCase(),
         bankName: bankName.trim(),
@@ -108,7 +107,7 @@ export default function ReceiverBankDetailsScreen(): React.JSX.Element {
               <Icon name="chevron-left" size={26} color="#1a1a1a" />
             </TouchableOpacity>
             <Text style={styles.headerTitle}>Bank Details</Text>
-            <View style={styles.backBtn} />
+            <View style={styles.placeholder} /> 
           </View>
 
           {step === 'form' ? (
@@ -307,6 +306,10 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.05,
     shadowRadius: 4,
     elevation: 2,
+  },
+  placeholder: {
+    width: 40,
+    height: 40,
   },
   backText: { fontSize: 20, color: '#1a1a1a', fontWeight: '700' },
   headerTitle: { 
