@@ -24,7 +24,7 @@ export default function ReceiverOnboardingNicknameScreen({ navigation }: Props):
 
   return (
     <ReceiverOnboardingStepLayout
-      title="What is your Nickname?"
+      title="Enter Your Display Name"
       subtitle="This is how callers will see you on the app."
       onContinue={onContinue}
       continueDisabled={value.trim().length < 2}

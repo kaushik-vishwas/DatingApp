@@ -363,7 +363,7 @@
                   label="Display Name" 
                   value={name} 
                   onChangeText={setName} 
-                  placeholder="Enter your display name"
+                  placeholder="Enter your displhhay name"
                   required
                 />
                 

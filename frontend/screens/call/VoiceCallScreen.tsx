@@ -176,6 +176,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
     cancelOutgoingCallInvite,
     setIncomingCallHandler,
     setIncomingCallDismissHandler,
+    setRemoteCallEndedHandler,
     rejectIncomingCall,
     acceptIncomingCallStayOnScreen,
     stopIncomingRingtone,
@@ -249,8 +250,10 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
   const readyRef = useRef(false);
   const endingRef = useRef(false);
   const endedSessionRef = useRef(false);
-  const endedSessionResultRef = useRef<{ canRate: boolean } | null>(null);
-  const endSessionPromiseRef = useRef<Promise<{ canRate: boolean } | null> | null>(null);
+  const endedSessionResultRef = useRef<{ canRate: boolean; durationSec: number } | null>(null);
+  const endSessionPromiseRef = useRef<Promise<{ canRate: boolean; durationSec: number } | null> | null>(null);
+  const elapsedSecRef = useRef(0);
+  const talkActiveRef = useRef(false);
   const callIdRef = useRef(getVoiceBootstrap(callParams)?.callId ?? '');
   useEffect(() => {
     const id = getVoiceBootstrap(callParams)?.callId;
@@ -291,6 +294,14 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
   const userRoleRef = useRef(user?.role);
   const receiverAvailabilitySessionRef = useRef(receiverAvailabilitySession);
   const userAvailableRef = useRef(Boolean(user?.isAvailable));
+  useEffect(() => {
+    elapsedSecRef.current = elapsedSec;
+  }, [elapsedSec]);
+
+  useEffect(() => {
+    talkActiveRef.current = talkActive;
+  }, [talkActive]);
+
   useEffect(() => {
     callerCanRateByDurationRef.current = callerCanRateByDuration;
     userRoleRef.current = user?.role;
@@ -345,13 +356,17 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
     return `${hh}:${mm}:${ss}`;
   };
 
-  const ensureSessionEnded = async (): Promise<{ canRate: boolean } | null> => {
+  const ensureSessionEnded = async (): Promise<{ canRate: boolean; durationSec: number } | null> => {
     if (endedSessionRef.current) return endedSessionResultRef.current;
     if (endSessionPromiseRef.current) return endSessionPromiseRef.current;
     endSessionPromiseRef.current = (async () => {
       try {
         const { data } = await callApi.sessionEnd(callIdRef.current);
-        const result = { canRate: Boolean(data.canRate) };
+        const durationSec =
+          typeof data.durationSec === 'number' && Number.isFinite(data.durationSec)
+            ? Math.max(0, data.durationSec)
+            : 0;
+        const result = { canRate: Boolean(data.canRate), durationSec };
         endedSessionRef.current = true;
         endedSessionResultRef.current = result;
         setLiveSettledAmountInr(
@@ -378,10 +393,68 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
   const showRatingPromptRef = useRef(showRatingPrompt);
   showRatingPromptRef.current = showRatingPrompt;
 
+  const callerMeetsRatingThreshold = (serverDurationSec?: number): boolean => {
+    const duration = Math.max(elapsedSecRef.current, serverDurationSec ?? 0);
+    return duration >= MIN_RATING_SECONDS;
+  };
+
+  const shouldShowCallerRating = async (): Promise<boolean> => {
+    if (callerCanRateByDurationRef.current) return true;
+    const end = await ensureSessionEnded();
+    return callerMeetsRatingThreshold(end?.durationSec);
+  };
+
+  const finishCallerCallEnd = async (): Promise<void> => {
+    await leaveMedia();
+    if (await shouldShowCallerRating()) {
+      showRatingPrompt();
+      return;
+    }
+    exitCallScreen();
+  };
+  const finishCallerCallEndRef = useRef(finishCallerCallEnd);
+  finishCallerCallEndRef.current = finishCallerCallEnd;
+
+  const matchesActiveCallId = useCallback(
+    (endedCallId: string): boolean => {
+      const normalized = endedCallId.trim();
+      if (!normalized) return false;
+      if (normalized === callIdRef.current.trim()) return true;
+      const routeCallId = getVoiceBootstrap(callParams)?.callId?.trim();
+      return Boolean(routeCallId && routeCallId === normalized);
+    },
+    [callParams],
+  );
+
+  const teardownFromRemotePeerEnd = useCallback(async (): Promise<void> => {
+    if (endingRef.current) return;
+    endingRef.current = true;
+    await leaveMediaRef.current();
+    void ensureSessionEndedRef.current();
+    if (receiverAvailabilitySessionRef.current && userAvailableRef.current) {
+      resetReceiverToWaitingRef.current();
+      return;
+    }
+    exitCallScreenRef.current();
+  }, []);
+  const teardownFromRemotePeerEndRef = useRef(teardownFromRemotePeerEnd);
+  teardownFromRemotePeerEndRef.current = teardownFromRemotePeerEnd;
+
+  const emitCallEnd = (): void => {
+    const callId = callIdRef.current.trim();
+    if (!callId) return;
+    try {
+      signalSocketRef.current?.emit('call:end', { callId });
+    } catch {
+      // ignore signaling failures
+    }
+  };
+
   const resetReceiverToWaiting = () => {
     endingRef.current = false;
     endedSessionRef.current = false;
     endedSessionResultRef.current = null;
+    callIdRef.current = '';
     setReady(false);
     setClient(null);
     setCall(null);
@@ -389,9 +462,10 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
     setElapsedSec(0);
     setIncomingReq(null);
     setReceiverSessionPhase('waiting');
-    (navigation as { setParams: (p: VoiceCallScreenParams) => void }).setParams({
-      receiverAvailabilitySession: true,
-    });
+    (navigation as { replace: (name: 'VoiceCall', params: VoiceCallScreenParams) => void }).replace(
+      'VoiceCall',
+      { receiverAvailabilitySession: true },
+    );
   };
   const resetReceiverToWaitingRef = useRef(resetReceiverToWaiting);
   resetReceiverToWaitingRef.current = resetReceiverToWaiting;
@@ -403,6 +477,15 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
       try {
         if (incomingReq) {
           rejectIncomingCall(incomingReq);
+        }
+        const hasLiveCall =
+          Boolean(callIdRef.current.trim()) &&
+          (readyRef.current || talkActiveRef.current || Boolean(getVoiceBootstrap(callParams)));
+        if (hasLiveCall && !endingRef.current) {
+          endingRef.current = true;
+          emitCallEnd();
+          await leaveMedia();
+          void ensureSessionEnded();
         }
         await profileApi.updateReceiverProfile({ isAvailable: false });
         await refreshUser();
@@ -510,6 +593,18 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
   }, [stopIncomingRingtone]);
   const dismissIncomingOnSessionRef = useRef(dismissIncomingOnSession);
   dismissIncomingOnSessionRef.current = dismissIncomingOnSession;
+
+  useEffect(() => {
+    if (user?.role !== 'receiver') {
+      setRemoteCallEndedHandler(null);
+      return;
+    }
+    setRemoteCallEndedHandler((endedCallId) => {
+      if (!matchesActiveCallId(endedCallId)) return;
+      void teardownFromRemotePeerEndRef.current();
+    });
+    return () => setRemoteCallEndedHandler(null);
+  }, [user?.role, matchesActiveCallId, setRemoteCallEndedHandler]);
 
   useEffect(() => {
     if (!receiverAvailabilitySession) return;
@@ -769,13 +864,15 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
           {
             text: 'OK',
             onPress: () => {
-              if (userRoleRef.current === 'caller' && callerCanRateByDurationRef.current) {
-                runBackgroundCallCleanupRef.current();
-                showRatingPromptRef.current();
-                return;
-              }
-              exitCallScreenRef.current();
-              runBackgroundCallCleanupRef.current();
+              void (async () => {
+                if (userRoleRef.current === 'caller') {
+                  await finishCallerCallEndRef.current();
+                  return;
+                }
+                await leaveMediaRef.current();
+                void ensureSessionEndedRef.current();
+                exitCallScreenRef.current();
+              })();
             },
           },
         ]);
@@ -794,21 +891,14 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
           dismissIncomingOnSessionRef.current(payload.callId);
           return;
         }
-        if (payload.callId !== callIdRef.current) return;
-        if (endingRef.current) return;
-        endingRef.current = true;
-        if (userRoleRef.current === 'caller' && callerCanRateByDurationRef.current) {
-          runBackgroundCallCleanupRef.current();
-          showRatingPromptRef.current();
+        if (!matchesActiveCallId(payload.callId)) return;
+        if (userRoleRef.current === 'caller') {
+          if (endingRef.current) return;
+          endingRef.current = true;
+          void finishCallerCallEndRef.current();
           return;
         }
-        if (receiverAvailabilitySessionRef.current && userAvailableRef.current) {
-          runBackgroundCallCleanupRef.current();
-          resetReceiverToWaitingRef.current();
-          return;
-        }
-        exitCallScreenRef.current();
-        runBackgroundCallCleanupRef.current();
+        void teardownFromRemotePeerEndRef.current();
       });
     })();
 
@@ -900,26 +990,22 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
     if (endingRef.current) return;
     endingRef.current = true;
 
-    try {
-      signalSocketRef.current?.emit('call:end', { callId: callIdRef.current });
-    } catch {
-      // ignore signaling failures
-    }
+    emitCallEnd();
 
-    if (user?.role === 'caller' && callerCanRateByDuration) {
-      runBackgroundCallCleanup();
-      showRatingPrompt();
+    if (user?.role === 'caller') {
+      await finishCallerCallEnd();
       return;
     }
 
+    await leaveMedia();
+    void ensureSessionEnded();
+
     if (receiverAvailabilitySession && Boolean(user?.isAvailable)) {
-      runBackgroundCallCleanup();
       resetReceiverToWaiting();
       return;
     }
 
     exitCallScreen();
-    runBackgroundCallCleanup();
   };
 
   const toggleSpeaker = async () => {
@@ -1145,8 +1231,78 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
     );
   };
 
+  const ratingModal = (
+    <Modal visible={ratingOpen} transparent animationType="fade">
+      <View style={styles.modalOverlay}>
+        <View style={styles.ratingCard}>
+          <Text style={styles.ratingTitle}>Rate this call</Text>
+          <Text style={styles.ratingSubtitle}>How was the call quality?</Text>
+          <View style={styles.starRow}>
+            {[1, 2, 3, 4, 5].map((n) => (
+              <TouchableOpacity
+                key={n}
+                activeOpacity={0.75}
+                onPress={() => setSelectedRating(n)}
+                style={styles.starHit}
+                accessibilityRole="button"
+                accessibilityLabel={`Rate ${n} out of 5`}
+              >
+                <Ionicons
+                  name={n <= selectedRating ? 'star' : 'star-outline'}
+                  size={38}
+                  color={n <= selectedRating ? '#fbbf24' : '#c4b5fd'}
+                />
+              </TouchableOpacity>
+            ))}
+          </View>
+          <TouchableOpacity
+            style={[styles.ratingSubmitOuter, selectedRating === 0 && styles.ratingSubmitBtnOff]}
+            disabled={selectedRating === 0 || submittingRating}
+            activeOpacity={0.88}
+            onPress={() => {
+              void (async () => {
+                if (!selectedRating) return;
+                setSubmittingRating(true);
+                try {
+                  await callApi.sessionRate(callIdRef.current, selectedRating);
+                } catch {
+                  // Keep exit behavior even if rating submit fails.
+                } finally {
+                  setSubmittingRating(false);
+                  setRatingOpen(false);
+                  stopQueueAndExit();
+                }
+              })();
+            }}
+          >
+            <LinearGradient
+              colors={['#6d28d9', '#7c3aed', '#a78bfa']}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={styles.ratingSubmitGrad}
+            >
+              <Text style={styles.ratingSubmitText}>{submittingRating ? 'Submitting...' : 'Submit'}</Text>
+            </LinearGradient>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.ratingSkipBtn}
+            disabled={submittingRating}
+            onPress={() => {
+              setRatingOpen(false);
+              stopQueueAndExit();
+            }}
+          >
+            <Text style={styles.ratingSkipText}>Skip</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    </Modal>
+  );
+
+  let screenBody: React.JSX.Element;
+
   if (error && !showStreamChrome) {
-    return (
+    screenBody = (
       <View style={styles.center}>
         <LinearGradient
           colors={['#0a0014', '#1e0b3d', '#4c1d95', '#6d28d9']}
@@ -1164,17 +1320,12 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
         </TouchableOpacity>
       </View>
     );
-  }
-
-  if (showCallShell) {
-    return renderCallShell();
-  }
-
-  if (!(ready && client && call && sdk)) {
-    return <View style={{ flex: 1, backgroundColor: '#0a0014' }} />;
-  }
-
-  return (
+  } else if (showCallShell) {
+    screenBody = renderCallShell();
+  } else if (!(ready && client && call && sdk)) {
+    screenBody = <View style={{ flex: 1, backgroundColor: '#0a0014' }} />;
+  } else {
+    screenBody = (
     <View style={styles.container}>
       <LinearGradient
         colors={['#0a0014', '#1e0b3d', '#4c1d95', '#6d28d9', '#7c3aed']}
@@ -1319,72 +1470,15 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
           </View>
         </sdk.StreamCall>
       </sdk.StreamVideo>
-      <Modal visible={ratingOpen} transparent animationType="fade">
-        <View style={styles.modalOverlay}>
-          <View style={styles.ratingCard}>
-            <Text style={styles.ratingTitle}>Rate this call</Text>
-            <Text style={styles.ratingSubtitle}>How was the call quality?</Text>
-            <View style={styles.starRow}>
-              {[1, 2, 3, 4, 5].map((n) => (
-                <TouchableOpacity
-                  key={n}
-                  activeOpacity={0.75}
-                  onPress={() => setSelectedRating(n)}
-                  style={styles.starHit}
-                  accessibilityRole="button"
-                  accessibilityLabel={`Rate ${n} out of 5`}
-                >
-                  <Ionicons
-                    name={n <= selectedRating ? 'star' : 'star-outline'}
-                    size={38}
-                    color={n <= selectedRating ? '#fbbf24' : '#c4b5fd'}
-                  />
-                </TouchableOpacity>
-              ))}
-            </View>
-            <TouchableOpacity
-              style={[styles.ratingSubmitOuter, selectedRating === 0 && styles.ratingSubmitBtnOff]}
-              disabled={selectedRating === 0 || submittingRating}
-              activeOpacity={0.88}
-              onPress={() => {
-                void (async () => {
-                  if (!selectedRating) return;
-                  setSubmittingRating(true);
-                  try {
-                    await callApi.sessionRate(callIdRef.current, selectedRating);
-                  } catch {
-                    // Keep exit behavior even if rating submit fails.
-                  } finally {
-                    setSubmittingRating(false);
-                    setRatingOpen(false);
-                    stopQueueAndExit();
-                  }
-                })();
-              }}
-            >
-              <LinearGradient
-                colors={['#6d28d9', '#7c3aed', '#a78bfa']}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 1 }}
-                style={styles.ratingSubmitGrad}
-              >
-                <Text style={styles.ratingSubmitText}>{submittingRating ? 'Submitting...' : 'Submit'}</Text>
-              </LinearGradient>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.ratingSkipBtn}
-              disabled={submittingRating}
-              onPress={() => {
-                setRatingOpen(false);
-                stopQueueAndExit();
-              }}
-            >
-              <Text style={styles.ratingSkipText}>Skip</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
     </View>
+    );
+  }
+
+  return (
+    <>
+      {screenBody}
+      {ratingModal}
+    </>
   );
 }
 

@@ -1,9 +1,10 @@
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import React from 'react';
-import { Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Image, Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
 import type { RootStackParamList } from '../../navigation/RootStackParamList';
 import { markAuthWelcomeSeen } from '../../services/authWelcomeStorage';
+import SelectoLogo from '../../assets/SelectoLogo.png'; // Adjust path as needed
 
 const GREEN = '#1b4d3e';
 const PURPLE = '#7b2cff';
@@ -21,9 +22,11 @@ export default function SplashScreen({ navigation }: Props): React.JSX.Element {
   return (
     <View style={styles.root}>
       <View style={styles.logoRing}>
-        <Text style={styles.logoGlyph} accessibilityLabel="Selecto logo">
-          🤝
-        </Text>
+        <Image 
+          source={SelectoLogo} 
+          style={styles.logoImage}
+          resizeMode="contain"
+        />
       </View>
 
       <Text style={styles.brand}>Selecto !</Text>
@@ -54,6 +57,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginBottom: 20,
     backgroundColor: 'rgba(27, 77, 62, 0.06)',
+  },
+  logoImage: {
+    width: 50,
+    height: 50,
   },
   logoGlyph: {
     fontSize: 36,

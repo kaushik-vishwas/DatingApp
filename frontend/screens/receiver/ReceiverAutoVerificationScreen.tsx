@@ -21,10 +21,14 @@ import { useAuth } from '../../context/AuthContext';
 
 type Nav = NativeStackNavigationProp<ReceiverStackParamList, 'ReceiverAutoVerification'>;
 
-const RECEIVER_AUDIO_VERIFICATION_SCRIPT =
-  'Hello! Friendship is very special because good friends are always by our side; ' +
-  'they increase our happiness, decrease our sadness, and without them, ' +
-  'everything feels incomplete—so, thank you, friends!';
+// Language translations for the script
+const SCRIPT_TRANSLATIONS = {
+  english: "Hello! Friendship is very special because good friends are always by our side; they increase our happiness, decrease our sadness, and without them, everything feels incomplete—so, thank you, friends!",
+  telugu: "నమస్కారం! స్నేహం చాలా ప్రత్యేకమైనది ఎందుకంటే మంచి స్నేహితులు ఎప్పుడూ మా పక్కన ఉంటారు; వారు మా ఆనందాన్ని పెంచుతారు, మా విచారాన్ని తగ్గిస్తారు, మరియు వారు లేకుండా, ప్రతిదీ అసంపూర్ణంగా అనిపిస్తుంది—కాబట్టి, ధన్యవాదాలు స్నేహితులారా!",
+  kannada: "ನಮಸ್ಕಾರ! ಸ್ನೇಹವು ಬಹಳ ವಿಶೇಷವಾಗಿದೆ ಏಕೆಂದರೆ ಉತ್ತಮ ಸ್ನೇಹಿತರು ಯಾವಾಗಲೂ ನಮ್ಮ ಪಕ್ಕದಲ್ಲಿರುತ್ತಾರೆ; ಅವರು ನಮ್ಮ ಸಂತೋಷವನ್ನು ಹೆಚ್ಚಿಸುತ್ತಾರೆ, ನಮ್ಮ ದುಃಖವನ್ನು ಕಡಿಮೆ ಮಾಡುತ್ತಾರೆ, ಮತ್ತು ಅವರಿಲ್ಲದೆ, ಎಲ್ಲವೂ ಅಪೂರ್ಣವಾಗಿ ಭಾಸವಾಗುತ್ತದೆ—ಆದ್ದರಿಂದ, ಧನ್ಯವಾದಗಳು ಸ್ನೇಹಿತರೇ!"
+};
+
+type Language = 'english' | 'telugu' | 'kannada';
 
 export default function ReceiverAutoVerificationScreen(): React.JSX.Element {
   const navigation = useNavigation<Nav>();
@@ -32,6 +36,7 @@ export default function ReceiverAutoVerificationScreen(): React.JSX.Element {
   const [isRecording, setIsRecording] = useState(false);
   const [isVerifying, setIsVerifying] = useState(false);
   const [isVerified, setIsVerified] = useState(false);
+  const [selectedLanguage, setSelectedLanguage] = useState<Language>('english');
   
   // Animation values
   const pulseAnim = useRef(new Animated.Value(1)).current;
@@ -198,6 +203,9 @@ export default function ReceiverAutoVerificationScreen(): React.JSX.Element {
     }
   };
 
+  // Get current script text based on selected language
+  const currentScriptText = SCRIPT_TRANSLATIONS[selectedLanguage];
+
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'left', 'right']}>
       <View style={styles.container}>
@@ -214,6 +222,58 @@ export default function ReceiverAutoVerificationScreen(): React.JSX.Element {
             : 'Record your voice by reading the paragraph below'}
         </Text>
 
+        {/* Language Tabs */}
+        <View style={styles.languageTabsContainer}>
+          <TouchableOpacity
+            style={[
+              styles.languageTab,
+              selectedLanguage === 'english' && styles.languageTabActive,
+            ]}
+            onPress={() => setSelectedLanguage('english')}
+          >
+            <Text
+              style={[
+                styles.languageTabText,
+                selectedLanguage === 'english' && styles.languageTabTextActive,
+              ]}
+            >
+              English
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[
+              styles.languageTab,
+              selectedLanguage === 'telugu' && styles.languageTabActive,
+            ]}
+            onPress={() => setSelectedLanguage('telugu')}
+          >
+            <Text
+              style={[
+                styles.languageTabText,
+                selectedLanguage === 'telugu' && styles.languageTabTextActive,
+              ]}
+            >
+              తెలుగు
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[
+              styles.languageTab,
+              selectedLanguage === 'kannada' && styles.languageTabActive,
+            ]}
+            onPress={() => setSelectedLanguage('kannada')}
+          >
+            <Text
+              style={[
+                styles.languageTabText,
+                selectedLanguage === 'kannada' && styles.languageTabTextActive,
+              ]}
+            >
+              ಕನ್ನಡ
+            </Text>
+          </TouchableOpacity>
+        </View>
+
         <ScrollView
           style={styles.scroll}
           contentContainerStyle={styles.scrollContent}
@@ -222,7 +282,7 @@ export default function ReceiverAutoVerificationScreen(): React.JSX.Element {
         >
           {/* Script Card */}
           <View style={styles.scriptCard}>
-            <Text style={styles.scriptText}>{RECEIVER_AUDIO_VERIFICATION_SCRIPT}</Text>
+            <Text style={styles.scriptText}>{currentScriptText}</Text>
           </View>
 
           {/* Verification Animation */}
@@ -389,6 +449,36 @@ const styles = StyleSheet.create({
     marginTop: 6,
     marginBottom: 12,
     lineHeight: 18,
+  },
+  languageTabsContainer: {
+    flexDirection: 'row',
+    backgroundColor: '#F3F4F6',
+    borderRadius: 12,
+    padding: 4,
+    marginTop: 8,
+    marginBottom: 16,
+  },
+  languageTab: {
+    flex: 1,
+    paddingVertical: 10,
+    alignItems: 'center',
+    borderRadius: 8,
+  },
+  languageTabActive: {
+    backgroundColor: '#FFFFFF',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  languageTabText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#6B7280',
+  },
+  languageTabTextActive: {
+    color: '#7F00FF',
   },
   scroll: {
     flex: 1,
