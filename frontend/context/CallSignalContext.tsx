@@ -124,6 +124,32 @@ function getFallbackPeerName(fromType: 'u' | 'r'): string {
   return fromType === 'r' ? 'Receiver' : 'Caller';
 }
 
+const CALL_SIGNAL_CONNECT_WAIT_MS = 12_000;
+const CALL_SIGNAL_NOT_CONNECTED_MSG =
+  'Call signaling is not connected. Check your network and try again.';
+
+/** Wait for the shared call socket (connect can lag behind REST after login / refresh). */
+async function ensureCallSocketReady(
+  socketRef: React.MutableRefObject<Socket | null>
+): Promise<Socket> {
+  const deadline = Date.now() + CALL_SIGNAL_CONNECT_WAIT_MS;
+  while (Date.now() < deadline) {
+    const socket = socketRef.current;
+    if (socket?.connected) return socket;
+    if (socket && !socket.active) {
+      try {
+        socket.connect();
+      } catch {
+        // ignore — wait loop will retry or time out
+      }
+    }
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, 200);
+    });
+  }
+  throw new Error(CALL_SIGNAL_NOT_CONNECTED_MSG);
+}
+
 /** Outbound ringing UI must not sit under active VoiceCall (back would return to "Calling…"). */
 function callerShouldResetStackForVoiceCall(params: VoiceCallScreenParams): boolean {
   // Outbound ringing → joining stays on one VoiceCall screen (avoids Stream client teardown mid-call).
@@ -407,10 +433,7 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       }
       registerPeer(id, name, peerImage);
 
-      const socket = socketRef.current;
-      if (!socket?.connected) {
-        throw new Error('Call signaling is not connected. Check your network and try again.');
-      }
+      const socket = await ensureCallSocketReady(socketRef);
 
       const abort = new AbortController();
       outgoingInviteAbortRef.current = abort;
@@ -623,10 +646,7 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       if (activeIncomingCallUiCallIdRef.current === req.callId) {
         activeIncomingCallUiCallIdRef.current = null;
       }
-      const socket = socketRef.current;
-      if (!socket?.connected) {
-        throw new Error('Call signaling is not connected.');
-      }
+      const socket = await ensureCallSocketReady(socketRef);
       socket.emit('call:response', { callId: req.callId, accepted: true });
 
       const cachedBootstrap = incomingBootstrapByCallIdRef.current.get(req.callId) ?? null;
@@ -660,10 +680,7 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       if (activeIncomingCallUiCallIdRef.current === req.callId) {
         activeIncomingCallUiCallIdRef.current = null;
       }
-      const socket = socketRef.current;
-      if (!socket?.connected) {
-        throw new Error('Call signaling is not connected.');
-      }
+      const socket = await ensureCallSocketReady(socketRef);
       socket.emit('call:response', { callId: req.callId, accepted: true });
 
       const cachedBootstrap = incomingBootstrapByCallIdRef.current.get(req.callId) ?? null;
@@ -716,6 +733,21 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     incomingCallDismissHandlerRef.current?.(callId);
   }, []);
 
+  const openCallerJoiningVoiceCallRef = useRef(openCallerJoiningVoiceCall);
+  const openIncomingCallRef = useRef(openIncomingCall);
+  const acceptIncomingCallRef = useRef(acceptIncomingCall);
+  const rejectIncomingCallRef = useRef(rejectIncomingCall);
+  const clearOutgoingCallSessionRef = useRef(clearOutgoingCallSession);
+  useEffect(() => {
+    openCallerJoiningVoiceCallRef.current = openCallerJoiningVoiceCall;
+    openIncomingCallRef.current = openIncomingCall;
+    acceptIncomingCallRef.current = acceptIncomingCall;
+    rejectIncomingCallRef.current = rejectIncomingCall;
+    clearOutgoingCallSessionRef.current = clearOutgoingCallSession;
+  });
+
+  const signedInAccountId = user?._id ?? null;
+
   const setQueueMode = useCallback(async (active: boolean): Promise<void> => {
     queueModeRef.current = active;
     if (!active) {
@@ -755,12 +787,18 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
       const socket = io(base, {
         auth: { token },
-        transports: ['websocket', 'polling'],
+        transports: ['polling', 'websocket'],
         timeout: 20000,
-        reconnectionAttempts: 6,
+        reconnectionAttempts: 10,
         reconnectionDelay: 1000,
+        reconnectionDelayMax: 5000,
       });
       socketRef.current = socket;
+      socket.on('connect_error', (err: Error) => {
+        if (__DEV__) {
+          console.warn('[CallSignal] socket connect_error:', err.message);
+        }
+      });
       socket.on('connect', () => {
         socket.emit('call:queue:set', { active: queueModeRef.current }, () => {});
         if (userRoleRef.current === 'receiver') {
@@ -834,7 +872,7 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
             });
           }
 
-          openIncomingCall(incoming);
+          openIncomingCallRef.current(incoming);
           return;
         }
 
@@ -843,7 +881,7 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
             text: 'Reject',
             style: 'destructive',
             onPress: () => {
-              rejectIncomingCall(incoming);
+              rejectIncomingCallRef.current(incoming);
             },
           },
           {
@@ -851,7 +889,7 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
             onPress: () => {
               void (async () => {
                 try {
-                  await acceptIncomingCall(incoming);
+                  await acceptIncomingCallRef.current(incoming);
                 } catch (e: unknown) {
                   const msg = e instanceof Error ? e.message : 'Unable to join call.';
                   Alert.alert('Call failed', msg);
@@ -883,7 +921,7 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         }
 
         if (!payload.accepted) {
-          clearOutgoingCallSession(payload.callId);
+          clearOutgoingCallSessionRef.current(payload.callId);
           if (!waiter) {
             Alert.alert('Call unavailable', 'Receiver is not available right now.');
           }
@@ -894,7 +932,7 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         pendingOutgoingByCallIdRef.current.delete(payload.callId);
 
         if (pending) {
-          openCallerJoiningVoiceCall(pending);
+          openCallerJoiningVoiceCallRef.current(pending);
           return;
         }
 
@@ -911,7 +949,7 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
               bootstrap: data,
             };
             outgoingSessionByCallIdRef.current.set(payload.callId, session);
-            openCallerJoiningVoiceCall(session);
+            openCallerJoiningVoiceCallRef.current(session);
           } catch {
             Alert.alert('Call accepted', 'The user accepted, but joining failed. Please try again.');
           }
@@ -922,7 +960,7 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         if (payload.fromType === (userRoleRef.current === 'caller' ? 'u' : 'r')) return;
         seenIncomingCallIdsRef.current.delete(payload.callId);
         rejectedIncomingCallIdsRef.current.delete(payload.callId);
-        clearOutgoingCallSession(payload.callId);
+        clearOutgoingCallSessionRef.current(payload.callId);
 
         if (userRoleRef.current === 'receiver') {
           const onIntegratedVoiceCall =
@@ -963,15 +1001,7 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       clearPendingInvites(false);
       socketRef.current = null;
     };
-  }, [
-    clearOutgoingCallSession,
-    clearPendingInvites,
-    clearReceiverIncomingCallUi,
-    isSignedIn,
-    openCallerJoiningVoiceCall,
-    openIncomingCall,
-    user,
-  ]);
+  }, [clearPendingInvites, isSignedIn, signedInAccountId]);
 
   const value = useMemo<CallSignalContextValue>(
     () => ({

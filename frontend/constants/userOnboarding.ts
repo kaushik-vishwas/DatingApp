@@ -98,9 +98,6 @@ const CALLER_MALE_AVATAR_SOURCES: ImageSourcePropType[] = [
   require('../assets/boyavt/boyavt22.png'),
   require('../assets/boyavt/boyavt23.png'),
   require('../assets/boyavt/boyavt24.png'),
-  require('../assets/boyavt/boyavt25.png'),
-  require('../assets/boyavt/boyavt26.png'),
-  require('../assets/boyavt/boyavt27.png'),
 ];
 
 const CALLER_FEMALE_AVATAR_SOURCES: ImageSourcePropType[] = [

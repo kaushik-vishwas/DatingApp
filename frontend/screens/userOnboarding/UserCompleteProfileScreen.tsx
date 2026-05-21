@@ -236,7 +236,7 @@ export default function UserCompleteProfileScreen({
             autoCapitalize="words"
           />
 
-          <Text style={styles.label}>Interests (max 2)</Text>
+          <Text style={styles.label}>Interests (max 3)</Text>
 
           <View style={styles.chipGrid}>
             {CALLER_INTEREST_OPTIONS.map((opt) =>
@@ -249,13 +249,14 @@ export default function UserCompleteProfileScreen({
                       return prev.filter((x) => x !== opt);
                     }
                 
-                    if (prev.length >= 2) {
-                      Alert.alert(
-                        'Maximum 2 interests',
-                        'You can select only 2 interests.',
-                      );
-                      return prev;
-                    }
+                  // Line 137 - Update the Alert message
+if (prev.length >= 3) {
+  Alert.alert(
+    'Maximum 3 interests',  // Changed from 2 to 3
+    'You can select only 3 interests.',  // Changed from 2 to 3
+  );
+  return prev;
+}
                 
                     return [...prev, opt];
                   });
@@ -277,7 +278,7 @@ export default function UserCompleteProfileScreen({
             <Icon name="chevron-down" size={20} color="#666" />
           </TouchableOpacity>
 
-          <Text style={styles.label}>Languages (max 4)</Text>
+          <Text style={styles.label}>Languages (max 2)</Text>
 
           <View style={styles.chipGrid}>
             {CALLER_LANGUAGE_OPTIONS.map((opt) =>
@@ -289,10 +290,10 @@ export default function UserCompleteProfileScreen({
                     if (prev.includes(opt)) {
                       return prev.filter((x) => x !== opt);
                     }
-                    if (prev.length >= 4) {
+                    if (prev.length >= 2) {
                       Alert.alert(
-                        'Maximum 4 languages',
-                        'You can select only 4 languages.',
+                        'Maximum 2 languages',
+                        'You can select only 2 languages.',
                       );
                       return prev;
                     }

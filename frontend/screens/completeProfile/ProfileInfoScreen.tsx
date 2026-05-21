@@ -63,7 +63,7 @@ export default function ProfileInfoScreen({ navigation }: Props): React.JSX.Elem
           keyboardShouldPersistTaps="handled"
         >
           <ScreenHeader
-            title="Complssete Your Profile"
+            title="Complete Yssour Profile"
             subtitle="Step 1 of 3"
             navigation={navigation}
             showBack

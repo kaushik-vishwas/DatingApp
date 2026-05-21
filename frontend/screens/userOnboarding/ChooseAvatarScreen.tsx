@@ -7,6 +7,7 @@ import {
   Text,
   TouchableOpacity,
   View,
+  Dimensions,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -23,6 +24,14 @@ type Props = NativeStackScreenProps<
   UserOnboardingStackParamList,
   'ChooseAvatar'
 >;
+
+const SCREEN_WIDTH = Dimensions.get('window').width;
+const HORIZONTAL_PADDING = 20;
+const GAP = 18;
+
+// 2 images per row with equal left/right spacing
+const CELL =
+  (SCREEN_WIDTH - HORIZONTAL_PADDING * 2 - GAP) / 2;
 
 export default function ChooseAvatarScreen({
   navigation,
@@ -109,29 +118,27 @@ export default function ChooseAvatarScreen({
       </Text>
 
       {/* Featured Avatar */}
-      <View style={styles.featured}>
+      {/* <View style={styles.featured}>
         {selectedPreset ? (
           <Image
             source={selectedPreset.source}
             style={styles.featuredImg}
           />
         ) : null}
-
-        {/* <Text style={styles.featuredName}>
-          {displayLabel}
-        </Text> */}
-      </View>
+      </View> */}
 
       {/* Avatar Grid */}
       <View style={styles.listWrap}>
-        <FlatList
-          data={avatarPresets}
-          keyExtractor={(item) => item.id}
-          numColumns={3}
-          columnWrapperStyle={styles.row}
-          contentContainerStyle={styles.grid}
-          scrollEnabled
-          renderItem={({ item }) => {
+      <FlatList
+  key={`cols-2`}
+  data={avatarPresets}
+  keyExtractor={(item) => item.id}
+  numColumns={2}
+  columnWrapperStyle={styles.row}
+  contentContainerStyle={styles.grid}
+  showsVerticalScrollIndicator={false}
+  scrollEnabled
+  renderItem={({ item }) => {
             const active =
               item.id === selected;
 
@@ -182,13 +189,11 @@ export default function ChooseAvatarScreen({
   );
 }
 
-const CELL = 88;
-
 const styles = StyleSheet.create({
   root: {
     flex: 1,
     backgroundColor: '#fff',
-    paddingHorizontal: 20,
+    paddingHorizontal: HORIZONTAL_PADDING,
   },
 
   backWrap: {
@@ -221,26 +226,6 @@ const styles = StyleSheet.create({
     lineHeight: 20,
   },
 
-  featured: {
-    alignItems: 'center',
-    marginBottom: 26,
-  },
-
-  featuredImg: {
-    width: 130,
-    height: 130,
-    borderRadius: 65,
-    borderWidth: 3,
-    borderColor: PURPLE,
-  },
-
-  featuredName: {
-    marginTop: 10,
-    fontSize: 17,
-    fontWeight: '800',
-    color: '#111',
-  },
-
   listWrap: {
     flex: 1,
     minHeight: 120,
@@ -252,7 +237,7 @@ const styles = StyleSheet.create({
 
   row: {
     justifyContent: 'space-between',
-    marginBottom: 14,
+    marginBottom: 18,
   },
 
   cell: {
@@ -262,6 +247,8 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     borderWidth: 2,
     borderColor: '#e8e8e8',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 
   cellActive: {
