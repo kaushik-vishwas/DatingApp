@@ -68,7 +68,7 @@ export default function ProfileInfoScreen({ navigation }: Props): React.JSX.Elem
             navigation={navigation}
             showBack
           />
-          <Text style={styles.lead}>All fields are required to continue</Text>
+          <Text style={styles.lead}>All fields addre required to continue</Text>
 
           <UploadField
             label="Profile avatar *"
@@ -80,7 +80,7 @@ export default function ProfileInfoScreen({ navigation }: Props): React.JSX.Elem
           />
 
           <Input
-            label="Displajjy name *"
+            label="Display name *"
             value={state.displayName}
             onChangeText={(t) => update({ displayName: t })}
             placeholder="How should users call you?"

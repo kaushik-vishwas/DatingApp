@@ -1,5 +1,5 @@
 import React from 'react';
-import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Alert, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
 const PURPLE = '#7b2cff';
 
@@ -9,6 +9,7 @@ type Props = {
   selected: string[];
   onChange: (next: string[]) => void;
   minSelection?: number;
+  maxSelection?: number;
 };
 
 export function ToggleGroup({
@@ -16,13 +17,20 @@ export function ToggleGroup({
   options,
   selected,
   onChange,
+  maxSelection,
 }: Props): React.JSX.Element {
+  const visibleSelected = selected.filter((item) => options.includes(item));
+
   const toggle = (item: string) => {
-    if (selected.includes(item)) {
-      onChange(selected.filter((s) => s !== item));
-    } else {
-      onChange([...selected, item]);
+    if (visibleSelected.includes(item)) {
+      onChange(visibleSelected.filter((s) => s !== item));
+      return;
     }
+    if (maxSelection != null && visibleSelected.length >= maxSelection) {
+      Alert.alert('Maximum reached', `You can select up to ${maxSelection} options.`);
+      return;
+    }
+    onChange([...visibleSelected, item]);
   };
 
   return (
@@ -30,7 +38,7 @@ export function ToggleGroup({
       <Text style={styles.groupLabel}>{label}</Text>
       <View style={styles.row}>
         {options.map((opt) => {
-          const active = selected.includes(opt);
+          const active = visibleSelected.includes(opt);
           return (
             <TouchableOpacity
               key={opt}

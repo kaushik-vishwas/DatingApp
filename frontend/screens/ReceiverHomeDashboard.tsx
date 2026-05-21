@@ -377,7 +377,7 @@ export default function ReceiverHomeDashboard(): React.JSX.Element {
                   <Text style={styles.powerIcon}>⏻</Text>
                 </View>
                 <View>
-                  <Text style={styles.availabilityTitle}>Availability Status</Text>
+                  <Text style={styles.availabilityTitle}>Go Online</Text>
                   <Text style={[styles.availabilitySub, { color: available ? '#22c55e' : '#f59e0b' }]}>
                     {available ? 'You are available' : 'You are offline'}
                   </Text>

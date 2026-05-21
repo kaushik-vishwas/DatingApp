@@ -63,7 +63,7 @@ export default function ProfileInfoScreen({ navigation }: Props): React.JSX.Elem
           keyboardShouldPersistTaps="handled"
         >
           <ScreenHeader
-            title="Complete Yssour Profile"
+            title="Complete Your Profile"
             subtitle="Step 1 of 3"
             navigation={navigation}
             showBack
@@ -114,16 +114,18 @@ export default function ProfileInfoScreen({ navigation }: Props): React.JSX.Elem
           </TouchableOpacity>
 
           <ToggleGroup
-            label="Languages *"
+            label="Languages * (max 2)"
             options={LANGUAGE_OPTIONS}
             selected={state.languages}
+            maxSelection={2}
             onChange={(languages) => update({ languages })}
           />
 
           <ToggleGroup
-            label="Interests *"
+            label="Interests * (max 3)"
             options={INTEREST_OPTIONS}
             selected={state.interests}
+            maxSelection={3}
             onChange={(interests) => update({ interests })}
           />
 

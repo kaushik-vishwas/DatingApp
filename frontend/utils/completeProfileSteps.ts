@@ -6,7 +6,9 @@ export function validateProfileInfo(state: CompleteProfileState): string | null 
   const n = state.displayName.trim();
   if (n.length < 2) return 'Enter your name (at least 2 characters)';
   if (state.languages.length === 0) return 'Select at least one language';
+  if (state.languages.length > 2) return 'Select up to 2 languages';
   if (state.interests.length === 0) return 'Select at least one interest';
+  if (state.interests.length > 3) return 'Select up to 3 interests';
   if (!state.gender) return 'Select your gender';
   if (!state.state.trim()) return 'Select your state';
   return null;
