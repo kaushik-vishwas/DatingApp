@@ -117,7 +117,7 @@ export default function ReceiverAvailabilityWaitingScreen(): React.JSX.Element {
           </View>
 
           <Text style={styles.title}>You are online</Text>
-          <Text style={styles.subtitle}>Waiting for callers…</Text>
+          <Text style={styles.subtitle}>Waiting for dcallers…</Text>
           <Text style={styles.hint}>Someone may join soon. Stay on this screen while you are free to talk.</Text>
         </View>
 

@@ -1,5 +1,5 @@
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Ionicons } from '@expo/vector-icons';
 import {
   Alert,
@@ -19,12 +19,16 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { io, type Socket } from 'socket.io-client';
 import type { CallerStackParamList } from '../../navigation/CallerStackParamList';
 import type { ReceiverStackParamList } from '../../navigation/ReceiverStackParamList';
-import type { VoiceCallScreenParams } from '../../navigation/voiceCallParams';
+import {
+  isReceiverAvailabilitySession,
+  type VoiceCallScreenParams,
+} from '../../navigation/voiceCallParams';
+import type { IncomingCallRequest } from '../../context/CallSignalContext';
 import type { VoiceBootstrapResponse } from '../../types/api';
 import { useCallSignals } from '../../context/CallSignalContext';
 import { useCallerMessageEligibilityOptional } from '../../context/CallerMessageEligibilityContext';
 import { useAuth } from '../../context/AuthContext';
-import { callApi, getErrorMessage, getJwt, getResolvedApiBaseUrl } from '../../services/api';
+import { callApi, getErrorMessage, getJwt, getResolvedApiBaseUrl, profileApi } from '../../services/api';
 import { startOutboundRingtoneLoop } from '../../utils/callSounds';
 import { profileImageUrlForStreamOrNetwork, resolveProfileImageSource } from '../../utils/avatarSource';
 
@@ -166,15 +170,32 @@ function getReceiverEarnRatePerMinute(params: VoiceCallScreenParams): number {
 export default function VoiceCallScreen({ navigation, route }: Props): React.JSX.Element {
   const MIN_RATING_SECONDS = 55;
   const insets = useSafeAreaInsets();
-  const { user } = useAuth();
+  const { user, refreshUser } = useAuth();
   const messageEligibility = useCallerMessageEligibilityOptional();
-  const { cancelOutgoingCallInvite } = useCallSignals();
+  const {
+    cancelOutgoingCallInvite,
+    setIncomingCallHandler,
+    setIncomingCallDismissHandler,
+    rejectIncomingCall,
+    acceptIncomingCallStayOnScreen,
+    stopIncomingRingtone,
+    startIncomingRingtone,
+  } = useCallSignals();
   const cancelOutgoingRef = useRef(cancelOutgoingCallInvite);
   cancelOutgoingRef.current = cancelOutgoingCallInvite;
 
   const callParams = route.params as VoiceCallScreenParams;
+  const receiverAvailabilitySession =
+    user?.role === 'receiver' && isReceiverAvailabilitySession(callParams);
   const outgoingCallerPhase = getOutgoingCallerPhase(callParams);
   const streamBootstrap = getVoiceBootstrap(callParams);
+  const [receiverSessionPhase, setReceiverSessionPhase] = useState<'waiting' | 'incoming' | null>(
+    receiverAvailabilitySession ? 'waiting' : null
+  );
+  const [incomingReq, setIncomingReq] = useState<IncomingCallRequest | null>(null);
+  const incomingReqRef = useRef<IncomingCallRequest | null>(null);
+  const [incomingResponding, setIncomingResponding] = useState(false);
+  const [goingOffline, setGoingOffline] = useState(false);
   const [sdk, setSdk] = useState<null | {
     StreamVideo: React.ComponentType<{ client: unknown; children: React.ReactNode }>;
     StreamCall: React.ComponentType<{ call: unknown; children: React.ReactNode }>;
@@ -231,6 +252,10 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
   const endedSessionResultRef = useRef<{ canRate: boolean } | null>(null);
   const endSessionPromiseRef = useRef<Promise<{ canRate: boolean } | null> | null>(null);
   const callIdRef = useRef(getVoiceBootstrap(callParams)?.callId ?? '');
+  useEffect(() => {
+    const id = getVoiceBootstrap(callParams)?.callId;
+    if (id) callIdRef.current = id;
+  }, [callParams]);
   const streamJoinAttemptRef = useRef(0);
   const displayNameRef = useRef(user?.name ?? 'User');
   const displayImageRef = useRef(user?.profileImage);
@@ -264,10 +289,14 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
   /** Kept in refs so the signaling socket effect does not re-run when duration crosses the rating threshold (that was disconnecting the socket ~55s into the call). */
   const callerCanRateByDurationRef = useRef(callerCanRateByDuration);
   const userRoleRef = useRef(user?.role);
+  const receiverAvailabilitySessionRef = useRef(receiverAvailabilitySession);
+  const userAvailableRef = useRef(Boolean(user?.isAvailable));
   useEffect(() => {
     callerCanRateByDurationRef.current = callerCanRateByDuration;
     userRoleRef.current = user?.role;
-  }, [callerCanRateByDuration, user?.role]);
+    receiverAvailabilitySessionRef.current = receiverAvailabilitySession;
+    userAvailableRef.current = Boolean(user?.isAvailable);
+  }, [callerCanRateByDuration, user?.role, receiverAvailabilitySession, user?.isAvailable]);
 
   useEffect(() => {
     readyRef.current = ready;
@@ -349,17 +378,69 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
   const showRatingPromptRef = useRef(showRatingPrompt);
   showRatingPromptRef.current = showRatingPrompt;
 
-  const stopQueueAndExit = () => {
+  const resetReceiverToWaiting = () => {
+    endingRef.current = false;
+    endedSessionRef.current = false;
+    endedSessionResultRef.current = null;
+    setReady(false);
+    setClient(null);
+    setCall(null);
+    setTalkActive(false);
+    setElapsedSec(0);
+    setIncomingReq(null);
+    setReceiverSessionPhase('waiting');
+    (navigation as { setParams: (p: VoiceCallScreenParams) => void }).setParams({
+      receiverAvailabilitySession: true,
+    });
+  };
+  const resetReceiverToWaitingRef = useRef(resetReceiverToWaiting);
+  resetReceiverToWaitingRef.current = resetReceiverToWaiting;
+
+  const onReceiverGoOffline = () => {
+    if (goingOffline) return;
+    setGoingOffline(true);
+    void (async () => {
+      try {
+        if (incomingReq) {
+          rejectIncomingCall(incomingReq);
+        }
+        await profileApi.updateReceiverProfile({ isAvailable: false });
+        await refreshUser();
+        (navigation as { navigate: (name: string, params?: object) => void }).navigate(
+          'ReceiverMainTabs',
+          { screen: 'ReceiverHome' }
+        );
+      } catch (e) {
+        Alert.alert('Could not go offline', getErrorMessage(e));
+      } finally {
+        setGoingOffline(false);
+      }
+    })();
+  };
+
+  const exitCallScreen = () => {
     try {
-      signalSocketRef.current?.emit('call:queue:set', { active: false });
+      if (navigation.canGoBack()) {
+        navigation.goBack();
+        return;
+      }
     } catch {
-      // ignore signaling failures
+      // ignore
     }
     if (user?.role === 'caller') {
       (navigation as any).navigate('CallerMainTabs', { screen: 'CallerHome' });
       return;
     }
     (navigation as any).navigate('ReceiverMainTabs', { screen: 'ReceiverHome' });
+  };
+
+  const stopQueueAndExit = () => {
+    try {
+      signalSocketRef.current?.emit('call:queue:set', { active: false });
+    } catch {
+      // ignore signaling failures
+    }
+    exitCallScreen();
   };
 
   const leaveCallOnly = async (): Promise<void> => {
@@ -391,21 +472,133 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
   const ensureSessionEndedRef = useRef(ensureSessionEnded);
   const leaveMediaRef = useRef(leaveMedia);
   const stopQueueAndExitRef = useRef(stopQueueAndExit);
+  const exitCallScreenRef = useRef(exitCallScreen);
   useEffect(() => {
     ensureSessionEndedRef.current = ensureSessionEnded;
     leaveMediaRef.current = leaveMedia;
     stopQueueAndExitRef.current = stopQueueAndExit;
+    exitCallScreenRef.current = exitCallScreen;
   });
 
+  const runBackgroundCallCleanup = () => {
+    void (async () => {
+      await leaveMediaRef.current();
+      void ensureSessionEndedRef.current();
+    })();
+  };
+  const runBackgroundCallCleanupRef = useRef(runBackgroundCallCleanup);
+  runBackgroundCallCleanupRef.current = runBackgroundCallCleanup;
+
   useEffect(() => {
-    if (Constants.appOwnership === 'expo') {
-      Alert.alert(
-        'Development build required',
-        'Voice calling uses native WebRTC modules and will not work in Expo Go. Build and run a development build first.',
-        [{ text: 'OK', onPress: () => navigation.goBack() }]
-      );
-    }
-  }, [navigation]);
+    if (!receiverAvailabilitySession) return;
+    void applyVoiceCallAudioMode(true).catch(() => { });
+    return () => {
+      void resetVoiceCallAudioMode();
+    };
+  }, [receiverAvailabilitySession]);
+
+  useEffect(() => {
+    incomingReqRef.current = incomingReq;
+  }, [incomingReq]);
+
+  const dismissIncomingOnSession = useCallback((callId: string) => {
+    if (incomingReqRef.current?.callId !== callId) return;
+    void stopIncomingRingtone();
+    setIncomingReq(null);
+    setReceiverSessionPhase('waiting');
+    setIncomingResponding(false);
+  }, [stopIncomingRingtone]);
+  const dismissIncomingOnSessionRef = useRef(dismissIncomingOnSession);
+  dismissIncomingOnSessionRef.current = dismissIncomingOnSession;
+
+  useEffect(() => {
+    if (!receiverAvailabilitySession) return;
+    setIncomingCallDismissHandler(dismissIncomingOnSession);
+    setIncomingCallHandler((incoming) => {
+      setIncomingReq(incoming);
+      incomingReqRef.current = incoming;
+      setReceiverSessionPhase('incoming');
+      void (async () => {
+        try {
+          await startIncomingRingtone();
+        } catch {
+          // UI still works if ring fails
+        }
+      })();
+      void callApi.bootstrap(incoming.fromId, incoming.callId).catch(() => { });
+    });
+    return () => {
+      setIncomingCallHandler(null);
+      setIncomingCallDismissHandler(null);
+      void stopIncomingRingtone();
+    };
+  }, [
+    receiverAvailabilitySession,
+    dismissIncomingOnSession,
+    setIncomingCallHandler,
+    setIncomingCallDismissHandler,
+    startIncomingRingtone,
+    stopIncomingRingtone,
+  ]);
+
+  useEffect(() => {
+    if (!receiverAvailabilitySession || receiverSessionPhase !== 'incoming' || !incomingReq) return;
+    const timeout = setTimeout(() => {
+      if (!incomingResponding) {
+        rejectIncomingCall(incomingReq);
+        setIncomingReq(null);
+        setReceiverSessionPhase('waiting');
+        void stopIncomingRingtone();
+      }
+    }, 35_000);
+    return () => clearTimeout(timeout);
+  }, [
+    receiverAvailabilitySession,
+    receiverSessionPhase,
+    incomingReq,
+    incomingResponding,
+    rejectIncomingCall,
+    stopIncomingRingtone,
+  ]);
+
+  const onAcceptIncomingOnSession = () => {
+    if (!incomingReq || incomingResponding) return;
+    setIncomingResponding(true);
+    void (async () => {
+      try {
+        const boot = await acceptIncomingCallStayOnScreen(incomingReq);
+        setIncomingReq(null);
+        setReceiverSessionPhase(null);
+        (navigation as { setParams: (p: VoiceCallScreenParams) => void }).setParams({
+          ...boot,
+          peerName: incomingReq.peerName,
+          peerImage: incomingReq.peerImage ?? null,
+          receiverAvailabilitySession: true,
+        });
+      } catch (e) {
+        Alert.alert('Call failed', getErrorMessage(e));
+        setReceiverSessionPhase('waiting');
+        setIncomingReq(null);
+      } finally {
+        setIncomingResponding(false);
+      }
+    })();
+  };
+
+  const onRejectIncomingOnSession = () => {
+    if (!incomingReq || incomingResponding) return;
+    setIncomingResponding(true);
+    void (async () => {
+      try {
+        await stopIncomingRingtone();
+        rejectIncomingCall(incomingReq);
+      } finally {
+        setIncomingReq(null);
+        setReceiverSessionPhase('waiting');
+        setIncomingResponding(false);
+      }
+    })();
+  };
 
   useEffect(() => {
     const id = streamBootstrap?.callId;
@@ -452,6 +645,14 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
     let cancelled = false;
 
     void (async () => {
+      if (Constants.appOwnership === 'expo') {
+        Alert.alert(
+          'Development build required',
+          'Voice calling uses native WebRTC modules and will not work in Expo Go. Build and run a development build first.',
+          [{ text: 'OK', onPress: () => exitCallScreenRef.current() }]
+        );
+        return;
+      }
       try {
         const streamSdk = require('@stream-io/video-react-native-sdk') as {
           StreamVideo: React.ComponentType<{ client: unknown; children: React.ReactNode }>;
@@ -474,11 +675,13 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
         };
         setSdk(streamSdk);
 
-        const mic = await Audio.requestPermissionsAsync();
+        const [mic] = await Promise.all([
+          Audio.requestPermissionsAsync(),
+          applyVoiceCallAudioMode(true),
+        ]);
         if (mic.status !== 'granted') {
           throw new Error('Microphone permission is required for voice calls');
         }
-        await applyVoiceCallAudioMode(true);
 
         const nextClient = streamSdk.StreamVideoClient.getOrCreateInstance({
           apiKey: boot.apiKey,
@@ -496,7 +699,10 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
 
         const nextCall = nextClient.call(boot.callType, boot.callId);
         activeCallRef.current = nextCall;
-        await nextCall.getOrCreate();
+        const [, startRes] = await Promise.all([
+          nextCall.getOrCreate(),
+          callApi.sessionStart(boot.callId, boot.peerAccountId),
+        ]);
         if (cancelled || attemptId !== streamJoinAttemptRef.current) {
           return;
         }
@@ -504,11 +710,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
         if (cancelled || attemptId !== streamJoinAttemptRef.current) {
           return;
         }
-        const { data: startData } = await callApi.sessionStart(boot.callId, boot.peerAccountId);
-        if (cancelled || attemptId !== streamJoinAttemptRef.current) {
-          return;
-        }
-        applyTalkTimingFromServer(startData);
+        applyTalkTimingFromServer(startRes.data);
 
         setClient(nextClient);
         setCall(nextCall);
@@ -556,7 +758,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
       if (!token || cancelled) return;
       const socket = io(base, {
         auth: { token },
-        transports: ['polling', 'websocket'],
+        transports: ['websocket', 'polling'],
         timeout: 20000,
       });
       signalSocketRef.current = socket;
@@ -567,17 +769,13 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
           {
             text: 'OK',
             onPress: () => {
-              void (async () => {
-                if (userRoleRef.current === 'caller' && callerCanRateByDurationRef.current) {
-                  await ensureSessionEndedRef.current();
-                  await leaveMediaRef.current();
-                  showRatingPromptRef.current();
-                  return;
-                }
-                void ensureSessionEndedRef.current();
-                await leaveMediaRef.current();
-                stopQueueAndExitRef.current();
-              })();
+              if (userRoleRef.current === 'caller' && callerCanRateByDurationRef.current) {
+                runBackgroundCallCleanupRef.current();
+                showRatingPromptRef.current();
+                return;
+              }
+              exitCallScreenRef.current();
+              runBackgroundCallCleanupRef.current();
             },
           },
         ]);
@@ -587,20 +785,30 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
       ioMgr?.on('reconnect_failed', onReconnectFailed);
 
       socket.on('call:ended', (payload: { callId: string; fromType: 'u' | 'r'; fromId: string }) => {
-        if (!payload || payload.callId !== callIdRef.current) return;
+        if (!payload?.callId) return;
+        if (
+          receiverAvailabilitySessionRef.current &&
+          incomingReqRef.current?.callId === payload.callId &&
+          payload.callId !== callIdRef.current
+        ) {
+          dismissIncomingOnSessionRef.current(payload.callId);
+          return;
+        }
+        if (payload.callId !== callIdRef.current) return;
         if (endingRef.current) return;
         endingRef.current = true;
-        void (async () => {
-          if (userRoleRef.current === 'caller' && callerCanRateByDurationRef.current) {
-            await ensureSessionEnded();
-            await leaveMedia();
-            showRatingPrompt();
-            return;
-          }
-          void ensureSessionEnded();
-          await leaveMedia();
-          stopQueueAndExit();
-        })();
+        if (userRoleRef.current === 'caller' && callerCanRateByDurationRef.current) {
+          runBackgroundCallCleanupRef.current();
+          showRatingPromptRef.current();
+          return;
+        }
+        if (receiverAvailabilitySessionRef.current && userAvailableRef.current) {
+          runBackgroundCallCleanupRef.current();
+          resetReceiverToWaitingRef.current();
+          return;
+        }
+        exitCallScreenRef.current();
+        runBackgroundCallCleanupRef.current();
       });
     })();
 
@@ -619,6 +827,24 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
     // Intentionally static: do not depend on callerCanRateByDuration (flips at 55s) or the socket will reconnect and drop the call.
   }, []);
 
+  const syncTalkTimingOnce = useCallback(async (): Promise<void> => {
+    if (!callIdRef.current || endingRef.current) return;
+    try {
+      const { data } = await callApi.sessionSync(callIdRef.current);
+      if (!data?.ok) return;
+      applyTalkTimingFromServer(data);
+      if (
+        typeof data.receiverEarnedInr === 'number' &&
+        Number.isFinite(data.receiverEarnedInr) &&
+        data.receiverEarnedInr >= 0
+      ) {
+        setLiveSettledAmountInr((prev) => (data.receiverEarnedInr > prev ? data.receiverEarnedInr : prev));
+      }
+    } catch {
+      // Best-effort live settlement sync.
+    }
+  }, []);
+
   useEffect(() => {
     if (!ready || !talkActive) return;
     const timer = setInterval(() => setElapsedSec((prev) => prev + 1), 1000);
@@ -627,28 +853,18 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
 
   useEffect(() => {
     if (!ready || endingRef.current) return;
-    const pollMs = talkActive ? 5000 : 1500;
+    void syncTalkTimingOnce();
+  }, [ready, syncTalkTimingOnce]);
+
+  useEffect(() => {
+    if (!ready || endingRef.current) return;
+    const pollMs = talkActive ? 5000 : 500;
     const poll = setInterval(() => {
       if (endingRef.current) return;
-      void (async () => {
-        try {
-          const { data } = await callApi.sessionSync(callIdRef.current);
-          if (!data?.ok) return;
-          applyTalkTimingFromServer(data);
-          if (
-            typeof data.receiverEarnedInr === 'number' &&
-            Number.isFinite(data.receiverEarnedInr) &&
-            data.receiverEarnedInr >= 0
-          ) {
-            setLiveSettledAmountInr((prev) => (data.receiverEarnedInr > prev ? data.receiverEarnedInr : prev));
-          }
-        } catch {
-          // Best-effort live settlement sync.
-        }
-      })();
+      void syncTalkTimingOnce();
     }, pollMs);
     return () => clearInterval(poll);
-  }, [ready, talkActive]);
+  }, [ready, talkActive, syncTalkTimingOnce]);
 
   useEffect(() => {
     if (!ready) return;
@@ -664,9 +880,21 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
   }, [callerRemainingTalkSec, ready, showCallerCountdown, user?.role]);
 
   const hangup = async () => {
-    if (user?.role === 'caller' && getOutgoingCallerPhase(route.params as VoiceCallScreenParams) === 'ringing') {
+    if (receiverAvailabilitySession && receiverSessionPhase === 'waiting') {
+      onReceiverGoOffline();
+      return;
+    }
+    if (receiverAvailabilitySession && receiverSessionPhase === 'incoming') {
+      onRejectIncomingOnSession();
+      return;
+    }
+
+    const outboundPhase = getOutgoingCallerPhase(route.params as VoiceCallScreenParams);
+    if (user?.role === 'caller' && outboundPhase === 'ringing') {
+      if (endingRef.current) return;
+      endingRef.current = true;
       cancelOutgoingCallInvite();
-      navigation.goBack();
+      exitCallScreen();
       return;
     }
     if (endingRef.current) return;
@@ -679,14 +907,19 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
     }
 
     if (user?.role === 'caller' && callerCanRateByDuration) {
-      await ensureSessionEnded();
-      await leaveMedia();
+      runBackgroundCallCleanup();
       showRatingPrompt();
       return;
     }
-    void ensureSessionEnded();
-    await leaveMedia();
-    stopQueueAndExit();
+
+    if (receiverAvailabilitySession && Boolean(user?.isAvailable)) {
+      runBackgroundCallCleanup();
+      resetReceiverToWaiting();
+      return;
+    }
+
+    exitCallScreen();
+    runBackgroundCallCleanup();
   };
 
   const toggleSpeaker = async () => {
@@ -701,7 +934,10 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
 
   const toggleMute = async () => {
     try {
-      if (!call) return;
+      if (!call) {
+        setMuted((m) => !m);
+        return;
+      }
       const mic = (call as any).microphone;
       if (mic?.disable && !muted) {
         await mic.disable();
@@ -721,39 +957,55 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
   };
 
   const showStreamChrome = ready && Boolean(client) && Boolean(call) && Boolean(sdk);
-  const showPreJoinUi =
+
+  const showCallShell =
     !error &&
     !showStreamChrome &&
-    (outgoingCallerPhase === 'ringing' ||
+    (receiverAvailabilitySession ||
+      outgoingCallerPhase === 'ringing' ||
       outgoingCallerPhase === 'joining' ||
       Boolean(streamBootstrap));
 
-  const preJoinStatusLabel = outgoingCallerPhase === 'ringing' ? 'Calling…' : 'Connecting';
-  const preJoinHangupLabel =
-    user?.role === 'caller' && outgoingCallerPhase === 'ringing' ? 'Cancel' : 'Disconnect';
+  const shellPeerName =
+    receiverSessionPhase === 'incoming' && incomingReq
+      ? incomingReq.peerName
+      : ('peerName' in callParams ? callParams.peerName : undefined) || 'Contact';
+  const shellPeerImage =
+    receiverSessionPhase === 'incoming' && incomingReq
+      ? incomingReq.peerImage
+      : 'peerImage' in callParams
+        ? callParams.peerImage
+        : null;
+  const shellPeerEmpty = receiverAvailabilitySession && receiverSessionPhase === 'waiting';
+  const shellStatusLabel = receiverAvailabilitySession
+    ? receiverSessionPhase === 'incoming'
+      ? 'Incoming call'
+      : streamBootstrap
+        ? 'Connecting…'
+        : 'You are online'
+    : outgoingCallerPhase === 'ringing'
+      ? 'Calling…'
+      : 'Connecting';
+  const shellHangupLabel =
+    receiverAvailabilitySession && receiverSessionPhase === 'waiting'
+      ? 'Go offline'
+      : receiverAvailabilitySession && receiverSessionPhase === 'incoming'
+        ? 'Decline'
+        : user?.role === 'caller' && outgoingCallerPhase === 'ringing'
+          ? 'Cancel'
+          : 'Disconnect';
+  const shellShowControls = receiverAvailabilitySession || user?.role === 'receiver';
+  const shellShowIncomingActions =
+    receiverAvailabilitySession && receiverSessionPhase === 'incoming' && Boolean(incomingReq);
 
-  if (error && !showStreamChrome) {
-    return (
-      <View style={styles.center}>
-        <LinearGradient
-          colors={['#0a0014', '#1e0b3d', '#4c1d95', '#6d28d9']}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 1 }}
-          style={StyleSheet.absoluteFillObject}
-        />
-        <Text style={styles.loadingText}>{error}</Text>
-        <TouchableOpacity
-          style={styles.preJoinBackBtn}
-          onPress={() => navigation.goBack()}
-          activeOpacity={0.88}
-        >
-          <Text style={styles.preJoinBackBtnText}>Go back</Text>
-        </TouchableOpacity>
-      </View>
-    );
-  }
+  const renderCallShell = (): React.JSX.Element => {
+    const peerSrc =
+      !shellPeerEmpty && shellPeerImage ? resolveProfileImageSource(shellPeerImage) : null;
+    const peerInitial = (shellPeerName || 'U').trim().charAt(0).toUpperCase();
+    const showPeerPulse =
+      receiverAvailabilitySession &&
+      (receiverSessionPhase === 'incoming' || Boolean(streamBootstrap));
 
-  if (showPreJoinUi) {
     return (
       <View style={styles.container}>
         <LinearGradient
@@ -765,31 +1017,26 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
         />
         <View style={[styles.overlay, { paddingTop: Math.max(insets.top + 16, 36) }]}>
           <View style={styles.statusPill}>
-            <Text style={styles.statusText}>{preJoinStatusLabel}</Text>
+            <Text style={styles.statusText}>{shellStatusLabel}</Text>
           </View>
           <View style={styles.avatarRow}>
             <View style={styles.avatarCol}>
               <View style={styles.avatarRingHost}>
-                <AvatarSoundWaveRings />
+                {showPeerPulse ? <AvatarSoundWaveRings /> : null}
                 <View style={styles.avatarWrap}>
-                  {(() => {
-                    const peerSrc = callParams.peerImage
-                      ? resolveProfileImageSource(callParams.peerImage)
-                      : null;
-                    return peerSrc ? (
-                      <Image source={peerSrc} style={styles.avatar} />
-                    ) : (
-                      <View style={[styles.avatar, styles.avatarPlaceholder]}>
-                        <Text style={styles.avatarInitial}>
-                          {(callParams.peerName || 'U').trim().charAt(0).toUpperCase()}
-                        </Text>
-                      </View>
-                    );
-                  })()}
+                  {peerSrc ? (
+                    <Image source={peerSrc} style={styles.avatar} />
+                  ) : shellPeerEmpty ? (
+                    <View style={[styles.avatar, styles.avatarPlaceholder, styles.avatarEmptyPeer]} />
+                  ) : (
+                    <View style={[styles.avatar, styles.avatarPlaceholder]}>
+                      <Text style={styles.avatarInitial}>{peerInitial}</Text>
+                    </View>
+                  )}
                 </View>
               </View>
               <Text style={styles.avatarCaption} numberOfLines={1}>
-                {callParams.peerName || 'Contact'}
+                {shellPeerEmpty ? 'Waiting…' : shellPeerName}
               </Text>
             </View>
             <View style={styles.avatarCol}>
@@ -815,26 +1062,112 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
               <Text style={styles.avatarCaption}>You</Text>
             </View>
           </View>
-          <Text style={styles.peerName}>{callParams.peerName}</Text>
+          <Text style={[
+            styles.peerName,
+            receiverAvailabilitySession && receiverSessionPhase === 'waiting' && styles.peerNameCentered
+          ]}>
+            {receiverAvailabilitySession && receiverSessionPhase === 'waiting'
+              ? 'Waiting for callers…'
+              : shellPeerName}
+          </Text>
+          {receiverAvailabilitySession && streamBootstrap && !talkActive ? (
+            <Text style={styles.waitingHint}>Someone will join soon..s</Text>
+          ) : null}
           {showCallerCountdown ? (
             <View style={styles.countdownCard}>
               <Text style={styles.countdownTitle}>Remaining Talk Time</Text>
               <Text style={styles.countdownValue}>{formatHms(callerRemainingTalkSec)}</Text>
             </View>
           ) : null}
-          <TouchableOpacity style={styles.hangup} onPress={() => void hangup()} activeOpacity={0.88}>
-            <LinearGradient
-              colors={['#9d174d', '#be185d', '#db2777']}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 1 }}
-              style={styles.hangupGrad}
+          {shellShowIncomingActions && incomingReq ? (
+            <View style={styles.incomingActions}>
+              <TouchableOpacity
+                style={[styles.incomingActionBtn, styles.incomingRejectBtn]}
+                onPress={() => onRejectIncomingOnSession()}
+                disabled={incomingResponding}
+                activeOpacity={0.88}
+              >
+                <Ionicons name="close" size={28} color="#fff" />
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.incomingActionBtn, styles.incomingAcceptBtn]}
+                onPress={() => onAcceptIncomingOnSession()}
+                disabled={incomingResponding}
+                activeOpacity={0.88}
+              >
+                <Ionicons name="checkmark" size={28} color="#fff" />
+              </TouchableOpacity>
+            </View>
+          ) : null}
+          {shellShowControls ? (
+            <View style={styles.controls}>
+              <TouchableOpacity
+                style={[styles.roundBtn, muted && styles.roundBtnActive]}
+                onPress={() => void toggleMute()}
+                activeOpacity={0.85}
+              >
+                <Ionicons name={muted ? 'mic-off' : 'mic'} size={26} color="#faf5ff" />
+                <Text style={styles.roundText}>{muted ? 'Unmute' : 'Mute'}</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.roundBtn, speakerOn && styles.roundBtnActive]}
+                onPress={() => void toggleSpeaker()}
+                activeOpacity={0.85}
+              >
+                <Ionicons
+                  name={speakerOn ? 'volume-high' : 'phone-portrait-outline'}
+                  size={26}
+                  color="#faf5ff"
+                />
+                <Text style={styles.roundText}>{speakerOn ? 'Speaker' : 'Earpiece'}</Text>
+              </TouchableOpacity>
+            </View>
+          ) : null}
+          {!shellShowIncomingActions ? (
+            <TouchableOpacity
+              style={styles.hangup}
+              onPress={() => void hangup()}
+              disabled={goingOffline || incomingResponding}
+              activeOpacity={0.88}
             >
-              <Text style={styles.hangupText}>{preJoinHangupLabel}</Text>
-            </LinearGradient>
-          </TouchableOpacity>
+              <LinearGradient
+                colors={['#9d174d', '#be185d', '#db2777']}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={styles.hangupGrad}
+              >
+                <Text style={styles.hangupText}>{shellHangupLabel}</Text>
+              </LinearGradient>
+            </TouchableOpacity>
+          ) : null}
         </View>
       </View>
     );
+  };
+
+  if (error && !showStreamChrome) {
+    return (
+      <View style={styles.center}>
+        <LinearGradient
+          colors={['#0a0014', '#1e0b3d', '#4c1d95', '#6d28d9']}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={StyleSheet.absoluteFillObject}
+        />
+        <Text style={styles.loadingText}>{error}</Text>
+        <TouchableOpacity
+          style={styles.preJoinBackBtn}
+          onPress={() => navigation.goBack()}
+          activeOpacity={0.88}
+        >
+          <Text style={styles.preJoinBackBtnText}>Go back</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
+  if (showCallShell) {
+    return renderCallShell();
   }
 
   if (!(ready && client && call && sdk)) {
@@ -904,13 +1237,29 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
                 <Text style={styles.avatarCaption}>You</Text>
               </View>
             </View>
-            <Text style={styles.peerName}>{route.params.peerName}</Text>
-            <Text style={styles.durationLabel}>Talk time</Text>
-            <Text style={styles.durationValue}>
-              {talkActive
-                ? `${String(Math.floor(elapsedSec / 60)).padStart(2, '0')}:${String(elapsedSec % 60).padStart(2, '0')}`
-                : 'Connecting…'}
+            <Text style={styles.peerName}>
+              {'peerName' in route.params ? route.params.peerName : 'Contact'}
             </Text>
+            {talkActive ? (
+              <>
+                <Text style={styles.durationLabel}>Talk time</Text>
+                <Text style={styles.durationValue}>
+                  {`${String(Math.floor(elapsedSec / 60)).padStart(2, '0')}:${String(elapsedSec % 60).padStart(2, '0')}`}
+                </Text>
+              </>
+            ) : user?.role === 'caller' ? (
+              <>
+                <Text style={styles.durationLabel}>Talk time</Text>
+                <Text style={styles.durationValue}>Connecting…</Text>
+              </>
+            ) : receiverAvailabilitySession ? (
+              <Text style={styles.waitingHint}>Talk time starts when you are both connected.</Text>
+            ) : (
+              <>
+                <Text style={styles.durationLabel}>Talk time</Text>
+                <Text style={styles.durationValue}>Connecting…</Text>
+              </>
+            )}
             {showCallerCountdown ? (
               <View style={styles.countdownCard}>
                 <Text style={styles.countdownTitle}>Remaining Talk Time</Text>
@@ -951,7 +1300,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
                 <Text style={styles.roundText}>{speakerOn ? 'Speaker' : 'Earpiece'}</Text>
               </TouchableOpacity>
             </View>
-            <TouchableOpacity style={styles.hangup} onPress={hangup} activeOpacity={0.88}>
+            <TouchableOpacity style={styles.hangup} onPress={() => void hangup()} activeOpacity={0.88}>
               <LinearGradient
                 colors={['#9d174d', '#be185d', '#db2777']}
                 start={{ x: 0, y: 0 }}
@@ -959,7 +1308,11 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
                 style={styles.hangupGrad}
               >
                 <Text style={styles.hangupText}>
-                  {user?.role === 'receiver' ? 'Go Offline' : 'Disconnect'}
+                  {receiverAvailabilitySession && !talkActive
+                    ? 'Disconnect'
+                    : user?.role === 'receiver'
+                      ? 'Go Offline'
+                      : 'Disconnect'}
                 </Text>
               </LinearGradient>
             </TouchableOpacity>
@@ -1151,6 +1504,30 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24,
   },
   hangupText: { color: '#fff', fontSize: 16, fontWeight: '900' },
+  avatarEmptyPeer: { backgroundColor: 'rgba(255,255,255,0.12)' },
+  waitingHint: {
+    color: 'rgba(255,255,255,0.75)',
+    fontSize: 14,
+    fontWeight: '600',
+    marginTop: 4,
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  incomingActions: {
+    flexDirection: 'row',
+    gap: 22,
+    marginTop: 8,
+    marginBottom: 12,
+  },
+  incomingActionBtn: {
+    width: 74,
+    height: 74,
+    borderRadius: 37,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  incomingRejectBtn: { backgroundColor: '#ff3048' },
+  incomingAcceptBtn: { backgroundColor: '#2ad07f' },
   center: {
     flex: 1,
     justifyContent: 'center',
@@ -1188,6 +1565,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 24,
+  },
+  peerNameCentered: {
+    textAlign: 'center',
+    width: '100%',
   },
   ratingCard: {
     width: '100%',

@@ -605,7 +605,8 @@ export const syncVoiceSession = async (
     }
 
     const settled = await settleCallSession(callId, false);
-    const talkFields = callTalkApiFields(current);
+    const latest = await CallSession.findOne({ callId });
+    const talkFields = callTalkApiFields((latest ?? current) as CallSessionDocument);
     res.status(200).json({
       ok: true,
       durationSec: settled.durationSec,

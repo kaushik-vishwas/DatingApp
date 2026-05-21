@@ -107,10 +107,15 @@ type CallSignalContextValue = {
   randomCallMatchingVisible: boolean;
   cancelOutgoingCallInvite: () => void;
   setIncomingCallHandler: (handler: ((req: IncomingCallRequest) => void) | null) => void;
+  /** Receiver availability VoiceCall: clear incoming UI when caller cancels or call ends. */
+  setIncomingCallDismissHandler: (handler: ((callId: string) => void) | null) => void;
   acceptIncomingCall: (req: IncomingCallRequest) => Promise<void>;
   rejectIncomingCall: (req: IncomingCallRequest) => void;
   setQueueMode: (active: boolean) => Promise<void>;
   stopIncomingRingtone: () => Promise<void>;
+  startIncomingRingtone: () => Promise<void>;
+  /** Accept invite and return Stream bootstrap without leaving the current VoiceCall screen. */
+  acceptIncomingCallStayOnScreen: (req: IncomingCallRequest) => Promise<VoiceBootstrapResponse>;
 };
 
 const CallSignalContext = createContext<CallSignalContextValue | null>(null);
@@ -149,6 +154,7 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   const userRoleRef = useRef(user?.role ?? null);
   const outgoingInviteAbortRef = useRef<AbortController | null>(null);
   const incomingCallHandlerRef = useRef<((req: IncomingCallRequest) => void) | null>(null);
+  const incomingCallDismissHandlerRef = useRef<((callId: string) => void) | null>(null);
   const queueModeRef = useRef<boolean>(false);
   /** Receiver accepted — never re-apply `outgoingCallerPhase: 'ringing'` (race with delayed navigate). */
   const callerInviteAcceptedCallIdsRef = useRef<Set<string>>(new Set());
@@ -351,7 +357,9 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       ...outgoingSessionByCallIdRef.current.keys(),
     ]);
     for (const callId of callIds) {
-      socket?.emit('call:end', { callId });
+      if (socket?.connected) {
+        socket.emit('call:end', { callId });
+      }
       clearOutgoingCallSession(callId);
     }
     for (const [, waiter] of pendingInviteOutcomeRef.current) {
@@ -549,6 +557,7 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
           await startCallInvite(data.receiverId, data.name, data.profileImage ?? null, {
             receiverRatePerMinuteHint:
               rate != null && Number.isFinite(rate) ? rate : undefined,
+            redirectToRandomOnMissed: true,
           });
           return;
         } catch (e: unknown) {
@@ -570,8 +579,9 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       if (randomMatchAbortRef.current === abort) {
         randomMatchAbortRef.current = null;
       }
-      randomMatchRunningRef.current = false;
+      // Aborted for handoff to the next random match — leave overlay/state to the new engagement.
       if (!abort.signal.aborted) {
+        randomMatchRunningRef.current = false;
         setRandomCallMatchingVisible(false);
       }
     }
@@ -589,6 +599,9 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
   useEffect(() => {
     scheduleRandomAfterMissedManualCallRef.current = () => {
+      randomMatchAbortRef.current?.abort();
+      randomMatchAbortRef.current = null;
+      randomMatchRunningRef.current = false;
       void startRandomCallEngagement();
     };
   }, [startRandomCallEngagement]);
@@ -603,6 +616,43 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     incomingBootstrapPromiseByCallIdRef.current.delete(req.callId);
     socketRef.current?.emit('call:response', { callId: req.callId, accepted: false });
   }, []);
+
+  const acceptIncomingCallStayOnScreen = useCallback(
+    async (req: IncomingCallRequest): Promise<VoiceBootstrapResponse> => {
+      await stopIncomingRingtonePlayback();
+      if (activeIncomingCallUiCallIdRef.current === req.callId) {
+        activeIncomingCallUiCallIdRef.current = null;
+      }
+      const socket = socketRef.current;
+      if (!socket?.connected) {
+        throw new Error('Call signaling is not connected.');
+      }
+      socket.emit('call:response', { callId: req.callId, accepted: true });
+
+      const cachedBootstrap = incomingBootstrapByCallIdRef.current.get(req.callId) ?? null;
+      if (cachedBootstrap) {
+        incomingBootstrapByCallIdRef.current.delete(req.callId);
+        incomingBootstrapPromiseByCallIdRef.current.delete(req.callId);
+        return cachedBootstrap;
+      }
+
+      let bootstrapped: VoiceBootstrapResponse;
+      try {
+        const inFlight = incomingBootstrapPromiseByCallIdRef.current.get(req.callId) ?? null;
+        bootstrapped = inFlight
+          ? await inFlight
+          : (await callApi.bootstrap(req.fromId, req.callId)).data;
+      } catch (e) {
+        socket.emit('call:end', { callId: req.callId });
+        throw e;
+      }
+
+      incomingBootstrapByCallIdRef.current.delete(req.callId);
+      incomingBootstrapPromiseByCallIdRef.current.delete(req.callId);
+      return bootstrapped;
+    },
+    []
+  );
 
   const acceptIncomingCall = useCallback(
     async (req: IncomingCallRequest): Promise<void> => {
@@ -643,9 +693,27 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   );
 
   const stopIncomingRingtone = useCallback(() => stopIncomingRingtonePlayback(), []);
+  const startIncomingRingtoneCtx = useCallback(async () => {
+    await startIncomingRingtone();
+  }, []);
 
   const setIncomingCallHandler = useCallback((handler: ((req: IncomingCallRequest) => void) | null) => {
     incomingCallHandlerRef.current = handler;
+  }, []);
+
+  const setIncomingCallDismissHandler = useCallback((handler: ((callId: string) => void) | null) => {
+    incomingCallDismissHandlerRef.current = handler;
+  }, []);
+
+  const clearReceiverIncomingCallUi = useCallback((callId: string) => {
+    void stopIncomingRingtonePlayback();
+    if (activeIncomingCallUiCallIdRef.current === callId) {
+      activeIncomingCallUiCallIdRef.current = null;
+    }
+    incomingBootstrapByCallIdRef.current.delete(callId);
+    incomingBootstrapPromiseByCallIdRef.current.delete(callId);
+    seenIncomingCallIdsRef.current.delete(callId);
+    incomingCallDismissHandlerRef.current?.(callId);
   }, []);
 
   const setQueueMode = useCallback(async (active: boolean): Promise<void> => {
@@ -687,7 +755,7 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
       const socket = io(base, {
         auth: { token },
-        transports: ['polling', 'websocket'],
+        transports: ['websocket', 'polling'],
         timeout: 20000,
         reconnectionAttempts: 6,
         reconnectionDelay: 1000,
@@ -732,6 +800,7 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         };
 
         if (incomingCallHandlerRef.current) {
+          activeIncomingCallUiCallIdRef.current = incoming.callId;
           incomingCallHandlerRef.current(incoming);
           return;
         }
@@ -855,18 +924,24 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         rejectedIncomingCallIdsRef.current.delete(payload.callId);
         clearOutgoingCallSession(payload.callId);
 
-        if (userRoleRef.current === 'receiver' && activeIncomingCallUiCallIdRef.current === payload.callId) {
-          void stopIncomingRingtonePlayback();
-          activeIncomingCallUiCallIdRef.current = null;
-          incomingBootstrapByCallIdRef.current.delete(payload.callId);
-          incomingBootstrapPromiseByCallIdRef.current.delete(payload.callId);
-          const goHome = (): boolean => {
-            const n = navigationRef.current;
-            if (!n?.isReady()) return false;
-            n.navigate('Home', { screen: 'ReceiverMainTabs', params: { screen: 'ReceiverHome' } });
-            return true;
-          };
-          if (!goHome()) scheduleNavigateWhenReady(goHome, outgoingNavigateGeneration);
+        if (userRoleRef.current === 'receiver') {
+          const onIntegratedVoiceCall =
+            Boolean(incomingCallDismissHandlerRef.current) ||
+            Boolean(incomingCallHandlerRef.current);
+          const legacyIncomingScreen =
+            !onIntegratedVoiceCall && activeIncomingCallUiCallIdRef.current === payload.callId;
+          if (onIntegratedVoiceCall || legacyIncomingScreen) {
+            clearReceiverIncomingCallUi(payload.callId);
+            if (legacyIncomingScreen) {
+              const goHome = (): boolean => {
+                const n = navigationRef.current;
+                if (!n?.isReady()) return false;
+                n.navigate('Home', { screen: 'ReceiverMainTabs', params: { screen: 'ReceiverHome' } });
+                return true;
+              };
+              if (!goHome()) scheduleNavigateWhenReady(goHome, outgoingNavigateGeneration);
+            }
+          }
         }
 
         const waiter = pendingInviteOutcomeRef.current.get(payload.callId);
@@ -888,7 +963,15 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       clearPendingInvites(false);
       socketRef.current = null;
     };
-  }, [clearOutgoingCallSession, clearPendingInvites, isSignedIn, openCallerJoiningVoiceCall, openIncomingCall, user]);
+  }, [
+    clearOutgoingCallSession,
+    clearPendingInvites,
+    clearReceiverIncomingCallUi,
+    isSignedIn,
+    openCallerJoiningVoiceCall,
+    openIncomingCall,
+    user,
+  ]);
 
   const value = useMemo<CallSignalContextValue>(
     () => ({
@@ -899,10 +982,13 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       randomCallMatchingVisible,
       cancelOutgoingCallInvite,
       setIncomingCallHandler,
+      setIncomingCallDismissHandler,
       acceptIncomingCall,
       rejectIncomingCall,
       setQueueMode,
       stopIncomingRingtone,
+      startIncomingRingtone: startIncomingRingtoneCtx,
+      acceptIncomingCallStayOnScreen,
     }),
     [
       registerPeer,
@@ -912,10 +998,14 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       randomCallMatchingVisible,
       cancelOutgoingCallInvite,
       setIncomingCallHandler,
+      setIncomingCallDismissHandler,
       acceptIncomingCall,
       rejectIncomingCall,
       setQueueMode,
       stopIncomingRingtone,
+      startIncomingRingtoneCtx,
+      acceptIncomingCallStayOnScreen,
+      clearReceiverIncomingCallUi,
     ]
   );
 

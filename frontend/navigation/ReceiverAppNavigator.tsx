@@ -79,7 +79,7 @@ export default function ReceiverAppNavigator({
       <Stack.Screen
         name="VoiceCall"
         component={VoiceCallScreen}
-        options={{ contentStyle: { paddingBottom: 0 } }}
+        options={{ contentStyle: { paddingBottom: 0 }, gestureEnabled: false }}
       />
       <Stack.Screen
         name="IncomingCall"

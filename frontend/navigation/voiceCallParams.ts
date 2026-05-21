@@ -17,4 +17,21 @@ export type VoiceCallActiveParams = VoiceBootstrapResponse & {
   outgoingCallerPhase?: 'joining';
 };
 
-export type VoiceCallScreenParams = VoiceCallOutgoingRingingParams | VoiceCallActiveParams;
+/** Receiver turned availability on — one screen for waiting, incoming, connecting, and active call. */
+export type VoiceCallReceiverAvailabilityParams = {
+  receiverAvailabilitySession: true;
+  peerName?: string;
+  peerImage?: string | null;
+};
+
+export type VoiceCallScreenParams =
+  | VoiceCallOutgoingRingingParams
+  | VoiceCallActiveParams
+  | VoiceCallReceiverAvailabilityParams
+  | (VoiceCallActiveParams & VoiceCallReceiverAvailabilityParams);
+
+export function isReceiverAvailabilitySession(
+  params: VoiceCallScreenParams
+): params is VoiceCallReceiverAvailabilityParams | (VoiceCallActiveParams & VoiceCallReceiverAvailabilityParams) {
+  return 'receiverAvailabilitySession' in params && Boolean(params.receiverAvailabilitySession);
+}

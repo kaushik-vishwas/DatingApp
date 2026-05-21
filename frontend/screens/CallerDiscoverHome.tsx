@@ -1,9 +1,10 @@
-import { useIsFocused } from '@react-navigation/native';
+import { useFocusEffect, useIsFocused } from '@react-navigation/native';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { LinearGradient } from 'expo-linear-gradient';
 import {
   ActivityIndicator,
   Alert,
+  AppState,
   FlatList,
   Image,
   KeyboardAvoidingView,
@@ -15,8 +16,11 @@ import {
   TextInput,
   TouchableOpacity,
   View,
+  type AppStateStatus,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+
+import { Ionicons } from '@expo/vector-icons';
 
 import { useReceiverTabBarBottomInset } from '../utils/receiverTabBarInset';
 import { useCallerAppNavigation } from '../utils/callerAppNavigation';
@@ -26,17 +30,22 @@ import DiscoverFiltersModal, {
   type DiscoverFiltersState,
 } from '../components/caller/DiscoverFiltersModal';
 import { CALLER_LANGUAGE_OPTIONS } from '../constants/userOnboarding';
+import { CALLER_MESSAGE_REQUIRES_CALL } from '../constants/callerMessaging';
 import { useAuth } from '../context/AuthContext';
 import { useCallSignals } from '../context/CallSignalContext';
+import { useCallerMessageEligibility } from '../context/CallerMessageEligibilityContext';
 import { discoverApi, getErrorMessage } from '../services/api';
 import type { DiscoverReceiverSummary } from '../types/api';
 import { resolveProfileImageSource } from '../utils/avatarSource';
 import { getReceiverPresenceInfo, sortDiscoverReceivers } from '../utils/receiverStatus';
-import { SCREEN_FETCH_TIMEOUT_MS, withTimeout } from '../utils/withTimeout';
+import { withTimeout } from '../utils/withTimeout';
 import SelectoLogo from '../assets/SelectoLogo.png'
 
 const PURPLE = '#7b2cff';
 const GREEN = '#22c55e';
+/** Discover list only — shorter than generic screen timeout so home does not spin too long. */
+const DISCOVER_FETCH_TIMEOUT_MS = 12_000;
+const DISCOVER_POLL_MS = 5_000;
 
 export default function CallerDiscoverHome(): React.JSX.Element {
   const isFocused = useIsFocused();
@@ -44,6 +53,7 @@ export default function CallerDiscoverHome(): React.JSX.Element {
   const navigation = useCallerAppNavigation();
   const { user, refreshUser } = useAuth();
   const { startCallInvite, startRandomCallEngagement, randomCallMatchingVisible } = useCallSignals();
+  const { canMessageReceiver, refresh: refreshMessageEligibility } = useCallerMessageEligibility();
   const [language, setLanguage] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [debounced, setDebounced] = useState('');
@@ -55,6 +65,7 @@ export default function CallerDiscoverHome(): React.JSX.Element {
   const [appliedFilters, setAppliedFilters] = useState<DiscoverFiltersState>(DEFAULT_DISCOVER_FILTERS);
   const [modalDraft, setModalDraft] = useState<DiscoverFiltersState>(DEFAULT_DISCOVER_FILTERS);
   const discoverLoadGenRef = useRef(0);
+  const hasDiscoverDataRef = useRef(false);
 
   useEffect(() => {
     const t = setTimeout(() => setDebounced(search.trim()), 350);
@@ -85,23 +96,33 @@ export default function CallerDiscoverHome(): React.JSX.Element {
     return sortDiscoverReceivers(rows);
   }, [language, debounced, appliedFilters]);
 
-  const fetchDiscoverReceivers = useCallback(async (): Promise<void> => {
-    const id = ++discoverLoadGenRef.current;
-    setLoading(true);
-    setErr(null);
-    try {
-      const rows = await withTimeout(fetchList(), SCREEN_FETCH_TIMEOUT_MS);
-      if (discoverLoadGenRef.current !== id) return;
-      setReceivers(rows);
-      setErr(null);
-    } catch (e: unknown) {
-      if (discoverLoadGenRef.current !== id) return;
-      setErr(getErrorMessage(e));
-      setReceivers([]);
-    } finally {
-      if (discoverLoadGenRef.current === id) setLoading(false);
-    }
-  }, [fetchList]);
+  const fetchDiscoverReceivers = useCallback(
+    async (opts?: { silent?: boolean }): Promise<void> => {
+      const id = ++discoverLoadGenRef.current;
+      const silent = opts?.silent ?? hasDiscoverDataRef.current;
+      if (!silent) {
+        setLoading(true);
+        setErr(null);
+      }
+      try {
+        const rows = await withTimeout(fetchList(), DISCOVER_FETCH_TIMEOUT_MS);
+        if (discoverLoadGenRef.current !== id) return;
+        setReceivers(rows);
+        setErr(null);
+        hasDiscoverDataRef.current = rows.length > 0;
+      } catch (e: unknown) {
+        if (discoverLoadGenRef.current !== id) return;
+        if (!silent) {
+          setErr(getErrorMessage(e));
+          setReceivers([]);
+          hasDiscoverDataRef.current = false;
+        }
+      } finally {
+        if (discoverLoadGenRef.current === id) setLoading(false);
+      }
+    },
+    [fetchList]
+  );
 
   useEffect(() => {
     void fetchDiscoverReceivers();
@@ -110,30 +131,49 @@ export default function CallerDiscoverHome(): React.JSX.Element {
     };
   }, [fetchDiscoverReceivers]);
 
-  useEffect(() => {
-    if (!isFocused) return;
-    void withTimeout(fetchList(), SCREEN_FETCH_TIMEOUT_MS)
+  const refreshDiscoverSilent = useCallback((): void => {
+    void withTimeout(fetchList(), DISCOVER_FETCH_TIMEOUT_MS)
       .then((rows) => {
-        setReceivers((prev) => {
-          if (prev.length === rows.length && prev.every((p, i) => p._id === rows[i]?._id)) {
-            return prev;
-          }
-          return rows;
-        });
+        setReceivers(rows);
+        hasDiscoverDataRef.current = rows.length > 0;
       })
       .catch(() => {
         // Keep existing cards on transient failures.
       });
-    return;
-  }, [fetchList, isFocused]);
+  }, [fetchList]);
+
+  useFocusEffect(
+    useCallback(() => {
+      refreshDiscoverSilent();
+      void refreshMessageEligibility();
+    }, [refreshDiscoverSilent, refreshMessageEligibility])
+  );
+
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (state: AppStateStatus) => {
+      if (state === 'active' && isFocused) {
+        refreshDiscoverSilent();
+        void refreshMessageEligibility();
+      }
+    });
+    return () => sub.remove();
+  }, [isFocused, refreshDiscoverSilent, refreshMessageEligibility]);
+
+  useEffect(() => {
+    if (!isFocused) return;
+    refreshDiscoverSilent();
+    const poll = setInterval(refreshDiscoverSilent, DISCOVER_POLL_MS);
+    return () => clearInterval(poll);
+  }, [isFocused, refreshDiscoverSilent]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     setErr(null);
+    void refreshUser();
     try {
-      await refreshUser();
-      const rows = await withTimeout(fetchList(), SCREEN_FETCH_TIMEOUT_MS);
+      const rows = await withTimeout(fetchList(), DISCOVER_FETCH_TIMEOUT_MS);
       setReceivers(rows);
+      hasDiscoverDataRef.current = rows.length > 0;
     } catch (e: unknown) {
       setErr(getErrorMessage(e));
     } finally {
@@ -180,6 +220,18 @@ export default function CallerDiscoverHome(): React.JSX.Element {
     void startRandomCallEngagement();
   };
 
+  const onMessage = (item: DiscoverReceiverSummary) => {
+    if (!canMessageReceiver(item._id)) {
+      Alert.alert('Messaging locked', CALLER_MESSAGE_REQUIRES_CALL);
+      return;
+    }
+    navigation.navigate('CallerChat', {
+      receiverId: item._id,
+      receiverName: item.name,
+      receiverImage: item.profileImage,
+    });
+  };
+
   const langChip = (label: string, value: string | null) => {
     const active = language === value;
     return (
@@ -212,6 +264,7 @@ export default function CallerDiscoverHome(): React.JSX.Element {
     const displayedLanguages = item.languages.slice(0, 2).map(getShortLang);
     const remainingCount = item.languages.length - 2;
     const receiverAvatarSource = resolveProfileImageSource(item.profileImage);
+    const canMessage = canMessageReceiver(item._id);
 
     return (
       <TouchableOpacity
@@ -268,18 +321,30 @@ export default function CallerDiscoverHome(): React.JSX.Element {
           {/* Right Column - Languages and Status */}
           {/* Right Column - Call Button, Languages and Status */}
           <View style={styles.rightColumn}>
-            {/* Call Button - Above languages */}
-            <TouchableOpacity
-              style={[styles.callButtonAboveLanguages, !presence.canCall && styles.callButtonAboveLanguagesDisabled]}
-              onPress={(e) => {
-                e.stopPropagation();
-                onCall(item);
-              }}
-              activeOpacity={presence.canCall ? 0.9 : 1}
-              disabled={!presence.canCall}
-            >
-              <Text style={styles.callButtonIcon}>📞</Text>
-            </TouchableOpacity>
+            <View style={styles.cardActionRow}>
+              <TouchableOpacity
+                style={[styles.cardActionBtn, styles.cardCallBtn, !presence.canCall && styles.cardActionBtnDisabled]}
+                onPress={(e) => {
+                  e.stopPropagation();
+                  onCall(item);
+                }}
+                activeOpacity={presence.canCall ? 0.9 : 1}
+                disabled={!presence.canCall}
+              >
+                <Text style={styles.cardActionIcon}>📞</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.cardActionBtn, styles.cardChatBtn, !canMessage && styles.cardActionBtnDisabled]}
+                onPress={(e) => {
+                  e.stopPropagation();
+                  onMessage(item);
+                }}
+                activeOpacity={canMessage ? 0.9 : 1}
+                disabled={!canMessage}
+              >
+               <Ionicons name="chatbubble-outline" size={18} color={canMessage ? "#fff" : "#9ca3af"} />
+              </TouchableOpacity>
+            </View>
 
             <View style={styles.languagesRow}>
               {displayedLanguages.map((lang) => (
@@ -359,6 +424,9 @@ export default function CallerDiscoverHome(): React.JSX.Element {
           <FlatList
             data={receivers}
             keyExtractor={(it) => it._id}
+            extraData={receivers.map(
+              (r) => `${r._id}:${r.isOnline}:${r.isAvailable}:${r.isBusyOnCall}:${canMessageReceiver(r._id)}`
+            ).join('|')}
             renderItem={renderItem}
             contentContainerStyle={[styles.listContent, { paddingBottom: contentBottomPadding }]}
             ListHeaderComponent={
@@ -1103,31 +1171,41 @@ rateCard: {
     // Remove marginTop: 2,
   },
 
-  // Add this new style for call button above languages
-  callButtonAboveLanguages: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: GREEN,
+  cardActionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 8,
+  },
+  cardActionBtn: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 8,
-    shadowColor: GREEN,
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.2,
     shadowRadius: 4,
     elevation: 2,
   },
-
-  callButtonAboveLanguagesDisabled: {
+  cardCallBtn: {
+    backgroundColor: GREEN,
+    shadowColor: GREEN,
+  },
+  cardChatBtn: {
+    backgroundColor: PURPLE,
+    shadowColor: PURPLE,
+  },
+  cardActionBtnDisabled: {
     backgroundColor: '#e5e7eb',
     shadowOpacity: 0,
     elevation: 0,
   },
-
-  callButtonIcon: {
-    fontSize: 18,
-    color: '#fff',
+  cardActionIcon: {
+    fontSize: 16,
+  },
+  cardActionIconDisabled: {
+    opacity: 0.45,
   },
 
   // Update rightColumn to align items center

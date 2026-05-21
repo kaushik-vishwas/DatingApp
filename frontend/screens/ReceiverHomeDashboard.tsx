@@ -160,7 +160,7 @@ export default function ReceiverHomeDashboard(): React.JSX.Element {
       await profileApi.updateReceiverProfile({ isAvailable: next });
       await refreshUser();
       if (next) {
-        navigation.navigate('ReceiverAvailabilityWaiting');
+        navigation.navigate('VoiceCall', { receiverAvailabilitySession: true });
       }
     } catch (e) {
       setAvailable(prev);

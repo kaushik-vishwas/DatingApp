@@ -525,7 +525,8 @@ const syncVoiceSession = async (req, res) => {
             return;
         }
         const settled = await settleCallSession(callId, false);
-        const talkFields = callTalkApiFields(current);
+        const latest = await CallSession_1.default.findOne({ callId });
+        const talkFields = callTalkApiFields((latest ?? current));
         res.status(200).json({
             ok: true,
             durationSec: settled.durationSec,
