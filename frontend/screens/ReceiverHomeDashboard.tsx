@@ -3,6 +3,7 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import React, { useCallback, useMemo, useState } from 'react';
 import { LinearGradient } from 'expo-linear-gradient';
+import { StatusBar } from 'react-native';
 import {
   Alert,
   ActivityIndicator,
@@ -83,6 +84,8 @@ type CompactInfoCardProps = {
   children: React.ReactNode;
 };
 
+
+
 function CompactInfoCard({ colors, bgImage, title, subtitle, children }: CompactInfoCardProps): React.JSX.Element {
   return (
     <View style={styles.infoSection}>
@@ -92,7 +95,7 @@ function CompactInfoCard({ colors, bgImage, title, subtitle, children }: Compact
         <View style={styles.cardForeground}>
           <View style={styles.compactTitleRow}>
             <Text style={styles.gradientCardTitle}>{title}</Text>
-            <Text style={styles.compactSubtitle}>{subtitle}</Text>
+            {/* <Text style={styles.compactSubtitle}>{subtitle}</Text> */}
           </View>
           {children}
         </View>
@@ -117,9 +120,13 @@ export default function ReceiverHomeDashboard(): React.JSX.Element {
   const availabilityFromServer =
     user?.role === 'receiver' ? Boolean(user.isAvailable ?? false) : false;
 
+
+
   React.useEffect(() => {
     setAvailable(availabilityFromServer);
   }, [availabilityFromServer]);
+
+
 
   const loadWalletSummary = useCallback(async () => {
     if (!receiverId) return;
@@ -141,6 +148,13 @@ export default function ReceiverHomeDashboard(): React.JSX.Element {
       setSummaryError((prev) => prev ?? getErrorMessage(e));
     }
   }, [receiverId]);
+
+
+  // Add this inside your component, before the return statement
+  React.useEffect(() => {
+    StatusBar.setBarStyle('dark-content');
+    StatusBar.setBackgroundColor('white'); // Match your background
+  }, []);
 
   const loadReceiverNotificationUnread = useCallback(async () => {
     if (!receiverId) return;
@@ -389,7 +403,7 @@ export default function ReceiverHomeDashboard(): React.JSX.Element {
                   </View>
 
                   <View style={styles.publicRightColumn}>
-                   
+
                     <View style={styles.publicLanguagesRow}>
                       {(user.languages ?? []).slice(0, 2).map((lang) => (
                         <View key={lang} style={styles.publicMiniLang}>
@@ -463,7 +477,7 @@ export default function ReceiverHomeDashboard(): React.JSX.Element {
                     <View style={styles.levelRow}>
                       <View style={styles.levelLeft}>
                         <View style={styles.levelIconBadge}>
-                          <MaterialCommunityIcons name={row.icon} size={14} color="#1e3a8a" />
+                          <MaterialCommunityIcons name={row.icon} size={14} color="white" />
                         </View>
                         <Text style={styles.levelTime}>{row.label}</Text>
                       </View>
@@ -483,19 +497,19 @@ export default function ReceiverHomeDashboard(): React.JSX.Element {
               <View style={styles.guidelinesList}>
                 <View style={styles.guidelineRow}>
                   <View style={styles.guideIconBadge}>
-                    <MaterialCommunityIcons name="clock-check-outline" size={14} color="#312e81" />
+                    <MaterialCommunityIcons name="clock-check-outline" size={14} color="white" />
                   </View>
                   <Text style={styles.guidelineText}>Stay online at least 8 hours per day.</Text>
                 </View>
                 <View style={styles.guidelineRow}>
                   <View style={styles.guideIconBadge}>
-                    <MaterialCommunityIcons name="shield-lock-outline" size={14} color="#312e81" />
+                    <MaterialCommunityIcons name="shield-lock-outline" size={14} color="white" />
                   </View>
                   <Text style={styles.guidelineText}>Don't share phone, UPI, or personal IDs.</Text>
                 </View>
                 <View style={styles.guidelineRow}>
                   <View style={styles.guideIconBadge}>
-                    <MaterialCommunityIcons name="phone-cancel-outline" size={14} color="#312e81" />
+                    <MaterialCommunityIcons name="phone-cancel-outline" size={14} color="white" />
                   </View>
                   <Text style={styles.guidelineText}>Block rude or inappropriate callers.</Text>
                 </View>
@@ -947,10 +961,10 @@ const styles = StyleSheet.create({
   levelIconBadge: {
     width: 22,
     height: 22,
-    borderRadius: 11,
+    borderRadius: 10,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(255,255,255,0.92)',
+    backgroundColor: 'rgba(108, 45, 255, 0.47)',
   },
   levelTime: {
     fontSize: 13,
@@ -983,7 +997,7 @@ const styles = StyleSheet.create({
     borderRadius: 11,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(255,255,255,0.92)',
+    backgroundColor: 'rgba(158, 76, 229, 0.68)',
   },
   guidelineText: {
     fontSize: 11,
