@@ -9,7 +9,14 @@ import UserReport, { type ReportResolution } from '../models/UserReport';
 import WithdrawalRequest from '../models/WithdrawalRequest';
 import CallSession from '../models/CallSession';
 import ChatMessage from '../models/ChatMessage';
-import AdminSettings from '../models/AdminSettings';
+import AdminSettings, { type IFixedPerMinuteWindow, type ReceiverEarningModel } from '../models/AdminSettings';
+import {
+  clearReceiverEarningSettingsCache,
+  DEFAULT_FIXED_PER_MINUTE_WINDOWS,
+  DEFAULT_RECEIVER_EARNING_MODEL,
+  normalizeFixedPerMinuteWindows,
+  publicEarningSchedulePayload,
+} from '../services/receiverEarningModel';
 import { toApiReceiver, toApiUser } from './authController';
 import { sendOtpEmail } from '../config/email';
 import { getConfiguredAdminEmail } from '../services/superAdminSync';
@@ -445,12 +452,22 @@ export const getAdminSettings = async (req: Request, res: Response): Promise<voi
       .sort({ createdAt: 1 })
       .lean<{ _id: mongoose.Types.ObjectId; name: string; email: string; role: string; createdAt: Date }[]>();
 
+    const earningModel: ReceiverEarningModel =
+      effective.receiverEarningModel === 'fixed_per_minute' ? 'fixed_per_minute' : DEFAULT_RECEIVER_EARNING_MODEL;
+    const fixedPerMinuteWindows = normalizeFixedPerMinuteWindows(
+      effective.fixedPerMinuteWindows?.length
+        ? effective.fixedPerMinuteWindows
+        : DEFAULT_FIXED_PER_MINUTE_WINDOWS
+    );
+
     res.status(200).json({
       notificationControls: {
         kycSubmissionsEmail: Boolean(effective.notificationControls?.kycSubmissionsEmail ?? true),
         pendingWithdrawalsEmail: Boolean(effective.notificationControls?.pendingWithdrawalsEmail ?? true),
         dailyRevenueSummaryEmail: Boolean(effective.notificationControls?.dailyRevenueSummaryEmail ?? true),
       },
+      receiverEarningModel: earningModel,
+      fixedPerMinuteWindows,
       rolesCatalog: [
         { id: 'super_admin', label: 'Super Admin', description: 'Full access to all features' },
         { id: 'support_admin', label: 'Support Admin', description: 'Can manage KYC, users, and reports' },
@@ -522,6 +539,67 @@ export const updateAdminNotificationControls = async (
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error('updateAdminNotificationControls error:', msg);
+    res.status(500).json({ message: msg || 'Server error' });
+  }
+};
+
+/**
+ * PATCH /admin/settings/earning-model
+ */
+export const updateAdminReceiverEarningModel = async (
+  req: Request<
+    {},
+    {},
+    {
+      receiverEarningModel?: ReceiverEarningModel;
+      fixedPerMinuteWindows?: IFixedPerMinuteWindow[];
+    }
+  >,
+  res: Response
+): Promise<void> => {
+  try {
+    const body = req.body ?? {};
+    const model = body.receiverEarningModel;
+    if (model !== 'score_based' && model !== 'fixed_per_minute') {
+      res.status(400).json({ message: 'receiverEarningModel must be score_based or fixed_per_minute' });
+      return;
+    }
+
+    const windows =
+      model === 'fixed_per_minute'
+        ? normalizeFixedPerMinuteWindows(body.fixedPerMinuteWindows ?? DEFAULT_FIXED_PER_MINUTE_WINDOWS)
+        : normalizeFixedPerMinuteWindows(
+            (await AdminSettings.findOne({}).select('fixedPerMinuteWindows').lean())?.fixedPerMinuteWindows ??
+              DEFAULT_FIXED_PER_MINUTE_WINDOWS
+          );
+
+    const settings = await AdminSettings.findOneAndUpdate(
+      {},
+      {
+        $set: {
+          receiverEarningModel: model,
+          fixedPerMinuteWindows: windows,
+        },
+      },
+      { new: true, upsert: true, setDefaultsOnInsert: true }
+    );
+
+    clearReceiverEarningSettingsCache();
+
+    const payload = publicEarningSchedulePayload({
+      receiverEarningModel: settings.receiverEarningModel,
+      fixedPerMinuteWindows: normalizeFixedPerMinuteWindows(settings.fixedPerMinuteWindows),
+    });
+
+    res.status(200).json({
+      ok: true,
+      receiverEarningModel: payload.receiverEarningModel,
+      fixedPerMinuteWindows: payload.fixedPerMinuteWindows,
+      earningTimezone: payload.timezone,
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error('updateAdminReceiverEarningModel error:', msg);
     res.status(500).json({ message: msg || 'Server error' });
   }
 };
@@ -1786,9 +1864,11 @@ export const listWithdrawals = async (
           amount: number;
           status: string;
           bankName: string;
+          accountHolderName: string;
           accountMasked: string;
           payoutStatus?: string;
           payoutUtr?: string | null;
+          payoutError?: string | null;
           createdAt: Date;
         }[]
       >();
@@ -1810,18 +1890,24 @@ export const listWithdrawals = async (
         processedCount,
         processedTodayAmount,
       },
-      rows: rows.map((row) => ({
-        _id: String(row._id),
-        withdrawalId: `W-${String(row._id).slice(-6).toUpperCase()}`,
-        receiverName: receiverNameById.get(String(row.receiverId)) ?? 'Receiver',
-        amount: row.amount,
-        bankName: row.bankName,
-        accountMasked: row.accountMasked,
-        createdAt: row.createdAt.toISOString(),
-        status: row.status,
-        payoutStatus: row.payoutStatus && row.payoutStatus !== 'none' ? row.payoutStatus : undefined,
-        payoutUtr: row.payoutUtr,
-      })),
+      rows: rows.map((row) => {
+        const isUpi = String(row.bankName ?? '').trim().toUpperCase() === 'UPI';
+        return {
+          _id: String(row._id),
+          withdrawalId: `W-${String(row._id).slice(-6).toUpperCase()}`,
+          receiverName: receiverNameById.get(String(row.receiverId)) ?? 'Receiver',
+          amount: row.amount,
+          payoutMethod: isUpi ? ('upi' as const) : ('bank' as const),
+          bankName: row.bankName,
+          accountHolderName: row.accountHolderName,
+          accountMasked: row.accountMasked,
+          createdAt: row.createdAt.toISOString(),
+          status: row.status,
+          payoutStatus: row.payoutStatus && row.payoutStatus !== 'none' ? row.payoutStatus : undefined,
+          payoutUtr: row.payoutUtr,
+          payoutError: row.payoutError ?? undefined,
+        };
+      }),
       total: totalBase,
       page,
       limit,

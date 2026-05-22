@@ -4,7 +4,8 @@ import { Image, Platform, StyleSheet, Text, TouchableOpacity, View } from 'react
 
 import type { RootStackParamList } from '../../navigation/RootStackParamList';
 import { markAuthWelcomeSeen } from '../../services/authWelcomeStorage';
-import SelectoLogo from '../../assets/SelectoLogo.png'; // Adjust path as needed
+import Logo from '../../assets/logo.png';
+import LogoText from '../../assets/logoText.png';
 
 const GREEN = '#1b4d3e';
 const PURPLE = '#7b2cff';
@@ -21,15 +22,20 @@ export default function SplashScreen({ navigation }: Props): React.JSX.Element {
 
   return (
     <View style={styles.root}>
-      <View style={styles.logoRing}>
-        <Image 
-          source={SelectoLogo} 
-          style={styles.logoImage}
-          resizeMode="contain"
-        />
-      </View>
+      {/* Just the logo without circle ring */}
+      <Image 
+        source={Logo} 
+        style={styles.logoImage}
+        resizeMode="contain"
+      />
 
-      <Text style={styles.brand}>Selecto !</Text>
+      {/* Logo text image instead of "Selecto !" text */}
+      <Image 
+        source={LogoText} 
+        style={styles.logoTextImage}
+        resizeMode="contain"
+      />
+
       <Text style={styles.tagline}>A online Friendship app 👋</Text>
 
       <TouchableOpacity style={styles.cta} onPress={onGetStarted} activeOpacity={0.9}>
@@ -47,31 +53,15 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  logoRing: {
-    width: 88,
-    height: 88,
-    borderRadius: 44,
-    borderWidth: 3,
-    borderColor: GREEN,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 20,
-    backgroundColor: 'rgba(27, 77, 62, 0.06)',
-  },
   logoImage: {
-    width: 50,
+    width: 120,
+    height: 120,
+    marginBottom: 16,
+  },
+  logoTextImage: {
+    width: 180,
     height: 50,
-  },
-  logoGlyph: {
-    fontSize: 36,
-  },
-  brand: {
-    fontSize: 32,
-    fontWeight: '600',
-    color: GREEN,
-    fontFamily: Platform.select({ ios: 'Georgia', android: 'serif', default: 'serif' }),
-    marginBottom: 10,
-    textAlign: 'center',
+    marginBottom: 12,
   },
   tagline: {
     fontSize: 15,

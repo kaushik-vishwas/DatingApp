@@ -70,6 +70,18 @@ export function ReceiverDetailModal({ receiver, onClose, onEdit }: Props) {
               <dd className="font-medium text-neutral-900">{receiver.panNumber}</dd>
             </div>
           ) : null}
+          {receiver.nameAsPerAadhaar ? (
+            <div className="flex justify-between gap-4">
+              <dt className="text-neutral-500">Name (as per Aadhaar)</dt>
+              <dd className="font-medium text-neutral-900">{receiver.nameAsPerAadhaar}</dd>
+            </div>
+          ) : null}
+          {receiver.upiId ? (
+            <div className="flex justify-between gap-4">
+              <dt className="text-neutral-500">UPI ID</dt>
+              <dd className="font-medium text-neutral-900">{receiver.upiId}</dd>
+            </div>
+          ) : null}
           {typeof receiver.audioCallRate === 'number' && Number.isFinite(receiver.audioCallRate) ? (
             <div className="flex justify-between gap-4">
               <dt className="text-neutral-500">Audio call rate</dt>

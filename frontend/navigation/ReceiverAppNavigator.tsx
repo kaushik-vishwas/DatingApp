@@ -12,6 +12,7 @@ import WithdrawEarningsScreen from '../screens/receiver/WithdrawEarningsScreen';
 import ReceiverCallHistoryScreen from '../screens/receiver/ReceiverCallHistoryScreen';
 import ReceiverSettingsScreen from '../screens/receiver/ReceiverSettingsScreen';
 import ReceiverHowToEarnScreen from '../screens/receiver/ReceiverHowToEarnScreen';
+import ReceiverGuidelinesScreen from '../screens/receiver/ReceiverGuidelinesScreen';
 import ReceiverNotificationsScreen from '../screens/receiver/ReceiverNotificationsScreen';
 import ReceiverBankDetailsScreen from '../screens/receiver/ReceiverBankDetailsScreen';
 import ReceiverEditProfileScreen from '../screens/receiver/ReceiverEditProfileScreen';
@@ -58,6 +59,7 @@ export default function ReceiverAppNavigator({
         options={{ animation: 'fade', gestureEnabled: false, contentStyle: { paddingBottom: 0 } }}
       />
       <Stack.Screen name="ReceiverSettings" component={ReceiverSettingsScreen} />
+      <Stack.Screen name="ReceiverGuidelines" component={ReceiverGuidelinesScreen} />
       <Stack.Screen name="ReceiverHowToEarn" component={ReceiverHowToEarnScreen} />
       <Stack.Screen name="ReceiverNotifications" component={ReceiverNotificationsScreen} />
       <Stack.Screen name="ReceiverBankDetails" component={ReceiverBankDetailsScreen} />

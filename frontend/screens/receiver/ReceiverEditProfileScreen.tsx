@@ -363,7 +363,7 @@
                   label="Display Name" 
                   value={name} 
                   onChangeText={setName} 
-                  placeholder="Enter your displhhay name"
+                  placeholder="Enter your display name"
                   required
                 />
                 
@@ -443,7 +443,7 @@
                       setShowSuccess(false);
                       
                       if (fromWithdrawKyc) {
-                        navigation.replace('ReceiverBankDetails');
+                        navigation.replace('ReceiverBankDetails', { returnToWithdraw: true });
                       } else {
                         if (navigation.canGoBack()) {
                           navigation.goBack();
@@ -460,7 +460,7 @@
                       end={{ x: 1, y: 0 }}
                       style={styles.successBtnGradient}
                     >
-                      <Text style={styles.successBtnText}>{fromWithdrawKyc ? 'Continue to Bank' : 'Done'}</Text>
+                      <Text style={styles.successBtnText}>{fromWithdrawKyc ? 'Continue to payment' : 'Done'}</Text>
                     </LinearGradient>
                   </TouchableOpacity>
                 </View>

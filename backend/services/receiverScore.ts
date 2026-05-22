@@ -2,9 +2,10 @@ import mongoose from 'mongoose';
 import CallSession from '../models/CallSession';
 import Receiver from '../models/Receiver';
 import ReceiverDailyScore from '../models/ReceiverDailyScore';
+import { getReceiverEarningSettings } from './receiverEarningModel';
 
 const MAX_SCORED_CALLS_PER_CALLER_PER_DAY = 3;
-const MIN_VALID_CALL_SECONDS = 55;
+const MIN_VALID_CALL_SECONDS = 60;
 const MIN_MID_BAND_SECONDS = 3 * 60;
 const MIN_TOP_BAND_SECONDS = 10 * 60;
 const IST_OFFSET_MINUTES = 330;
@@ -28,7 +29,7 @@ function badgeForScore(score: number): { badgeLevel: 'platinum' | 'diamond' | 's
 }
 
 function callScoreForDuration(durationSec: number): number {
-  if (durationSec <= MIN_VALID_CALL_SECONDS) return 0;
+  if (durationSec < MIN_VALID_CALL_SECONDS) return 0;
   const minutes = durationSec / 60;
   if (durationSec >= MIN_TOP_BAND_SECONDS) return round2(minutes * 5);
   if (durationSec >= MIN_MID_BAND_SECONDS) return round2(minutes * 3);
@@ -42,10 +43,15 @@ export async function recordReceiverCallScore(args: {
   startedAt: Date;
   durationSec: number;
 }): Promise<void> {
+  const earningSettings = await getReceiverEarningSettings();
+  if (earningSettings.receiverEarningModel === 'fixed_per_minute') {
+    return;
+  }
+
   const { callId, receiverId, callerId, startedAt, durationSec } = args;
   const dateKey = utcDateKey(startedAt);
 
-  if (durationSec <= MIN_VALID_CALL_SECONDS) {
+  if (durationSec < MIN_VALID_CALL_SECONDS) {
     await ReceiverDailyScore.findOneAndUpdate(
       { receiverId: new mongoose.Types.ObjectId(receiverId), dateKey },
       { $inc: { shortCallsIgnored: 1 } },
@@ -61,7 +67,7 @@ export async function recordReceiverCallScore(args: {
     receiverId: new mongoose.Types.ObjectId(receiverId),
     callerId: new mongoose.Types.ObjectId(callerId),
     status: 'completed',
-    durationSec: { $gt: MIN_VALID_CALL_SECONDS },
+    durationSec: { $gte: MIN_VALID_CALL_SECONDS },
     startedAt: { $gte: dayStart, $lt: dayEnd },
   });
   if (sameCallerCount >= MAX_SCORED_CALLS_PER_CALLER_PER_DAY) {

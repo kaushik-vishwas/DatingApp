@@ -29,6 +29,12 @@ const prettyStatus = (row: AdminWithdrawalRow) => {
   return row.status[0].toUpperCase() + row.status.slice(1);
 };
 
+const resolvePayoutMethod = (row: AdminWithdrawalRow): 'upi' | 'bank' =>
+  row.payoutMethod ?? (row.bankName?.trim().toUpperCase() === 'UPI' ? 'upi' : 'bank');
+
+const payoutMethodLabel = (row: AdminWithdrawalRow) =>
+  resolvePayoutMethod(row) === 'upi' ? 'UPI (RazorpayX)' : 'Bank (RazorpayX)';
+
 export function WithdrawalsPage() {
   const [stats, setStats] = useState<AdminWithdrawalStats>(emptyStats);
   const [rows, setRows] = useState<AdminWithdrawalRow[]>([]);
@@ -134,7 +140,7 @@ export function WithdrawalsPage() {
                 <th className="px-3 py-2">ID</th>
                 <th className="px-3 py-2">Receiver</th>
                 <th className="px-3 py-2">Amount</th>
-                <th className="px-3 py-2">Bank details</th>
+                <th className="px-3 py-2">Payout destination</th>
                 <th className="px-3 py-2">Request date</th>
                 <th className="px-3 py-2">Status</th>
                 <th className="px-3 py-2">Actions</th>
@@ -147,8 +153,15 @@ export function WithdrawalsPage() {
                   <td className="px-3 py-2.5 font-medium text-neutral-800">{row.receiverName}</td>
                   <td className="px-3 py-2.5 font-semibold text-neutral-800">₹{row.amount.toLocaleString('en-IN')}</td>
                   <td className="px-3 py-2.5 text-neutral-600">
-                    <p>{row.bankName}</p>
-                    <p className="text-[11px]">{row.accountMasked}</p>
+                    <p className="font-semibold text-neutral-800">{payoutMethodLabel(row)}</p>
+                    {row.accountHolderName ? (
+                      <p className="text-[11px]">{row.accountHolderName}</p>
+                    ) : null}
+                    <p className="text-[11px]">
+                      {resolvePayoutMethod(row) === 'upi'
+                        ? row.accountMasked
+                        : `${row.bankName} · ${row.accountMasked}`}
+                    </p>
                   </td>
                   <td className="px-3 py-2.5 text-neutral-600">
                     {new Date(row.createdAt).toLocaleString()}
@@ -158,6 +171,11 @@ export function WithdrawalsPage() {
                       {prettyStatus(row)}
                     </span>
                     {row.payoutUtr ? <p className="mt-1 text-[11px] text-neutral-500">UTR: {row.payoutUtr}</p> : null}
+                    {row.payoutError ? (
+                      <p className="mt-1 text-[11px] text-red-600" title={row.payoutError}>
+                        {row.payoutError.length > 80 ? `${row.payoutError.slice(0, 80)}…` : row.payoutError}
+                      </p>
+                    ) : null}
                   </td>
                   <td className="px-3 py-2.5">
                     {row.status === 'pending' ? (

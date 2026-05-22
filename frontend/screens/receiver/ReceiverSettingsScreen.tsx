@@ -36,12 +36,23 @@ export default function ReceiverSettingsScreen(): React.JSX.Element {
           <Icon name="chevron-right" size={18} color="#9ca3af" />
         </TouchableOpacity>
 
-        <TouchableOpacity style={styles.row} onPress={() => navigation.navigate('ReceiverHowToEarn')}>
+        {/* <TouchableOpacity style={styles.row} onPress={() => navigation.navigate('ReceiverHowToEarn')}>
           <View style={styles.rowLeft}>
             <View style={styles.iconCircle}>
               <Icon name="trending-up" size={18} color="#7B2CFF" />
             </View>
             <Text style={styles.label}>How to Earn</Text>
+          </View>
+          <Icon name="chevron-right" size={18} color="#9ca3af" />
+        </TouchableOpacity> */}
+
+
+        <TouchableOpacity style={styles.row} onPress={() => navigation.navigate('ReceiverGuidelines')}>
+          <View style={styles.rowLeft}>
+            <View style={styles.iconCircle}>
+              <Icon name="file-text" size={18} color="#7B2CFF" />
+            </View>
+            <Text style={styles.label}>Selecto Guidelines</Text>
           </View>
           <Icon name="chevron-right" size={18} color="#9ca3af" />
         </TouchableOpacity>
@@ -61,7 +72,7 @@ export default function ReceiverSettingsScreen(): React.JSX.Element {
             <View style={styles.iconCircle}>
               <Icon name="credit-card" size={18} color="#7B2CFF" />
             </View>
-            <Text style={styles.label}>Bank Details</Text>
+            <Text style={styles.label}>Payment Details</Text>
           </View>
           <Icon name="chevron-right" size={18} color="#9ca3af" />
         </TouchableOpacity>
@@ -126,7 +137,7 @@ const styles = StyleSheet.create({
   },
   headerTitle: { fontSize: 18, fontWeight: '900', color: '#111' },
   sectionTitle: { fontSize: 11, color: '#9a9a9a', fontWeight: '800', marginBottom: 8, letterSpacing: 0.5 },
-  
+
   row: {
     backgroundColor: '#fff',
     borderWidth: 1,

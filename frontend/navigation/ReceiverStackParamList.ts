@@ -16,9 +16,10 @@ export type ReceiverStackParamList = {
   /** Shown after turning availability on — display only; calls still work as before. */
   ReceiverAvailabilityWaiting: undefined;
   ReceiverSettings: undefined;
+  ReceiverGuidelines: undefined;
   ReceiverHowToEarn: undefined;
   ReceiverNotifications: undefined;
-  ReceiverBankDetails: undefined;
+  ReceiverBankDetails: { returnToWithdraw?: boolean } | undefined;
   ReceiverEditProfile: { fromWithdrawKyc?: boolean } | undefined;
   ReceiverSelectGender: undefined;
   ReceiverOnboarding: { gender?: Gender } | undefined;

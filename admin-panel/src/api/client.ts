@@ -60,6 +60,8 @@ export type ReceiverRecord = {
   aadhaarNumber?: string | null;
   panNumber?: string | null;
   panFront?: string | null;
+  nameAsPerAadhaar?: string | null;
+  upiId?: string | null;
   documents?: string[];
   createdAt: string;
   updatedAt: string;
@@ -201,12 +203,24 @@ export async function adminResetPassword(
 
 export type AdminRole = 'super_admin' | 'support_admin' | 'finance_admin';
 
+export type ReceiverEarningModel = 'score_based' | 'fixed_per_minute';
+
+export type FixedPerMinuteWindow = {
+  id: string;
+  label: string;
+  from: string;
+  to: string;
+  ratePerMinute: number;
+};
+
 export type AdminSettingsResponse = {
   notificationControls: {
     kycSubmissionsEmail: boolean;
     pendingWithdrawalsEmail: boolean;
     dailyRevenueSummaryEmail: boolean;
   };
+  receiverEarningModel: ReceiverEarningModel;
+  fixedPerMinuteWindows: FixedPerMinuteWindow[];
   rolesCatalog: Array<{ id: AdminRole; label: string; description: string }>;
   admins: Array<{
     _id: string;
@@ -220,6 +234,19 @@ export type AdminSettingsResponse = {
 
 export async function fetchAdminSettings() {
   const { data } = await api.get<AdminSettingsResponse>('/admin/settings');
+  return data;
+}
+
+export async function updateAdminReceiverEarningModel(payload: {
+  receiverEarningModel: ReceiverEarningModel;
+  fixedPerMinuteWindows: FixedPerMinuteWindow[];
+}) {
+  const { data } = await api.patch<{
+    ok: boolean;
+    receiverEarningModel: ReceiverEarningModel;
+    fixedPerMinuteWindows: FixedPerMinuteWindow[];
+    earningTimezone: string;
+  }>('/admin/settings/earning-model', payload);
   return data;
 }
 
@@ -475,17 +502,23 @@ export async function fetchRevenueDashboard(params?: { range?: '7d' | '30d' | 'a
 
 export type AdminWithdrawalStatus = 'pending' | 'approved' | 'rejected';
 
+export type AdminWithdrawalPayoutMethod = 'upi' | 'bank';
+
 export type AdminWithdrawalRow = {
   _id: string;
   withdrawalId: string;
   receiverName: string;
   amount: number;
+  /** RazorpayX destination: UPI (VPA) or legacy bank account */
+  payoutMethod?: AdminWithdrawalPayoutMethod;
   bankName: string;
+  accountHolderName: string;
   accountMasked: string;
   createdAt: string;
   status: AdminWithdrawalStatus;
   payoutStatus?: 'processing' | 'success' | 'failed';
   payoutUtr?: string | null;
+  payoutError?: string | null;
 };
 
 export type AdminWithdrawalStats = {

@@ -10,6 +10,11 @@ import { SCREEN_FETCH_TIMEOUT_MS, withTimeout } from '../../utils/withTimeout';
 
 type Nav = NativeStackNavigationProp<ReceiverStackParamList, 'ReceiverEarningsBreakdown'>;
 
+function formatInr(n: number): string {
+  const v = Math.round(n * 100) / 100;
+  return `₹${v.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`;
+}
+
 export default function ReceiverEarningsBreakdownScreen(): React.JSX.Element {
   const navigation = useNavigation<Nav>();
   const [loading, setLoading] = useState(true);
@@ -52,6 +57,11 @@ export default function ReceiverEarningsBreakdownScreen(): React.JSX.Element {
         </TouchableOpacity>
       </View>
 
+      <View style={styles.rowTop}>
+            <StatCard label="Total Calls" value={String(data.stats.totalCalls)} note={`${Math.round(data.stats.totalMinutes)} minutes`} />
+            <StatCard label="Avg Call" value={`${Math.round(data.stats.avgCallMinutes)} min`} note="per call" />
+          </View>
+
       {loading ? (
         <ActivityIndicator size="large" color="#7b2cff" style={{ marginTop: 20 }} />
       ) : error ? (
@@ -63,21 +73,27 @@ export default function ReceiverEarningsBreakdownScreen(): React.JSX.Element {
         </View>
       ) : data ? (
         <>
-          <View style={styles.rowTop}>
-            <StatCard label="Total Calls" value={String(data.stats.totalCalls)} note={`${Math.round(data.stats.totalMinutes)} minutes`} />
-            <StatCard label="Avg Call" value={`${Math.round(data.stats.avgCallMinutes)} min`} note="per call" />
-          </View>
+          {(() => {
+            const chatEarnings = Math.max(0, data.stats.chatEarnings ?? 0);
+            const callEarnings = Math.max(0, Math.round((data.stats.netEarnings - chatEarnings) * 100) / 100);
+            const bonus = 0;
+            const total = Math.round((callEarnings + chatEarnings + bonus) * 100) / 100;
+            return (
+              <View style={styles.summaryCard}>
+                <Text style={styles.summaryTitle}>This week&apos;s earnings</Text>
+                <Line label="Earnings from calls" value={formatInr(callEarnings)} />
+                <Line label="Earnings from chat" value={formatInr(chatEarnings)} />
+                <Line label="Bonus" value={formatInr(bonus)} />
+                <View style={styles.totalDivider} />
+                <Line label="Total" value={formatInr(total)} strong />
+                <TouchableOpacity style={styles.detailsBtn} onPress={() => navigation.navigate('ReceiverEarningsAnalytics')}>
+                  <Text style={styles.detailsText}>View analytics</Text>
+                </TouchableOpacity>
+              </View>
+            );
+          })()}
 
-          <View style={styles.summaryCard}>
-            <Text style={styles.summaryTitle}>This Week's Earnings</Text>
-            <Line label="Gross Earnings" value={`₹${Math.round(data.stats.grossEarnings)}`} />
-            <Line label="Platform Fee (20%)" value={`-₹${Math.round(data.stats.platformFee)}`} danger />
-            <Line label="Net Earnings" value={`₹${Math.round(data.stats.netEarnings)}`} strong />
-            <Line label="Chat Earnings (included)" value={`₹${Math.round(data.stats.chatEarnings)}`} />
-            <TouchableOpacity style={styles.detailsBtn} onPress={() => navigation.navigate('ReceiverEarningsAnalytics')}>
-              <Text style={styles.detailsText}>View Commission Details</Text>
-            </TouchableOpacity>
-          </View>
+        
 
           <View style={styles.sectionRow}>
             <Text style={styles.sectionTitle}>Call History</Text>
@@ -159,6 +175,12 @@ const styles = StyleSheet.create({
   statNote: { marginTop: 2, fontSize: 10, color: '#999', fontWeight: '600' },
   summaryCard: { marginTop: 10, backgroundColor: '#e97cdd', borderRadius: 12, borderWidth: 1, borderColor: '#d85ec8', padding: 12 },
   summaryTitle: { fontSize: 14, color: '#4b1f45', fontWeight: '900', marginBottom: 8 },
+  totalDivider: {
+    marginTop: 10,
+    marginBottom: 2,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(75, 31, 69, 0.25)',
+  },
   lineRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 8 },
   lineLabel: { fontSize: 12, color: '#4b1f45', fontWeight: '700' },
   lineValue: { fontSize: 18, color: '#241824', fontWeight: '900' },

@@ -51,17 +51,25 @@ function basicAuthHeader(keyId: string, keySecret: string): string {
   return `Basic ${Buffer.from(raw, 'utf8').toString('base64')}`;
 }
 
+type RazorpayFundAccount =
+  | {
+      account_type: 'bank_account';
+      bank_account: { name: string; ifsc: string; account_number: string };
+      contact: { name: string; email: string; contact: string; type: string; reference_id: string };
+    }
+  | {
+      account_type: 'vpa';
+      vpa: { address: string };
+      contact: { name: string; email: string; contact: string; type: string; reference_id: string };
+    };
+
 async function razorpayCreatePayout(params: {
   accountNumber: string;
   amountPaise: number;
   currency: 'INR';
-  mode: 'IMPS' | 'NEFT' | 'RTGS';
+  mode: 'IMPS' | 'NEFT' | 'RTGS' | 'UPI';
   purpose: string;
-  fundAccount: {
-    account_type: 'bank_account';
-    bank_account: { name: string; ifsc: string; account_number: string };
-    contact: { name: string; email: string; contact: string; type: string; reference_id: string };
-  };
+  fundAccount: RazorpayFundAccount;
   referenceId: string;
   narration: string;
   idempotencyKey: string;
@@ -174,7 +182,7 @@ export async function trackAndFinalizeRazorpayXPayout(withdrawalId: string): Pro
   if (withdrawal.payoutStatus !== 'processing') return;
 
   const receiver = await Receiver.findById(withdrawal.receiverId).select(
-    'name email phone bankAccountHolderName bankAccountNumber bankIfsc bankName walletBalance'
+    'name email phone nameAsPerAadhaar upiId bankAccountHolderName bankAccountNumber bankIfsc bankName walletBalance'
   );
   if (!receiver) {
     await WithdrawalRequest.findByIdAndUpdate(withdrawalId, {
@@ -191,16 +199,19 @@ export async function trackAndFinalizeRazorpayXPayout(withdrawalId: string): Pro
     return;
   }
 
-  if (
-    !safeTrim(receiver.bankAccountNumber) ||
-    !safeTrim(receiver.bankIfsc) ||
-    !safeTrim(receiver.bankAccountHolderName) ||
-    !safeTrim(receiver.phone)
-  ) {
+  const upiId = safeTrim(receiver.upiId).toLowerCase();
+  const payeeName = safeTrim(receiver.nameAsPerAadhaar) || safeTrim(receiver.bankAccountHolderName) || safeTrim(receiver.name);
+  const hasUpi = /^[a-z0-9._-]{2,256}@[a-z]{3,}$/i.test(upiId);
+  const hasBank =
+    Boolean(safeTrim(receiver.bankAccountNumber)) &&
+    Boolean(safeTrim(receiver.bankIfsc)) &&
+    Boolean(safeTrim(receiver.bankAccountHolderName));
+
+  if ((!hasUpi && !hasBank) || !safeTrim(receiver.phone) || !payeeName) {
     await WithdrawalRequest.findByIdAndUpdate(withdrawalId, {
       status: 'rejected',
       payoutStatus: 'failed',
-      payoutError: 'Receiver bank/contact details missing',
+      payoutError: 'Receiver payment/contact details missing',
     });
     emitReceiverWithdrawalUpdate(String(withdrawal.receiverId), {
       withdrawalId,
@@ -212,8 +223,13 @@ export async function trackAndFinalizeRazorpayXPayout(withdrawalId: string): Pro
   }
 
   const payoutAccountNumber = process.env.RAZORPAYX_ACCOUNT_NUMBER?.trim();
-  const modeRaw = process.env.RAZORPAYX_PAYOUT_MODE?.trim().toUpperCase() || 'IMPS';
-  const mode: 'IMPS' | 'NEFT' | 'RTGS' = modeRaw === 'NEFT' || modeRaw === 'RTGS' || modeRaw === 'IMPS' ? modeRaw : 'IMPS';
+  const modeRaw = process.env.RAZORPAYX_PAYOUT_MODE?.trim().toUpperCase() || (hasUpi ? 'UPI' : 'IMPS');
+  const mode: 'IMPS' | 'NEFT' | 'RTGS' | 'UPI' =
+    modeRaw === 'UPI' || (hasUpi && modeRaw !== 'NEFT' && modeRaw !== 'RTGS' && modeRaw !== 'IMPS')
+      ? 'UPI'
+      : modeRaw === 'NEFT' || modeRaw === 'RTGS' || modeRaw === 'IMPS'
+        ? modeRaw
+        : 'IMPS';
   const purpose = process.env.RAZORPAYX_PAYOUT_PURPOSE?.trim() || 'payout';
   const narration = safeTrim(process.env.RAZORPAYX_PAYOUT_NARRATION) || 'DatingApp Payout';
 
@@ -240,6 +256,30 @@ export async function trackAndFinalizeRazorpayXPayout(withdrawalId: string): Pro
   try {
     if (!payoutId) {
       const refId = referenceBase.slice(0, 40);
+      const contact = {
+        name: payeeName || 'Receiver',
+        email: razorpayContactEmailFromPhone(safeTrim(receiver.phone)),
+        contact: safeTrim(receiver.phone),
+        type: 'customer',
+        reference_id: `recv_${String(receiver._id).slice(-10)}`.slice(0, 40),
+      };
+      const fundAccount: RazorpayFundAccount =
+        mode === 'UPI' && hasUpi
+          ? {
+              account_type: 'vpa',
+              vpa: { address: upiId },
+              contact,
+            }
+          : {
+              account_type: 'bank_account',
+              bank_account: {
+                name: safeTrim(receiver.bankAccountHolderName) || payeeName || 'Receiver',
+                ifsc: safeTrim(receiver.bankIfsc),
+                account_number: safeTrim(receiver.bankAccountNumber),
+              },
+              contact,
+            };
+
       const payout = await razorpayCreatePayout({
         accountNumber: payoutAccountNumber,
         amountPaise,
@@ -249,21 +289,7 @@ export async function trackAndFinalizeRazorpayXPayout(withdrawalId: string): Pro
         referenceId: refId,
         narration: narration.slice(0, 30),
         idempotencyKey,
-        fundAccount: {
-          account_type: 'bank_account',
-          bank_account: {
-            name: safeTrim(receiver.bankAccountHolderName) || 'Receiver',
-            ifsc: safeTrim(receiver.bankIfsc),
-            account_number: safeTrim(receiver.bankAccountNumber),
-          },
-          contact: {
-            name: safeTrim(receiver.bankAccountHolderName) || 'Receiver',
-            email: razorpayContactEmailFromPhone(safeTrim(receiver.phone)),
-            contact: safeTrim(receiver.phone),
-            type: 'customer',
-            reference_id: `recv_${String(receiver._id).slice(-10)}`.slice(0, 40),
-          },
-        },
+        fundAccount,
       });
 
       const createdPayoutId = safeTrim(payout.id) || null;

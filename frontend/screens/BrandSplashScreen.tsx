@@ -183,32 +183,6 @@ export default function BrandSplashScreen({ navigation, route }: Props): React.J
         />
       </Animated.View>
 
-      {/* Animated border rings around logo */}
-      <Animated.View
-        style={[
-          styles.ring1,
-          {
-            opacity: borderOpacity,
-            transform: [{ scale: borderPulseAnim.interpolate({
-              inputRange: [0, 1],
-              outputRange: [1, 1.2],
-            }) }],
-          },
-        ]}
-      />
-      <Animated.View
-        style={[
-          styles.ring2,
-          {
-            opacity: borderOpacity,
-            transform: [{ scale: borderPulseAnim.interpolate({
-              inputRange: [0, 1],
-              outputRange: [1, 1.4],
-            }) }],
-          },
-        ]}
-      />
-
       {/* Floating Particles */}
       <View style={styles.particlesContainer}>
         {[...Array(15)].map((_, i) => {
@@ -281,16 +255,14 @@ export default function BrandSplashScreen({ navigation, route }: Props): React.J
               },
             ]}
           />
-          <View style={styles.logoBorder}>
-            <Image
-              source={require('../assets/SelectoLogo.png')}
-              style={styles.logo}
-              resizeMode="contain"
-            />
-          </View>
+          <Image
+            source={require('../assets/logo.png')}
+            style={styles.logo}
+            resizeMode="contain"
+          />
         </Animated.View>
 
-        {/* App Name with Stagger Animation */}
+        {/* Logo Text Image */}
         <Animated.View
           style={[
             styles.titleWrapper,
@@ -300,9 +272,11 @@ export default function BrandSplashScreen({ navigation, route }: Props): React.J
             },
           ]}
         >
-          <Text style={styles.appName}>
-            Selecto
-          </Text>
+          <Image
+            source={require('../assets/logoText.png')}
+            style={styles.logoTextImage}
+            resizeMode="contain"
+          />
           <Animated.View
             style={[
               styles.underline,
@@ -370,22 +344,6 @@ const styles = StyleSheet.create({
     position: 'absolute',
     borderRadius: 10,
   },
-  ring1: {
-    position: 'absolute',
-    width: 180,
-    height: 180,
-    borderRadius: 90,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.3)',
-  },
-  ring2: {
-    position: 'absolute',
-    width: 200,
-    height: 200,
-    borderRadius: 100,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.2)',
-  },
   content: {
     alignItems: 'center',
     justifyContent: 'center',
@@ -410,35 +368,17 @@ const styles = StyleSheet.create({
     shadowRadius: 30,
     elevation: 10,
   },
-  logoBorder: {
-    width: 130,
-    height: 130,
-    borderRadius: 65,
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.2)',
-  },
   logo: {
     width: 100,
     height: 100,
-    borderRadius: 50,
   },
   titleWrapper: {
     alignItems: 'center',
     marginTop: 8,
   },
-  appName: {
-    fontSize: 42,
-    fontWeight: '800',
-    color: '#FFFFFF',
-    textAlign: 'center',
-    fontFamily: Platform.select({ ios: 'Georgia', android: 'serif' }),
-    letterSpacing: 1,
-    textShadowColor: 'rgba(0,0,0,0.2)',
-    textShadowOffset: { width: 0, height: 2 },
-    textShadowRadius: 8,
+  logoTextImage: {
+    width: 180,
+    height: 50,
   },
   underline: {
     height: 2,

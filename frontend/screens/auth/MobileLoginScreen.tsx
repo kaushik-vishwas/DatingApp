@@ -465,7 +465,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 0,
   },
   bannerSlide: {
-    height: 200,
+    height: 130,
     borderRadius: 20,
     overflow: 'hidden',
     marginHorizontal: 0,

@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.resolveWithdrawal = exports.listWithdrawals = exports.resolveModerationReport = exports.listModerationReports = exports.rejectAppUser = exports.approveAppUser = exports.listPendingAppUsers = exports.rejectReceiver = exports.approveReceiver = exports.listPendingReceivers = exports.getKycStats = exports.listAllReceivers = exports.updateReceiver = exports.updateAppUser = exports.listAppUsers = exports.getOverviewDashboard = exports.getRevenueDashboard = exports.updateAdminRole = exports.updateAdminNotificationControls = exports.getAdminSettings = exports.adminConfirmEmailChange = exports.adminRequestEmailChange = exports.adminResetPassword = exports.adminForgotPassword = exports.adminMe = exports.adminLogin = void 0;
+exports.resolveWithdrawal = exports.listWithdrawals = exports.resolveModerationReport = exports.listModerationReports = exports.rejectAppUser = exports.approveAppUser = exports.listPendingAppUsers = exports.rejectReceiver = exports.approveReceiver = exports.listPendingReceivers = exports.getKycStats = exports.listAllReceivers = exports.updateReceiver = exports.updateAppUser = exports.listAppUsers = exports.getOverviewDashboard = exports.getRevenueDashboard = exports.updateAdminRole = exports.updateAdminReceiverEarningModel = exports.updateAdminNotificationControls = exports.getAdminSettings = exports.adminConfirmEmailChange = exports.adminRequestEmailChange = exports.adminResetPassword = exports.adminForgotPassword = exports.adminMe = exports.adminLogin = void 0;
 const bcryptjs_1 = __importDefault(require("bcryptjs"));
 const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
 const mongoose_1 = __importDefault(require("mongoose"));
@@ -15,6 +15,7 @@ const WithdrawalRequest_1 = __importDefault(require("../models/WithdrawalRequest
 const CallSession_1 = __importDefault(require("../models/CallSession"));
 const ChatMessage_1 = __importDefault(require("../models/ChatMessage"));
 const AdminSettings_1 = __importDefault(require("../models/AdminSettings"));
+const receiverEarningModel_1 = require("../services/receiverEarningModel");
 const authController_1 = require("./authController");
 const email_1 = require("../config/email");
 const superAdminSync_1 = require("../services/superAdminSync");
@@ -387,12 +388,18 @@ const getAdminSettings = async (req, res) => {
             .select('_id name email role createdAt')
             .sort({ createdAt: 1 })
             .lean();
+        const earningModel = effective.receiverEarningModel === 'fixed_per_minute' ? 'fixed_per_minute' : receiverEarningModel_1.DEFAULT_RECEIVER_EARNING_MODEL;
+        const fixedPerMinuteWindows = (0, receiverEarningModel_1.normalizeFixedPerMinuteWindows)(effective.fixedPerMinuteWindows?.length
+            ? effective.fixedPerMinuteWindows
+            : receiverEarningModel_1.DEFAULT_FIXED_PER_MINUTE_WINDOWS);
         res.status(200).json({
             notificationControls: {
                 kycSubmissionsEmail: Boolean(effective.notificationControls?.kycSubmissionsEmail ?? true),
                 pendingWithdrawalsEmail: Boolean(effective.notificationControls?.pendingWithdrawalsEmail ?? true),
                 dailyRevenueSummaryEmail: Boolean(effective.notificationControls?.dailyRevenueSummaryEmail ?? true),
             },
+            receiverEarningModel: earningModel,
+            fixedPerMinuteWindows,
             rolesCatalog: [
                 { id: 'super_admin', label: 'Super Admin', description: 'Full access to all features' },
                 { id: 'support_admin', label: 'Support Admin', description: 'Can manage KYC, users, and reports' },
@@ -450,6 +457,46 @@ const updateAdminNotificationControls = async (req, res) => {
     }
 };
 exports.updateAdminNotificationControls = updateAdminNotificationControls;
+/**
+ * PATCH /admin/settings/earning-model
+ */
+const updateAdminReceiverEarningModel = async (req, res) => {
+    try {
+        const body = req.body ?? {};
+        const model = body.receiverEarningModel;
+        if (model !== 'score_based' && model !== 'fixed_per_minute') {
+            res.status(400).json({ message: 'receiverEarningModel must be score_based or fixed_per_minute' });
+            return;
+        }
+        const windows = model === 'fixed_per_minute'
+            ? (0, receiverEarningModel_1.normalizeFixedPerMinuteWindows)(body.fixedPerMinuteWindows ?? receiverEarningModel_1.DEFAULT_FIXED_PER_MINUTE_WINDOWS)
+            : (0, receiverEarningModel_1.normalizeFixedPerMinuteWindows)((await AdminSettings_1.default.findOne({}).select('fixedPerMinuteWindows').lean())?.fixedPerMinuteWindows ??
+                receiverEarningModel_1.DEFAULT_FIXED_PER_MINUTE_WINDOWS);
+        const settings = await AdminSettings_1.default.findOneAndUpdate({}, {
+            $set: {
+                receiverEarningModel: model,
+                fixedPerMinuteWindows: windows,
+            },
+        }, { new: true, upsert: true, setDefaultsOnInsert: true });
+        (0, receiverEarningModel_1.clearReceiverEarningSettingsCache)();
+        const payload = (0, receiverEarningModel_1.publicEarningSchedulePayload)({
+            receiverEarningModel: settings.receiverEarningModel,
+            fixedPerMinuteWindows: (0, receiverEarningModel_1.normalizeFixedPerMinuteWindows)(settings.fixedPerMinuteWindows),
+        });
+        res.status(200).json({
+            ok: true,
+            receiverEarningModel: payload.receiverEarningModel,
+            fixedPerMinuteWindows: payload.fixedPerMinuteWindows,
+            earningTimezone: payload.timezone,
+        });
+    }
+    catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error('updateAdminReceiverEarningModel error:', msg);
+        res.status(500).json({ message: msg || 'Server error' });
+    }
+};
+exports.updateAdminReceiverEarningModel = updateAdminReceiverEarningModel;
 /**
  * PATCH /admin/settings/admins/:id/role — super_admin only.
  */
@@ -1574,18 +1621,24 @@ const listWithdrawals = async (req, res) => {
                 processedCount,
                 processedTodayAmount,
             },
-            rows: rows.map((row) => ({
-                _id: String(row._id),
-                withdrawalId: `W-${String(row._id).slice(-6).toUpperCase()}`,
-                receiverName: receiverNameById.get(String(row.receiverId)) ?? 'Receiver',
-                amount: row.amount,
-                bankName: row.bankName,
-                accountMasked: row.accountMasked,
-                createdAt: row.createdAt.toISOString(),
-                status: row.status,
-                payoutStatus: row.payoutStatus && row.payoutStatus !== 'none' ? row.payoutStatus : undefined,
-                payoutUtr: row.payoutUtr,
-            })),
+            rows: rows.map((row) => {
+                const isUpi = String(row.bankName ?? '').trim().toUpperCase() === 'UPI';
+                return {
+                    _id: String(row._id),
+                    withdrawalId: `W-${String(row._id).slice(-6).toUpperCase()}`,
+                    receiverName: receiverNameById.get(String(row.receiverId)) ?? 'Receiver',
+                    amount: row.amount,
+                    payoutMethod: isUpi ? 'upi' : 'bank',
+                    bankName: row.bankName,
+                    accountHolderName: row.accountHolderName,
+                    accountMasked: row.accountMasked,
+                    createdAt: row.createdAt.toISOString(),
+                    status: row.status,
+                    payoutStatus: row.payoutStatus && row.payoutStatus !== 'none' ? row.payoutStatus : undefined,
+                    payoutUtr: row.payoutUtr,
+                    payoutError: row.payoutError ?? undefined,
+                };
+            }),
             total: totalBase,
             page,
             limit,

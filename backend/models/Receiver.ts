@@ -23,6 +23,10 @@ export interface IReceiver {
   aadhaarNumber: string | null;
   panNumber: string | null;
   panFront: string | null;
+  /** Legal name for payouts (as on Aadhaar). */
+  nameAsPerAadhaar: string | null;
+  /** UPI VPA for withdrawal payouts (e.g. name@bank). */
+  upiId: string | null;
   bankAccountHolderName: string | null;
   bankAccountType: BankAccountType | null;
   bankAccountNumber: string | null;
@@ -50,6 +54,13 @@ export interface IReceiver {
   moderationWarningAt: Date | null;
   /** Last admin-provided reason when KYC is rejected. */
   rejectionReason: string | null;
+  pendingNameAsPerAadhaar: string | null;
+  pendingUpiId: string | null;
+  pendingAadhaarNumber: string | null;
+  pendingPanNumber: string | null;
+  pendingAadhaarFront: string | null;
+  pendingAadhaarBack: string | null;
+  pendingPanFront: string | null;
   pendingBankAccountHolderName: string | null;
   pendingBankAccountType: BankAccountType | null;
   pendingBankAccountNumber: string | null;
@@ -92,6 +103,8 @@ const receiverSchema = new Schema<IReceiver>(
     aadhaarNumber: { type: String, default: null },
     panNumber: { type: String, default: null },
     panFront: { type: String, default: null },
+    nameAsPerAadhaar: { type: String, default: null },
+    upiId: { type: String, default: null },
     bankAccountHolderName: { type: String, default: null },
     bankAccountType: { type: String, enum: ['savings', 'current'], default: null },
     bankAccountNumber: { type: String, default: null },
@@ -111,6 +124,13 @@ const receiverSchema = new Schema<IReceiver>(
     isOnline: { type: Boolean, default: false },
     moderationWarningAt: { type: Date, default: null },
     rejectionReason: { type: String, default: null },
+    pendingNameAsPerAadhaar: { type: String, default: null },
+    pendingUpiId: { type: String, default: null },
+    pendingAadhaarNumber: { type: String, default: null },
+    pendingPanNumber: { type: String, default: null },
+    pendingAadhaarFront: { type: String, default: null },
+    pendingAadhaarBack: { type: String, default: null },
+    pendingPanFront: { type: String, default: null },
     pendingBankAccountHolderName: { type: String, default: null },
     pendingBankAccountType: { type: String, enum: ['savings', 'current'], default: null },
     pendingBankAccountNumber: { type: String, default: null },

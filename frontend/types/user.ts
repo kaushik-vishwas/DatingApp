@@ -24,6 +24,8 @@ export interface UserProfile {
   aadhaarNumber?: string | null;
   panNumber?: string | null;
   panFront?: string | null;
+  nameAsPerAadhaar?: string | null;
+  upiId?: string | null;
   bankAccountHolderName: string | null;
   bankAccountType: BankAccountType | null;
   bankAccountNumber: string | null;

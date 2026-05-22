@@ -149,7 +149,7 @@ const DiscoverReceiverRow = React.memo(function DiscoverReceiverRow({
   const presence = getReceiverPresenceInfo(item);
   const statusColor = presence.color;
   const statusLabel = presence.label;
-  const interestStr = item.interests.length > 0 ? item.interests.slice(0, 3).join(' • ') : '—';
+  const interestStr = item.interests.length > 0 ? item.interests.slice(0, 3).join(' | ') : '—';
   const displayedLanguages = item.languages.slice(0, 2).map((lang) => lang.substring(0, 3));
   const remainingCount = item.languages.length - 2;
   const receiverAvatarSource = resolveProfileImageSource(item.profileImage);
@@ -158,7 +158,7 @@ const DiscoverReceiverRow = React.memo(function DiscoverReceiverRow({
     <TouchableOpacity
       style={styles.card}
       activeOpacity={0.92}
-      // onPress={() => onOpenProfile(item)}
+    // onPress={() => onOpenProfile(item)}
     >
       <View style={styles.cardRow}>
         <View style={styles.leftColumn}>
@@ -175,7 +175,7 @@ const DiscoverReceiverRow = React.memo(function DiscoverReceiverRow({
           <View style={styles.ratingBelow}>
             <Text style={styles.star}>★</Text>
             <Text style={styles.ratingText}>{item.ratingAvg}</Text>
-            <Text style={styles.ratingCount}>({item.ratingCount})</Text>
+            {/* <Text style={styles.ratingCount}>({item.ratingCount})</Text> */}
           </View>
         </View>
         <View style={styles.infoSection}>
@@ -199,7 +199,7 @@ const DiscoverReceiverRow = React.memo(function DiscoverReceiverRow({
           </View>
         </View>
         <View style={styles.rightColumn}>
-          <View style={styles.languagesRow}>f
+          <View style={styles.languagesRow}>
             {displayedLanguages.map((lang) => (
               <View key={lang} style={styles.miniLang}>
                 <Text style={styles.miniLangText}>{lang}</Text>
@@ -480,22 +480,22 @@ export default function CallerDiscoverHome(): React.JSX.Element {
             <View style={styles.promoTwoColumns}>
               <View style={styles.promoLeftColumn}>
                 <View style={styles.promoBtn}>
-                <View style={styles.randomBtnContent}>
-  {!randomCallMatchingVisible && (
-    <Ionicons
-      name="shuffle-outline"
-      size={24}
-      color={PURPLE}
-    />
-  )}
+                  <View style={styles.randomBtnContent}>
+                    {!randomCallMatchingVisible && (
+                      <Ionicons
+                        name="shuffle-outline"
+                        size={24}
+                        color={PURPLE}
+                      />
+                    )}
 
-  <Text
-    style={styles.promoBtnText}
-    numberOfLines={1}
-  >
-    {randomCallMatchingVisible ? 'Please wait…' : 'Random Call'}
-  </Text>
-</View>
+                    <Text
+                      style={styles.promoBtnText}
+                      numberOfLines={1}
+                    >
+                      {randomCallMatchingVisible ? 'Please wait…' : 'Random Call'}
+                    </Text>
+                  </View>
                 </View>
               </View>
               <View style={styles.promoRightColumn}>
@@ -960,7 +960,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: 5,
   },
-  
+
   promoBtn: {
     backgroundColor: 'rgba(255,255,255,0.95)',
     paddingHorizontal: 11,
@@ -1132,7 +1132,7 @@ const styles = StyleSheet.create({
   // Add wrapper/card for the rate section
   // Update rateCard to be an inline badge (width fits content)
   rateCard: {
-    backgroundColor: '#74C365',
+    backgroundColor: PURPLE,
     borderRadius: 8,
     paddingHorizontal: 8,
     paddingVertical: 4,
@@ -1202,7 +1202,7 @@ const styles = StyleSheet.create({
   },
 
   callNowButton: {
-    backgroundColor: PURPLE,
+    backgroundColor: '#00A86B',
     paddingHorizontal: 9,      // Further reduced from 12 to 8
     paddingVertical: 7,        // Further reduced from 6 to 4
     borderRadius: 15,          // Further reduced from 16 to 12
@@ -1215,14 +1215,14 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
     elevation: 3,
   },
-  
+
 
   callNowButtonDisabled: {
-    backgroundColor: '#C4B5FD',
+    backgroundColor: '#8FD18F',
     shadowOpacity: 0,
     elevation: 0,
   },
-  
+
 
   callNowButtonText: {
     color: '#fff',

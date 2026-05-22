@@ -3,19 +3,31 @@ import { useAdminAuth } from '../context/AdminAuthContext';
 import {
   fetchAdminSettings,
   updateAdminRole,
+  updateAdminReceiverEarningModel,
   updateAdminSettingsNotifications,
   type AdminRole,
   type AdminSettingsResponse,
+  type FixedPerMinuteWindow,
+  type ReceiverEarningModel,
 } from '../api/client';
+
+const DEFAULT_WINDOWS: FixedPerMinuteWindow[] = [
+  { id: 'day', label: '6 AM – 9 PM', from: '06:00', to: '21:00', ratePerMinute: 2 },
+  { id: 'evening', label: '9 PM – 11 PM', from: '21:00', to: '23:00', ratePerMinute: 2.2 },
+  { id: 'night', label: '11 PM – 6 AM', from: '23:00', to: '06:00', ratePerMinute: 2.5 },
+];
 
 export function SettingsPage() {
   const { admin } = useAdminAuth();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [savingEarning, setSavingEarning] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [ok, setOk] = useState<string | null>(null);
   const [data, setData] = useState<AdminSettingsResponse | null>(null);
   const [notifications, setNotifications] = useState<AdminSettingsResponse['notificationControls'] | null>(null);
+  const [earningModel, setEarningModel] = useState<ReceiverEarningModel>('score_based');
+  const [fixedWindows, setFixedWindows] = useState<FixedPerMinuteWindow[]>(DEFAULT_WINDOWS);
   const canManageRoles = admin?.role === 'super_admin';
 
   const roleLabelById = useMemo(() => {
@@ -31,6 +43,10 @@ export function SettingsPage() {
       const res = await fetchAdminSettings();
       setData(res);
       setNotifications(res.notificationControls);
+      setEarningModel(res.receiverEarningModel ?? 'score_based');
+      setFixedWindows(
+        res.fixedPerMinuteWindows?.length ? res.fixedPerMinuteWindows : DEFAULT_WINDOWS
+      );
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Failed to load settings');
     } finally {
@@ -58,6 +74,28 @@ export function SettingsPage() {
     }
   };
 
+  const onSaveEarningModel = async () => {
+    setSavingEarning(true);
+    setError(null);
+    setOk(null);
+    try {
+      const res = await updateAdminReceiverEarningModel({
+        receiverEarningModel: earningModel,
+        fixedPerMinuteWindows: fixedWindows.map((w) => ({
+          ...w,
+          ratePerMinute: Number(w.ratePerMinute) || 0,
+        })),
+      });
+      setEarningModel(res.receiverEarningModel);
+      setFixedWindows(res.fixedPerMinuteWindows);
+      setOk('Receiver earning model updated. Active receivers will use the new rates on the next call sync.');
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Failed to save earning model');
+    } finally {
+      setSavingEarning(false);
+    }
+  };
+
   const onChangeRole = async (adminId: string, role: AdminRole) => {
     if (!canManageRoles) return;
     setError(null);
@@ -78,16 +116,22 @@ export function SettingsPage() {
     }
   };
 
+  const updateWindowRate = (id: string, ratePerMinute: number) => {
+    setFixedWindows((prev) =>
+      prev.map((w) => (w.id === id ? { ...w, ratePerMinute: Math.max(0, ratePerMinute) } : w))
+    );
+  };
+
   return (
     <div className="p-8">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-2xl font-bold text-neutral-900">Platform Settings</h1>
         <button
           onClick={() => void onSaveNotifications()}
           disabled={saving || loading || !notifications}
           className="rounded-lg bg-[#7b2cff] px-4 py-2 text-xs font-semibold text-white disabled:opacity-60"
         >
-          {saving ? 'Saving...' : 'Save Changes'}
+          {saving ? 'Saving...' : 'Save notifications'}
         </button>
       </div>
       {error ? (
@@ -99,15 +143,81 @@ export function SettingsPage() {
 
       <div className="mt-6 space-y-5">
         {/* <section className="rounded-xl border border-neutral-200 bg-white p-5">
-          <h2 className="text-sm font-bold text-neutral-800">Commission Settings</h2>
-          <div className="mt-3 max-w-xs">
-            <label className="text-[11px] font-medium text-neutral-500">Platform Commission (%)</label>
-            <input
-              defaultValue="20"
-              className="mt-1 w-full rounded-lg border border-neutral-200 px-3 py-2 text-sm font-medium text-neutral-700 outline-none ring-[#7b2cff]/30 focus:border-[#7b2cff] focus:ring-2"
-            />
-            <p className="mt-1 text-[11px] text-neutral-400">Current: 20% | Receivers keep 80%</p>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h2 className="text-sm font-bold text-neutral-800">Receiver earning model</h2>
+              <p className="mt-1 text-[11px] text-neutral-500">
+                Score based keeps the existing badge/score system. Fixed per minute uses IST time windows below.
+              </p>
+            </div>
+            <button
+              onClick={() => void onSaveEarningModel()}
+              disabled={savingEarning || loading}
+              className="rounded-lg border border-[#7b2cff] bg-white px-4 py-2 text-xs font-semibold text-[#7b2cff] disabled:opacity-60"
+            >
+              {savingEarning ? 'Saving...' : 'Save earning model'}
+            </button>
           </div>
+
+          <div className="mt-4 flex flex-wrap gap-3">
+            <label className="flex cursor-pointer items-center gap-2 rounded-lg border border-neutral-200 px-3 py-2 text-sm">
+              <input
+                type="radio"
+                name="earningModel"
+                checked={earningModel === 'score_based'}
+                onChange={() => setEarningModel('score_based')}
+                className="accent-[#7b2cff]"
+              />
+              Score based
+            </label>
+            <label className="flex cursor-pointer items-center gap-2 rounded-lg border border-neutral-200 px-3 py-2 text-sm">
+              <input
+                type="radio"
+                name="earningModel"
+                checked={earningModel === 'fixed_per_minute'}
+                onChange={() => setEarningModel('fixed_per_minute')}
+                className="accent-[#7b2cff]"
+              />
+              Fixed per minute
+            </label>
+          </div>
+
+          {earningModel === 'fixed_per_minute' ? (
+            <div className="mt-4 overflow-hidden rounded-lg border border-neutral-200">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-neutral-50 text-[11px] uppercase tracking-wide text-neutral-500">
+                  <tr>
+                    <th className="px-3 py-2">Window (IST)</th>
+                    <th className="px-3 py-2">Rate (₹/min)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {fixedWindows.map((w) => (
+                    <tr key={w.id} className="border-t border-neutral-100">
+                      <td className="px-3 py-2.5 font-medium text-neutral-800">{w.label}</td>
+                      <td className="px-3 py-2.5">
+                        <input
+                          type="number"
+                          min={0}
+                          step={0.1}
+                          value={w.ratePerMinute}
+                          onChange={(e) => updateWindowRate(w.id, Number(e.target.value))}
+                          className="w-28 rounded-lg border border-neutral-200 px-2 py-1.5 text-sm font-medium text-neutral-800"
+                        />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <p className="border-t border-neutral-100 bg-neutral-50 px-3 py-2 text-[11px] text-neutral-500">
+                Times are Asia/Kolkata. Calls crossing a window are settled using each minute&apos;s rate.
+              </p>
+            </div>
+          ) : (
+            <p className="mt-3 text-[11px] text-neutral-500">
+              Platinum / Diamond / Supreme badges and score multipliers remain unchanged.
+            </p>
+          )}
         </section> */}
 
         <section className="rounded-xl border border-neutral-200 bg-white p-5">

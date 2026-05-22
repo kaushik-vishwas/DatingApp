@@ -163,7 +163,7 @@ function getReceiverEarnRatePerMinute(params: VoiceCallScreenParams): number {
 }
 
 export default function VoiceCallScreen({ navigation, route }: Props): React.JSX.Element {
-  const MIN_RATING_SECONDS = 55;
+  const MIN_RATING_SECONDS = 60;
   const insets = useSafeAreaInsets();
   const { user } = useAuth();
   const { cancelOutgoingCallInvite } = useCallSignals();

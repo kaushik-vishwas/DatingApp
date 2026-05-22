@@ -62,6 +62,7 @@ const socketRegistry_1 = require("../socket/socketRegistry");
 const apiTraceLog_1 = require("../utils/apiTraceLog");
 const callerMessageEligibility_1 = require("../utils/callerMessageEligibility");
 const callController_1 = require("./callController");
+const receiverEarningModel_1 = require("../services/receiverEarningModel");
 function callerCallNotificationSubtitle(durationSec) {
     const d = Math.max(0, Math.floor(Number(durationSec) || 0));
     if (d <= 0)
@@ -79,6 +80,28 @@ function receiverOnboardingProfileFieldsComplete(r) {
         r.languages.length > 0 &&
         Array.isArray(r.interests) &&
         r.interests.length > 0);
+}
+function normalizeUpiId(raw) {
+    return typeof raw === 'string' ? raw.trim().toLowerCase() : '';
+}
+function isValidUpiId(upi) {
+    return /^[a-z0-9._-]{2,256}@[a-z]{3,}$/i.test(upi);
+}
+function maskUpiId(upi) {
+    const trimmed = upi.trim();
+    const at = trimmed.indexOf('@');
+    if (at <= 0)
+        return '****';
+    return `****${trimmed.slice(at)}`;
+}
+function receiverPaymentDetailsComplete(r) {
+    const aadhaarDigits = String(r.aadhaarNumber ?? '').replace(/\D/g, '');
+    const pan = String(r.panNumber ?? '').trim().toUpperCase();
+    return Boolean(r.nameAsPerAadhaar?.trim() &&
+        r.upiId?.trim() &&
+        isValidUpiId(normalizeUpiId(r.upiId)) &&
+        /^\d{12}$/.test(aadhaarDigits) &&
+        /^[A-Z]{5}[0-9]{4}[A-Z]$/.test(pan));
 }
 function parseCallerAudioHttpsUrl(body) {
     const raw = typeof body.userAudio === 'string'
@@ -1102,15 +1125,9 @@ const getReceiverWithdrawalOverview = async (req, res) => {
         if ((0, accountAccess_1.blockReceiverUntilApproved)(req, res))
             return;
         const rid = String(req.receiver._id);
-        const receiver = await Receiver_1.default.findById(rid).select('walletBalance phone bankName bankAccountHolderName bankAccountNumber');
+        const receiver = await Receiver_1.default.findById(rid).select('walletBalance phone nameAsPerAadhaar upiId aadhaarNumber panNumber');
         if (!receiver) {
             res.status(404).json({ message: 'Receiver not found' });
-            return;
-        }
-        if (!receiver.bankName ||
-            !receiver.bankAccountHolderName ||
-            !receiver.bankAccountNumber) {
-            res.status(400).json({ message: 'Please complete bank details before requesting a withdrawal' });
             return;
         }
         const recentRows = await WithdrawalRequest_1.default.find({
@@ -1129,10 +1146,15 @@ const getReceiverWithdrawalOverview = async (req, res) => {
             pendingAmount: withdrawable.pendingAmount,
             totalEarnings: withdrawable.totalEarnings,
             totalWithdrawn: withdrawable.totalWithdrawn,
+            payment: {
+                nameAsPerAadhaar: receiver.nameAsPerAadhaar ?? '',
+                upiMasked: receiver.upiId ? maskUpiId(receiver.upiId) : '',
+                complete: receiverPaymentDetailsComplete(receiver),
+            },
             bank: {
-                bankName: receiver.bankName,
-                accountHolderName: receiver.bankAccountHolderName,
-                accountMasked: maskAccountNumber(receiver.bankAccountNumber),
+                bankName: 'UPI',
+                accountHolderName: receiver.nameAsPerAadhaar ?? '',
+                accountMasked: receiver.upiId ? maskUpiId(receiver.upiId) : '',
             },
             phoneMasked: receiver.phone ? maskPhone(receiver.phone) : '',
             recent: recentRows.map((row) => ({
@@ -1168,7 +1190,7 @@ const sendReceiverWithdrawalOtp = async (req, res) => {
             return;
         }
         const rid = String(req.receiver._id);
-        const receiver = await Receiver_1.default.findById(rid).select('phone walletBalance bankName bankAccountHolderName bankAccountNumber');
+        const receiver = await Receiver_1.default.findById(rid).select('phone walletBalance nameAsPerAadhaar upiId aadhaarNumber panNumber');
         if (!receiver) {
             res.status(404).json({ message: 'Receiver not found' });
             return;
@@ -1178,10 +1200,8 @@ const sendReceiverWithdrawalOtp = async (req, res) => {
             res.status(400).json({ message: 'Insufficient wallet balance' });
             return;
         }
-        if (!receiver.bankName ||
-            !receiver.bankAccountHolderName ||
-            !receiver.bankAccountNumber) {
-            res.status(400).json({ message: 'Please complete bank details before requesting a withdrawal' });
+        if (!receiverPaymentDetailsComplete(receiver)) {
+            res.status(400).json({ message: 'Please complete payment details before requesting a withdrawal' });
             return;
         }
         const code = generateOtpCode();
@@ -1196,9 +1216,9 @@ const sendReceiverWithdrawalOtp = async (req, res) => {
                 reviewedAt: null,
                 reviewedByAdminId: null,
                 adminNote: null,
-                bankName: receiver.bankName,
-                accountHolderName: receiver.bankAccountHolderName,
-                accountMasked: maskAccountNumber(receiver.bankAccountNumber),
+                bankName: 'UPI',
+                accountHolderName: receiver.nameAsPerAadhaar ?? '',
+                accountMasked: maskUpiId(receiver.upiId ?? ''),
             },
         }, { upsert: true, new: true, setDefaultsOnInsert: true });
         if (!receiver.phone?.trim()) {
@@ -1337,8 +1357,6 @@ const getReceiverCallInsights = async (req, res) => {
         const monthStart = new Date(now);
         monthStart.setDate(1);
         monthStart.setHours(0, 0, 0, 0);
-        /** Align with `MIN_VALID_CALL_SECONDS` in receiverScore — shorter calls are missed/incomplete. */
-        const MISSED_OR_INCOMPLETE_MAX_SEC = 55;
         const completed = await CallSession_1.default.find({
             receiverId: rid,
             status: 'completed',
@@ -1346,8 +1364,8 @@ const getReceiverCallInsights = async (req, res) => {
             .sort({ startedAt: -1 })
             .lean();
         const safeDur = (row) => Math.max(0, Math.floor(Number(row.durationSec) || 0));
-        const completedValid = completed.filter((row) => safeDur(row) >= MISSED_OR_INCOMPLETE_MAX_SEC);
-        const missedOrIncomplete = completed.filter((row) => safeDur(row) < MISSED_OR_INCOMPLETE_MAX_SEC);
+        const completedValid = completed.filter((row) => safeDur(row) >= callController_1.MISSED_OR_INCOMPLETE_MAX_SEC);
+        const missedOrIncomplete = completed.filter((row) => safeDur(row) < callController_1.MISSED_OR_INCOMPLETE_MAX_SEC);
         const callerIds = [
             ...new Set([
                 ...completedValid.map((c) => String(c.callerId)),
@@ -1501,6 +1519,12 @@ const getReceiverCallInsights = async (req, res) => {
             durationMonthSec: row.durationMonthSec,
             avgRating: row.ratingCount > 0 ? roundInr(row.ratingSum / row.ratingCount) : null,
         }));
+        const earningSettings = await (0, receiverEarningModel_1.getReceiverEarningSettings)();
+        const earningPublic = (0, receiverEarningModel_1.publicEarningSchedulePayload)(earningSettings);
+        const scoreBasedRate = typeof receiverMeta?.earningRatePerMinute === 'number' &&
+            Number.isFinite(receiverMeta.earningRatePerMinute)
+            ? roundInr(receiverMeta.earningRatePerMinute)
+            : 2.0;
         const [ratingSummary] = await ReceiverRating_1.default.aggregate([
             { $match: { receiverId: rid } },
             {
@@ -1531,30 +1555,36 @@ const getReceiverCallInsights = async (req, res) => {
             totalScore: effectiveTotalScore,
             liveOnlineScore,
             badgeLevel: receiverMeta?.badgeLevel ?? 'platinum',
-            earningRatePerMinute: typeof receiverMeta?.earningRatePerMinute === 'number' &&
-                Number.isFinite(receiverMeta.earningRatePerMinute)
-                ? roundInr(receiverMeta.earningRatePerMinute)
-                : 2.0,
-            scoreRules: {
-                call: {
-                    ignoreAtOrBelowSeconds: 55,
-                    midBand: { minMinutes: 3, maxMinutesExclusive: 10, multiplier: 3 },
-                    topBand: { minMinutes: 10, multiplier: 5 },
+            receiverEarningModel: earningPublic.receiverEarningModel,
+            earningRatePerMinute: earningPublic.receiverEarningModel === 'fixed_per_minute'
+                ? earningPublic.earningRatePerMinute
+                : scoreBasedRate,
+            fixedPerMinuteWindows: earningPublic.receiverEarningModel === 'fixed_per_minute'
+                ? earningPublic.fixedPerMinuteWindows
+                : undefined,
+            earningTimezone: earningPublic.timezone,
+            scoreRules: earningPublic.receiverEarningModel === 'fixed_per_minute'
+                ? undefined
+                : {
+                    call: {
+                        ignoreAtOrBelowSeconds: callController_1.MISSED_OR_INCOMPLETE_MAX_SEC,
+                        midBand: { minMinutes: 3, maxMinutesExclusive: 10, multiplier: 3 },
+                        topBand: { minMinutes: 10, multiplier: 5 },
+                    },
+                    online: {
+                        timezone: 'Asia/Kolkata',
+                        windows: [
+                            { from: '09:00', to: '21:00', multiplier: 0.5 },
+                            { from: '22:00', to: '24:00', multiplier: 3 },
+                            { from: '00:00', to: '02:00', multiplier: 10 },
+                        ],
+                    },
+                    weekendTargets: {
+                        weekday: { supremeAt: 12000, diamondAt: 8000 },
+                        weekend: { supremeAt: 13000, diamondAt: 9000 },
+                        note: 'Targets can be adjusted on weekends due to demand.',
+                    },
                 },
-                online: {
-                    timezone: 'Asia/Kolkata',
-                    windows: [
-                        { from: '09:00', to: '21:00', multiplier: 0.5 },
-                        { from: '22:00', to: '24:00', multiplier: 3 },
-                        { from: '00:00', to: '02:00', multiplier: 10 },
-                    ],
-                },
-                weekendTargets: {
-                    weekday: { supremeAt: 12000, diamondAt: 8000 },
-                    weekend: { supremeAt: 13000, diamondAt: 9000 },
-                    note: 'Targets can be adjusted on weekends due to demand.',
-                },
-            },
         });
     }
     catch (err) {
@@ -1942,35 +1972,34 @@ const deleteReceiverAccount = async (req, res) => {
 };
 exports.deleteReceiverAccount = deleteReceiverAccount;
 /**
- * POST /profile/receiver/bank/send-otp — stage bank details and send OTP.
+ * POST /profile/receiver/bank/send-otp — stage payment details and send OTP.
  */
 const sendReceiverBankUpdateOtp = async (req, res) => {
     try {
         if (req.accountKind !== 'receiver') {
-            res.status(403).json({ message: 'Only receivers can update bank details' });
+            res.status(403).json({ message: 'Only receivers can update payment details' });
             return;
         }
         if ((0, accountAccess_1.blockReceiverUntilApproved)(req, res))
             return;
-        const { bankAccountHolderName, bankAccountType, bankAccountNumber, bankIfsc, bankName, } = req.body;
-        if (!bankAccountHolderName || !String(bankAccountHolderName).trim()) {
-            res.status(400).json({ message: 'bankAccountHolderName is required' });
+        const nameAsPerAadhaar = String(req.body.nameAsPerAadhaar ?? '').trim();
+        const upiId = normalizeUpiId(req.body.upiId);
+        if (!nameAsPerAadhaar) {
+            res.status(400).json({ message: 'nameAsPerAadhaar is required' });
             return;
         }
-        if (bankAccountType !== 'savings' && bankAccountType !== 'current') {
-            res.status(400).json({ message: 'bankAccountType must be savings or current' });
+        if (!upiId || !isValidUpiId(upiId)) {
+            res.status(400).json({ message: 'Enter a valid UPI ID (e.g. name@bank)' });
             return;
         }
-        if (!bankAccountNumber || !String(bankAccountNumber).trim()) {
-            res.status(400).json({ message: 'bankAccountNumber is required' });
+        const aadhaarDigits = String(req.body.aadhaarNumber ?? '').replace(/\D/g, '');
+        const pan = String(req.body.panNumber ?? '').trim().toUpperCase();
+        if (!/^\d{12}$/.test(aadhaarDigits)) {
+            res.status(400).json({ message: 'Aadhaar number must be 12 digits' });
             return;
         }
-        if (!bankIfsc || !String(bankIfsc).trim()) {
-            res.status(400).json({ message: 'bankIfsc is required' });
-            return;
-        }
-        if (!bankName || !String(bankName).trim()) {
-            res.status(400).json({ message: 'bankName is required' });
+        if (!/^[A-Z]{5}[0-9]{4}[A-Z]$/.test(pan)) {
+            res.status(400).json({ message: 'Enter a valid PAN (e.g. ABCDE1234F)' });
             return;
         }
         const receiver = await Receiver_1.default.findById(String(req.receiver._id)).select('phone');
@@ -1985,11 +2014,22 @@ const sendReceiverBankUpdateOtp = async (req, res) => {
         const otpCode = generateOtpCode();
         receiver.otp = otpHash(otpCode);
         receiver.otpExpiry = new Date(Date.now() + 5 * 60 * 1000);
-        receiver.pendingBankAccountHolderName = String(bankAccountHolderName).trim();
-        receiver.pendingBankAccountType = bankAccountType;
-        receiver.pendingBankAccountNumber = String(bankAccountNumber).trim();
-        receiver.pendingBankIfsc = String(bankIfsc).trim().toUpperCase();
-        receiver.pendingBankName = String(bankName).trim();
+        receiver.pendingNameAsPerAadhaar = nameAsPerAadhaar;
+        receiver.pendingUpiId = upiId;
+        receiver.pendingAadhaarNumber = aadhaarDigits;
+        receiver.pendingPanNumber = pan;
+        receiver.pendingAadhaarFront =
+            typeof req.body.aadhaarFront === 'string' && req.body.aadhaarFront.trim()
+                ? req.body.aadhaarFront.trim()
+                : null;
+        receiver.pendingAadhaarBack =
+            typeof req.body.aadhaarBack === 'string' && req.body.aadhaarBack.trim()
+                ? req.body.aadhaarBack.trim()
+                : null;
+        receiver.pendingPanFront =
+            typeof req.body.panFront === 'string' && req.body.panFront.trim()
+                ? req.body.panFront.trim()
+                : null;
         await receiver.save();
         logReceiverMobileOtp('bank_update', receiver.phone, otpCode);
         res.status(200).json({
@@ -2006,13 +2046,13 @@ const sendReceiverBankUpdateOtp = async (req, res) => {
 };
 exports.sendReceiverBankUpdateOtp = sendReceiverBankUpdateOtp;
 /**
- * POST /profile/receiver/bank/verify — verify OTP and commit bank details.
+ * POST /profile/receiver/bank/verify — verify OTP and commit payment details.
  */
 const verifyReceiverBankUpdateOtp = async (req, res) => {
     try {
         const otpBypass = process.env.OTP_BYPASS?.toLowerCase() === 'true';
         if (req.accountKind !== 'receiver') {
-            res.status(403).json({ message: 'Only receivers can update bank details' });
+            res.status(403).json({ message: 'Only receivers can update payment details' });
             return;
         }
         if ((0, accountAccess_1.blockReceiverUntilApproved)(req, res))
@@ -2036,29 +2076,35 @@ const verifyReceiverBankUpdateOtp = async (req, res) => {
             res.status(400).json({ message: 'Incorrect OTP' });
             return;
         }
-        if (!receiver.pendingBankAccountHolderName ||
-            !receiver.pendingBankAccountType ||
-            !receiver.pendingBankAccountNumber ||
-            !receiver.pendingBankIfsc ||
-            !receiver.pendingBankName) {
-            res.status(400).json({ message: 'No pending bank details found. Start again' });
+        if (!receiver.pendingNameAsPerAadhaar ||
+            !receiver.pendingUpiId ||
+            !receiver.pendingAadhaarNumber ||
+            !receiver.pendingPanNumber) {
+            res.status(400).json({ message: 'No pending payment details found. Start again' });
             return;
         }
-        receiver.bankAccountHolderName = receiver.pendingBankAccountHolderName;
-        receiver.bankAccountType = receiver.pendingBankAccountType;
-        receiver.bankAccountNumber = receiver.pendingBankAccountNumber;
-        receiver.bankIfsc = receiver.pendingBankIfsc;
-        receiver.bankName = receiver.pendingBankName;
-        receiver.pendingBankAccountHolderName = null;
-        receiver.pendingBankAccountType = null;
-        receiver.pendingBankAccountNumber = null;
-        receiver.pendingBankIfsc = null;
-        receiver.pendingBankName = null;
+        receiver.nameAsPerAadhaar = receiver.pendingNameAsPerAadhaar;
+        receiver.upiId = receiver.pendingUpiId;
+        receiver.aadhaarNumber = receiver.pendingAadhaarNumber;
+        receiver.panNumber = receiver.pendingPanNumber;
+        if (receiver.pendingAadhaarFront)
+            receiver.aadhaarFront = receiver.pendingAadhaarFront;
+        if (receiver.pendingAadhaarBack)
+            receiver.aadhaarBack = receiver.pendingAadhaarBack;
+        if (receiver.pendingPanFront)
+            receiver.panFront = receiver.pendingPanFront;
+        receiver.pendingNameAsPerAadhaar = null;
+        receiver.pendingUpiId = null;
+        receiver.pendingAadhaarNumber = null;
+        receiver.pendingPanNumber = null;
+        receiver.pendingAadhaarFront = null;
+        receiver.pendingAadhaarBack = null;
+        receiver.pendingPanFront = null;
         receiver.otp = null;
         receiver.otpExpiry = null;
         await receiver.save();
         res.status(200).json({
-            message: 'Bank details updated',
+            message: 'payment details updated',
             user: (0, authController_1.toApiReceiver)(receiver),
         });
     }

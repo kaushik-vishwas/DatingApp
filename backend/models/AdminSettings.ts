@@ -1,16 +1,39 @@
 import mongoose, { Schema, type HydratedDocument, type Model } from 'mongoose';
 
+export type ReceiverEarningModel = 'score_based' | 'fixed_per_minute';
+
+export interface IFixedPerMinuteWindow {
+  id: string;
+  label: string;
+  from: string;
+  to: string;
+  ratePerMinute: number;
+}
+
 export interface IAdminSettings {
   notificationControls: {
     kycSubmissionsEmail: boolean;
     pendingWithdrawalsEmail: boolean;
     dailyRevenueSummaryEmail: boolean;
   };
+  receiverEarningModel: ReceiverEarningModel;
+  fixedPerMinuteWindows: IFixedPerMinuteWindow[];
   createdAt: Date;
   updatedAt: Date;
 }
 
 export type AdminSettingsDocument = HydratedDocument<IAdminSettings>;
+
+const fixedWindowSchema = new Schema<IFixedPerMinuteWindow>(
+  {
+    id: { type: String, required: true, trim: true },
+    label: { type: String, required: true, trim: true },
+    from: { type: String, required: true, trim: true },
+    to: { type: String, required: true, trim: true },
+    ratePerMinute: { type: Number, required: true, min: 0 },
+  },
+  { _id: false }
+);
 
 const adminSettingsSchema = new Schema<IAdminSettings>(
   {
@@ -18,6 +41,15 @@ const adminSettingsSchema = new Schema<IAdminSettings>(
       kycSubmissionsEmail: { type: Boolean, default: true },
       pendingWithdrawalsEmail: { type: Boolean, default: true },
       dailyRevenueSummaryEmail: { type: Boolean, default: true },
+    },
+    receiverEarningModel: {
+      type: String,
+      enum: ['score_based', 'fixed_per_minute'],
+      default: 'score_based',
+    },
+    fixedPerMinuteWindows: {
+      type: [fixedWindowSchema],
+      default: [],
     },
   },
   { timestamps: true }
@@ -29,4 +61,3 @@ const AdminSettings: Model<IAdminSettings> = mongoose.model<IAdminSettings>(
 );
 
 export default AdminSettings;
-

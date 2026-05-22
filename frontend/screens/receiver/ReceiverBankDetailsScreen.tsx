@@ -1,7 +1,11 @@
-import { useNavigation } from '@react-navigation/native';
+import { useFocusEffect, useNavigation, useRoute } from '@react-navigation/native';
+import type { RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import React, { useState } from 'react';
+import * as DocumentPicker from 'expo-document-picker';
+import * as ImagePicker from 'expo-image-picker';
+import React, { useCallback, useMemo, useState } from 'react';
 import {
+  ActivityIndicator,
   Alert,
   KeyboardAvoidingView,
   Platform,
@@ -15,79 +19,232 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import Icon from 'react-native-vector-icons/Feather';
+
+import { UploadField } from '../../components/ui/UploadField';
 import { useAuth } from '../../context/AuthContext';
+import { inferResourceType, uploadToCloudinary } from '../../lib/cloudinary';
 import type { ReceiverStackParamList } from '../../navigation/ReceiverStackParamList';
 import { getErrorMessage, profileApi } from '../../services/api';
+import type { ReceiverWithdrawalOverviewResponse } from '../../types/api';
 
 type Nav = NativeStackNavigationProp<ReceiverStackParamList, 'ReceiverBankDetails'>;
+type Route = RouteProp<ReceiverStackParamList, 'ReceiverBankDetails'>;
 
-type Step = 'form' | 'otp' | 'success';
+type PickedDocument = { uri: string; name?: string; mimeType?: string };
+type PaymentStep = 'form' | 'otp';
+
+function isValidUpiId(upi: string): boolean {
+  return /^[a-z0-9._-]{2,256}@[a-z]{3,}$/i.test(upi.trim());
+}
+
+function isValidAadhaarNumber(value: string): boolean {
+  return /^\d{12}$/.test(value.replace(/\D/g, ''));
+}
+
+function isValidPanNumber(value: string): boolean {
+  return /^[A-Z]{5}[0-9]{4}[A-Z]$/.test(value.trim().toUpperCase());
+}
+
+async function pickKycDocument(onPicked: (doc: PickedDocument) => void): Promise<void> {
+  Alert.alert('Upload document', 'Choose source', [
+    { text: 'Cancel', style: 'cancel' },
+    {
+      text: 'Photo library',
+      onPress: async () => {
+        const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+        if (!perm.granted) {
+          Alert.alert('Permission', 'Photo library access is required.');
+          return;
+        }
+        const result = await ImagePicker.launchImageLibraryAsync({
+          mediaTypes: ImagePicker.MediaTypeOptions.Images,
+          quality: 0.9,
+        });
+        if (result.canceled || !result.assets[0]) return;
+        const a = result.assets[0];
+        onPicked({
+          uri: a.uri,
+          name: a.fileName ?? 'document.jpg',
+          mimeType: a.mimeType ?? 'image/jpeg',
+        });
+      },
+    },
+    {
+      text: 'Document (PDF)',
+      onPress: async () => {
+        const result = await DocumentPicker.getDocumentAsync({
+          type: ['application/pdf', 'image/*'],
+          copyToCacheDirectory: true,
+        });
+        if (result.canceled || !result.assets[0]) return;
+        const a = result.assets[0];
+        onPicked({
+          uri: a.uri,
+          name: a.name ?? 'document.pdf',
+          mimeType: a.mimeType ?? 'application/pdf',
+        });
+      },
+    },
+  ]);
+}
+
+async function ensureUploadedUrl(doc: PickedDocument, fileName: string): Promise<string> {
+  const raw = doc.uri.trim();
+  if (/^https:\/\//i.test(raw)) return raw;
+  const res = await uploadToCloudinary(raw, {
+    mimeType: doc.mimeType,
+    resourceType: inferResourceType(doc.mimeType ?? 'image/jpeg'),
+    fileName: doc.name || fileName,
+  });
+  return res.secure_url;
+}
 
 export default function ReceiverBankDetailsScreen(): React.JSX.Element {
   const navigation = useNavigation<Nav>();
+  const route = useRoute<Route>();
   const { user, refreshUser } = useAuth();
-  const [step, setStep] = useState<Step>('form');
-  const [busy, setBusy] = useState(false);
-  const [otp, setOtp] = useState('');
-  const [holderName, setHolderName] = useState(user?.bankAccountHolderName ?? '');
-  const accountType = 'savings';
-  const [accountNumber, setAccountNumber] = useState(user?.bankAccountNumber ?? '');
-  const [confirmAccountNumber, setConfirmAccountNumber] = useState(user?.bankAccountNumber ?? '');
-  const [ifsc, setIfsc] = useState(user?.bankIfsc ?? '');
-  const [bankName, setBankName] = useState(user?.bankName ?? '');
-  
-  const formValid =
-    Boolean(holderName.trim()) &&
-    Boolean(accountNumber.trim()) &&
-    Boolean(confirmAccountNumber.trim()) &&
-    Boolean(ifsc.trim()) &&
-    Boolean(bankName.trim()) &&
-    accountNumber.trim() === confirmAccountNumber.trim();
-    
-    const fullMobile = user?.phone ?? 'your mobile';
 
-  const sendOtp = async () => {
-    if (!holderName.trim() || !accountNumber.trim() || !ifsc.trim() || !bankName.trim()) {
-      Alert.alert('Validation', 'Please fill all fields.');
-      return;
-    }
-    if (accountNumber.trim() !== confirmAccountNumber.trim()) {
-      Alert.alert('Validation', 'Account number does not match confirmation.');
-      return;
-    }
-    setBusy(true);
+  const [overviewLoading, setOverviewLoading] = useState(true);
+  const [overview, setOverview] = useState<ReceiverWithdrawalOverviewResponse | null>(null);
+  const [overviewError, setOverviewError] = useState<string | null>(null);
+
+  const [paymentStep, setPaymentStep] = useState<PaymentStep>('form');
+  const [paymentBusy, setPaymentBusy] = useState(false);
+  const [paymentOtp, setPaymentOtp] = useState('');
+
+  const [nameAsPerAadhaar, setNameAsPerAadhaar] = useState(user?.nameAsPerAadhaar ?? '');
+  const [upiId, setUpiId] = useState(user?.upiId ?? '');
+  const [aadhaarNumber, setAadhaarNumber] = useState(String(user?.aadhaarNumber ?? ''));
+  const [panNumber, setPanNumber] = useState(String(user?.panNumber ?? ''));
+  const [aadhaarFront, setAadhaarFront] = useState<PickedDocument | null>(
+    user?.aadhaarFront ? { uri: user.aadhaarFront, name: 'aadhaar-front' } : null,
+  );
+  const [aadhaarBack, setAadhaarBack] = useState<PickedDocument | null>(
+    user?.aadhaarBack ? { uri: user.aadhaarBack, name: 'aadhaar-back' } : null,
+  );
+  const [panFront, setPanFront] = useState<PickedDocument | null>(
+    user?.panFront ? { uri: user.panFront, name: 'pan-front' } : null,
+  );
+
+  const paymentComplete = useMemo(() => {
+    if (overview?.payment?.complete) return true;
+    return Boolean(
+      user?.nameAsPerAadhaar?.trim() &&
+        user?.upiId?.trim() &&
+        isValidUpiId(user.upiId) &&
+        isValidAadhaarNumber(String(user?.aadhaarNumber ?? '')) &&
+        isValidPanNumber(String(user?.panNumber ?? '')),
+    );
+  }, [overview?.payment?.complete, user?.nameAsPerAadhaar, user?.upiId, user?.aadhaarNumber, user?.panNumber]);
+
+  const paymentFormValid = useMemo(
+    () =>
+      Boolean(
+        nameAsPerAadhaar.trim() &&
+          upiId.trim() &&
+          isValidUpiId(upiId) &&
+          isValidAadhaarNumber(aadhaarNumber) &&
+          isValidPanNumber(panNumber),
+      ),
+    [nameAsPerAadhaar, upiId, aadhaarNumber, panNumber],
+  );
+
+  const maskedMobile = useMemo(() => {
+    const d = String(user?.phone ?? '').replace(/\D/g, '');
+    if (d.length < 4) return d || 'your mobile';
+    return `******${d.slice(-4)}`;
+  }, [user?.phone]);
+
+  const loadOverview = useCallback(async (opts?: { silent?: boolean }) => {
+    if (!opts?.silent) setOverviewLoading(true);
+    setOverviewError(null);
     try {
+      const { data } = await profileApi.receiverWithdrawalOverview();
+      setOverview(data);
+    } catch (e) {
+      const msg = getErrorMessage(e);
+      if (!msg.toLowerCase().includes('payment details')) {
+        setOverviewError(msg);
+      }
+      setOverview(null);
+    } finally {
+      if (!opts?.silent) setOverviewLoading(false);
+    }
+  }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      setNameAsPerAadhaar(user?.nameAsPerAadhaar ?? '');
+      setUpiId(user?.upiId ?? '');
+      setAadhaarNumber(String(user?.aadhaarNumber ?? ''));
+      setPanNumber(String(user?.panNumber ?? ''));
+      void loadOverview();
+    }, [loadOverview, user]),
+  );
+
+  const onSavePaymentSendOtp = async () => {
+    if (!paymentFormValid) {
+      Alert.alert(
+        'Validation',
+        'Fill all required fields: name as per Aadhaar, UPI ID, 12-digit Aadhaar number, and valid PAN.',
+      );
+      return;
+    }
+    const aadhaarDigits = aadhaarNumber.replace(/\D/g, '');
+    const pan = panNumber.trim().toUpperCase();
+
+    setPaymentBusy(true);
+    try {
+      let aadhaarFrontUrl: string | undefined;
+      let aadhaarBackUrl: string | undefined;
+      let panFrontUrl: string | undefined;
+      if (aadhaarFront) aadhaarFrontUrl = await ensureUploadedUrl(aadhaarFront, 'aadhaar-front');
+      if (aadhaarBack) aadhaarBackUrl = await ensureUploadedUrl(aadhaarBack, 'aadhaar-back');
+      if (panFront) panFrontUrl = await ensureUploadedUrl(panFront, 'pan-front');
+
       await profileApi.sendReceiverBankUpdateOtp({
-        bankAccountHolderName: holderName.trim(),
-        bankAccountType: accountType,
-        bankAccountNumber: accountNumber.trim(),
-        bankIfsc: ifsc.trim().toUpperCase(),
-        bankName: bankName.trim(),
+        nameAsPerAadhaar: nameAsPerAadhaar.trim(),
+        upiId: upiId.trim().toLowerCase(),
+        aadhaarNumber: aadhaarDigits,
+        panNumber: pan,
+        ...(aadhaarFrontUrl ? { aadhaarFront: aadhaarFrontUrl } : {}),
+        ...(aadhaarBackUrl ? { aadhaarBack: aadhaarBackUrl } : {}),
+        ...(panFrontUrl ? { panFront: panFrontUrl } : {}),
       });
-      setStep('otp');
+      setPaymentOtp('');
+      setPaymentStep('otp');
     } catch (e) {
       Alert.alert('Failed', getErrorMessage(e));
     } finally {
-      setBusy(false);
+      setPaymentBusy(false);
     }
   };
 
-  const verifyOtp = async () => {
-    if (!/^\d{6}$/.test(otp.trim())) {
+  const onVerifyPaymentOtp = async () => {
+    if (!/^\d{6}$/.test(paymentOtp.trim())) {
       Alert.alert('Validation', 'Enter valid 6-digit OTP.');
       return;
     }
-    setBusy(true);
+    setPaymentBusy(true);
     try {
-      await profileApi.verifyReceiverBankUpdateOtp(otp.trim());
+      await profileApi.verifyReceiverBankUpdateOtp(paymentOtp.trim());
       await refreshUser();
-      setStep('success');
+      await loadOverview({ silent: true });
+      setPaymentStep('form');
+      setPaymentOtp('');
+      if (route.params?.returnToWithdraw) {
+        navigation.replace('WithdrawEarnings');
+      } else {
+        navigation.goBack();
+      }
     } catch (e) {
       Alert.alert('Verification failed', getErrorMessage(e));
     } finally {
-      setBusy(false);
+      setPaymentBusy(false);
     }
   };
+
+  const headerTitle = route.params?.returnToWithdraw ? 'Payment details' : 'Payment Details';
 
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'left', 'right']}>
@@ -99,153 +256,134 @@ export default function ReceiverBankDetailsScreen(): React.JSX.Element {
           style={styles.screen}
           contentContainerStyle={styles.content}
           keyboardShouldPersistTaps="handled"
-          showsVerticalScrollIndicator={false}
         >
-          {/* Header */}
           <View style={styles.header}>
-            <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn} activeOpacity={0.7}>
+            <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
               <Icon name="chevron-left" size={26} color="#1a1a1a" />
             </TouchableOpacity>
-            <Text style={styles.headerTitle}>Bank Details</Text>
-            <View style={styles.placeholder} /> 
+            <Text style={styles.headerTitle}>{headerTitle}</Text>
+            <View style={styles.placeholder} />
           </View>
 
-          {step === 'form' ? (
-            <View style={styles.formSection}>
-              {/* Info Card */}
-              <View style={styles.infoCard}>
-                <Icon name="info" size={20} color="#A855F7" />
-                <Text style={styles.infoText}>
-                  Your earnings will be transferred to this bank account
-                </Text>
-              </View>
+          {overviewLoading ? (
+            <ActivityIndicator size="small" color="#7b2cff" style={{ marginVertical: 12 }} />
+          ) : null}
+          {overviewError ? <Text style={styles.errorText}>{overviewError}</Text> : null}
 
-              <Field 
-                label="Account Holder Name" 
-                value={holderName} 
-                onChangeText={setHolderName}
-                placeholder="Enter account holder name"
+          {/* Payment details */}
+          <Text style={styles.sectionHeading}>Payment details</Text>
+          <View style={styles.infoCard}>
+            <Icon name="info" size={18} color="#A855F7" />
+            <Text style={styles.infoText}>
+              All fields are required. Check details before saving. 
+            </Text>
+          </View>
+
+          {paymentStep === 'form' ? (
+            <View>
+              <Field
+                label="Name as per Aadhaar *"
+                value={nameAsPerAadhaar}
+                onChangeText={setNameAsPerAadhaar}
+                placeholder="Enter name exactly as on Aadhaar"
               />
-              
-              <Field 
-                label="Account Number" 
-                value={accountNumber} 
-                onChangeText={setAccountNumber} 
+             
+              <Field
+                label="Aadhaar number *"
+                value={aadhaarNumber}
+                onChangeText={(v) => setAadhaarNumber(v.replace(/\D/g, '').slice(0, 12))}
                 keyboardType="numeric"
-                placeholder="Enter account number"
+                placeholder="12-digit Aadhaar"
               />
-              
-              <Field 
-                label="Confirm Account Number" 
-                value={confirmAccountNumber} 
-                onChangeText={setConfirmAccountNumber} 
-                keyboardType="numeric"
-                placeholder="Re-enter account number"
+              <Field
+                label="PAN number *"
+                value={panNumber}
+                onChangeText={(v) => setPanNumber(v.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 10))}
+                placeholder="ABCDE1234F"
               />
-              
-              <Field 
-                label="IFSC Code" 
-                value={ifsc} 
-                onChangeText={setIfsc}
-                placeholder="Enter IFSC code"
-              />
-              
-              <Field 
-                label="Bank Name" 
-                value={bankName} 
-                onChangeText={setBankName}
-                placeholder="Enter bank name"
+               <Field
+                label="UPI ID *"
+                value={upiId}
+                onChangeText={(v) => setUpiId(v.trim().toLowerCase())}
+                placeholder="yourname@bank"
+                autoCapitalize="none"
               />
 
-              {/* Submit Button */}
+              {/* <Text style={styles.optionalHeading}>Optional document uploads</Text>
+              <UploadField
+                label="Aadhaar front (optional)"
+                uri={aadhaarFront?.uri ?? null}
+                mimeType={aadhaarFront?.mimeType}
+                displayName={aadhaarFront?.name}
+                imageShape="rectangle"
+                onPick={() => void pickKycDocument(setAadhaarFront)}
+                onClear={() => setAadhaarFront(null)}
+              />
+              <UploadField
+                label="Aadhaar back (optional)"
+                uri={aadhaarBack?.uri ?? null}
+                mimeType={aadhaarBack?.mimeType}
+                displayName={aadhaarBack?.name}
+                imageShape="rectangle"
+                onPick={() => void pickKycDocument(setAadhaarBack)}
+                onClear={() => setAadhaarBack(null)}
+              />
+              <UploadField
+                label="PAN front (optional)"
+                uri={panFront?.uri ?? null}
+                mimeType={panFront?.mimeType}
+                displayName={panFront?.name}
+                imageShape="rectangle"
+                onPick={() => void pickKycDocument(setPanFront)}
+                onClear={() => setPanFront(null)}
+              /> */}
+
               <TouchableOpacity
-                style={[styles.submitBtnWrapper, (busy || !formValid) && styles.submitBtnDisabled]}
-                onPress={sendOtp}
-                disabled={busy || !formValid}
-                activeOpacity={0.8}
+                style={[styles.primaryWrap, (paymentBusy || !paymentFormValid) && styles.disabled]}
+                onPress={() => void onSavePaymentSendOtp()}
+                disabled={paymentBusy || !paymentFormValid}
               >
-                <LinearGradient
-                  colors={['#7F00FF', '#A855F7', '#E100FF']}
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 1, y: 0 }}
-                  style={styles.submitBtn}
-                >
-                  <Text style={styles.submitText}>
-                    {busy ? 'Sending OTP...' : 'Continue'}
-                  </Text>
+                <LinearGradient colors={['#7F00FF', '#A855F7', '#E100FF']} style={styles.primaryBtn}>
+                  <Text style={styles.primaryText}>{paymentBusy ? 'Sending OTP...' : 'Save payment details'}</Text>
                 </LinearGradient>
               </TouchableOpacity>
             </View>
           ) : null}
 
-          {step === 'otp' ? (
-            <View style={styles.otpSection}>
-              <View style={styles.otpIconContainer}>
-                <Icon name="smartphone" size={48} color="#A855F7" />
-              </View>
-              <Text style={styles.otpTitle}>Verify Your Identity</Text>
-              <Text style={styles.otpSubtitle}>
-                Enter the 6-digit verification code sent to
-              </Text>
-              <Text style={styles.mobileNumber}>{fullMobile}</Text>
-              
+          {paymentStep === 'otp' ? (
+            <View style={styles.otpBlock}>
+              <Text style={styles.otpTitle}>Verify Payment Details</Text>
+              <Text style={styles.otpSub}>OTP sent to {maskedMobile}</Text>
               <TextInput
-                value={otp}
-                onChangeText={setOtp}
+                value={paymentOtp}
+                onChangeText={setPaymentOtp}
                 keyboardType="number-pad"
                 maxLength={6}
-                placeholder="••••••"
-                placeholderTextColor="#bbb"
                 style={styles.otpInput}
                 textAlign="center"
               />
-              
               <TouchableOpacity
-                style={[styles.verifyBtnWrapper, busy && styles.verifyBtnDisabled]}
-                onPress={verifyOtp}
-                disabled={busy}
-                activeOpacity={0.8}
+                style={[styles.primaryWrap, paymentBusy && styles.disabled]}
+                onPress={() => void onVerifyPaymentOtp()}
+                disabled={paymentBusy}
               >
-                <LinearGradient
-                  colors={['#7F00FF', '#A855F7', '#E100FF']}
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 1, y: 0 }}
-                  style={styles.verifyBtn}
-                >
-                  <Text style={styles.verifyText}>
-                    {busy ? 'Verifying...' : 'Verify & Continue'}
-                  </Text>
+                <LinearGradient colors={['#7F00FF', '#A855F7', '#E100FF']} style={styles.primaryBtn}>
+                  <Text style={styles.primaryText}>{paymentBusy ? 'Verifying...' : 'Verify & save'}</Text>
                 </LinearGradient>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={() => setPaymentStep('form')}>
+                <Text style={styles.linkText}>Edit details</Text>
               </TouchableOpacity>
             </View>
           ) : null}
 
-          {step === 'success' ? (
-            <View style={styles.successCard}>
-              <View style={styles.successIconContainer}>
-                <Icon name="check" size={40} color="#FFFFFF" />
-              </View>
-              <Text style={styles.successTitle}>Bank Account Verified!</Text>
-              <Text style={styles.successSub}>
-                Your bank details have been successfully updated
+          {paymentComplete && overview ? (
+            <View style={styles.savedCard}>
+              <Text style={styles.savedLabel}>Saved UPI</Text>
+              <Text style={styles.savedValue}>{overview.payment?.upiMasked ?? overview.bank.accountMasked}</Text>
+              <Text style={styles.savedSub}>
+                {overview.payment?.nameAsPerAadhaar ?? overview.bank.accountHolderName}
               </Text>
-              <TouchableOpacity
-                style={styles.successBtnWrapper}
-                onPress={() => navigation.goBack()}
-                activeOpacity={0.8}
-              >
-                <LinearGradient
-                  colors={['#7F00FF', '#A855F7', '#E100FF']}
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 1, y: 0 }}
-                  style={styles.successBtn}
-                >
-                  <Text style={styles.successBtnText}>Go to Dashboard</Text>
-                </LinearGradient>
-              </TouchableOpacity>
-              <TouchableOpacity onPress={() => navigation.navigate('ReceiverProfilePreview')} activeOpacity={0.7}>
-                <Text style={styles.previewLink}>View Profile Preview</Text>
-              </TouchableOpacity>
             </View>
           ) : null}
         </ScrollView>
@@ -260,12 +398,14 @@ function Field({
   onChangeText,
   keyboardType,
   placeholder,
+  autoCapitalize,
 }: {
   label: string;
   value: string;
   onChangeText: (v: string) => void;
   keyboardType?: 'default' | 'numeric';
   placeholder?: string;
+  autoCapitalize?: 'none' | 'sentences';
 }) {
   return (
     <View style={styles.fieldWrap}>
@@ -274,8 +414,9 @@ function Field({
         value={value}
         onChangeText={onChangeText}
         keyboardType={keyboardType ?? 'default'}
+        autoCapitalize={autoCapitalize ?? 'sentences'}
         style={styles.input}
-        placeholder={placeholder || label}
+        placeholder={placeholder ?? label}
         placeholderTextColor="#999"
       />
     </View>
@@ -286,72 +427,38 @@ const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: '#F8F9FA' },
   screen: { flex: 1, backgroundColor: '#F8F9FA' },
   content: { paddingHorizontal: 20, paddingBottom: 40, paddingTop: 8 },
-  
-  header: { 
-    flexDirection: 'row', 
-    alignItems: 'center', 
-    justifyContent: 'space-between', 
-    marginBottom: 24,
-    paddingVertical: 8,
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 16,
   },
-  backBtn: { 
-    width: 40, 
-    height: 40, 
-    alignItems: 'center', 
-    justifyContent: 'center',
-    borderRadius: 20,
-    backgroundColor: '#FFFFFF',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
-    elevation: 2,
-  },
-  placeholder: {
+  backBtn: {
     width: 40,
     height: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 20,
+    backgroundColor: '#fff',
   },
-  backText: { fontSize: 20, color: '#1a1a1a', fontWeight: '700' },
-  headerTitle: { 
-    fontSize: 18, 
-    fontWeight: '700', 
-    color: '#1a1a1a',
-    letterSpacing: -0.3,
-  },
-  
-  formSection: {
-    marginBottom: 8,
-  },
-  
+  placeholder: { width: 40, height: 40 },
+  headerTitle: { fontSize: 17, fontWeight: '700', color: '#1a1a1a' },
+  sectionHeading: { fontSize: 15, fontWeight: '800', color: '#1a1a1a', marginBottom: 10 },
+  optionalHeading: { fontSize: 13, fontWeight: '700', color: '#666', marginTop: 8, marginBottom: 8 },
   infoCard: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: '#F3E8FF',
-    padding: 14,
+    padding: 12,
     borderRadius: 12,
-    marginBottom: 20,
-    gap: 10,
+    marginBottom: 14,
+    gap: 8,
   },
-  infoText: {
-    flex: 1,
-    fontSize: 12,
-    color: '#6B21A8',
-    fontWeight: '500',
-    lineHeight: 16,
-  },
-  
-  fieldWrap: { 
-    marginBottom: 16,
-  },
-  fieldLabel: { 
-    fontSize: 13, 
-    color: '#444', 
-    fontWeight: '600', 
-    marginBottom: 8,
-    letterSpacing: -0.2,
-  },
+  infoText: { flex: 1, fontSize: 12, color: '#6B21A8', fontWeight: '500' },
+  fieldWrap: { marginBottom: 14 },
+  fieldLabel: { fontSize: 13, fontWeight: '600', color: '#444', marginBottom: 6 },
   input: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: '#fff',
     borderWidth: 1,
     borderColor: '#E8E8E8',
     borderRadius: 12,
@@ -359,146 +466,37 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     fontSize: 14,
     color: '#1a1a1a',
-    fontWeight: '500',
   },
-  
-  submitBtnWrapper: {
-    marginTop: 24,
-    borderRadius: 12,
-    overflow: 'hidden',
-    shadowColor: '#7F00FF',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.2,
-    shadowRadius: 8,
-    elevation: 4,
-  },
-  submitBtn: {
-    paddingVertical: 14,
-    alignItems: 'center',
-  },
-  submitBtnDisabled: { 
-    opacity: 0.6,
-  },
-  submitText: { 
-    color: '#FFFFFF', 
-    fontSize: 15, 
-    fontWeight: '700',
-    letterSpacing: 0.3,
-  },
-  
-  otpSection: {
-    alignItems: 'center',
-    paddingVertical: 20,
-  },
-  otpIconContainer: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    backgroundColor: '#F3E8FF',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 20,
-  },
-  otpTitle: {
-    fontSize: 20,
-    fontWeight: '800',
-    color: '#1a1a1a',
-    marginBottom: 8,
-  },
-  otpSubtitle: {
-    fontSize: 13,
-    color: '#888',
-    marginBottom: 4,
-  },
-  mobileNumber: {
-    fontSize: 13,
-    fontWeight: '400',
-    color: '#A855F7',
-    marginBottom: 24,
-  },
+  primaryWrap: { marginTop: 8, borderRadius: 12, overflow: 'hidden' },
+  primaryBtn: { paddingVertical: 16, paddingHorizontal: 16,  alignItems: 'center' },
+  primaryText: { color: '#fff', fontWeight: '700', fontSize: 15 },
+  disabled: { opacity: 0.55 },
+  otpBlock: { alignItems: 'center', paddingVertical: 12 },
+  otpTitle: { fontSize: 18, fontWeight: '800', color: '#1a1a1a' },
+  otpSub: { fontSize: 13, color: '#666', marginVertical: 8 },
   otpInput: {
     width: '100%',
-    backgroundColor: '#FFFFFF',
+    backgroundColor: '#fff',
     borderWidth: 1,
     borderColor: '#E8E8E8',
     borderRadius: 12,
-    paddingHorizontal: 14,
     paddingVertical: 12,
-    fontSize: 24,
-    fontWeight: '700',
-    letterSpacing: 8,
-    color: '#1a1a1a',
-    marginBottom: 20,
-  },
-  verifyBtnWrapper: {
-    width: '100%',
-    borderRadius: 12,
-    overflow: 'hidden',
-    shadowColor: '#7F00FF',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.2,
-    shadowRadius: 8,
-    elevation: 4,
-  },
-  verifyBtn: {
-    paddingVertical: 14,
-    alignItems: 'center',
-  },
-  verifyBtnDisabled: { 
-    opacity: 0.6,
-  },
-  verifyText: { 
-    color: '#FFFFFF', 
-    fontSize: 15, 
-    fontWeight: '700',
-    letterSpacing: 0.3,
-  },
-  
-  successCard: {
-    alignItems: 'center',
-    paddingVertical: 40,
-  },
-  successIconContainer: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    backgroundColor: '#4CAF50',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 20,
-  },
-  successTitle: {
     fontSize: 22,
-    fontWeight: '800',
-    color: '#1a1a1a',
-    marginBottom: 8,
-  },
-  successSub: {
-    fontSize: 13,
-    color: '#666',
-    textAlign: 'center',
-    marginBottom: 24,
-    lineHeight: 18,
-  },
-  successBtnWrapper: {
-    width: '100%',
-    borderRadius: 12,
-    overflow: 'hidden',
+    fontWeight: '700',
+    letterSpacing: 6,
     marginBottom: 12,
   },
-  successBtn: {
-    paddingVertical: 14,
-    alignItems: 'center',
+  linkText: { color: '#A855F7', fontWeight: '600', marginTop: 8 },
+  savedCard: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 14,
+    marginTop: 12,
+    borderWidth: 1,
+    borderColor: '#E8E8E8',
   },
-  successBtnText: { 
-    color: '#FFFFFF', 
-    fontSize: 15, 
-    fontWeight: '700',
-    letterSpacing: 0.3,
-  },
-  previewLink: { 
-    color: '#A855F7', 
-    fontSize: 13, 
-    fontWeight: '600',
-  },
+  savedLabel: { fontSize: 12, color: '#666', fontWeight: '600' },
+  savedValue: { fontSize: 16, fontWeight: '800', color: '#1a1a1a', marginTop: 4 },
+  savedSub: { fontSize: 13, color: '#444', marginTop: 2 },
+  errorText: { fontSize: 13, color: '#dc2626', marginBottom: 8 },
 });

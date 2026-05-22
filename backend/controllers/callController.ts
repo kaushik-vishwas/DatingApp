@@ -13,6 +13,12 @@ import {
   toStreamUserId,
 } from '../utils/streamVoice';
 import { recordReceiverCallScore } from '../services/receiverScore';
+import {
+  computeProratedFixedEarningsInr,
+  getReceiverEarningSettings,
+  publicEarningSchedulePayload,
+  resolveFixedRatePerMinuteAt,
+} from '../services/receiverEarningModel';
 import { pickRandomQueuedReceiverForCaller } from '../services/callQueue';
 import {
   releaseReceiverReservation,
@@ -41,7 +47,7 @@ export type SettledCallSnapshot = {
 };
 
 /** Completed calls shorter than this count as missed/incomplete for receiver history. */
-export const MISSED_OR_INCOMPLETE_MAX_SEC = 55;
+export const MISSED_OR_INCOMPLETE_MAX_SEC = 60;
 
 type CallTalkTimingFields = {
   talkStartedAt?: Date | null;
@@ -210,9 +216,21 @@ export async function settleCallSession(
       const grossAmountInr = roundInr((durationSec / 60) * Math.max(0, call.ratePerMinute));
       const alreadySettled = roundInr(call.settledAmountInr || 0);
       const dueAmount = roundInr(Math.max(0, grossAmountInr - alreadySettled));
-      const receiverEarnedInr = roundInr(
-        (durationSec / 60) * Math.max(0, Number(call.receiverPayoutRatePerMinute || 0))
-      );
+
+      const earningSettings = await getReceiverEarningSettings();
+      let receiverEarnedInr: number;
+      if (earningSettings.receiverEarningModel === 'fixed_per_minute') {
+        const talkAnchor = callTalkStartedAt(call) ?? call.startedAt;
+        receiverEarnedInr = computeProratedFixedEarningsInr(
+          talkAnchor,
+          now,
+          earningSettings.fixedPerMinuteWindows
+        );
+      } else {
+        receiverEarnedInr = roundInr(
+          (durationSec / 60) * Math.max(0, Number(call.receiverPayoutRatePerMinute || 0))
+        );
+      }
 
       let settledNow = 0;
       if (dueAmount > 0) {
@@ -417,6 +435,17 @@ export const getVoiceBootstrap = async (req: Request, res: Response): Promise<vo
   const { token, expiresAt } = createStreamUserToken(meStreamUserId);
   const callId = requestedCallId || buildVoiceCallId(meStreamUserId, peerStreamUserId);
 
+  const earningSettings = await getReceiverEarningSettings();
+  const earningPublic = publicEarningSchedulePayload(earningSettings);
+  const scoreBasedRate =
+    typeof receiverDoc.earningRatePerMinute === 'number' && Number.isFinite(receiverDoc.earningRatePerMinute)
+      ? roundInr(receiverDoc.earningRatePerMinute)
+      : 0;
+  const receiverEarningRatePerMinute =
+    earningSettings.receiverEarningModel === 'fixed_per_minute'
+      ? earningPublic.earningRatePerMinute
+      : scoreBasedRate;
+
   res.json({
     apiKey: getStreamApiKey(),
     token,
@@ -425,10 +454,10 @@ export const getVoiceBootstrap = async (req: Request, res: Response): Promise<vo
     peerStreamUserId,
     peerAccountId: peerId,
     receiverRatePerMinute: RECEIVER_AUDIO_CALL_RATE_INR_PER_MIN,
-    receiverEarningRatePerMinute:
-      typeof receiverDoc.earningRatePerMinute === 'number' && Number.isFinite(receiverDoc.earningRatePerMinute)
-        ? roundInr(receiverDoc.earningRatePerMinute)
-        : 0,
+    receiverEarningRatePerMinute,
+    receiverEarningModel: earningPublic.receiverEarningModel,
+    fixedPerMinuteWindows: earningPublic.fixedPerMinuteWindows,
+    earningTimezone: earningPublic.timezone,
     callType: 'default',
     callId,
   });
@@ -466,10 +495,13 @@ export const startVoiceSession = async (
       return;
     }
     const ratePerMinute = RECEIVER_AUDIO_CALL_RATE_INR_PER_MIN;
+    const earningSettings = await getReceiverEarningSettings();
     const receiverPayoutRatePerMinute =
-      typeof receiver.earningRatePerMinute === 'number' && Number.isFinite(receiver.earningRatePerMinute)
-        ? Math.max(0, receiver.earningRatePerMinute)
-        : 0;
+      earningSettings.receiverEarningModel === 'fixed_per_minute'
+        ? resolveFixedRatePerMinuteAt(new Date(), earningSettings.fixedPerMinuteWindows)
+        : typeof receiver.earningRatePerMinute === 'number' && Number.isFinite(receiver.earningRatePerMinute)
+          ? Math.max(0, receiver.earningRatePerMinute)
+          : 0;
 
     await CallSession.findOneAndUpdate(
       { callId },
@@ -562,7 +594,7 @@ export const endVoiceSession = async (
       estimatedEarning: settled.receiverEarnedInr,
       settledAmountInr: settled.settledAmountInr,
       receiverEarnedInr: settled.receiverEarnedInr,
-      canRate: settled.durationSec >= 30,
+      canRate: settled.durationSec >= MISSED_OR_INCOMPLETE_MAX_SEC,
       ...talkFields,
       ...(callerWalletBalanceInr !== undefined ? { callerWalletBalanceInr } : {}),
     });
@@ -612,7 +644,7 @@ export const syncVoiceSession = async (
       durationSec: settled.durationSec,
       settledAmountInr: settled.settledAmountInr,
       receiverEarnedInr: settled.receiverEarnedInr,
-      canRate: settled.durationSec >= 30,
+      canRate: settled.durationSec >= MISSED_OR_INCOMPLETE_MAX_SEC,
       status: settled.status,
       ...talkFields,
     });
@@ -652,8 +684,8 @@ export const rateVoiceSession = async (
       res.status(409).json({ message: 'You can rate only after a completed call.' });
       return;
     }
-    if (session.durationSec < 30) {
-      res.status(409).json({ message: 'Call too short for rating. Minimum 30 seconds required.' });
+    if (session.durationSec < MISSED_OR_INCOMPLETE_MAX_SEC) {
+      res.status(409).json({ message: `Call too short for rating. Minimum ${MISSED_OR_INCOMPLETE_MAX_SEC} seconds required.` });
       return;
     }
     if (typeof session.callerRating === 'number') {

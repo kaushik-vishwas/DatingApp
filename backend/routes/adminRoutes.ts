@@ -22,6 +22,7 @@ import {
   getOverviewDashboard,
   getRevenueDashboard,
   updateAdminNotificationControls,
+  updateAdminReceiverEarningModel,
   updateAdminRole,
   listWithdrawals,
   resolveModerationReport,
@@ -46,6 +47,7 @@ router.post('/auth/request-email-change', adminProtect, adminRequestEmailChange)
 router.post('/auth/confirm-email-change', adminProtect, adminConfirmEmailChange);
 router.get('/settings', adminProtect, getAdminSettings);
 router.patch('/settings/notifications', adminProtect, updateAdminNotificationControls);
+router.patch('/settings/earning-model', adminProtect, updateAdminReceiverEarningModel);
 router.patch('/settings/admins/:id/role', adminProtect, updateAdminRole);
 
 router.get('/users', adminProtect, listAppUsers);

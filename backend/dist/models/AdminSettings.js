@@ -34,11 +34,27 @@ var __importStar = (this && this.__importStar) || (function () {
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
 const mongoose_1 = __importStar(require("mongoose"));
+const fixedWindowSchema = new mongoose_1.Schema({
+    id: { type: String, required: true, trim: true },
+    label: { type: String, required: true, trim: true },
+    from: { type: String, required: true, trim: true },
+    to: { type: String, required: true, trim: true },
+    ratePerMinute: { type: Number, required: true, min: 0 },
+}, { _id: false });
 const adminSettingsSchema = new mongoose_1.Schema({
     notificationControls: {
         kycSubmissionsEmail: { type: Boolean, default: true },
         pendingWithdrawalsEmail: { type: Boolean, default: true },
         dailyRevenueSummaryEmail: { type: Boolean, default: true },
+    },
+    receiverEarningModel: {
+        type: String,
+        enum: ['score_based', 'fixed_per_minute'],
+        default: 'score_based',
+    },
+    fixedPerMinuteWindows: {
+        type: [fixedWindowSchema],
+        default: [],
     },
 }, { timestamps: true });
 const AdminSettings = mongoose_1.default.model('AdminSettings', adminSettingsSchema);

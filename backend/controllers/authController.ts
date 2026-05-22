@@ -32,6 +32,8 @@ export interface SafeUser {
   aadhaarNumber: string | null;
   panNumber: string | null;
   panFront: string | null;
+  nameAsPerAadhaar: string | null;
+  upiId: string | null;
   bankAccountHolderName: string | null;
   bankAccountType: 'savings' | 'current' | null;
   bankAccountNumber: string | null;
@@ -195,6 +197,8 @@ export function toApiUser(user: UserDocument): SafeUser {
     aadhaarNumber: null,
     panNumber: null,
     panFront: null,
+    nameAsPerAadhaar: null,
+    upiId: null,
     bankAccountHolderName: null,
     bankAccountType: null,
     bankAccountNumber: null,
@@ -233,6 +237,8 @@ export function toApiReceiver(receiver: ReceiverDocument): SafeUser {
     aadhaarNumber: r.aadhaarNumber ?? null,
     panNumber: r.panNumber ?? null,
     panFront: r.panFront ?? null,
+    nameAsPerAadhaar: r.nameAsPerAadhaar ?? null,
+    upiId: r.upiId ?? null,
     bankAccountHolderName: r.bankAccountHolderName ?? null,
     bankAccountType: r.bankAccountType ?? null,
     bankAccountNumber: r.bankAccountNumber ?? null,
@@ -727,11 +733,7 @@ export const verifyOtp = async (
           const hasName = receiverDoc.name && receiverDoc.name.trim();
           const hasProfileImage = receiverDoc.profileImage && receiverDoc.profileImage.trim();
           const hasUserAudio = receiverDoc.userAudio && receiverDoc.userAudio.trim();
-          const hasAadhaar = receiverDoc.aadhaarFront && receiverDoc.aadhaarBack && receiverDoc.aadhaarNumber;
-          const hasPan = receiverDoc.panNumber && receiverDoc.panFront;
-          const hasBank = receiverDoc.bankAccountNumber && receiverDoc.bankName;
-    
-          if (hasName && hasProfileImage && hasUserAudio && hasAadhaar && hasPan && hasBank) {
+          if (hasName && hasProfileImage && hasUserAudio) {
             doc.accountStatus = 'approved';
           }
         }
@@ -770,11 +772,7 @@ export const verifyOtp = async (
         const hasName = receiverDoc.name && receiverDoc.name.trim();
         const hasProfileImage = receiverDoc.profileImage && receiverDoc.profileImage.trim();
         const hasUserAudio = receiverDoc.userAudio && receiverDoc.userAudio.trim();
-        const hasAadhaar = receiverDoc.aadhaarFront && receiverDoc.aadhaarBack && receiverDoc.aadhaarNumber;
-        const hasPan = receiverDoc.panNumber && receiverDoc.panFront;
-        const hasBank = receiverDoc.bankAccountNumber && receiverDoc.bankName;
-    
-        if (hasName && hasProfileImage && hasUserAudio && hasAadhaar && hasPan && hasBank) {
+        if (hasName && hasProfileImage && hasUserAudio) {
           doc.accountStatus = 'approved';
         }
       }

@@ -198,8 +198,17 @@ export interface VoiceBootstrapResponse {
   peerAccountId: string;
   /** Caller charge rate per minute (deduction side). */
   receiverRatePerMinute: number;
-  /** Receiver earning rate per minute based on current score tier. */
+  /** Receiver earning rate per minute (score tier or current fixed window). */
   receiverEarningRatePerMinute?: number;
+  receiverEarningModel?: 'score_based' | 'fixed_per_minute';
+  fixedPerMinuteWindows?: Array<{
+    id: string;
+    label: string;
+    from: string;
+    to: string;
+    ratePerMinute: number;
+  }>;
+  earningTimezone?: string;
   callType: string;
   callId: string;
 }
@@ -270,7 +279,16 @@ export interface ReceiverCallInsightsResponse {
   receiverRatingCount: number;
   totalScore: number;
   badgeLevel?: 'platinum' | 'diamond' | 'supreme';
+  receiverEarningModel?: 'score_based' | 'fixed_per_minute';
   earningRatePerMinute?: number;
+  fixedPerMinuteWindows?: Array<{
+    id: string;
+    label: string;
+    from: string;
+    to: string;
+    ratePerMinute: number;
+  }>;
+  earningTimezone?: string;
   scoreRules?: {
     call: {
       ignoreAtOrBelowSeconds: number;
@@ -351,6 +369,11 @@ export interface ReceiverWithdrawalOverviewResponse {
   pendingAmount: number;
   totalEarnings?: number;
   totalWithdrawn?: number;
+  payment?: {
+    nameAsPerAadhaar: string;
+    upiMasked: string;
+    complete: boolean;
+  };
   bank: {
     bankName: string;
     accountHolderName: string;
@@ -508,11 +531,13 @@ export interface DeleteReceiverAccountPayload {
 }
 
 export interface ReceiverBankDetailsPayload {
-  bankAccountHolderName: string;
-  bankAccountType: 'savings' | 'current';
-  bankAccountNumber: string;
-  bankIfsc: string;
-  bankName: string;
+  nameAsPerAadhaar: string;
+  upiId: string;
+  aadhaarNumber: string;
+  panNumber: string;
+  aadhaarFront?: string;
+  aadhaarBack?: string;
+  panFront?: string;
 }
 
 export interface ReceiverBankOtpSendResponse {

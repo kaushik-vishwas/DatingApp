@@ -1,5 +1,6 @@
+import { useFocusEffect } from '@react-navigation/native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Ionicons } from '@expo/vector-icons';
 import {
   Alert,
@@ -25,6 +26,7 @@ import {
 } from '../../navigation/voiceCallParams';
 import type { IncomingCallRequest } from '../../context/CallSignalContext';
 import type { VoiceBootstrapResponse } from '../../types/api';
+import { resolveFixedRatePerMinuteAt, type FixedPerMinuteWindow } from '../../utils/fixedPerMinuteEarning';
 import { useCallSignals } from '../../context/CallSignalContext';
 import { useCallerMessageEligibilityOptional } from '../../context/CallerMessageEligibilityContext';
 import { useAuth } from '../../context/AuthContext';
@@ -149,7 +151,39 @@ function getReceiverChargeRatePerMinute(params: VoiceCallScreenParams): number {
   return 0;
 }
 
-function getReceiverEarnRatePerMinute(params: VoiceCallScreenParams): number {
+function getFixedWindowsFromParams(params: VoiceCallScreenParams): FixedPerMinuteWindow[] {
+  const boot = getVoiceBootstrap(params);
+  return boot?.fixedPerMinuteWindows ?? [];
+}
+
+function getReceiverEarningModelFromParams(params: VoiceCallScreenParams): 'score_based' | 'fixed_per_minute' {
+  const boot = getVoiceBootstrap(params);
+  return boot?.receiverEarningModel === 'fixed_per_minute' ? 'fixed_per_minute' : 'score_based';
+}
+
+type ReceiverEarningMeta = {
+  model: 'score_based' | 'fixed_per_minute';
+  windows: FixedPerMinuteWindow[];
+  earningRatePerMinute?: number;
+};
+
+function getReceiverEarnRatePerMinute(
+  params: VoiceCallScreenParams,
+  at: Date = new Date(),
+  override?: ReceiverEarningMeta | null
+): number {
+  const model = override?.model ?? getReceiverEarningModelFromParams(params);
+  const windows = override?.windows ?? getFixedWindowsFromParams(params);
+  if (model === 'fixed_per_minute' && windows.length > 0) {
+    return resolveFixedRatePerMinuteAt(at, windows);
+  }
+  if (
+    model === 'score_based' &&
+    typeof override?.earningRatePerMinute === 'number' &&
+    Number.isFinite(override.earningRatePerMinute)
+  ) {
+    return Math.max(0, override.earningRatePerMinute);
+  }
   if (
     'receiverEarningRatePerMinute' in params &&
     typeof params.receiverEarningRatePerMinute === 'number' &&
@@ -168,7 +202,7 @@ function getReceiverEarnRatePerMinute(params: VoiceCallScreenParams): number {
 }
 
 export default function VoiceCallScreen({ navigation, route }: Props): React.JSX.Element {
-  const MIN_RATING_SECONDS = 55;
+  const MIN_RATING_SECONDS = 60;
   const insets = useSafeAreaInsets();
   const { user, refreshUser } = useAuth();
   const messageEligibility = useCallerMessageEligibilityOptional();
@@ -266,12 +300,48 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
     displayNameRef.current = user?.name ?? 'User';
     displayImageRef.current = user?.profileImage;
   }, [user?.name, user?.profileImage]);
-  const rawEarnRate = getReceiverEarnRatePerMinute(callParams);
+  const [earningMeta, setEarningMeta] = useState<ReceiverEarningMeta | null>(null);
+
+  const refreshReceiverEarningMeta = useCallback(async (): Promise<void> => {
+    if (user?.role !== 'receiver') return;
+    try {
+      const { data } = await profileApi.receiverCallInsights('all');
+      const model = data.receiverEarningModel === 'fixed_per_minute' ? 'fixed_per_minute' : 'score_based';
+      setEarningMeta({
+        model,
+        windows: data.fixedPerMinuteWindows ?? [],
+        earningRatePerMinute:
+          typeof data.earningRatePerMinute === 'number' && Number.isFinite(data.earningRatePerMinute)
+            ? data.earningRatePerMinute
+            : undefined,
+      });
+    } catch {
+      // Keep bootstrap / route params until insights load.
+    }
+  }, [user?.role]);
+
+  useFocusEffect(
+    useCallback(() => {
+      void refreshReceiverEarningMeta();
+    }, [refreshReceiverEarningMeta])
+  );
+
+  const effectiveEarningModel = earningMeta?.model ?? getReceiverEarningModelFromParams(callParams);
+
+  const rawEarnRate = useMemo(
+    () => getReceiverEarnRatePerMinute(callParams, new Date(), earningMeta),
+    [callParams, earningMeta, elapsedSec]
+  );
   const liveRatePerMinute =
     typeof rawEarnRate === 'number' && Number.isFinite(rawEarnRate) ? Math.max(0, rawEarnRate) : 0;
   const liveEarning = Math.round(((elapsedSec / 60) * liveRatePerMinute) * 100) / 100;
+  /** Server prorates fixed windows on sync; take the higher of estimate vs settled. */
   const shownLiveEarning = Math.max(liveEarning, liveSettledAmountInr);
   const showLiveEarning = user?.role === 'receiver';
+  const liveEarningSub =
+    effectiveEarningModel === 'fixed_per_minute'
+      ? `₹${liveRatePerMinute.toLocaleString('en-IN')}/min · IST window · synced every few sec`
+      : `₹${liveRatePerMinute.toLocaleString('en-IN')}/min · score tier · synced every few sec`;
   const callerWalletInr =
     user?.role === 'caller' && typeof user.walletBalance === 'number' && Number.isFinite(user.walletBalance)
       ? Math.max(0, user.walletBalance)
@@ -289,7 +359,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
 
   const callerCanRateByDuration = user?.role === 'caller' && elapsedSec >= MIN_RATING_SECONDS;
 
-  /** Kept in refs so the signaling socket effect does not re-run when duration crosses the rating threshold (that was disconnecting the socket ~55s into the call). */
+  /** Kept in refs so the signaling socket effect does not re-run when duration crosses the rating threshold (that was disconnecting the socket at the 1‑min mark). */
   const callerCanRateByDurationRef = useRef(callerCanRateByDuration);
   const userRoleRef = useRef(user?.role);
   const receiverAvailabilitySessionRef = useRef(receiverAvailabilitySession);
@@ -914,7 +984,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
       }
       signalSocketRef.current = null;
     };
-    // Intentionally static: do not depend on callerCanRateByDuration (flips at 55s) or the socket will reconnect and drop the call.
+    // Intentionally static: do not depend on callerCanRateByDuration (flips at 60s) or the socket will reconnect and drop the call.
   }, []);
 
   const syncTalkTimingOnce = useCallback(async (): Promise<void> => {
@@ -930,10 +1000,13 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
       ) {
         setLiveSettledAmountInr((prev) => (data.receiverEarnedInr > prev ? data.receiverEarnedInr : prev));
       }
+      if (user?.role === 'receiver') {
+        void refreshReceiverEarningMeta();
+      }
     } catch {
       // Best-effort live settlement sync.
     }
-  }, []);
+  }, [refreshReceiverEarningMeta, user?.role]);
 
   useEffect(() => {
     if (!ready || !talkActive) return;
@@ -1425,8 +1498,8 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
                 style={styles.earningCard}
               >
                 <Text style={styles.earningTitle}>Live Earning</Text>
-                <Text style={styles.earningValue}>₹{shownLiveEarning}</Text>
-                <Text style={styles.earningSub}>Updating every second</Text>
+                <Text style={styles.earningValue}>₹{shownLiveEarning.toLocaleString('en-IN')}</Text>
+                <Text style={styles.earningSub}>{liveEarningSub}</Text>
               </LinearGradient>
             ) : null}
             <View style={styles.controls}>

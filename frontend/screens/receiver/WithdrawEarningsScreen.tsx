@@ -35,6 +35,18 @@ function formatDate(iso: string): string {
   return new Intl.DateTimeFormat('en-IN', { dateStyle: 'medium', timeStyle: 'short' }).format(d);
 }
 
+function isValidUpiId(upi: string): boolean {
+  return /^[a-z0-9._-]{2,256}@[a-z]{3,}$/i.test(upi.trim());
+}
+
+function isValidAadhaarNumber(value: string): boolean {
+  return /^\d{12}$/.test(value.replace(/\D/g, ''));
+}
+
+function isValidPanNumber(value: string): boolean {
+  return /^[A-Z]{5}[0-9]{4}[A-Z]$/.test(value.trim().toUpperCase());
+}
+
 export default function WithdrawEarningsScreen(): React.JSX.Element {
   const navigation = useNavigation<WithdrawNav>();
   const { user } = useAuth();
@@ -77,55 +89,34 @@ export default function WithdrawEarningsScreen(): React.JSX.Element {
     return `******${d.slice(-4)}`;
   }, [user?.phone]);
 
-  const isIdentityComplete = useMemo(() => {
+  const isPaymentComplete = useMemo(() => {
+    if (overview?.payment?.complete) return true;
     if (!user) return false;
-    const aadhaarDigits = String(user.aadhaarNumber ?? '').replace(/\D/g, '');
-    const pan = String(user.panNumber ?? '').trim().toUpperCase();
     return Boolean(
-      user.aadhaarFront?.trim() &&
-      user.aadhaarBack?.trim() &&
-      user.panFront?.trim() &&
-      /^\d{12}$/.test(aadhaarDigits) &&
-      /^[A-Z]{5}[0-9]{4}[A-Z]$/.test(pan),
+      user.nameAsPerAadhaar?.trim() &&
+        user.upiId?.trim() &&
+        isValidUpiId(user.upiId) &&
+        isValidAadhaarNumber(String(user.aadhaarNumber ?? '')) &&
+        isValidPanNumber(String(user.panNumber ?? '')),
     );
-  }, [user]);
+  }, [overview?.payment?.complete, user]);
 
-  const isBankDetailsComplete = useMemo(() => {
-    if (!overview) return false;
-    return Boolean(
-      overview.bank.bankName?.trim() &&
-      overview.bank.accountHolderName?.trim() &&
-      overview.bank.accountMasked?.trim(),
-    );
-  }, [overview]);
+  const handleCompletePaymentDetails = useCallback(() => {
+    navigation.navigate('ReceiverBankDetails', { returnToWithdraw: true });
+  }, [navigation]);
 
-  // Single function that handles both KYC and bank details intelligently
-  const handleCompleteRequiredDetails = useCallback(() => {
-    if (!isIdentityComplete) {
-      navigation.navigate('ReceiverEditProfile', { fromWithdrawKyc: true });
-    } else if (!isBankDetailsComplete) {
-      navigation.navigate('ReceiverBankDetails');
-    }
-    // If both are complete, do nothing or optionally show a success message
-  }, [isIdentityComplete, isBankDetailsComplete, navigation]);
-
-  const ensureWithdrawKycReady = useCallback((): boolean => {
-    if (!isIdentityComplete) {
-      Alert.alert('Complete KYC', 'Please complete Verify Your Identity first.');
-      navigation.navigate('ReceiverEditProfile', { fromWithdrawKyc: true });
-      return false;
-    }
-    if (!isBankDetailsComplete) {
-      Alert.alert('Complete KYC', 'Please complete Apply for KYC bank details.');
-      navigation.navigate('ReceiverBankDetails');
+  const ensurePaymentReady = useCallback((): boolean => {
+    if (!isPaymentComplete) {
+      Alert.alert('Payment details', 'Add your UPI ID and required details to withdraw.');
+      navigation.navigate('ReceiverBankDetails', { returnToWithdraw: true });
       return false;
     }
     return true;
-  }, [isIdentityComplete, isBankDetailsComplete, navigation]);
+  }, [isPaymentComplete, navigation]);
 
   const onSendOtp = async () => {
     if (!overview) return;
-    if (!ensureWithdrawKycReady()) return;
+    if (!ensurePaymentReady()) return;
     if (!Number.isFinite(parsedAmount) || parsedAmount < 1) {
       Alert.alert('Invalid amount', 'Enter a valid withdrawal amount.');
       return;
@@ -181,7 +172,7 @@ export default function WithdrawEarningsScreen(): React.JSX.Element {
           if (!row?.payoutStatus) return;
           if (row.payoutStatus === 'success') {
             setStep('success');
-            Alert.alert('Payment successful', 'Withdrawal credited successfully.');
+            Alert.alert('Payment successful', 'Withdrawal credited to your UPI.');
           } else if (row.payoutStatus === 'failed') {
             setStep('failed');
             Alert.alert('Payment failed', 'Payment is failed.');
@@ -218,7 +209,7 @@ export default function WithdrawEarningsScreen(): React.JSX.Element {
             setStep('processing');
           } else if (payload.payoutStatus === 'success') {
             setStep('success');
-            Alert.alert('Payment successful', 'Withdrawal credited successfully.');
+            Alert.alert('Payment successful', 'Withdrawal credited to your UPI.');
           } else if (payload.payoutStatus === 'failed') {
             setStep('failed');
             Alert.alert('Payment failed', 'Payment is failed.');
@@ -244,8 +235,7 @@ export default function WithdrawEarningsScreen(): React.JSX.Element {
     );
   }
 
-  // If KYC or bank details are incomplete, show only the centered action card
-  if (!isIdentityComplete || !isBankDetailsComplete) {
+  if (!isPaymentComplete) {
     return (
       <SafeAreaView style={styles.safe} edges={['top', 'left', 'right']}>
         <View style={styles.centeredContainer}>
@@ -262,18 +252,16 @@ export default function WithdrawEarningsScreen(): React.JSX.Element {
             {/* <Text style={styles.actionIcon}>⚠️</Text> */}
             <Text style={styles.centeredTitle}>Action Required</Text>
             <Text style={styles.centeredSubtitle}>
-              {!isIdentityComplete
-                ? 'Please complete your identity verification with Aadhaar and PAN details first.'
-                : 'Please add your bank account details to proceed with withdrawals.'}
+              Add your UPI ID, name as per Aadhaar, Aadhaar number, and PAN to withdraw earnings.
             </Text>
-            <TouchableOpacity onPress={handleCompleteRequiredDetails} activeOpacity={0.8}>
+            <TouchableOpacity onPress={handleCompletePaymentDetails} activeOpacity={0.8}>
               <LinearGradient
                 colors={['#7F00FF', '#A855F7', '#E100FF']}
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 0 }}
                 style={styles.actionButton}
               >
-                <Text style={styles.actionButtonText}>Complete Your KYC</Text>
+                <Text style={styles.actionButtonText}>Add payment details</Text>
               </LinearGradient>
             </TouchableOpacity>
           </View>
@@ -308,7 +296,7 @@ export default function WithdrawEarningsScreen(): React.JSX.Element {
               <View style={styles.balanceCard}>
                 <Text style={styles.balanceLabel}>Available Balance</Text>
                 <Text style={styles.balanceAmount}>{formatInr(overview.walletBalance)}</Text>
-                <Text style={styles.balanceSub}>Withdraw your earnings to your bank account</Text>
+                <Text style={styles.balanceSub}>Withdraw your earnings to your UPI</Text>
               </View>
 
               <Text style={styles.sectionLabel}>Enter Withdrawal Amount</Text>
@@ -339,9 +327,11 @@ export default function WithdrawEarningsScreen(): React.JSX.Element {
                   <Text style={styles.bankTitle}>Withdrawal will be sent to</Text>
                   <View />
                 </View>
-                <Text style={styles.bankName}>{overview.bank.bankName}</Text>
-                <Text style={styles.bankAcc}>{overview.bank.accountMasked}</Text>
-                <Text style={styles.bankHolder}>{overview.bank.accountHolderName}</Text>
+                <Text style={styles.bankName}>{overview.payment?.upiMasked ?? overview.bank.accountMasked}</Text>
+                <Text style={styles.bankAcc}>UPI payout</Text>
+                <Text style={styles.bankHolder}>
+                  {overview.payment?.nameAsPerAadhaar ?? overview.bank.accountHolderName}
+                </Text>
               </View>
 
               {step === 'amount' ? (
@@ -421,7 +411,7 @@ export default function WithdrawEarningsScreen(): React.JSX.Element {
               {step === 'success' ? (
                 <View style={styles.successCard}>
                   <Text style={styles.successTitle}>Payment Successful!</Text>
-                  <Text style={styles.successSub}>Amount credited to your bank account.</Text>
+                  <Text style={styles.successSub}>Amount credited to your UPI.</Text>
                   <TouchableOpacity
                     style={styles.primaryBtn}
                     onPress={() => {
@@ -495,7 +485,7 @@ export default function WithdrawEarningsScreen(): React.JSX.Element {
               <Text style={styles.emptyStateSub}>
                 Complete your required details to continue the withdrawal flow.
               </Text>
-              <TouchableOpacity onPress={handleCompleteRequiredDetails} activeOpacity={0.8}>
+              <TouchableOpacity onPress={handleCompletePaymentDetails} activeOpacity={0.8}>
                 <LinearGradient
                   colors={['#7F00FF', '#A855F7', '#E100FF']}
                   start={{ x: 0, y: 0 }}

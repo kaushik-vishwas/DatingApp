@@ -87,17 +87,7 @@ const CALLER_MALE_AVATAR_SOURCES: ImageSourcePropType[] = [
   require('../assets/boyavt/boyavt11.png'),
   require('../assets/boyavt/boyavt12.png'),
   require('../assets/boyavt/boyavt13.png'),
-  require('../assets/boyavt/boyavt14.png'),
-  require('../assets/boyavt/boyavt15.png'),
-  require('../assets/boyavt/boyavt16.png'),
-  require('../assets/boyavt/boyavt17.png'),
-  require('../assets/boyavt/boyavt18.png'),
-  require('../assets/boyavt/boyavt19.png'),
-  require('../assets/boyavt/boyavt20.png'),
-  require('../assets/boyavt/boyavt21.png'),
-  require('../assets/boyavt/boyavt22.png'),
-  require('../assets/boyavt/boyavt23.png'),
-  require('../assets/boyavt/boyavt24.png'),
+
 ];
 
 const CALLER_FEMALE_AVATAR_SOURCES: ImageSourcePropType[] = [
@@ -117,14 +107,6 @@ const CALLER_FEMALE_AVATAR_SOURCES: ImageSourcePropType[] = [
   require('../assets/girlavt/girlavt14.png'),
   require('../assets/girlavt/girlavt15.png'),
   require('../assets/girlavt/girlavt16.png'),
-  require('../assets/girlavt/girlavt17.png'),
-  require('../assets/girlavt/girlavt18.png'),
-  require('../assets/girlavt/girlavt19.png'),
-  require('../assets/girlavt/girlavt20.png'),
-  require('../assets/girlavt/girlavt21.png'),
-  require('../assets/girlavt/girlavt22.png'),
-  require('../assets/girlavt/girlavt23.png'),
-  require('../assets/girlavt/girlavt24.png'),
 ];
 
 /** Preset profile photos for onboarding / edit profile (bundled assets; stored as `preset:male:N` / `preset:female:N`). */

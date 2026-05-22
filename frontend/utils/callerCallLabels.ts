@@ -1,7 +1,7 @@
 import { formatCallDurationCompact } from './callDurationDisplay';
 
 /** Align with backend `MISSED_OR_INCOMPLETE_MAX_SEC`. */
-export const CALL_INCOMPLETE_MAX_SEC = 55;
+export const CALL_INCOMPLETE_MAX_SEC = 60;
 
 export type CallerCallDisplayStatus = 'completed' | 'missed' | 'incomplete';
 

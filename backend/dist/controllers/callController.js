@@ -50,6 +50,7 @@ const ReceiverRating_1 = __importDefault(require("../models/ReceiverRating"));
 const UserReport_1 = __importDefault(require("../models/UserReport"));
 const streamVoice_1 = require("../utils/streamVoice");
 const receiverScore_1 = require("../services/receiverScore");
+const receiverEarningModel_1 = require("../services/receiverEarningModel");
 const callQueue_1 = require("../services/callQueue");
 const callQueue_2 = require("../services/callQueue");
 function roundInr(n) {
@@ -61,7 +62,7 @@ function sleep(ms) {
     });
 }
 /** Completed calls shorter than this count as missed/incomplete for receiver history. */
-exports.MISSED_OR_INCOMPLETE_MAX_SEC = 55;
+exports.MISSED_OR_INCOMPLETE_MAX_SEC = 60;
 /** Anchor for live/ settled talk duration (both sides connected). */
 function callTalkStartedAt(call) {
     if (call.talkStartedAt)
@@ -186,7 +187,15 @@ async function settleCallSession(callId, complete) {
             const grossAmountInr = roundInr((durationSec / 60) * Math.max(0, call.ratePerMinute));
             const alreadySettled = roundInr(call.settledAmountInr || 0);
             const dueAmount = roundInr(Math.max(0, grossAmountInr - alreadySettled));
-            const receiverEarnedInr = roundInr((durationSec / 60) * Math.max(0, Number(call.receiverPayoutRatePerMinute || 0)));
+            const earningSettings = await (0, receiverEarningModel_1.getReceiverEarningSettings)();
+            let receiverEarnedInr;
+            if (earningSettings.receiverEarningModel === 'fixed_per_minute') {
+                const talkAnchor = callTalkStartedAt(call) ?? call.startedAt;
+                receiverEarnedInr = (0, receiverEarningModel_1.computeProratedFixedEarningsInr)(talkAnchor, now, earningSettings.fixedPerMinuteWindows);
+            }
+            else {
+                receiverEarnedInr = roundInr((durationSec / 60) * Math.max(0, Number(call.receiverPayoutRatePerMinute || 0)));
+            }
             let settledNow = 0;
             if (dueAmount > 0) {
                 const [callerDoc, receiverDoc] = await Promise.all([
@@ -366,6 +375,14 @@ const getVoiceBootstrap = async (req, res) => {
     const peerStreamUserId = (0, streamVoice_1.toStreamUserId)(accountKind === 'user' ? 'receiver' : 'user', peerId);
     const { token, expiresAt } = (0, streamVoice_1.createStreamUserToken)(meStreamUserId);
     const callId = requestedCallId || (0, streamVoice_1.buildVoiceCallId)(meStreamUserId, peerStreamUserId);
+    const earningSettings = await (0, receiverEarningModel_1.getReceiverEarningSettings)();
+    const earningPublic = (0, receiverEarningModel_1.publicEarningSchedulePayload)(earningSettings);
+    const scoreBasedRate = typeof receiverDoc.earningRatePerMinute === 'number' && Number.isFinite(receiverDoc.earningRatePerMinute)
+        ? roundInr(receiverDoc.earningRatePerMinute)
+        : 0;
+    const receiverEarningRatePerMinute = earningSettings.receiverEarningModel === 'fixed_per_minute'
+        ? earningPublic.earningRatePerMinute
+        : scoreBasedRate;
     res.json({
         apiKey: (0, streamVoice_1.getStreamApiKey)(),
         token,
@@ -374,9 +391,10 @@ const getVoiceBootstrap = async (req, res) => {
         peerStreamUserId,
         peerAccountId: peerId,
         receiverRatePerMinute: Receiver_1.RECEIVER_AUDIO_CALL_RATE_INR_PER_MIN,
-        receiverEarningRatePerMinute: typeof receiverDoc.earningRatePerMinute === 'number' && Number.isFinite(receiverDoc.earningRatePerMinute)
-            ? roundInr(receiverDoc.earningRatePerMinute)
-            : 0,
+        receiverEarningRatePerMinute,
+        receiverEarningModel: earningPublic.receiverEarningModel,
+        fixedPerMinuteWindows: earningPublic.fixedPerMinuteWindows,
+        earningTimezone: earningPublic.timezone,
         callType: 'default',
         callId,
     });
@@ -408,9 +426,12 @@ const startVoiceSession = async (req, res) => {
             return;
         }
         const ratePerMinute = Receiver_1.RECEIVER_AUDIO_CALL_RATE_INR_PER_MIN;
-        const receiverPayoutRatePerMinute = typeof receiver.earningRatePerMinute === 'number' && Number.isFinite(receiver.earningRatePerMinute)
-            ? Math.max(0, receiver.earningRatePerMinute)
-            : 0;
+        const earningSettings = await (0, receiverEarningModel_1.getReceiverEarningSettings)();
+        const receiverPayoutRatePerMinute = earningSettings.receiverEarningModel === 'fixed_per_minute'
+            ? (0, receiverEarningModel_1.resolveFixedRatePerMinuteAt)(new Date(), earningSettings.fixedPerMinuteWindows)
+            : typeof receiver.earningRatePerMinute === 'number' && Number.isFinite(receiver.earningRatePerMinute)
+                ? Math.max(0, receiver.earningRatePerMinute)
+                : 0;
         await CallSession_1.default.findOneAndUpdate({ callId }, {
             $setOnInsert: {
                 callId,
@@ -487,7 +508,7 @@ const endVoiceSession = async (req, res) => {
             estimatedEarning: settled.receiverEarnedInr,
             settledAmountInr: settled.settledAmountInr,
             receiverEarnedInr: settled.receiverEarnedInr,
-            canRate: settled.durationSec >= 30,
+            canRate: settled.durationSec >= exports.MISSED_OR_INCOMPLETE_MAX_SEC,
             ...talkFields,
             ...(callerWalletBalanceInr !== undefined ? { callerWalletBalanceInr } : {}),
         });
@@ -532,7 +553,7 @@ const syncVoiceSession = async (req, res) => {
             durationSec: settled.durationSec,
             settledAmountInr: settled.settledAmountInr,
             receiverEarnedInr: settled.receiverEarnedInr,
-            canRate: settled.durationSec >= 30,
+            canRate: settled.durationSec >= exports.MISSED_OR_INCOMPLETE_MAX_SEC,
             status: settled.status,
             ...talkFields,
         });
@@ -569,8 +590,8 @@ const rateVoiceSession = async (req, res) => {
             res.status(409).json({ message: 'You can rate only after a completed call.' });
             return;
         }
-        if (session.durationSec < 30) {
-            res.status(409).json({ message: 'Call too short for rating. Minimum 30 seconds required.' });
+        if (session.durationSec < exports.MISSED_OR_INCOMPLETE_MAX_SEC) {
+            res.status(409).json({ message: `Call too short for rating. Minimum ${exports.MISSED_OR_INCOMPLETE_MAX_SEC} seconds required.` });
             return;
         }
         if (typeof session.callerRating === 'number') {

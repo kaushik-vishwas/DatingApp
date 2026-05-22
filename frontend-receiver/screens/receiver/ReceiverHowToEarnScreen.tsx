@@ -20,7 +20,7 @@ const EARN_STEPS: EarnStep[] = [
     title: '💰 How You Earn',
     subtitle: 'Your earnings depend on call duration & timing',
     bullets: [
-      'Calls under 55 seconds = 0 earnings ❌',
+      'Calls under 1 minute = 0 earnings ❌',
       'Calls 3-10 minutes = 3x score multiplier',
       'Calls above 10 minutes = 5x score multiplier',
       'Longer calls = much higher earnings!',
@@ -68,7 +68,7 @@ const EARN_STEPS: EarnStep[] = [
     bullets: [
       'Talk for 10+ minutes to get 5x points',
       'Be active after 10 PM for bonus multipliers',
-      'Avoid calls shorter than 55 seconds',
+      'Avoid calls shorter than 1 minute',
       'Higher score = better badge = more ₹ per minute',
       'Consistent earnings = reach Supreme level!',
     ],

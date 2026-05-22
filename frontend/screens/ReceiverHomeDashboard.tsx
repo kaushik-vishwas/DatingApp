@@ -1,6 +1,6 @@
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { Ionicons } from '@expo/vector-icons';
+import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import React, { useCallback, useMemo, useState } from 'react';
 import { LinearGradient } from 'expo-linear-gradient';
 import {
@@ -31,10 +31,19 @@ import { formatCallDurationCompact, leaderboardMinutesFromSeconds } from '../uti
 import { type ReceiverPresenceInfo } from '../utils/receiverStatus';
 import { resolveProfileImageSource } from '../utils/avatarSource';
 import SelectoLogo from '../assets/SelectoLogo.png';
+import EarningsCardBg from '../assets/earnBg.png';
+import InstructionsCardBg from '../assets/instructionBg.png';
 import { useReceiverTabBarBottomInset } from '../utils/receiverTabBarInset';
+
+const INSTRUCTIONS_GRADIENT_START = '#A855F7';
+const INSTRUCTIONS_GRADIENT_END = '#F4C430';
 
 const PURPLE = '#7b2cff';
 const PINK = '#ff72d2';
+const SKY_BLUE_START = '#3B82F6';
+const SKY_BLUE_END = '#8E2DE2';
+const DEEP_PURPLE_START = '#8E2DE2';
+const DEEP_PURPLE_END = '#4A00E0';
 
 function formatInr(n: number): string {
   const v = Math.round(n * 100) / 100;
@@ -65,6 +74,32 @@ function getReceiverPublicPresence(isOnline: boolean, isAvailable: boolean): Rec
 
 /** Receiver (call earner) home — availability, earnings demo, etc. */
 type ReceiverHomeNav = NativeStackNavigationProp<ReceiverStackParamList>;
+
+type CompactInfoCardProps = {
+  colors: [string, string];
+  bgImage: number;
+  title: string;
+  subtitle: string;
+  children: React.ReactNode;
+};
+
+function CompactInfoCard({ colors, bgImage, title, subtitle, children }: CompactInfoCardProps): React.JSX.Element {
+  return (
+    <View style={styles.infoSection}>
+      <LinearGradient colors={colors} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.compactGradientCard}>
+        <Image source={bgImage} style={styles.cardBgImage} resizeMode="cover" />
+        <View style={styles.cardBgScrim} />
+        <View style={styles.cardForeground}>
+          <View style={styles.compactTitleRow}>
+            <Text style={styles.gradientCardTitle}>{title}</Text>
+            <Text style={styles.compactSubtitle}>{subtitle}</Text>
+          </View>
+          {children}
+        </View>
+      </LinearGradient>
+    </View>
+  );
+}
 
 export default function ReceiverHomeDashboard(): React.JSX.Element {
   const navigation = useNavigation<ReceiverHomeNav>();
@@ -186,6 +221,37 @@ export default function ReceiverHomeDashboard(): React.JSX.Element {
     callInsights != null
       ? Math.round(callInsights.totalScore)
       : Math.round(persistedScoreFromProfile);
+  const showScoreInTopBar = callInsights?.receiverEarningModel !== 'fixed_per_minute';
+
+  const isFixedEarning = callInsights?.receiverEarningModel === 'fixed_per_minute';
+  const earningLevelRows = useMemo(() => {
+    type LevelIcon = 'white-balance-sunny' | 'weather-sunset' | 'moon-waning-crescent' | 'medal-outline' | 'diamond-stone' | 'crown';
+    if (isFixedEarning && callInsights?.fixedPerMinuteWindows?.length) {
+      const iconById: Record<string, LevelIcon> = {
+        day: 'white-balance-sunny',
+        evening: 'weather-sunset',
+        night: 'moon-waning-crescent',
+      };
+      return callInsights.fixedPerMinuteWindows.map((w) => ({
+        id: w.id,
+        label: w.label || `${w.from} – ${w.to}`,
+        rate: `₹${w.ratePerMinute}/min`,
+        icon: iconById[w.id] ?? 'white-balance-sunny',
+      }));
+    }
+    if (!isFixedEarning) {
+      return [
+        { id: 'platinum', label: 'Platinum', rate: '₹2/min', icon: 'medal-outline' as LevelIcon },
+        { id: 'diamond', label: 'Diamond', rate: '₹2.3/min', icon: 'diamond-stone' as LevelIcon },
+        { id: 'supreme', label: 'Supreme', rate: '₹2.6/min', icon: 'crown' as LevelIcon },
+      ];
+    }
+    return [
+      { id: 'day', label: '6 AM – 9 PM', rate: '₹2/min', icon: 'white-balance-sunny' as LevelIcon },
+      { id: 'evening', label: '9 PM – 11 PM', rate: '₹2.2/min', icon: 'weather-sunset' as LevelIcon },
+      { id: 'night', label: '11 PM – 6 AM', rate: '₹2.5/min', icon: 'moon-waning-crescent' as LevelIcon },
+    ];
+  }, [callInsights?.fixedPerMinuteWindows, isFixedEarning]);
 
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'left', 'right']}>
@@ -202,18 +268,20 @@ export default function ReceiverHomeDashboard(): React.JSX.Element {
               resizeMode="contain"
             />
             <View style={styles.topRight}>
-              <TouchableOpacity
-                style={styles.scoreCapsule}
-                onPress={() => navigation.navigate('WithdrawEarnings')}
-                activeOpacity={0.85}
-              >
-                <View style={styles.scoreContainer}>
-                  <Text style={styles.scoreIco}>🏆</Text>
-                  <Text style={styles.scoreText}>
-                    {trophyScoreRounded.toLocaleString('en-IN')}
-                  </Text>
-                </View>
-              </TouchableOpacity>
+              {showScoreInTopBar ? (
+                <TouchableOpacity
+                  style={styles.scoreCapsule}
+                  onPress={() => navigation.navigate('ReceiverProfilePreview')}
+                  activeOpacity={0.85}
+                >
+                  <View style={styles.scoreContainer}>
+                    <Text style={styles.scoreIco}>🏆</Text>
+                    <Text style={styles.scoreText}>
+                      {trophyScoreRounded.toLocaleString('en-IN')}
+                    </Text>
+                  </View>
+                </TouchableOpacity>
+              ) : null}
 
               <TouchableOpacity
                 style={styles.bellButton}
@@ -294,7 +362,6 @@ export default function ReceiverHomeDashboard(): React.JSX.Element {
                     <View style={styles.publicRatingBelow}>
                       <Ionicons name="star" size={10} color="#fbbf24" />
                       <Text style={styles.publicRatingText}>{callInsights?.receiverRatingAvg ?? 0}</Text>
-                      <Text style={styles.publicRatingCount}>({callInsights?.receiverRatingCount ?? 0})</Text>
                     </View>
                   </View>
                   <View style={styles.publicInfoSection}>
@@ -304,21 +371,25 @@ export default function ReceiverHomeDashboard(): React.JSX.Element {
                     </Text>
                     <Text style={styles.publicCardInterests} numberOfLines={1}>
                       {(user.interests ?? []).length > 0
-                        ? user.interests.slice(0, 3).join(' • ')
+                        ? user.interests.slice(0, 3).join(' | ')
                         : '—'}
                     </Text>
                     <Text style={styles.publicCardLoc} numberOfLines={1}>
                       {user.state?.trim() || '—'}
                     </Text>
-                  </View>
-                  <View style={styles.publicRightColumn}>
-                    <View style={styles.publicRateBtn}>
+
+                    {/* Rate button moved here - below state */}
+                    <View style={styles.publicRateBtnInline}>
                       <Text style={styles.publicRateBtnText}>
                         {typeof user.audioCallRate === 'number' && Number.isFinite(user.audioCallRate)
                           ? `₹${user.audioCallRate}/min`
                           : '₹5/min'}
                       </Text>
                     </View>
+                  </View>
+
+                  <View style={styles.publicRightColumn}>
+                   
                     <View style={styles.publicLanguagesRow}>
                       {(user.languages ?? []).slice(0, 2).map((lang) => (
                         <View key={lang} style={styles.publicMiniLang}>
@@ -353,147 +424,168 @@ export default function ReceiverHomeDashboard(): React.JSX.Element {
               </View>
             </View>
 
-            <View style={styles.availabilityCard}>
-              <View style={styles.availabilityLeft}>
-              <Ionicons name="power-outline" size={20} color="#7b2cff" />
-                <Text style={styles.availabilityTitle}>Go Online </Text>
-              </View>
-              <View style={styles.availabilityStatusRow}>
-                <Text style={[styles.availabilityStatusText, { color: available ? '#22c55e' : '#f59e0b' }]}>
-                  {available ? '- You Are Online' : '- You Are Offline'}
-                </Text>
-                <Switch
-                  value={available}
-                  onValueChange={(next) => void onToggleAvailability(next)}
-                  trackColor={{ false: '#e5e5e5', true: 'rgba(123,44,255,0.35)' }}
-                  thumbColor={available ? PURPLE : '#bdbdbd'}
-                />
-              </View>
-            </View>
-
-            {/* Earning Levels Section - Purple Gradient Card */}
-            <View style={styles.infoSection}>
-              <Text style={styles.infoSectionTitle}>Earning Levels</Text>
+            {/* Go Online Card with Earnings Summary Card Color Combination */}
+            <View style={styles.availabilityCardWrapper}>
               <LinearGradient
-                colors={['#7F00FF', '#A855F7', '#E100FF']}
+                colors={[PURPLE, PINK]}
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 1 }}
-                style={styles.gradientCard}
+                style={styles.highlightedAvailabilityCard}
               >
-                <View style={styles.earningLevelList}>
-                  <View style={styles.levelRow}>
-                    <Text style={styles.levelTime}>9 AM - 9 PM</Text>
-                    <Text style={styles.levelRate}>0.5x Score Multiplier</Text>
-                  </View>
-                  <View style={styles.levelDividerLine} />
-                  <View style={styles.levelRow}>
-                    <Text style={styles.levelTime}>10 PM - 12 PM</Text>
-                    <Text style={styles.levelRate}>3x Score Multiplier</Text>
-                  </View>
-                  <View style={styles.levelDividerLine} />
-                  <View style={styles.levelRow}>
-                    <Text style={styles.levelTime}>12 AM - 2 AM</Text>
-                    <Text style={styles.levelRate}>10x Score Multiplier</Text>
-                  </View>
+                <View style={styles.availabilityLeft}>
+                  <Ionicons name="power-outline" size={24} color="#fff" />
+                  <Text style={styles.availabilityTitle}>Go Online</Text>
+                </View>
+                <View style={styles.availabilityStatusRow}>
+                  {/* <Text style={[styles.availabilityStatusText, { color: available ? '#fff' : '#fff' }]}>
+                    {available ? '🟢 You Are Online' : '🟡 You Are Offline'}
+                  </Text> */}
+                  <Switch
+                    value={available}
+                    onValueChange={(next) => void onToggleAvailability(next)}
+                    trackColor={{ false: '#e5e5e5', true: 'rgba(255,255,255,0.5)' }}
+                    thumbColor={available ? '#fff' : '#f59e0b'}
+                  />
                 </View>
               </LinearGradient>
             </View>
 
-            {/* Guidelines Section - Purple Gradient Card */}
-            <View style={styles.infoSection}>
-              <Text style={styles.infoSectionTitle}>Instructions</Text>
-              <LinearGradient
-                colors={['#7F00FF', '#A855F7', '#E100FF']}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 1 }}
-                style={styles.gradientCard}
-              >
-                <View style={styles.guidelinesList}>
-                  <View style={styles.guidelineRow}>
-                    <Ionicons name="time-outline" size={16} color="#fff" style={styles.guideIcon} />
-                    <Text style={styles.guidelineText}>Maximum you stay in online minimum 8 hours per day.</Text>
+            <CompactInfoCard
+              colors={[SKY_BLUE_START, SKY_BLUE_END]}
+              bgImage={EarningsCardBg}
+              title="Earning Levels"
+              subtitle={isFixedEarning ? 'IST time slots' : 'Score badges'}
+            >
+              <View style={styles.earningLevelList}>
+                {earningLevelRows.map((row, index) => (
+                  <React.Fragment key={row.id}>
+                    {index > 0 ? <View style={styles.levelDividerLine} /> : null}
+                    <View style={styles.levelRow}>
+                      <View style={styles.levelLeft}>
+                        <View style={styles.levelIconBadge}>
+                          <MaterialCommunityIcons name={row.icon} size={14} color="#1e3a8a" />
+                        </View>
+                        <Text style={styles.levelTime}>{row.label}</Text>
+                      </View>
+                      <Text style={styles.levelRate}>{row.rate}</Text>
+                    </View>
+                  </React.Fragment>
+                ))}
+              </View>
+            </CompactInfoCard>
+
+            <CompactInfoCard
+              colors={[INSTRUCTIONS_GRADIENT_START, INSTRUCTIONS_GRADIENT_END]}
+              bgImage={InstructionsCardBg}
+              title="Instructions"
+              subtitle="Stay safe & professional"
+            >
+              <View style={styles.guidelinesList}>
+                <View style={styles.guidelineRow}>
+                  <View style={styles.guideIconBadge}>
+                    <MaterialCommunityIcons name="clock-check-outline" size={14} color="#312e81" />
                   </View>
-                  <View style={styles.guidelineRow}>
-                    <Ionicons name="lock-closed-outline" size={16} color="#fff" style={styles.guideIcon} />
-                    <Text style={styles.guidelineText}>Don't share personal information like phone number, personal ID</Text>
-                  </View>
-                  <View style={styles.guidelineRow}>
-                    <Ionicons name="call-outline" size={16} color="#fff" style={styles.guideIcon} />
-                    <Text style={styles.guidelineText}>Block the calls if they caller talk badly and rudely.</Text>
-                  </View>
+                  <Text style={styles.guidelineText}>Stay online at least 8 hours per day.</Text>
                 </View>
-              </LinearGradient>
-            </View>
+                <View style={styles.guidelineRow}>
+                  <View style={styles.guideIconBadge}>
+                    <MaterialCommunityIcons name="shield-lock-outline" size={14} color="#312e81" />
+                  </View>
+                  <Text style={styles.guidelineText}>Don't share phone, UPI, or personal IDs.</Text>
+                </View>
+                <View style={styles.guidelineRow}>
+                  <View style={styles.guideIconBadge}>
+                    <MaterialCommunityIcons name="phone-cancel-outline" size={14} color="#312e81" />
+                  </View>
+                  <Text style={styles.guidelineText}>Block rude or inappropriate callers.</Text>
+                </View>
+              </View>
+            </CompactInfoCard>
 
-            <View style={styles.section}>
-              <Text style={styles.sectionTitle}>Earnings Summary</Text>
-              {summaryError ? <Text style={styles.summaryErr}>{summaryError}</Text> : null}
-
+            {/* Earnings Summary Section - With inline icons */}
+            <View style={styles.infoSection}>
               <LinearGradient
-                colors={['#7F00FF', '#A855F7', '#E100FF']}
+                colors={[PURPLE, PINK]}
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 1 }}
-                style={styles.earningsMainCard}
+                style={styles.fullGradientCard}
               >
-                <View style={styles.earningsHeader}>
-                  <Text style={styles.earningsSubtitle}>Total Earnings</Text>
-                  <View style={styles.earningsIconWrap}>
+                {summaryError ? <Text style={styles.summaryErr}>{summaryError}</Text> : null}
+
+                {/* Row 1: Title with Icon on Left, Amount on Right */}
+                <View style={styles.earningsRow}>
+                  <View style={styles.earningsTitleWrapper}>
                     <Ionicons name="card-outline" size={20} color="#fff" />
+                    <Text style={styles.earningsTitle}>Total Earnings</Text>
+                  </View>
+                  <Text style={styles.totalEarningsAmount}>
+                    {walletSummary
+                      ? formatInr(
+                        typeof walletSummary.totalEarningsLifetime === 'number'
+                          ? walletSummary.totalEarningsLifetime
+                          : (typeof walletSummary.callEarningsLifetime === 'number'
+                            ? walletSummary.callEarningsLifetime
+                            : 0) +
+                          (typeof walletSummary.chatEarningsLifetime === 'number'
+                            ? walletSummary.chatEarningsLifetime
+                            : 0)
+                      )
+                      : '…'}
+                  </Text>
+                </View>
+
+                {/* {callInsights ? (
+                  <Text style={styles.earningModelNote}>
+                    {callInsights.receiverEarningModel === 'fixed_per_minute'
+                      ? `Fixed rate · ₹${(callInsights.earningRatePerMinute ?? 0).toLocaleString('en-IN')}/min now (IST)`
+                      : `Score based · ${(callInsights.badgeLevel ?? 'platinum').toUpperCase()} · ₹${(callInsights.earningRatePerMinute ?? 0).toLocaleString('en-IN')}/min`}
+                  </Text>
+                ) : null} */}
+
+                {/* Row 2: Today and 7 Days earnings side by side with icons */}
+                <View style={styles.smallEarningsRow}>
+                  <View style={styles.smallEarningsCard}>
+                    <View style={styles.smallEarningsHeader}>
+                      <Ionicons name="today-outline" size={14} color="#fff" style={styles.smallEarningsIcon} />
+                      <Text style={styles.smallEarningsLabel}>Earned today</Text>
+                    </View>
+                    <Text style={styles.smallEarningsText}>
+                      {walletSummary
+                        ? formatInr(
+                          typeof walletSummary.totalEarningsToday === 'number'
+                            ? walletSummary.totalEarningsToday
+                            : (typeof walletSummary.callEarningsToday === 'number'
+                              ? walletSummary.callEarningsToday
+                              : 0) +
+                            (typeof walletSummary.chatToday === 'number'
+                              ? walletSummary.chatToday
+                              : 0)
+                        )
+                        : '₹0'}
+                    </Text>
+                  </View>
+                  <View style={styles.smallEarningsCard}>
+                    <View style={styles.smallEarningsHeader}>
+                      <Ionicons name="calendar-outline" size={14} color="#fff" style={styles.smallEarningsIcon} />
+                      <Text style={styles.smallEarningsLabel}>Earned in 7 days</Text>
+                    </View>
+                    <Text style={[styles.smallEarningsText, { color: '#fff' }]}>
+                      {walletSummary
+                        ? formatInr(
+                          typeof walletSummary.totalEarningsThisWeek === 'number'
+                            ? walletSummary.totalEarningsThisWeek
+                            : (typeof walletSummary.callEarningsThisWeek === 'number'
+                              ? walletSummary.callEarningsThisWeek
+                              : 0) +
+                            (typeof walletSummary.chatEarningsThisWeek === 'number'
+                              ? walletSummary.chatEarningsThisWeek
+                              : 0)
+                        )
+                        : '₹0'}
+                    </Text>
                   </View>
                 </View>
-                <Text style={styles.earningsAmount}>
-                  {walletSummary
-                    ? formatInr(
-                      typeof walletSummary.totalEarningsLifetime === 'number'
-                        ? walletSummary.totalEarningsLifetime
-                        : (typeof walletSummary.callEarningsLifetime === 'number'
-                          ? walletSummary.callEarningsLifetime
-                          : 0) +
-                        (typeof walletSummary.chatEarningsLifetime === 'number'
-                          ? walletSummary.chatEarningsLifetime
-                          : 0)
-                    )
-                    : '…'}
-                </Text>
-
               </LinearGradient>
-
-              <View style={styles.smallEarningsRow}>
-                <View style={styles.smallEarningsCard}>
-                  <Text style={styles.smallEarningsLabel}>Earned today</Text>
-                  <Text style={styles.smallEarningsText}>
-                    {walletSummary
-                      ? formatInr(
-                        typeof walletSummary.totalEarningsToday === 'number'
-                          ? walletSummary.totalEarningsToday
-                          : (typeof walletSummary.callEarningsToday === 'number'
-                            ? walletSummary.callEarningsToday
-                            : 0) +
-                          (typeof walletSummary.chatToday === 'number'
-                            ? walletSummary.chatToday
-                            : 0)
-                      )
-                      : '₹0'}
-                  </Text>
-                </View>
-                <View style={styles.smallEarningsCard}>
-                  <Text style={styles.smallEarningsLabel}>Earned in 7 days</Text>
-                  <Text style={[styles.smallEarningsText, { color: '#2563eb' }]}>
-                    {walletSummary
-                      ? formatInr(
-                        typeof walletSummary.totalEarningsThisWeek === 'number'
-                          ? walletSummary.totalEarningsThisWeek
-                          : (typeof walletSummary.callEarningsThisWeek === 'number'
-                            ? walletSummary.callEarningsThisWeek
-                            : 0) +
-                          (typeof walletSummary.chatEarningsThisWeek === 'number'
-                            ? walletSummary.chatEarningsThisWeek
-                            : 0)
-                      )
-                      : '₹0'}
-                  </Text>
-                </View>
-              </View>
             </View>
 
             <View style={styles.section}>
@@ -717,7 +809,7 @@ const styles = StyleSheet.create({
   publicRatingBelow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 3, marginTop: 6 },
   publicRatingText: { fontSize: 11, fontWeight: '700', color: '#444' },
   publicRatingCount: { fontSize: 9, color: '#888' },
-  publicInfoSection: { flex: 1, gap: 6 },
+  publicInfoSection: { flex: 1, gap: 0 },
   publicCardName: { fontSize: 15, fontWeight: '700', color: '#111' },
   publicCardInterests: { fontSize: 11, color: '#666', lineHeight: 14 },
   publicCardLoc: { fontSize: 11, color: '#888', fontWeight: '500', marginTop: 2 },
@@ -743,37 +835,35 @@ const styles = StyleSheet.create({
   publicStatusPillRight: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 10 },
   publicStatusTextRight: { fontSize: 10, fontWeight: '600' },
 
-  availabilityCard: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#ececec',
+  availabilityCardWrapper: {
+    marginHorizontal: 16,
+    marginTop: 8,
+    marginBottom: 0,
+  },
+  highlightedAvailabilityCard: {
+    borderRadius: 16,
     paddingHorizontal: 16,
-    paddingVertical: 12,
+    paddingVertical: 4,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginHorizontal: 16,
-    marginTop: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 8,
   },
-availabilityTitle: {
-  fontSize: 14,
-  color: '#7b2cff',  // Change from 'purple' to actual hex color
-  fontWeight: '600',
-},
-
+  availabilityTitle: {
+    fontSize: 16,
+    color: '#fff',
+    fontWeight: '700',
+  },
   availabilityLeft: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    flex: 1,  // Add this
+    flex: 1,
   },
-  powerIcon: {
-    fontSize: 18,
-    color: 'purple',
-    fontWeight: '600',
-  },
-
   availabilityStatusRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -784,104 +874,221 @@ availabilityTitle: {
     fontWeight: '700',
   },
 
-  earningsMainCard: {
-    borderRadius: 14,
-    padding: 14,
-    color: '#fff',
+  infoSection: {
+    marginTop: 10,
+    paddingHorizontal: 16,
   },
-  earningsHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  earningsIconWrap: {
-    width: 32,
-    height: 32,
-    borderRadius: 10,
-    backgroundColor: 'rgba(255,255,255,0.35)',
-    alignItems: 'center',
-    justifyContent: 'center',
+  fullGradientCard: {
+    borderRadius: 16,
+    padding: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
   },
-  earningsIcon: { fontSize: 18 },
-  earningsSubtitle: { fontSize: 12, fontWeight: '700', color: '#fff' },
-  earningsAmount: { fontSize: 36, fontWeight: '900', color: '#fff', marginTop: 4 },
-  smallEarningsRow: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 12, gap: 10 },
-  smallEarningsCard: {
-    flex: 1,
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 12,
-    borderWidth: 1,
-    borderColor: '#ececec',
+  compactGradientCard: {
+    borderRadius: 16,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    overflow: 'hidden',
+    minHeight: 0,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.12,
+    shadowRadius: 4,
+    elevation: 3,
   },
-  smallEarningsLabel: { fontSize: 12, fontWeight: '700', color: '#666', marginBottom: 4 },
-  smallEarningsText: { color: '#16a34a', fontSize: 28, fontWeight: '900' },
-  summaryErr: {
-    color: '#b91c1c',
-    fontSize: 12,
-    fontWeight: '700',
+  cardBgImage: {
+    position: 'absolute',
+    right: -14,
+    bottom: -18,
+    width: 140,
+    height: 140,
+    opacity: 0.44,
+  },
+  cardBgScrim: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(30, 27, 75, 0.32)',
+  },
+  cardForeground: {
+    zIndex: 1,
+    paddingRight: 36,
+  },
+  compactTitleRow: {
     marginBottom: 8,
   },
-  emptyRecent: { color: '#666', fontSize: 13, paddingVertical: 8, textAlign: 'center' },
-  quickActionsCol: { gap: 10 },
-  muted: { color: '#888', textAlign: 'center', paddingHorizontal: 16 },
-  
-  // New gradient card styles
-  infoSection: {
-    marginTop: 8,
-    paddingHorizontal: 16,
+  gradientCardTitle: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: '#fff',
   },
-  infoSectionTitle: {
-    fontSize: 14,
-    fontWeight: '500',
-    color: '#111',
-    marginBottom: 10,
-  },
-  gradientCard: {
-    borderRadius: 14,
-    paddingVertical: 12,
-    paddingHorizontal: 16,
+  compactSubtitle: {
+    marginTop: 1,
+    fontSize: 10,
+    fontWeight: '600',
+    color: 'rgba(255,255,255,0.82)',
   },
   earningLevelList: {
-    gap: 8,
+    gap: 0,
   },
   levelRow: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-    paddingVertical: 4,
+    paddingVertical: 2,
+    gap: 6,
+  },
+  levelLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    flexShrink: 1,
+  },
+  levelIconBadge: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.92)',
   },
   levelTime: {
-    fontSize: 12,
+    fontSize: 13,
     fontWeight: '600',
     color: '#fff',
     opacity: 0.95,
   },
   levelRate: {
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: '800',
     color: '#fff',
+    flexShrink: 0,
   },
   levelDividerLine: {
     height: 1,
     backgroundColor: 'rgba(255,255,255,0.25)',
-    marginVertical: 2,
+    marginVertical: 1,
   },
   guidelinesList: {
-    gap: 10,
+    gap: 6,
   },
   guidelineRow: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 10,
+    alignItems: 'center',
+    gap: 8,
   },
-  guideIcon: {
-    marginTop: 2,
+  guideIconBadge: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.92)',
   },
   guidelineText: {
     fontSize: 11,
-    fontWeight: '500',
+    fontWeight: '600',
     color: '#fff',
-    opacity: 0.95,
     flex: 1,
-    lineHeight: 16,
+    lineHeight: 15,
   },
+  earningsRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  earningsTitleWrapper: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  earningsTitleIcon: {
+    marginRight: 4,
+  },
+  earningsTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#fff',
+  },
+  earningModelNote: {
+    marginTop: 8,
+    marginBottom: 4,
+    fontSize: 11,
+    fontWeight: '600',
+    color: 'rgba(255,255,255,0.92)',
+  },
+  totalEarningsWrapper: {
+    alignItems: 'flex-end',
+  },
+  totalEarningsLabel: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#fff',
+    opacity: 0.8,
+    marginBottom: 4,
+  },
+
+  earningsColumn: {
+    marginBottom: 20,
+  },
+
+  totalEarningsAmount: {
+    fontSize: 20,
+    fontWeight: '900',
+    color: '#fff',
+  },
+  smallEarningsRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  smallEarningsCard: {
+    flex: 1,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    borderRadius: 12,
+    padding: 12,
+  },
+  smallEarningsHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 6,
+  },
+  smallEarningsIcon: {
+    opacity: 0.9,
+  },
+  smallEarningsLabel: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#fff',
+    opacity: 0.9,
+  },
+  smallEarningsText: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: '800',
+  },
+  summaryErr: {
+    color: '#ffeb3b',
+    fontSize: 12,
+    fontWeight: '700',
+    marginBottom: 12,
+  },
+
+  publicRateBtnInline: {
+    backgroundColor: '#22c55e',
+    paddingHorizontal: 12,
+    paddingVertical: 3,
+    borderRadius: 8,
+    minWidth: 65,
+    alignItems: 'center',
+    marginTop: 8,  // Add spacing from state
+    alignSelf: 'flex-start',  // Left align instead of full width
+  },
+  emptyRecent: { color: '#666', fontSize: 13, paddingVertical: 8, textAlign: 'center' },
+  quickActionsCol: { gap: 10 },
+  muted: { color: '#888', textAlign: 'center', paddingHorizontal: 16 },
 });
 
 function CallRow({

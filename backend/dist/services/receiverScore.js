@@ -9,8 +9,9 @@ const mongoose_1 = __importDefault(require("mongoose"));
 const CallSession_1 = __importDefault(require("../models/CallSession"));
 const Receiver_1 = __importDefault(require("../models/Receiver"));
 const ReceiverDailyScore_1 = __importDefault(require("../models/ReceiverDailyScore"));
+const receiverEarningModel_1 = require("./receiverEarningModel");
 const MAX_SCORED_CALLS_PER_CALLER_PER_DAY = 3;
-const MIN_VALID_CALL_SECONDS = 55;
+const MIN_VALID_CALL_SECONDS = 60;
 const MIN_MID_BAND_SECONDS = 3 * 60;
 const MIN_TOP_BAND_SECONDS = 10 * 60;
 const IST_OFFSET_MINUTES = 330;
@@ -31,7 +32,7 @@ function badgeForScore(score) {
     return { badgeLevel: 'platinum', ratePerMinute: 2.0 };
 }
 function callScoreForDuration(durationSec) {
-    if (durationSec <= MIN_VALID_CALL_SECONDS)
+    if (durationSec < MIN_VALID_CALL_SECONDS)
         return 0;
     const minutes = durationSec / 60;
     if (durationSec >= MIN_TOP_BAND_SECONDS)
@@ -41,9 +42,13 @@ function callScoreForDuration(durationSec) {
     return 0;
 }
 async function recordReceiverCallScore(args) {
+    const earningSettings = await (0, receiverEarningModel_1.getReceiverEarningSettings)();
+    if (earningSettings.receiverEarningModel === 'fixed_per_minute') {
+        return;
+    }
     const { callId, receiverId, callerId, startedAt, durationSec } = args;
     const dateKey = utcDateKey(startedAt);
-    if (durationSec <= MIN_VALID_CALL_SECONDS) {
+    if (durationSec < MIN_VALID_CALL_SECONDS) {
         await ReceiverDailyScore_1.default.findOneAndUpdate({ receiverId: new mongoose_1.default.Types.ObjectId(receiverId), dateKey }, { $inc: { shortCallsIgnored: 1 } }, { upsert: true, new: true, setDefaultsOnInsert: true });
         return;
     }
@@ -54,7 +59,7 @@ async function recordReceiverCallScore(args) {
         receiverId: new mongoose_1.default.Types.ObjectId(receiverId),
         callerId: new mongoose_1.default.Types.ObjectId(callerId),
         status: 'completed',
-        durationSec: { $gt: MIN_VALID_CALL_SECONDS },
+        durationSec: { $gte: MIN_VALID_CALL_SECONDS },
         startedAt: { $gte: dayStart, $lt: dayEnd },
     });
     if (sameCallerCount >= MAX_SCORED_CALLS_PER_CALLER_PER_DAY) {

@@ -17,7 +17,7 @@ export default function CallerHelpScreen({ navigation }: Props): React.JSX.Eleme
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
           <Text style={styles.back}>←</Text>
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Helpmj & Support</Text>
+        <Text style={styles.headerTitle}>Help & Support</Text>
         <View style={{ width: 40 }} />
       </View>
 
