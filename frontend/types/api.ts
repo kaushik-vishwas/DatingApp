@@ -289,6 +289,11 @@ export interface ReceiverCallInsightsResponse {
     ratePerMinute: number;
   }>;
   earningTimezone?: string;
+  receiverWelcome?: {
+    enabled: boolean;
+    title: string;
+    body: string;
+  };
   scoreRules?: {
     call: {
       ignoreAtOrBelowSeconds: number;
@@ -330,6 +335,16 @@ export type ReceiverWalletRecentRow = {
   createdAt: string;
 };
 
+export type ReceiverWelcomeContent = {
+  enabled: boolean;
+  title: string;
+  body: string;
+};
+
+export interface ReceiverWelcomeResponse {
+  receiverWelcome: ReceiverWelcomeContent;
+}
+
 export interface ReceiverWalletSummaryResponse {
   /** Withdrawable balance (e.g. chat message credits credited to wallet). */
   walletBalance: number;
@@ -350,6 +365,7 @@ export interface ReceiverWalletSummaryResponse {
   totalEarningsToday?: number;
   totalEarningsThisWeek?: number;
   recent: ReceiverWalletRecentRow[];
+  receiverWelcome?: ReceiverWelcomeContent;
 }
 
 export type ReceiverWithdrawalStatus = 'pending' | 'approved' | 'rejected';

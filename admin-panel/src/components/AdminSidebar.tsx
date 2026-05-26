@@ -11,6 +11,7 @@ import {
   LogOut,
   Tag,
   Star,
+  MessageSquareHeart,
 } from 'lucide-react';
 import { useAdminAuth } from '../context/AdminAuthContext';
 
@@ -29,6 +30,7 @@ const items = [
   { to: '/revenue', label: 'Revenue', icon: IndianRupee },
   { to: '/withdrawals', label: 'Withdrawals', icon: Wallet },
   { to: '/wallet-offers', label: 'Wallet Offers', icon: Tag },
+  { to: '/receiver-welcome', label: 'Receiver Welcome', icon: MessageSquareHeart },
   { to: '/reports', label: 'Reports', icon: Flag },
   { to: '/ratings', label: 'Ratings', icon: Star },
   { to: '/settings', label: 'Settings', icon: Settings },

@@ -1,16 +1,20 @@
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useReceiverNotificationData } from '../../context/ReceiverNotificationDataContext';
 import type { ReceiverStackParamList } from '../../navigation/ReceiverStackParamList';
 import ReceiverNotificationActivityList from './ReceiverNotificationActivityList';
 
-type Nav = NativeStackNavigationProp<ReceiverStackParamList>;
 type PaymentSubTab = 'earning' | 'withdrawal';
 
 export default function ReceiverPaymentTabsContent(): React.JSX.Element {
-  const navigation = useNavigation<Nav>();
+  const navigation = useNavigation();
+  const stackNavigation = useMemo(() => {
+    const parent = navigation.getParent<NativeStackNavigationProp<ReceiverStackParamList>>();
+    if (parent) return parent;
+    return navigation as NativeStackNavigationProp<ReceiverStackParamList>;
+  }, [navigation]);
   const { reload } = useReceiverNotificationData();
   const [subTab, setSubTab] = useState<PaymentSubTab>('earning');
 
@@ -52,7 +56,7 @@ export default function ReceiverPaymentTabsContent(): React.JSX.Element {
           headerExtra={
             <TouchableOpacity
               style={styles.withdrawBtn}
-              onPress={() => navigation.navigate('WithdrawEarnings')}
+              onPress={() => stackNavigation.navigate('WithdrawEarnings')}
               activeOpacity={0.88}
             >
               <Text style={styles.withdrawBtnText}>Withdraw earnings</Text>

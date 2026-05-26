@@ -12,6 +12,7 @@ import { WithdrawalsPage } from './pages/WithdrawalsPage';
 import { ReportsPage } from './pages/ReportsPage';
 import { RatingsPage } from './pages/RatingsPage';
 import { WalletOffersPage } from './pages/WalletOffers';
+import { ReceiverWelcomePage } from './pages/ReceiverWelcomePage';
 
 function RequireAuth() {
   const { token, bootstrapping } = useAdminAuth();
@@ -46,6 +47,7 @@ function AppRoutes() {
           <Route path="/revenue" element={<RevenuePage />} />
           <Route path="/withdrawals" element={<WithdrawalsPage />} />
           <Route path="/wallet-offers" element={<WalletOffersPage />} />
+          <Route path="/receiver-welcome" element={<ReceiverWelcomePage />} />
           <Route path="/reports" element={<ReportsPage />} />
           <Route path="/ratings" element={<RatingsPage />} />
           <Route path="/settings" element={<SettingsPage />} />

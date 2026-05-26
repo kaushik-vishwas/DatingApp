@@ -24,35 +24,12 @@ export default function ReceiverSettingsScreen(): React.JSX.Element {
           <View style={styles.placeholder} />
         </View>
 
-        <Text style={styles.sectionTitle}>ACCOUNT</Text>
-
         <TouchableOpacity style={styles.row} onPress={() => navigation.navigate('ReceiverEditProfile')}>
           <View style={styles.rowLeft}>
             <View style={styles.iconCircle}>
               <Icon name="user" size={18} color="#7B2CFF" />
             </View>
             <Text style={styles.label}>Profile Management</Text>
-          </View>
-          <Icon name="chevron-right" size={18} color="#9ca3af" />
-        </TouchableOpacity>
-
-        {/* <TouchableOpacity style={styles.row} onPress={() => navigation.navigate('ReceiverHowToEarn')}>
-          <View style={styles.rowLeft}>
-            <View style={styles.iconCircle}>
-              <Icon name="trending-up" size={18} color="#7B2CFF" />
-            </View>
-            <Text style={styles.label}>How to Earn</Text>
-          </View>
-          <Icon name="chevron-right" size={18} color="#9ca3af" />
-        </TouchableOpacity> */}
-
-
-        <TouchableOpacity style={styles.row} onPress={() => navigation.navigate('ReceiverGuidelines')}>
-          <View style={styles.rowLeft}>
-            <View style={styles.iconCircle}>
-              <Icon name="file-text" size={18} color="#7B2CFF" />
-            </View>
-            <Text style={styles.label}>Selecto Guidelines</Text>
           </View>
           <Icon name="chevron-right" size={18} color="#9ca3af" />
         </TouchableOpacity>
@@ -73,6 +50,76 @@ export default function ReceiverSettingsScreen(): React.JSX.Element {
               <Icon name="credit-card" size={18} color="#7B2CFF" />
             </View>
             <Text style={styles.label}>Payment Details</Text>
+          </View>
+          <Icon name="chevron-right" size={18} color="#9ca3af" />
+        </TouchableOpacity>
+
+        <TouchableOpacity style={styles.row} onPress={() => navigation.navigate('ReceiverGuidelines')}>
+          <View style={styles.rowLeft}>
+            <View style={styles.iconCircle}>
+              <Icon name="book-open" size={18} color="#7B2CFF" />
+            </View>
+            <Text style={styles.label}>Selecto Guidelines</Text>
+          </View>
+          <Icon name="chevron-right" size={18} color="#9ca3af" />
+        </TouchableOpacity>
+
+        <TouchableOpacity style={styles.row} onPress={() => navigation.navigate('CallerShareApp')}>
+          <View style={styles.rowLeft}>
+            <View style={styles.iconCircle}>
+              <Icon name="share-2" size={18} color="#7B2CFF" />
+            </View>
+            <Text style={styles.label}>Share app</Text>
+          </View>
+          <Icon name="chevron-right" size={18} color="#9ca3af" />
+        </TouchableOpacity>
+
+        <TouchableOpacity style={styles.row} onPress={() => navigation.navigate('CallerFaq')}>
+          <View style={styles.rowLeft}>
+            <View style={styles.iconCircle}>
+              <Icon name="help-circle" size={18} color="#7B2CFF" />
+            </View>
+            <Text style={styles.label}>FAQ</Text>
+          </View>
+          <Icon name="chevron-right" size={18} color="#9ca3af" />
+        </TouchableOpacity>
+
+        <TouchableOpacity style={styles.row} onPress={() => navigation.navigate('CallerHelp')}>
+          <View style={styles.rowLeft}>
+            <View style={styles.iconCircle}>
+              <Icon name="message-circle" size={18} color="#7B2CFF" />
+            </View>
+            <Text style={styles.label}>Help & Support</Text>
+          </View>
+          <Icon name="chevron-right" size={18} color="#9ca3af" />
+        </TouchableOpacity>
+
+        <TouchableOpacity style={styles.row} onPress={() => navigation.navigate('CallerRateUs')}>
+          <View style={styles.rowLeft}>
+            <View style={styles.iconCircle}>
+              <Icon name="star" size={18} color="#7B2CFF" />
+            </View>
+            <Text style={styles.label}>Rate Us</Text>
+          </View>
+          <Icon name="chevron-right" size={18} color="#9ca3af" />
+        </TouchableOpacity>
+
+        <TouchableOpacity style={styles.row} onPress={() => navigation.navigate('CallerPrivacyPolicy')}>
+          <View style={styles.rowLeft}>
+            <View style={styles.iconCircle}>
+              <Icon name="lock" size={18} color="#7B2CFF" />
+            </View>
+            <Text style={styles.label}>Privacy Policy</Text>
+          </View>
+          <Icon name="chevron-right" size={18} color="#9ca3af" />
+        </TouchableOpacity>
+
+        <TouchableOpacity style={styles.row} onPress={() => navigation.navigate('CallerTerms')}>
+          <View style={styles.rowLeft}>
+            <View style={styles.iconCircle}>
+              <Icon name="file-text" size={18} color="#7B2CFF" />
+            </View>
+            <Text style={styles.label}>Terms & Conditions</Text>
           </View>
           <Icon name="chevron-right" size={18} color="#9ca3af" />
         </TouchableOpacity>
@@ -136,7 +183,6 @@ const styles = StyleSheet.create({
     height: 36,
   },
   headerTitle: { fontSize: 18, fontWeight: '900', color: '#111' },
-  sectionTitle: { fontSize: 11, color: '#9a9a9a', fontWeight: '800', marginBottom: 8, letterSpacing: 0.5 },
 
   row: {
     backgroundColor: '#fff',

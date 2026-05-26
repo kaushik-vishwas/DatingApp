@@ -57,11 +57,6 @@ export default function ReceiverEarningsBreakdownScreen(): React.JSX.Element {
         </TouchableOpacity>
       </View>
 
-      <View style={styles.rowTop}>
-            <StatCard label="Total Calls" value={String(data.stats.totalCalls)} note={`${Math.round(data.stats.totalMinutes)} minutes`} />
-            <StatCard label="Avg Call" value={`${Math.round(data.stats.avgCallMinutes)} min`} note="per call" />
-          </View>
-
       {loading ? (
         <ActivityIndicator size="large" color="#7b2cff" style={{ marginTop: 20 }} />
       ) : error ? (
@@ -73,6 +68,18 @@ export default function ReceiverEarningsBreakdownScreen(): React.JSX.Element {
         </View>
       ) : data ? (
         <>
+          <View style={styles.rowTop}>
+            <StatCard
+              label="Total Calls"
+              value={String(data.stats.totalCalls)}
+              note={`${Math.round(data.stats.totalMinutes)} minutes`}
+            />
+            <StatCard
+              label="Avg Call"
+              value={`${Math.round(data.stats.avgCallMinutes)} min`}
+              note="per call"
+            />
+          </View>
           {(() => {
             const chatEarnings = Math.max(0, data.stats.chatEarnings ?? 0);
             const callEarnings = Math.max(0, Math.round((data.stats.netEarnings - chatEarnings) * 100) / 100);

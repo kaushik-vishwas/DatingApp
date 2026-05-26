@@ -56,6 +56,11 @@ const adminSettingsSchema = new mongoose_1.Schema({
         type: [fixedWindowSchema],
         default: [],
     },
+    receiverWelcome: {
+        enabled: { type: Boolean, default: true },
+        title: { type: String, default: 'Welcome to Selecto', trim: true, maxlength: 120 },
+        body: { type: String, default: '', trim: true, maxlength: 3000 },
+    },
 }, { timestamps: true });
 const AdminSettings = mongoose_1.default.model('AdminSettings', adminSettingsSchema);
 exports.default = AdminSettings;

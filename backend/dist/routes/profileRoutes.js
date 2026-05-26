@@ -14,6 +14,7 @@ router.get('/withdrawals/overview', auth_1.protect, profileController_1.getRecei
 router.post('/withdrawals/send-otp', auth_1.protect, profileController_1.sendReceiverWithdrawalOtp);
 router.post('/withdrawals/verify', auth_1.protect, profileController_1.verifyReceiverWithdrawalOtpAndCreate);
 router.get('/receiver-call-insights', auth_1.protect, profileController_1.getReceiverCallInsights);
+router.get('/receiver-welcome', auth_1.protect, profileController_1.getReceiverWelcomeMessage);
 router.get('/receiver-notify-candidates', auth_1.protect, profileController_1.getReceiverNotifyCandidates);
 router.post('/receiver-notify-user', auth_1.protect, profileController_1.notifyReceiverRecentUser);
 router.patch('/receiver/kyc/profile-info', auth_1.protect, profileController_1.saveReceiverKycProfileInfo);

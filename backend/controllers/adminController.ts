@@ -17,6 +17,7 @@ import {
   normalizeFixedPerMinuteWindows,
   publicEarningSchedulePayload,
 } from '../services/receiverEarningModel';
+import { normalizeReceiverWelcome } from '../services/receiverWelcome';
 import { toApiReceiver, toApiUser } from './authController';
 import { sendOtpEmail } from '../config/email';
 import { getConfiguredAdminEmail } from '../services/superAdminSync';
@@ -460,12 +461,15 @@ export const getAdminSettings = async (req: Request, res: Response): Promise<voi
         : DEFAULT_FIXED_PER_MINUTE_WINDOWS
     );
 
+    const receiverWelcome = normalizeReceiverWelcome(effective.receiverWelcome);
+
     res.status(200).json({
       notificationControls: {
         kycSubmissionsEmail: Boolean(effective.notificationControls?.kycSubmissionsEmail ?? true),
         pendingWithdrawalsEmail: Boolean(effective.notificationControls?.pendingWithdrawalsEmail ?? true),
         dailyRevenueSummaryEmail: Boolean(effective.notificationControls?.dailyRevenueSummaryEmail ?? true),
       },
+      receiverWelcome,
       receiverEarningModel: earningModel,
       fixedPerMinuteWindows,
       rolesCatalog: [
@@ -600,6 +604,42 @@ export const updateAdminReceiverEarningModel = async (
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error('updateAdminReceiverEarningModel error:', msg);
+    res.status(500).json({ message: msg || 'Server error' });
+  }
+};
+
+/**
+ * PATCH /admin/settings/receiver-welcome — home card copy for receivers.
+ */
+export const updateAdminReceiverWelcome = async (
+  req: Request<{}, {}, { enabled?: boolean; title?: string; body?: string }>,
+  res: Response
+): Promise<void> => {
+  try {
+    const body = req.body ?? {};
+    if (typeof body.enabled !== 'boolean') {
+      res.status(400).json({ message: 'enabled boolean is required' });
+      return;
+    }
+    const receiverWelcome = normalizeReceiverWelcome({
+      enabled: body.enabled,
+      title: body.title,
+      body: body.body,
+    });
+
+    const settings = await AdminSettings.findOneAndUpdate(
+      {},
+      { $set: { receiverWelcome } },
+      { new: true, upsert: true, setDefaultsOnInsert: true }
+    );
+
+    res.status(200).json({
+      ok: true,
+      receiverWelcome: normalizeReceiverWelcome(settings.receiverWelcome),
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error('updateAdminReceiverWelcome error:', msg);
     res.status(500).json({ message: msg || 'Server error' });
   }
 };

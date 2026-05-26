@@ -27,20 +27,30 @@ import {
   markNotificationsSeenNow,
 } from '../services/notificationUnread';
 import { chatApi, getErrorMessage, profileApi } from '../services/api';
-import type { ReceiverCallInsightsResponse, ReceiverWalletSummaryResponse } from '../types/api';
-import { formatCallDurationCompact, leaderboardMinutesFromSeconds } from '../utils/callDurationDisplay';
+import type {
+  ReceiverCallInsightsResponse,
+  ReceiverWalletSummaryResponse,
+  ReceiverWelcomeContent,
+} from '../types/api';
 import { type ReceiverPresenceInfo } from '../utils/receiverStatus';
 import { resolveProfileImageSource } from '../utils/avatarSource';
 import SelectoLogo from '../assets/SelectoLogo.png';
 import EarningsCardBg from '../assets/earnBg.png';
 import InstructionsCardBg from '../assets/instructionBg.png';
+import NoticeBg from '../assets/noticeBg.png'
 import { useReceiverTabBarBottomInset } from '../utils/receiverTabBarInset';
+import { CHAT_RECEIVER_EARN_LABEL } from '../constants/chatPricing';
 
 const INSTRUCTIONS_GRADIENT_START = '#A855F7';
 const INSTRUCTIONS_GRADIENT_END = '#F4C430';
 
+const MAROON = 'purple'
+const GREEN1 = '#4ade80'
+const GREEN2 = '#059669'
 const PURPLE = '#7b2cff';
 const PINK = '#ff72d2';
+const PURPLE2 = '#9a5cff';
+const PINK2 = '#ff9ee5';
 const SKY_BLUE_START = '#3B82F6';
 const SKY_BLUE_END = '#8E2DE2';
 const DEEP_PURPLE_START = '#8E2DE2';
@@ -82,20 +92,21 @@ type CompactInfoCardProps = {
   title: string;
   subtitle: string;
   children: React.ReactNode;
+  bgImageStyle?: object;
 };
 
 
 
-function CompactInfoCard({ colors, bgImage, title, subtitle, children }: CompactInfoCardProps): React.JSX.Element {
+function CompactInfoCard({ colors, bgImage, title, subtitle, children, bgImageStyle }: CompactInfoCardProps): React.JSX.Element {
   return (
     <View style={styles.infoSection}>
       <LinearGradient colors={colors} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.compactGradientCard}>
-        <Image source={bgImage} style={styles.cardBgImage} resizeMode="cover" />
+        <Image source={bgImage} style={bgImageStyle || styles.cardBgImage} resizeMode="cover" />
         <View style={styles.cardBgScrim} />
         <View style={styles.cardForeground}>
           <View style={styles.compactTitleRow}>
             <Text style={styles.gradientCardTitle}>{title}</Text>
-            {/* <Text style={styles.compactSubtitle}>{subtitle}</Text> */}
+            {/* {subtitle ? <Text style={styles.compactSubtitle}>{subtitle}</Text> : null} */}
           </View>
           {children}
         </View>
@@ -112,6 +123,7 @@ export default function ReceiverHomeDashboard(): React.JSX.Element {
   const [available, setAvailable] = useState<boolean>(Boolean(user?.isAvailable ?? false));
   const [walletSummary, setWalletSummary] = useState<ReceiverWalletSummaryResponse | null>(null);
   const [callInsights, setCallInsights] = useState<ReceiverCallInsightsResponse | null>(null);
+  const [receiverWelcome, setReceiverWelcome] = useState<ReceiverWelcomeContent | null>(null);
   const [summaryError, setSummaryError] = useState<string | null>(null);
   const [notificationUnread, setNotificationUnread] = useState(0);
   const scrollBottomInset = useReceiverTabBarBottomInset();
@@ -134,6 +146,9 @@ export default function ReceiverHomeDashboard(): React.JSX.Element {
     try {
       const { data } = await profileApi.receiverWalletSummary();
       setWalletSummary(data);
+      if (data.receiverWelcome) {
+        setReceiverWelcome(data.receiverWelcome);
+      }
     } catch (e) {
       setSummaryError(getErrorMessage(e));
     }
@@ -144,8 +159,21 @@ export default function ReceiverHomeDashboard(): React.JSX.Element {
     try {
       const { data } = await profileApi.receiverCallInsights('all');
       setCallInsights(data);
+      if (data.receiverWelcome) {
+        setReceiverWelcome(data.receiverWelcome);
+      }
     } catch (e) {
       setSummaryError((prev) => prev ?? getErrorMessage(e));
+    }
+  }, [receiverId]);
+
+  const loadReceiverWelcome = useCallback(async () => {
+    if (!receiverId) return;
+    try {
+      const { data } = await profileApi.receiverWelcome();
+      setReceiverWelcome(data.receiverWelcome);
+    } catch {
+      // Optional endpoint; call-insights may still provide welcome content.
     }
   }, [receiverId]);
 
@@ -187,35 +215,52 @@ export default function ReceiverHomeDashboard(): React.JSX.Element {
       if (!receiverId) return;
       void loadWalletSummary();
       void loadCallInsights();
+      void loadReceiverWelcome();
       void loadReceiverNotificationUnread();
       void refreshUser();
       void refreshUnreadFromServer();
-    }, [receiverId, loadWalletSummary, loadCallInsights, loadReceiverNotificationUnread, refreshUser])
+    }, [
+      receiverId,
+      loadWalletSummary,
+      loadCallInsights,
+      loadReceiverWelcome,
+      loadReceiverNotificationUnread,
+      refreshUser,
+    ])
   );
 
   const onRefresh = async () => {
     setRefreshing(true);
-    await Promise.all([refreshUser(), loadWalletSummary(), loadCallInsights(), loadReceiverNotificationUnread()]);
+    await Promise.all([
+      refreshUser(),
+      loadWalletSummary(),
+      loadCallInsights(),
+      loadReceiverWelcome(),
+      loadReceiverNotificationUnread(),
+    ]);
     setRefreshing(false);
   };
 
   const onToggleAvailability = async (next: boolean) => {
     const prev = available;
     setAvailable(next);
+    if (next) {
+      navigation.navigate('VoiceCall', { receiverAvailabilitySession: true });
+    }
     try {
       await profileApi.updateReceiverProfile({ isAvailable: next });
-      await refreshUser();
-      if (next) {
-        navigation.navigate('VoiceCall', { receiverAvailabilitySession: true });
-      }
+      void refreshUser();
     } catch (e) {
       setAvailable(prev);
+      if (next) {
+        try {
+          if (navigation.canGoBack()) navigation.goBack();
+        } catch {
+          // ignore
+        }
+      }
       Alert.alert('Update failed', getErrorMessage(e));
     }
-  };
-
-  const onMessageCaller = (callerId: string, callerName: string, callerImage?: string | null) => {
-    navigation.navigate('ReceiverChat', { userId: callerId, userName: callerName, userImage: callerImage ?? null });
   };
 
   if (!user) {
@@ -267,6 +312,26 @@ export default function ReceiverHomeDashboard(): React.JSX.Element {
     ];
   }, [callInsights?.fixedPerMinuteWindows, isFixedEarning]);
 
+  const showReceiverWelcome =
+    receiverWelcome != null &&
+    receiverWelcome.enabled !== false &&
+    Boolean(receiverWelcome.title?.trim() || receiverWelcome.body?.trim());
+
+  const totalEarningsLifetime = useMemo(() => {
+    if (!walletSummary) return 0;
+    if (
+      typeof walletSummary.totalEarningsLifetime === 'number' &&
+      Number.isFinite(walletSummary.totalEarningsLifetime)
+    ) {
+      return walletSummary.totalEarningsLifetime;
+    }
+    const call =
+      typeof walletSummary.callEarningsLifetime === 'number' ? walletSummary.callEarningsLifetime : 0;
+    const chat =
+      typeof walletSummary.chatEarningsLifetime === 'number' ? walletSummary.chatEarningsLifetime : 0;
+    return call + chat;
+  }, [walletSummary]);
+
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'left', 'right']}>
       <ScrollView
@@ -296,6 +361,19 @@ export default function ReceiverHomeDashboard(): React.JSX.Element {
                   </View>
                 </TouchableOpacity>
               ) : null}
+
+              <TouchableOpacity
+                style={styles.earningsCapsule}
+                onPress={() => navigation.navigate('WithdrawEarnings')}
+                activeOpacity={0.85}
+              >
+                <View style={styles.earningsContainer}>
+                  <Text style={styles.earningsIco}>💰</Text>
+                  <Text style={styles.earningsText} numberOfLines={1}>
+                    {formatInr(totalEarningsLifetime)}
+                  </Text>
+                </View>
+              </TouchableOpacity>
 
               <TouchableOpacity
                 style={styles.bellButton}
@@ -441,24 +519,21 @@ export default function ReceiverHomeDashboard(): React.JSX.Element {
             {/* Go Online Card with Earnings Summary Card Color Combination */}
             <View style={styles.availabilityCardWrapper}>
               <LinearGradient
-                colors={[PURPLE, PINK]}
+                colors={[MAROON, SKY_BLUE_START]}
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 1 }}
                 style={styles.highlightedAvailabilityCard}
               >
-                <View style={styles.availabilityLeft}>
+                <View style={styles.availabilityCentered}>
                   <Ionicons name="power-outline" size={24} color="#fff" />
                   <Text style={styles.availabilityTitle}>Go Online</Text>
-                </View>
-                <View style={styles.availabilityStatusRow}>
-                  {/* <Text style={[styles.availabilityStatusText, { color: available ? '#fff' : '#fff' }]}>
-                    {available ? '🟢 You Are Online' : '🟡 You Are Offline'}
-                  </Text> */}
                   <Switch
                     value={available}
                     onValueChange={(next) => void onToggleAvailability(next)}
-                    trackColor={{ false: '#e5e5e5', true: 'rgba(255,255,255,0.5)' }}
-                    thumbColor={available ? '#fff' : '#f59e0b'}
+                    trackColor={{ false: '#e5e5e5', true: '#86efac' }}
+                    thumbColor={available ? '#22c55e' : '#f59e0b'}
+                    ios_backgroundColor="#e5e7eb"
+                    style={{ transform: [{ scaleX: 1.1 }, { scaleY: 1.1 }] }}
                   />
                 </View>
               </LinearGradient>
@@ -470,23 +545,37 @@ export default function ReceiverHomeDashboard(): React.JSX.Element {
               title="Earning Levels"
               subtitle={isFixedEarning ? 'IST time slots' : 'Score badges'}
             >
-              <View style={styles.earningLevelList}>
-                {earningLevelRows.map((row, index) => (
-                  <React.Fragment key={row.id}>
-                    {index > 0 ? <View style={styles.levelDividerLine} /> : null}
-                    <View style={styles.levelRow}>
-                      <View style={styles.levelLeft}>
+              <View style={styles.earningLevelsGrid}>
+                <View style={styles.earningLevelsRow}>
+                  {earningLevelRows.map((row) => (
+                    <View key={row.id} style={styles.earningGridCol}>
+                      <View style={styles.earningGridTopRow}>
                         <View style={styles.levelIconBadge}>
                           <MaterialCommunityIcons name={row.icon} size={14} color="white" />
                         </View>
-                        <Text style={styles.levelTime}>{row.label}</Text>
+                        <View style={styles.earningTextStack}>
+                          <Text style={styles.earningGridLabel} numberOfLines={2}>
+                            {row.label}
+                          </Text>
+                          <Text style={styles.earningGridRate}>{row.rate}</Text>
+                        </View>
                       </View>
-                      <Text style={styles.levelRate}>{row.rate}</Text>
                     </View>
-                  </React.Fragment>
-                ))}
+                  ))}
+                </View>
+                <View style={styles.earningLevelDivider} />
+                <View style={styles.earningGridLabelRow}>
+                  <View style={styles.levelIconBadge}>
+                    <MaterialCommunityIcons name="message-text-outline" size={14} color="white" />
+                  </View>
+                  <Text style={styles.chatEarnSideNote}>
+                    You will earn {CHAT_RECEIVER_EARN_LABEL} per text
+                  </Text>
+                </View>
               </View>
             </CompactInfoCard>
+
+
 
             <CompactInfoCard
               colors={[INSTRUCTIONS_GRADIENT_START, INSTRUCTIONS_GRADIENT_END]}
@@ -516,139 +605,69 @@ export default function ReceiverHomeDashboard(): React.JSX.Element {
               </View>
             </CompactInfoCard>
 
-            {/* Earnings Summary Section - With inline icons */}
             <View style={styles.infoSection}>
-              <LinearGradient
-                colors={[PURPLE, PINK]}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 1 }}
-                style={styles.fullGradientCard}
-              >
-                {summaryError ? <Text style={styles.summaryErr}>{summaryError}</Text> : null}
-
-                {/* Row 1: Title with Icon on Left, Amount on Right */}
-                <View style={styles.earningsRow}>
-                  <View style={styles.earningsTitleWrapper}>
-                    <Ionicons name="card-outline" size={20} color="#fff" />
-                    <Text style={styles.earningsTitle}>Total Earnings</Text>
+              {summaryError ? <Text style={styles.summaryErrInline}>{summaryError}</Text> : null}
+              <View style={styles.smallEarningsRow}>
+                <LinearGradient
+                  colors={[PURPLE, PINK]}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 1 }}
+                  style={styles.smallEarningsCard}
+                >
+                  <View style={styles.smallEarningsHeader}>
+                    <Ionicons name="call-outline" size={14} color="#fff" style={styles.smallEarningsIcon} />
+                    <Text style={styles.smallEarningsLabel}>Earned today by calls</Text>
                   </View>
-                  <Text style={styles.totalEarningsAmount}>
+                  <Text style={styles.smallEarningsText}>
                     {walletSummary
                       ? formatInr(
-                        typeof walletSummary.totalEarningsLifetime === 'number'
-                          ? walletSummary.totalEarningsLifetime
-                          : (typeof walletSummary.callEarningsLifetime === 'number'
-                            ? walletSummary.callEarningsLifetime
-                            : 0) +
-                          (typeof walletSummary.chatEarningsLifetime === 'number'
-                            ? walletSummary.chatEarningsLifetime
-                            : 0)
+                        typeof walletSummary.callEarningsToday === 'number'
+                          ? walletSummary.callEarningsToday
+                          : 0
                       )
-                      : '…'}
+                      : '₹0'}
                   </Text>
-                </View>
-
-                {/* {callInsights ? (
-                  <Text style={styles.earningModelNote}>
-                    {callInsights.receiverEarningModel === 'fixed_per_minute'
-                      ? `Fixed rate · ₹${(callInsights.earningRatePerMinute ?? 0).toLocaleString('en-IN')}/min now (IST)`
-                      : `Score based · ${(callInsights.badgeLevel ?? 'platinum').toUpperCase()} · ₹${(callInsights.earningRatePerMinute ?? 0).toLocaleString('en-IN')}/min`}
+                </LinearGradient>
+                <LinearGradient
+                  colors={[PURPLE, PINK]}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 1 }}
+                  style={styles.smallEarningsCard}
+                >
+                  <View style={styles.smallEarningsHeader}>
+                    <Ionicons name="chatbubbles-outline" size={14} color="#fff" style={styles.smallEarningsIcon} />
+                    <Text style={styles.smallEarningsLabel}>Earned today by chats</Text>
+                  </View>
+                  <Text style={styles.smallEarningsText}>
+                    {walletSummary
+                      ? formatInr(
+                        typeof walletSummary.chatToday === 'number' ? walletSummary.chatToday : 0
+                      )
+                      : '₹0'}
                   </Text>
-                ) : null} */}
-
-                {/* Row 2: Today and 7 Days earnings side by side with icons */}
-                <View style={styles.smallEarningsRow}>
-                  <View style={styles.smallEarningsCard}>
-                    <View style={styles.smallEarningsHeader}>
-                      <Ionicons name="today-outline" size={14} color="#fff" style={styles.smallEarningsIcon} />
-                      <Text style={styles.smallEarningsLabel}>Earned today</Text>
-                    </View>
-                    <Text style={styles.smallEarningsText}>
-                      {walletSummary
-                        ? formatInr(
-                          typeof walletSummary.totalEarningsToday === 'number'
-                            ? walletSummary.totalEarningsToday
-                            : (typeof walletSummary.callEarningsToday === 'number'
-                              ? walletSummary.callEarningsToday
-                              : 0) +
-                            (typeof walletSummary.chatToday === 'number'
-                              ? walletSummary.chatToday
-                              : 0)
-                        )
-                        : '₹0'}
-                    </Text>
-                  </View>
-                  <View style={styles.smallEarningsCard}>
-                    <View style={styles.smallEarningsHeader}>
-                      <Ionicons name="calendar-outline" size={14} color="#fff" style={styles.smallEarningsIcon} />
-                      <Text style={styles.smallEarningsLabel}>Earned in 7 days</Text>
-                    </View>
-                    <Text style={[styles.smallEarningsText, { color: '#fff' }]}>
-                      {walletSummary
-                        ? formatInr(
-                          typeof walletSummary.totalEarningsThisWeek === 'number'
-                            ? walletSummary.totalEarningsThisWeek
-                            : (typeof walletSummary.callEarningsThisWeek === 'number'
-                              ? walletSummary.callEarningsThisWeek
-                              : 0) +
-                            (typeof walletSummary.chatEarningsThisWeek === 'number'
-                              ? walletSummary.chatEarningsThisWeek
-                              : 0)
-                        )
-                        : '₹0'}
-                    </Text>
-                  </View>
-                </View>
-              </LinearGradient>
-            </View>
-
-            <View style={styles.section}>
-              <View style={styles.sectionHeaderRow}>
-                <Text style={styles.sectionTitle}>Recent Calls</Text>
-                <TouchableOpacity onPress={() => navigation.navigate('ReceiverCallHistory')}>
-                  <Text style={styles.viewAll}>View all</Text>
-                </TouchableOpacity>
-              </View>
-
-              {callInsights && callInsights.recentCalls.length === 0 ? (
-                <Text style={styles.emptyRecent}>No voice calls yet.</Text>
-              ) : null}
-              {(callInsights?.recentCalls ?? []).slice(0, 4).map((row) => (
-                <CallRow
-                  key={row.id}
-                  callerId={row.callerId}
-                  title={row.callerName}
-                  subtitle={formatCallDurationCompact(row.durationSec)}
-                  callerImage={row.callerImage}
-                  onMessage={onMessageCaller}
-                />
-              ))}
-            </View>
-
-            <View style={styles.section}>
-              <Text style={styles.sectionTitle}>Quick Actions</Text>
-              <View style={styles.quickActionsCol}>
-                <QuickAction
-                  label="Withdraw Earnings"
-                  sublabel="Transfer money to your bank account"
-                  iconName="wallet-outline"
-                  onPress={() => navigation.navigate('WithdrawEarnings')}
-                />
-                <QuickAction
-                  label="Messages"
-                  sublabel="Open your chats"
-                  iconName="chatbubble-outline"
-                  badgeCount={totalUnread}
-                  onPress={() => navigation.navigate('ReceiverChats')}
-                />
+                </LinearGradient>
               </View>
             </View>
-
           </>
         ) : (
           <Text style={styles.muted}>Could not load profile.</Text>
         )}
 
+        {showReceiverWelcome && receiverWelcome ? (
+          <CompactInfoCard
+            colors={[GREEN1, SKY_BLUE_START]}
+            bgImage={NoticeBg}
+            bgImageStyle={styles.welcomeCardBgImage}  // ← ADD THIS
+            title={receiverWelcome.title?.trim() || 'Notice Board'}
+            subtitle=""
+          >
+            <View style={styles.welcomeCardContent}>
+              {receiverWelcome.body?.trim() ? (
+                <Text style={styles.welcomeCardBody}>{receiverWelcome.body.trim()}</Text>
+              ) : null}
+            </View>
+          </CompactInfoCard>
+        ) : null}
       </ScrollView>
     </SafeAreaView>
   );
@@ -715,6 +734,30 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '800',
     color: '#111',
+  },
+
+  earningsCapsule: {
+    borderRadius: 40,
+    borderWidth: 1.5,
+    borderColor: PURPLE,
+    backgroundColor: 'transparent',
+    maxWidth: 120,
+  },
+  earningsContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    gap: 4,
+  },
+  earningsIco: {
+    fontSize: 14,
+  },
+  earningsText: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: '#111',
+    flexShrink: 1,
   },
 
   bellButton: {
@@ -799,15 +842,15 @@ const styles = StyleSheet.create({
   publicCardRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 12 },
   publicLeftColumn: { alignItems: 'center', width: 60 },
   publicAvatarWrapper: {
-    width: 52,
-    height: 52,
-    borderRadius: 26,
+    width: 62,
+    height: 62,
+    borderRadius: 30,
     borderWidth: 2,
     alignItems: 'center',
     justifyContent: 'center',
     position: 'relative',
   },
-  publicAvatar: { width: 48, height: 48, borderRadius: 24 },
+  publicAvatar: { width: 57, height: 57, borderRadius: 30 },
   publicAvatarPlaceholder: { backgroundColor: '#eee', alignItems: 'center', justifyContent: 'center' },
   publicAvatarGlyph: { fontSize: 22 },
   publicStatusDot: {
@@ -868,38 +911,34 @@ const styles = StyleSheet.create({
     elevation: 8,
   },
   availabilityTitle: {
-    fontSize: 16,
+    fontSize: 20,
     color: '#fff',
     fontWeight: '700',
   },
-  availabilityLeft: {
+  availabilityCentered: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    justifyContent: 'center',
+    gap: 12,
     flex: 1,
   },
-  availabilityStatusRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
   availabilityStatusText: {
-    fontSize: 13,
+    fontSize: 1,
     fontWeight: '700',
   },
 
+  welcomeCardContent: {
+    minHeight: 24,
+  },
+  welcomeCardBody: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: 'rgba(255,255,255,0.95)',
+    lineHeight: 18,
+  },
   infoSection: {
     marginTop: 10,
     paddingHorizontal: 16,
-  },
-  fullGradientCard: {
-    borderRadius: 16,
-    padding: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
   },
   compactGradientCard: {
     borderRadius: 16,
@@ -921,6 +960,17 @@ const styles = StyleSheet.create({
     height: 140,
     opacity: 0.44,
   },
+
+  welcomeCardBgImage: {
+    position: 'absolute',
+    right: 2,        // ← Move left instead of right
+    bottom: -18,
+    width: 140,
+    height: 140,
+    opacity: 0.44,
+  },
+
+
   cardBgScrim: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: 'rgba(30, 27, 75, 0.32)',
@@ -943,45 +993,68 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: 'rgba(255,255,255,0.82)',
   },
-  earningLevelList: {
+  earningLevelsGrid: {
     gap: 0,
   },
-  levelRow: {
+  earningLevelsRow: {
     flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 2,
+    alignItems: 'flex-start',
     gap: 6,
   },
-  levelLeft: {
+  earningGridCol: {
+    flex: 1,
+    minWidth: 105,
+  },
+  earningGridTopRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 6,
+  },
+  earningTextStack: {
+    flex: 1,
+    minWidth: 0,
+    gap: 2,
+  },
+  earningGridLabelRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
-    flexShrink: 1,
+    gap: 6,
   },
   levelIconBadge: {
     width: 22,
     height: 22,
-    borderRadius: 10,
+    borderRadius: 11,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: 'rgba(108, 45, 255, 0.47)',
   },
-  levelTime: {
-    fontSize: 13,
+  earningGridLabel: {
+    flex: 1,
+    fontSize: 12,
     fontWeight: '600',
-    color: '#fff',
-    opacity: 0.95,
+    color: 'rgba(255,255,255,0.95)',
+    textAlign: 'left',
+    lineHeight: 13,
   },
-  levelRate: {
+  earningLevelDivider: {
+    height: 1,
+    backgroundColor: 'rgba(255,255,255,0.25)',
+    marginVertical: 5,
+  },
+  earningGridRate: {
     fontSize: 13,
     fontWeight: '800',
     color: '#fff',
-    flexShrink: 0,
+    textAlign: 'left',
+    lineHeight: 15,
   },
-  levelDividerLine: {
-    height: 1,
-    backgroundColor: 'rgba(255,255,255,0.25)',
-    marginVertical: 1,
+  chatEarnSideNote: {
+    flex: 1,
+    fontSize: 12  ,
+    fontWeight: '700',
+    color: 'rgba(255,255,255,0.95)',
+    textAlign: 'left',
+    lineHeight: 15,
   },
   guidelinesList: {
     gap: 6,
@@ -1000,57 +1073,11 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(158, 76, 229, 0.68)',
   },
   guidelineText: {
-    fontSize: 11,
+    fontSize: 12,
     fontWeight: '600',
     color: '#fff',
     flex: 1,
     lineHeight: 15,
-  },
-  earningsRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 20,
-  },
-  earningsTitleWrapper: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  earningsTitleIcon: {
-    marginRight: 4,
-  },
-  earningsTitle: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#fff',
-  },
-  earningModelNote: {
-    marginTop: 8,
-    marginBottom: 4,
-    fontSize: 11,
-    fontWeight: '600',
-    color: 'rgba(255,255,255,0.92)',
-  },
-  totalEarningsWrapper: {
-    alignItems: 'flex-end',
-  },
-  totalEarningsLabel: {
-    fontSize: 11,
-    fontWeight: '600',
-    color: '#fff',
-    opacity: 0.8,
-    marginBottom: 4,
-  },
-
-  earningsColumn: {
-    marginBottom: 20,
-  },
-
-  totalEarningsAmount: {
-    fontSize: 20,
-    fontWeight: '900',
-    color: '#fff',
   },
   smallEarningsRow: {
     flexDirection: 'row',
@@ -1059,9 +1086,14 @@ const styles = StyleSheet.create({
   },
   smallEarningsCard: {
     flex: 1,
-    backgroundColor: 'rgba(255,255,255,0.2)',
     borderRadius: 12,
     padding: 12,
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
   },
   smallEarningsHeader: {
     flexDirection: 'row',
@@ -1073,7 +1105,7 @@ const styles = StyleSheet.create({
     opacity: 0.9,
   },
   smallEarningsLabel: {
-    fontSize: 11,
+    fontSize: 12,
     fontWeight: '600',
     color: '#fff',
     opacity: 0.9,
@@ -1083,11 +1115,11 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '800',
   },
-  summaryErr: {
-    color: '#ffeb3b',
+  summaryErrInline: {
+    color: '#b91c1c',
     fontSize: 12,
     fontWeight: '700',
-    marginBottom: 12,
+    marginBottom: 10,
   },
 
   publicRateBtnInline: {
@@ -1100,50 +1132,9 @@ const styles = StyleSheet.create({
     marginTop: 8,  // Add spacing from state
     alignSelf: 'flex-start',  // Left align instead of full width
   },
-  emptyRecent: { color: '#666', fontSize: 13, paddingVertical: 8, textAlign: 'center' },
-  quickActionsCol: { gap: 10 },
+  // quickActionsCol: { gap: 10 },
   muted: { color: '#888', textAlign: 'center', paddingHorizontal: 16 },
 });
-
-function CallRow({
-  callerId,
-  title,
-  subtitle,
-  callerImage,
-  onMessage,
-}: {
-  callerId: string;
-  title: string;
-  subtitle: string;
-  callerImage?: string | null;
-  onMessage: (callerId: string, callerName: string, callerImage?: string | null) => void;
-}) {
-  const avatarSource = useMemo(() => resolveProfileImageSource(callerImage), [callerImage]);
-  return (
-    <View style={callRowStyles.row}>
-      {avatarSource ? (
-        <Image source={avatarSource} style={callRowStyles.avatar} />
-      ) : (
-        <View style={callRowStyles.avatarPlaceholder}>
-          <Text style={callRowStyles.avatarText}>{title.charAt(0).toUpperCase()}</Text>
-        </View>
-      )}
-      <View style={{ flex: 1 }}>
-        <Text style={callRowStyles.title}>{title}</Text>
-        <Text style={callRowStyles.subtitle}>{subtitle}</Text>
-      </View>
-      <View style={callRowStyles.actions}>
-        <TouchableOpacity
-          style={callRowStyles.actionBtn}
-          onPress={() => onMessage(callerId, title, callerImage)}
-          activeOpacity={0.85}
-        >
-          <Text style={callRowStyles.actionTxt}>💬</Text>
-        </TouchableOpacity>
-      </View>
-    </View>
-  );
-}
 
 function QuickAction({
   label,
@@ -1178,50 +1169,6 @@ function QuickAction({
     </TouchableOpacity>
   );
 }
-
-const callRowStyles = StyleSheet.create({
-  row: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#ececec',
-    padding: 10,
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 8,
-    gap: 10,
-  },
-  avatar: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-  },
-  avatarPlaceholder: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: PURPLE,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  avatarText: {
-    color: '#fff',
-    fontSize: 18,
-    fontWeight: '900',
-  },
-  title: { fontSize: 14, fontWeight: '900', color: '#111' },
-  subtitle: { fontSize: 11, color: '#666', fontWeight: '700', marginTop: 2 },
-  actions: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  actionBtn: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    backgroundColor: '#f3f4f6',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  actionTxt: { fontSize: 16 },
-});
 
 const quickActionStyles = StyleSheet.create({
   btn: {

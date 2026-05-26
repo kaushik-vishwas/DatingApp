@@ -38,9 +38,12 @@ import { useCallerMessageEligibilityOptional } from '../../context/CallerMessage
 import { useChatInbox } from '../../context/ChatInboxContext';
 import { resolveProfileImageSource } from '../../utils/avatarSource';
 import { SCREEN_FETCH_TIMEOUT_MS, withTimeout } from '../../utils/withTimeout';
+import {
+  CHAT_CALLER_FEE_LABEL,
+  CHAT_RECEIVER_EARN_LABEL,
+} from '../../constants/chatPricing';
 
 const PURPLE = '#7b2cff';
-const CHAT_FEE_LABEL = '₹0.50';
 
 type Props =
   | NativeStackScreenProps<CallerStackParamList, 'CallerChat'>
@@ -463,13 +466,15 @@ export default function ChatConversationScreen({ navigation, route }: Props): Re
             {peerName}
           </Text>
           {peerTyping ? <Text style={styles.typingText}>typing...</Text> : null}
-          <TouchableOpacity
-            onPress={onStartVoiceCall}
-            style={[styles.callBtnTop, calling && styles.callBtnTopOff]}
-            disabled={calling}
-          >
-            <Text style={styles.callBtnTopTxt}>{calling ? 'Calling…' : 'Call'}</Text>
-          </TouchableOpacity>
+          {isCaller ? (
+            <TouchableOpacity
+              onPress={onStartVoiceCall}
+              style={[styles.callBtnTop, calling && styles.callBtnTopOff]}
+              disabled={calling}
+            >
+              <Text style={styles.callBtnTopTxt}>{calling ? 'Calling…' : 'Call'}</Text>
+            </TouchableOpacity>
+          ) : null}
           <TouchableOpacity
             onPress={() => setMenuOpen((v) => !v)}
             style={styles.moreBtn}
@@ -528,7 +533,11 @@ export default function ChatConversationScreen({ navigation, route }: Props): Re
             value={input}
             onChangeText={onChangeInput}
             placeholder={
-              isCaller && !canMessage ? 'Call first to unlock messaging' : 'Type a message…'
+              isCaller && !canMessage
+                ? 'Call first to unlock messaging'
+                : isCaller
+                  ? 'Just ₹1 Per Text'
+                  : 'Type a message…'
             }
             placeholderTextColor="#999"
             multiline
@@ -553,10 +562,15 @@ export default function ChatConversationScreen({ navigation, route }: Props): Re
           <View style={styles.continueCard}>
             <Text style={styles.continueTitle}>Continue to chat !</Text>
             <Text style={styles.coinEmoji}>🪙</Text>
-            <Text style={styles.continueSub}>Just for {CHAT_FEE_LABEL} (50 paise) per message</Text>
+            <Text style={styles.continueSub}>
+              {isCaller
+                ? `Just for ${CHAT_CALLER_FEE_LABEL} per message`
+                : `You earn ${CHAT_RECEIVER_EARN_LABEL} per paid message`}
+            </Text>
             <Text style={styles.continueHint}>
-              After the receiver replies once, each message you send uses {CHAT_FEE_LABEL} from your wallet and
-              credits the receiver.
+              {isCaller
+                ? `After the receiver replies once, each message you send uses ${CHAT_CALLER_FEE_LABEL} from your wallet and credits the receiver ${CHAT_RECEIVER_EARN_LABEL}.`
+                : `When the caller messages after your first reply, you earn ${CHAT_RECEIVER_EARN_LABEL} per message.`}
             </Text>
             {isCaller ? (
               <TouchableOpacity style={styles.continueBtn} onPress={goWallet}>

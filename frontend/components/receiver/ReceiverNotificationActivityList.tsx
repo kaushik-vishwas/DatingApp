@@ -1,6 +1,6 @@
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import React from 'react';
+import React, { useMemo } from 'react';
 import {
   ActivityIndicator,
   ScrollView,
@@ -13,8 +13,6 @@ import { useReceiverNotificationData } from '../../context/ReceiverNotificationD
 import { useReceiverTabBarBottomInset } from '../../utils/receiverTabBarInset';
 import type { ReceiverStackParamList } from '../../navigation/ReceiverStackParamList';
 import type { ReceiverNotificationKind, ReceiverNotificationRow } from '../../types/receiverNotification';
-
-type Nav = NativeStackNavigationProp<ReceiverStackParamList>;
 
 type Props = {
   types: ReceiverNotificationKind[];
@@ -29,14 +27,19 @@ export default function ReceiverNotificationActivityList({
   showEarningActions = false,
   headerExtra,
 }: Props): React.JSX.Element {
-  const navigation = useNavigation<Nav>();
+  const navigation = useNavigation();
+  const stackNavigation = useMemo(() => {
+    const parent = navigation.getParent<NativeStackNavigationProp<ReceiverStackParamList>>();
+    if (parent) return parent;
+    return navigation as NativeStackNavigationProp<ReceiverStackParamList>;
+  }, [navigation]);
   const scrollBottomInset = useReceiverTabBarBottomInset();
   const { loading, error, reload, rowsForTypes } = useReceiverNotificationData();
   const filtered = rowsForTypes(types);
 
   const openChat = (row: ReceiverNotificationRow) => {
     if (!row.peerId || !row.peerName) return;
-    navigation.navigate('ReceiverChat', {
+    stackNavigation.navigate('ReceiverChat', {
       userId: row.peerId,
       userName: row.peerName,
       userImage: row.peerImage ?? null,
@@ -45,11 +48,11 @@ export default function ReceiverNotificationActivityList({
 
   const onOpenRow = (row: ReceiverNotificationRow) => {
     if (row.type === 'withdrawal') {
-      navigation.navigate('WithdrawEarnings');
+      stackNavigation.navigate('WithdrawEarnings');
       return;
     }
     if (row.type === 'earning') {
-      navigation.navigate('ReceiverEarningsBreakdown');
+      stackNavigation.navigate('ReceiverEarningsBreakdown');
       return;
     }
     openChat(row);
@@ -67,13 +70,13 @@ export default function ReceiverNotificationActivityList({
         <View style={styles.earningActions}>
           <TouchableOpacity
             style={styles.earningBtn}
-            onPress={() => navigation.navigate('ReceiverEarningsBreakdown')}
+            onPress={() => stackNavigation.navigate('ReceiverEarningsBreakdown')}
           >
             <Text style={styles.earningBtnText}>Open Earnings Breakdown</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={styles.earningBtnOutline}
-            onPress={() => navigation.navigate('ReceiverEarningsAnalytics')}
+            onPress={() => stackNavigation.navigate('ReceiverEarningsAnalytics')}
           >
             <Text style={styles.earningBtnOutlineText}>Open Analytics</Text>
           </TouchableOpacity>

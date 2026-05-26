@@ -28,6 +28,7 @@ import { beginApiTrace, mongoErrCode, reuseOrCreateApiTrace } from '../utils/api
 import { CALLER_MESSAGE_MIN_DURATION_SEC } from '../utils/callerMessageEligibility';
 import { MISSED_OR_INCOMPLETE_MAX_SEC } from './callController';
 import { getReceiverEarningSettings, publicEarningSchedulePayload } from '../services/receiverEarningModel';
+import { getReceiverWelcomeSettings } from '../services/receiverWelcome';
 
 function callerCallNotificationSubtitle(durationSec: number): string {
   const d = Math.max(0, Math.floor(Number(durationSec) || 0));
@@ -1331,6 +1332,8 @@ export const getReceiverWalletSummary = async (req: Request, res: Response): Pro
       createdAt: r.createdAt.toISOString(),
     }));
 
+    const receiverWelcome = await getReceiverWelcomeSettings();
+
     res.status(200).json({
       walletBalance,
       chatToday,
@@ -1344,6 +1347,7 @@ export const getReceiverWalletSummary = async (req: Request, res: Response): Pro
       totalEarningsToday,
       totalEarningsThisWeek,
       recent,
+      receiverWelcome,
     });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -1860,7 +1864,10 @@ export const getReceiverCallInsights = async (
         avgRating: row.ratingCount > 0 ? roundInr(row.ratingSum / row.ratingCount) : null,
       }));
 
-    const earningSettings = await getReceiverEarningSettings();
+    const [earningSettings, receiverWelcome] = await Promise.all([
+      getReceiverEarningSettings(),
+      getReceiverWelcomeSettings(),
+    ]);
     const earningPublic = publicEarningSchedulePayload(earningSettings);
     const scoreBasedRate =
       typeof receiverMeta?.earningRatePerMinute === 'number' &&
@@ -1912,6 +1919,7 @@ export const getReceiverCallInsights = async (
           ? earningPublic.fixedPerMinuteWindows
           : undefined,
       earningTimezone: earningPublic.timezone,
+      receiverWelcome,
       scoreRules:
         earningPublic.receiverEarningModel === 'fixed_per_minute'
           ? undefined
@@ -1939,6 +1947,26 @@ export const getReceiverCallInsights = async (
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error('getReceiverCallInsights error:', msg);
+    res.status(500).json({ message: msg || 'Server error' });
+  }
+};
+
+/**
+ * GET /profile/receiver-welcome — admin-managed welcome card for receiver home.
+ */
+export const getReceiverWelcomeMessage = async (req: Request, res: Response): Promise<void> => {
+  try {
+    if (req.accountKind !== 'receiver') {
+      res.status(403).json({ message: 'Only receivers can access welcome message' });
+      return;
+    }
+    if (blockReceiverUntilApproved(req, res)) return;
+
+    const receiverWelcome = await getReceiverWelcomeSettings();
+    res.status(200).json({ receiverWelcome });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error('getReceiverWelcomeMessage error:', msg);
     res.status(500).json({ message: msg || 'Server error' });
   }
 };

@@ -10,6 +10,12 @@ export interface IFixedPerMinuteWindow {
   ratePerMinute: number;
 }
 
+export interface IReceiverWelcomeSettings {
+  enabled: boolean;
+  title: string;
+  body: string;
+}
+
 export interface IAdminSettings {
   notificationControls: {
     kycSubmissionsEmail: boolean;
@@ -18,6 +24,7 @@ export interface IAdminSettings {
   };
   receiverEarningModel: ReceiverEarningModel;
   fixedPerMinuteWindows: IFixedPerMinuteWindow[];
+  receiverWelcome: IReceiverWelcomeSettings;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -50,6 +57,11 @@ const adminSettingsSchema = new Schema<IAdminSettings>(
     fixedPerMinuteWindows: {
       type: [fixedWindowSchema],
       default: [],
+    },
+    receiverWelcome: {
+      enabled: { type: Boolean, default: true },
+      title: { type: String, default: 'Welcome to Selecto', trim: true, maxlength: 120 },
+      body: { type: String, default: '', trim: true, maxlength: 3000 },
     },
   },
   { timestamps: true }

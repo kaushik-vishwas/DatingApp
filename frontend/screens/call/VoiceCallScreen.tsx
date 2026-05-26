@@ -5,6 +5,7 @@ import { Ionicons } from '@expo/vector-icons';
 import {
   Alert,
   Animated,
+  BackHandler,
   Easing,
   Image,
   Modal,
@@ -211,6 +212,8 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
     setIncomingCallHandler,
     setIncomingCallDismissHandler,
     setRemoteCallEndedHandler,
+    emitCallEnd: emitCallEndSignal,
+    setQueueMode,
     rejectIncomingCall,
     acceptIncomingCallStayOnScreen,
     stopIncomingRingtone,
@@ -513,11 +516,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
   const emitCallEnd = (): void => {
     const callId = callIdRef.current.trim();
     if (!callId) return;
-    try {
-      signalSocketRef.current?.emit('call:end', { callId });
-    } catch {
-      // ignore signaling failures
-    }
+    emitCallEndSignal(callId);
   };
 
   const resetReceiverToWaiting = () => {
@@ -540,6 +539,8 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
   const resetReceiverToWaitingRef = useRef(resetReceiverToWaiting);
   resetReceiverToWaitingRef.current = resetReceiverToWaiting;
 
+  const allowAvailabilityLeaveRef = useRef(false);
+
   const onReceiverGoOffline = () => {
     if (goingOffline) return;
     setGoingOffline(true);
@@ -559,6 +560,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
         }
         await profileApi.updateReceiverProfile({ isAvailable: false });
         await refreshUser();
+        allowAvailabilityLeaveRef.current = true;
         (navigation as { navigate: (name: string, params?: object) => void }).navigate(
           'ReceiverMainTabs',
           { screen: 'ReceiverHome' }
@@ -570,6 +572,23 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
       }
     })();
   };
+
+  useEffect(() => {
+    const blockBack = receiverAvailabilitySession && receiverSessionPhase === 'waiting';
+    if (!blockBack) return;
+
+    const onHardwareBack = (): boolean => true;
+    const backHandlerSub = BackHandler.addEventListener('hardwareBackPress', onHardwareBack);
+    const navSub = navigation.addListener('beforeRemove', (e) => {
+      if (allowAvailabilityLeaveRef.current) return;
+      e.preventDefault();
+    });
+
+    return () => {
+      backHandlerSub.remove();
+      navSub();
+    };
+  }, [navigation, receiverAvailabilitySession, receiverSessionPhase]);
 
   const exitCallScreen = () => {
     try {
@@ -588,11 +607,9 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
   };
 
   const stopQueueAndExit = () => {
-    try {
-      signalSocketRef.current?.emit('call:queue:set', { active: false });
-    } catch {
+    void setQueueMode(false).catch(() => {
       // ignore signaling failures
-    }
+    });
     exitCallScreen();
   };
 
@@ -665,12 +682,19 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
   dismissIncomingOnSessionRef.current = dismissIncomingOnSession;
 
   useEffect(() => {
-    if (user?.role !== 'receiver') {
+    if (user?.role !== 'caller' && user?.role !== 'receiver') {
       setRemoteCallEndedHandler(null);
       return;
     }
+    const role = user.role;
     setRemoteCallEndedHandler((endedCallId) => {
       if (!matchesActiveCallId(endedCallId)) return;
+      if (role === 'caller') {
+        if (endingRef.current) return;
+        endingRef.current = true;
+        void finishCallerCallEndRef.current();
+        return;
+      }
       void teardownFromRemotePeerEndRef.current();
     });
     return () => setRemoteCallEndedHandler(null);
@@ -951,25 +975,6 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
       const ioMgr = (socket as unknown as { io?: { on: (ev: string, fn: () => void) => void; off: (ev: string, fn: () => void) => void } }).io;
       ioMgr?.on('reconnect_failed', onReconnectFailed);
 
-      socket.on('call:ended', (payload: { callId: string; fromType: 'u' | 'r'; fromId: string }) => {
-        if (!payload?.callId) return;
-        if (
-          receiverAvailabilitySessionRef.current &&
-          incomingReqRef.current?.callId === payload.callId &&
-          payload.callId !== callIdRef.current
-        ) {
-          dismissIncomingOnSessionRef.current(payload.callId);
-          return;
-        }
-        if (!matchesActiveCallId(payload.callId)) return;
-        if (userRoleRef.current === 'caller') {
-          if (endingRef.current) return;
-          endingRef.current = true;
-          void finishCallerCallEndRef.current();
-          return;
-        }
-        void teardownFromRemotePeerEndRef.current();
-      });
     })();
 
     return () => {

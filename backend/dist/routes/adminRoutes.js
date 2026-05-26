@@ -15,6 +15,7 @@ router.post('/auth/confirm-email-change', adminAuth_1.adminProtect, adminControl
 router.get('/settings', adminAuth_1.adminProtect, adminController_1.getAdminSettings);
 router.patch('/settings/notifications', adminAuth_1.adminProtect, adminController_1.updateAdminNotificationControls);
 router.patch('/settings/earning-model', adminAuth_1.adminProtect, adminController_1.updateAdminReceiverEarningModel);
+router.patch('/settings/receiver-welcome', adminAuth_1.adminProtect, adminController_1.updateAdminReceiverWelcome);
 router.patch('/settings/admins/:id/role', adminAuth_1.adminProtect, adminController_1.updateAdminRole);
 router.get('/users', adminAuth_1.adminProtect, adminController_1.listAppUsers);
 router.get('/users/pending', adminAuth_1.adminProtect, adminController_1.listPendingAppUsers);

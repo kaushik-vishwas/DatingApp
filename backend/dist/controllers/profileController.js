@@ -36,7 +36,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getCallerNotifications = exports.getReceiverCallerOnlineNotifications = exports.getCallerMessageEligibleReceivers = exports.getCallerCallHistory = exports.getReceiverEarningsBreakdown = exports.verifyReceiverBankUpdateOtp = exports.sendReceiverBankUpdateOtp = exports.deleteReceiverAccount = exports.reopenRejectedReceiverKyc = exports.completeReceiverAudioOnboarding = exports.updateReceiverProfile = exports.notifyReceiverRecentUser = exports.getReceiverNotifyCandidates = exports.getReceiverCallInsights = exports.verifyReceiverWithdrawalOtpAndCreate = exports.sendReceiverWithdrawalOtp = exports.getReceiverWithdrawalOverview = exports.getReceiverWalletSummary = exports.updateCallerProfile = exports.completeCallerProfile = exports.saveCallerUserAudio = exports.saveReceiverKycBankFinalize = exports.saveReceiverKycDocuments = exports.saveReceiverKycProfileInfo = exports.completeProfile = void 0;
+exports.getCallerNotifications = exports.getReceiverCallerOnlineNotifications = exports.getCallerMessageEligibleReceivers = exports.getCallerCallHistory = exports.getReceiverEarningsBreakdown = exports.verifyReceiverBankUpdateOtp = exports.sendReceiverBankUpdateOtp = exports.deleteReceiverAccount = exports.reopenRejectedReceiverKyc = exports.completeReceiverAudioOnboarding = exports.updateReceiverProfile = exports.notifyReceiverRecentUser = exports.getReceiverNotifyCandidates = exports.getReceiverWelcomeMessage = exports.getReceiverCallInsights = exports.verifyReceiverWithdrawalOtpAndCreate = exports.sendReceiverWithdrawalOtp = exports.getReceiverWithdrawalOverview = exports.getReceiverWalletSummary = exports.updateCallerProfile = exports.completeCallerProfile = exports.saveCallerUserAudio = exports.saveReceiverKycBankFinalize = exports.saveReceiverKycDocuments = exports.saveReceiverKycProfileInfo = exports.completeProfile = void 0;
 const crypto_1 = __importDefault(require("crypto"));
 const mongoose_1 = __importDefault(require("mongoose"));
 const User_1 = __importDefault(require("../models/User"));
@@ -63,6 +63,7 @@ const apiTraceLog_1 = require("../utils/apiTraceLog");
 const callerMessageEligibility_1 = require("../utils/callerMessageEligibility");
 const callController_1 = require("./callController");
 const receiverEarningModel_1 = require("../services/receiverEarningModel");
+const receiverWelcome_1 = require("../services/receiverWelcome");
 function callerCallNotificationSubtitle(durationSec) {
     const d = Math.max(0, Math.floor(Number(durationSec) || 0));
     if (d <= 0)
@@ -1091,6 +1092,7 @@ const getReceiverWalletSummary = async (req, res) => {
             amountInr: roundInr(r.amountInr),
             createdAt: r.createdAt.toISOString(),
         }));
+        const receiverWelcome = await (0, receiverWelcome_1.getReceiverWelcomeSettings)();
         res.status(200).json({
             walletBalance,
             chatToday,
@@ -1104,6 +1106,7 @@ const getReceiverWalletSummary = async (req, res) => {
             totalEarningsToday,
             totalEarningsThisWeek,
             recent,
+            receiverWelcome,
         });
     }
     catch (err) {
@@ -1519,7 +1522,10 @@ const getReceiverCallInsights = async (req, res) => {
             durationMonthSec: row.durationMonthSec,
             avgRating: row.ratingCount > 0 ? roundInr(row.ratingSum / row.ratingCount) : null,
         }));
-        const earningSettings = await (0, receiverEarningModel_1.getReceiverEarningSettings)();
+        const [earningSettings, receiverWelcome] = await Promise.all([
+            (0, receiverEarningModel_1.getReceiverEarningSettings)(),
+            (0, receiverWelcome_1.getReceiverWelcomeSettings)(),
+        ]);
         const earningPublic = (0, receiverEarningModel_1.publicEarningSchedulePayload)(earningSettings);
         const scoreBasedRate = typeof receiverMeta?.earningRatePerMinute === 'number' &&
             Number.isFinite(receiverMeta.earningRatePerMinute)
@@ -1563,6 +1569,7 @@ const getReceiverCallInsights = async (req, res) => {
                 ? earningPublic.fixedPerMinuteWindows
                 : undefined,
             earningTimezone: earningPublic.timezone,
+            receiverWelcome,
             scoreRules: earningPublic.receiverEarningModel === 'fixed_per_minute'
                 ? undefined
                 : {
@@ -1594,6 +1601,27 @@ const getReceiverCallInsights = async (req, res) => {
     }
 };
 exports.getReceiverCallInsights = getReceiverCallInsights;
+/**
+ * GET /profile/receiver-welcome — admin-managed welcome card for receiver home.
+ */
+const getReceiverWelcomeMessage = async (req, res) => {
+    try {
+        if (req.accountKind !== 'receiver') {
+            res.status(403).json({ message: 'Only receivers can access welcome message' });
+            return;
+        }
+        if ((0, accountAccess_1.blockReceiverUntilApproved)(req, res))
+            return;
+        const receiverWelcome = await (0, receiverWelcome_1.getReceiverWelcomeSettings)();
+        res.status(200).json({ receiverWelcome });
+    }
+    catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error('getReceiverWelcomeMessage error:', msg);
+        res.status(500).json({ message: msg || 'Server error' });
+    }
+};
+exports.getReceiverWelcomeMessage = getReceiverWelcomeMessage;
 /**
  * GET /profile/receiver-notify-candidates — latest 20 unique recent callers for manual ping.
  */

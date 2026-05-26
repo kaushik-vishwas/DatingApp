@@ -10,7 +10,7 @@ import User from '../models/User';
 import Receiver from '../models/Receiver';
 import { getPayloadSessionVersion, type AppJwtPayload } from '../utils/authToken';
 import { registerSocketIOServer } from './socketRegistry';
-import { CHAT_TEXT_FEE_INR } from '../constants/chatPricing';
+import { CHAT_TEXT_CHARGE_INR, CHAT_TEXT_EARN_INR } from '../constants/chatPricing';
 import { finalizeReceiverOnlineSession, recordReceiverCallScore } from '../services/receiverScore';
 import { scheduleCallerOnlineNotifications } from '../services/callerOnlineNotifier';
 import { scheduleReceiverAvailabilityNotifications } from '../services/receiverAvailabilityNotifier';
@@ -489,8 +489,8 @@ export function attachChatSocket(httpServer: HTTPServer): Server {
               try {
                 await session.withTransaction(async () => {
                   const usrUpd = await User.updateOne(
-                    { _id: uidObj, walletBalance: { $gte: CHAT_TEXT_FEE_INR } },
-                    { $inc: { walletBalance: -CHAT_TEXT_FEE_INR } },
+                    { _id: uidObj, walletBalance: { $gte: CHAT_TEXT_CHARGE_INR } },
+                    { $inc: { walletBalance: -CHAT_TEXT_CHARGE_INR } },
                     { session }
                   );
                   if (usrUpd.modifiedCount === 0) {
@@ -498,7 +498,7 @@ export function attachChatSocket(httpServer: HTTPServer): Server {
                   }
                   const recvUpd = await Receiver.updateOne(
                     { _id: ridObj },
-                    { $inc: { walletBalance: CHAT_TEXT_FEE_INR } },
+                    { $inc: { walletBalance: CHAT_TEXT_EARN_INR } },
                     { session }
                   );
                   if (recvUpd.modifiedCount !== 1) {
@@ -511,7 +511,7 @@ export function attachChatSocket(httpServer: HTTPServer): Server {
                         receiverId: ridObj,
                         senderType: typ,
                         text,
-                        feeInr: CHAT_TEXT_FEE_INR,
+                        feeInr: CHAT_TEXT_EARN_INR,
                       },
                     ],
                     { session }
@@ -529,7 +529,7 @@ export function attachChatSocket(httpServer: HTTPServer): Server {
                       typeof uDoc?.walletBalance === 'number' && Number.isFinite(uDoc.walletBalance)
                         ? uDoc.walletBalance
                         : 0,
-                    requiredInr: CHAT_TEXT_FEE_INR,
+                    requiredInr: CHAT_TEXT_CHARGE_INR,
                   });
                   return;
                 }

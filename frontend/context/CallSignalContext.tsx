@@ -111,6 +111,8 @@ type CallSignalContextValue = {
   setIncomingCallDismissHandler: (handler: ((callId: string) => void) | null) => void;
   /** VoiceCall screen: tear down active Stream session when the peer ends the call. */
   setRemoteCallEndedHandler: (handler: ((callId: string) => void) | null) => void;
+  /** Notify peer instantly via the shared call-signaling socket (always-on while signed in). */
+  emitCallEnd: (callId: string) => void;
   acceptIncomingCall: (req: IncomingCallRequest) => Promise<void>;
   rejectIncomingCall: (req: IncomingCallRequest) => void;
   setQueueMode: (active: boolean) => Promise<void>;
@@ -729,6 +731,28 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     remoteCallEndedHandlerRef.current = handler;
   }, []);
 
+  const emitCallEnd = useCallback((callId: string) => {
+    const normalized = callId.trim();
+    if (!normalized) return;
+    const emitOn = (socket: Socket): void => {
+      try {
+        socket.emit('call:end', { callId: normalized });
+      } catch {
+        // ignore signaling failures
+      }
+    };
+    const socket = socketRef.current;
+    if (socket?.connected) {
+      emitOn(socket);
+      return;
+    }
+    void ensureCallSocketReady(socketRef)
+      .then(emitOn)
+      .catch(() => {
+        // ignore — peer may still see end via session timeout / other path
+      });
+  }, []);
+
   const clearReceiverIncomingCallUi = useCallback((callId: string) => {
     void stopIncomingRingtonePlayback();
     if (activeIncomingCallUiCallIdRef.current === callId) {
@@ -969,11 +993,11 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         rejectedIncomingCallIdsRef.current.delete(payload.callId);
         clearOutgoingCallSessionRef.current(payload.callId);
 
+        const onVoiceCallScreen = Boolean(remoteCallEndedHandlerRef.current);
         if (userRoleRef.current === 'receiver') {
           const onIntegratedVoiceCall =
             Boolean(incomingCallDismissHandlerRef.current) ||
             Boolean(incomingCallHandlerRef.current);
-          const onVoiceCallScreen = Boolean(remoteCallEndedHandlerRef.current);
           const legacyIncomingScreen =
             !onIntegratedVoiceCall &&
             !onVoiceCallScreen &&
@@ -991,6 +1015,8 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
               if (!goHome()) scheduleNavigateWhenReady(goHome, outgoingNavigateGeneration);
             }
           }
+        } else if (userRoleRef.current === 'caller' && onVoiceCallScreen) {
+          remoteCallEndedHandlerRef.current?.(payload.callId);
         }
 
         const waiter = pendingInviteOutcomeRef.current.get(payload.callId);
@@ -1025,6 +1051,7 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       setIncomingCallHandler,
       setIncomingCallDismissHandler,
       setRemoteCallEndedHandler,
+      emitCallEnd,
       acceptIncomingCall,
       rejectIncomingCall,
       setQueueMode,
@@ -1042,6 +1069,7 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       setIncomingCallHandler,
       setIncomingCallDismissHandler,
       setRemoteCallEndedHandler,
+      emitCallEnd,
       acceptIncomingCall,
       rejectIncomingCall,
       setQueueMode,

@@ -36,6 +36,7 @@ import type {
   ReceiverWalletSummaryResponse,
   ReceiverWithdrawalOverviewResponse,
   ReceiverCallInsightsResponse,
+  ReceiverWelcomeResponse,
   VoiceBootstrapResponse,
   RandomReceiverMatchResponse,
   SendWithdrawalOtpResponse,
@@ -244,6 +245,8 @@ export const profileApi = {
     api.get<ReceiverCallInsightsResponse>('/profile/receiver-call-insights', {
       params: { range },
     }),
+
+  receiverWelcome: () => api.get<ReceiverWelcomeResponse>('/profile/receiver-welcome'),
 
   updateReceiverProfile: (payload: UpdateReceiverProfilePayload) =>
     api.patch<CompleteProfileResponse>('/profile/receiver', payload),

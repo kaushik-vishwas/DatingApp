@@ -17,6 +17,7 @@ import {
   saveCallerUserAudio,
   sendReceiverWithdrawalOtp,
   getReceiverCallInsights,
+  getReceiverWelcomeMessage,
   updateCallerProfile,
   verifyReceiverWithdrawalOtpAndCreate,
   getReceiverWalletSummary,
@@ -40,6 +41,7 @@ router.get('/withdrawals/overview', protect, getReceiverWithdrawalOverview);
 router.post('/withdrawals/send-otp', protect, sendReceiverWithdrawalOtp);
 router.post('/withdrawals/verify', protect, verifyReceiverWithdrawalOtpAndCreate);
 router.get('/receiver-call-insights', protect, getReceiverCallInsights);
+router.get('/receiver-welcome', protect, getReceiverWelcomeMessage);
 router.get('/receiver-notify-candidates', protect, getReceiverNotifyCandidates);
 router.post('/receiver-notify-user', protect, notifyReceiverRecentUser);
 router.patch('/receiver/kyc/profile-info', protect, saveReceiverKycProfileInfo);

@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.resolveWithdrawal = exports.listWithdrawals = exports.resolveModerationReport = exports.listModerationReports = exports.rejectAppUser = exports.approveAppUser = exports.listPendingAppUsers = exports.rejectReceiver = exports.approveReceiver = exports.listPendingReceivers = exports.getKycStats = exports.listAllReceivers = exports.updateReceiver = exports.updateAppUser = exports.listAppUsers = exports.getOverviewDashboard = exports.getRevenueDashboard = exports.updateAdminRole = exports.updateAdminReceiverEarningModel = exports.updateAdminNotificationControls = exports.getAdminSettings = exports.adminConfirmEmailChange = exports.adminRequestEmailChange = exports.adminResetPassword = exports.adminForgotPassword = exports.adminMe = exports.adminLogin = void 0;
+exports.resolveWithdrawal = exports.listWithdrawals = exports.resolveModerationReport = exports.listModerationReports = exports.rejectAppUser = exports.approveAppUser = exports.listPendingAppUsers = exports.rejectReceiver = exports.approveReceiver = exports.listPendingReceivers = exports.getKycStats = exports.listAllReceivers = exports.updateReceiver = exports.updateAppUser = exports.listAppUsers = exports.getOverviewDashboard = exports.getRevenueDashboard = exports.updateAdminRole = exports.updateAdminReceiverWelcome = exports.updateAdminReceiverEarningModel = exports.updateAdminNotificationControls = exports.getAdminSettings = exports.adminConfirmEmailChange = exports.adminRequestEmailChange = exports.adminResetPassword = exports.adminForgotPassword = exports.adminMe = exports.adminLogin = void 0;
 const bcryptjs_1 = __importDefault(require("bcryptjs"));
 const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
 const mongoose_1 = __importDefault(require("mongoose"));
@@ -16,6 +16,7 @@ const CallSession_1 = __importDefault(require("../models/CallSession"));
 const ChatMessage_1 = __importDefault(require("../models/ChatMessage"));
 const AdminSettings_1 = __importDefault(require("../models/AdminSettings"));
 const receiverEarningModel_1 = require("../services/receiverEarningModel");
+const receiverWelcome_1 = require("../services/receiverWelcome");
 const authController_1 = require("./authController");
 const email_1 = require("../config/email");
 const superAdminSync_1 = require("../services/superAdminSync");
@@ -392,12 +393,14 @@ const getAdminSettings = async (req, res) => {
         const fixedPerMinuteWindows = (0, receiverEarningModel_1.normalizeFixedPerMinuteWindows)(effective.fixedPerMinuteWindows?.length
             ? effective.fixedPerMinuteWindows
             : receiverEarningModel_1.DEFAULT_FIXED_PER_MINUTE_WINDOWS);
+        const receiverWelcome = (0, receiverWelcome_1.normalizeReceiverWelcome)(effective.receiverWelcome);
         res.status(200).json({
             notificationControls: {
                 kycSubmissionsEmail: Boolean(effective.notificationControls?.kycSubmissionsEmail ?? true),
                 pendingWithdrawalsEmail: Boolean(effective.notificationControls?.pendingWithdrawalsEmail ?? true),
                 dailyRevenueSummaryEmail: Boolean(effective.notificationControls?.dailyRevenueSummaryEmail ?? true),
             },
+            receiverWelcome,
             receiverEarningModel: earningModel,
             fixedPerMinuteWindows,
             rolesCatalog: [
@@ -497,6 +500,34 @@ const updateAdminReceiverEarningModel = async (req, res) => {
     }
 };
 exports.updateAdminReceiverEarningModel = updateAdminReceiverEarningModel;
+/**
+ * PATCH /admin/settings/receiver-welcome — home card copy for receivers.
+ */
+const updateAdminReceiverWelcome = async (req, res) => {
+    try {
+        const body = req.body ?? {};
+        if (typeof body.enabled !== 'boolean') {
+            res.status(400).json({ message: 'enabled boolean is required' });
+            return;
+        }
+        const receiverWelcome = (0, receiverWelcome_1.normalizeReceiverWelcome)({
+            enabled: body.enabled,
+            title: body.title,
+            body: body.body,
+        });
+        const settings = await AdminSettings_1.default.findOneAndUpdate({}, { $set: { receiverWelcome } }, { new: true, upsert: true, setDefaultsOnInsert: true });
+        res.status(200).json({
+            ok: true,
+            receiverWelcome: (0, receiverWelcome_1.normalizeReceiverWelcome)(settings.receiverWelcome),
+        });
+    }
+    catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error('updateAdminReceiverWelcome error:', msg);
+        res.status(500).json({ message: msg || 'Server error' });
+    }
+};
+exports.updateAdminReceiverWelcome = updateAdminReceiverWelcome;
 /**
  * PATCH /admin/settings/admins/:id/role — super_admin only.
  */

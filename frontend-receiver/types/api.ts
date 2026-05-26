@@ -177,6 +177,11 @@ export interface ReceiverCallInsightsResponse {
   totalScore: number;
   badgeLevel?: 'platinum' | 'diamond' | 'supreme';
   earningRatePerMinute?: number;
+  receiverWelcome?: {
+    enabled: boolean;
+    title: string;
+    body: string;
+  };
   scoreRules?: {
     call: {
       ignoreAtOrBelowSeconds: number;

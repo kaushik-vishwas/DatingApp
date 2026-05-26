@@ -428,11 +428,11 @@ function attachChatSocket(httpServer) {
                             const session = await mongoose_1.default.startSession();
                             try {
                                 await session.withTransaction(async () => {
-                                    const usrUpd = await User_1.default.updateOne({ _id: uidObj, walletBalance: { $gte: chatPricing_1.CHAT_TEXT_FEE_INR } }, { $inc: { walletBalance: -chatPricing_1.CHAT_TEXT_FEE_INR } }, { session });
+                                    const usrUpd = await User_1.default.updateOne({ _id: uidObj, walletBalance: { $gte: chatPricing_1.CHAT_TEXT_CHARGE_INR } }, { $inc: { walletBalance: -chatPricing_1.CHAT_TEXT_CHARGE_INR } }, { session });
                                     if (usrUpd.modifiedCount === 0) {
                                         throw new Error('INSUFFICIENT_WALLET');
                                     }
-                                    const recvUpd = await Receiver_1.default.updateOne({ _id: ridObj }, { $inc: { walletBalance: chatPricing_1.CHAT_TEXT_FEE_INR } }, { session });
+                                    const recvUpd = await Receiver_1.default.updateOne({ _id: ridObj }, { $inc: { walletBalance: chatPricing_1.CHAT_TEXT_EARN_INR } }, { session });
                                     if (recvUpd.modifiedCount !== 1) {
                                         throw new Error('RECEIVER_CREDIT_FAILED');
                                     }
@@ -442,7 +442,7 @@ function attachChatSocket(httpServer) {
                                             receiverId: ridObj,
                                             senderType: typ,
                                             text,
-                                            feeInr: chatPricing_1.CHAT_TEXT_FEE_INR,
+                                            feeInr: chatPricing_1.CHAT_TEXT_EARN_INR,
                                         },
                                     ], { session });
                                     doc = created[0];
@@ -458,7 +458,7 @@ function attachChatSocket(httpServer) {
                                         walletBalance: typeof uDoc?.walletBalance === 'number' && Number.isFinite(uDoc.walletBalance)
                                             ? uDoc.walletBalance
                                             : 0,
-                                        requiredInr: chatPricing_1.CHAT_TEXT_FEE_INR,
+                                        requiredInr: chatPricing_1.CHAT_TEXT_CHARGE_INR,
                                     });
                                     return;
                                 }

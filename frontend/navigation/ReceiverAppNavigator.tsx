@@ -25,6 +25,12 @@ import ReceiverDeleteAccountScreen from '../screens/receiver/ReceiverDeleteAccou
 import ReceiverEarningsBreakdownScreen from '../screens/receiver/ReceiverEarningsBreakdownScreen';
 import ReceiverEarningsAnalyticsScreen from '../screens/receiver/ReceiverEarningsAnalyticsScreen';
 import ReceiverAvailabilityWaitingScreen from '../screens/receiver/ReceiverAvailabilityWaitingScreen';
+import CallerFaqScreen from '../screens/caller/CallerFaqScreen';
+import CallerHelpScreen from '../screens/caller/CallerHelpScreen';
+import CallerPrivacyPolicyScreen from '../screens/caller/CallerPrivacyPolicyScreen';
+import CallerRateUsScreen from '../screens/caller/CallerRateUsScreen';
+import CallerShareAppScreen from '../screens/caller/CallerShareAppScreen';
+import CallerTermsScreen from '../screens/caller/CallerTermsScreen';
 import type { ReceiverStackParamList } from './ReceiverStackParamList';
 
 const Stack = createNativeStackNavigator<ReceiverStackParamList>();
@@ -72,6 +78,12 @@ export default function ReceiverAppNavigator({
       <Stack.Screen name="ReceiverAutoVerification" component={ReceiverAutoVerificationScreen} />
       <Stack.Screen name="ReceiverProfilePreview" component={ReceiverProfilePreviewScreen} />
       <Stack.Screen name="ReceiverDeleteAccount" component={ReceiverDeleteAccountScreen} />
+      <Stack.Screen name="CallerShareApp" component={CallerShareAppScreen} />
+      <Stack.Screen name="CallerFaq" component={CallerFaqScreen} />
+      <Stack.Screen name="CallerTerms" component={CallerTermsScreen} />
+      <Stack.Screen name="CallerPrivacyPolicy" component={CallerPrivacyPolicyScreen} />
+      <Stack.Screen name="CallerHelp" component={CallerHelpScreen} />
+      <Stack.Screen name="CallerRateUs" component={CallerRateUsScreen} />
       <Stack.Screen name="ReceiverEarningsBreakdown" component={ReceiverEarningsBreakdownScreen} />
       <Stack.Screen name="ReceiverEarningsAnalytics" component={ReceiverEarningsAnalyticsScreen} />
       <Stack.Screen name="WithdrawEarnings" component={WithdrawEarningsScreen} />

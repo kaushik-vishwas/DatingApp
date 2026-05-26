@@ -1,6 +1,6 @@
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
@@ -15,17 +15,21 @@ import { useChatInbox } from '../../context/ChatInboxContext';
 import type { ReceiverStackParamList } from '../../navigation/ReceiverStackParamList';
 import { chatApi, getErrorMessage } from '../../services/api';
 import type { ChatPeerSummary } from '../../types/api';
+import { resolveProfileImageSource } from '../../utils/avatarSource';
 
 const PURPLE = '#7b2cff';
-
-type Nav = NativeStackNavigationProp<ReceiverStackParamList>;
 
 export default function ReceiverChatsList({
   listPaddingBottom = 24,
 }: {
   listPaddingBottom?: number;
 }): React.JSX.Element {
-  const navigation = useNavigation<Nav>();
+  const navigation = useNavigation();
+  const stackNavigation = useMemo(() => {
+    const parent = navigation.getParent<NativeStackNavigationProp<ReceiverStackParamList>>();
+    if (parent) return parent;
+    return navigation as NativeStackNavigationProp<ReceiverStackParamList>;
+  }, [navigation]);
   const { getTyping, getUnreadCount, refreshUnreadFromServer } = useChatInbox();
   const [rows, setRows] = useState<ChatPeerSummary[]>([]);
   const [loading, setLoading] = useState(true);
@@ -61,19 +65,27 @@ export default function ReceiverChatsList({
     void load();
   };
 
-  const renderItem = ({ item }: { item: ChatPeerSummary }) => (
+  const openConversation = useCallback(
+    (item: ChatPeerSummary) => {
+      stackNavigation.navigate('ReceiverChat', {
+        userId: item.peerId,
+        userName: item.peerName,
+        userImage: item.peerImage,
+      });
+    },
+    [stackNavigation],
+  );
+
+  const renderItem = ({ item }: { item: ChatPeerSummary }) => {
+    const peerAvatar = resolveProfileImageSource(item.peerImage);
+    return (
     <TouchableOpacity
       style={styles.row}
-      onPress={() =>
-        navigation.navigate('ReceiverChat', {
-          userId: item.peerId,
-          userName: item.peerName,
-          userImage: item.peerImage,
-        })
-      }
+      onPress={() => openConversation(item)}
+      activeOpacity={0.7}
     >
-      {item.peerImage ? (
-        <Image source={{ uri: item.peerImage }} style={styles.avatar} />
+      {peerAvatar ? (
+        <Image source={peerAvatar} style={styles.avatar} />
       ) : (
         <View style={[styles.avatar, styles.avatarPh]}>
           <Text style={styles.avatarTxt}>{item.peerName.charAt(0) ?? '?'}</Text>
@@ -95,7 +107,8 @@ export default function ReceiverChatsList({
         </View>
       ) : null}
     </TouchableOpacity>
-  );
+    );
+  };
 
   if (loading) {
     return (

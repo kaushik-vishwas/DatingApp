@@ -31,6 +31,13 @@ export type ReceiverStackParamList = {
   ReceiverEarningsBreakdown: undefined;
   ReceiverEarningsAnalytics: undefined;
   WithdrawEarnings: undefined;
+  /** Reused caller profile/support screens (same UI as caller app). */
+  CallerShareApp: undefined;
+  CallerFaq: undefined;
+  CallerTerms: undefined;
+  CallerPrivacyPolicy: undefined;
+  CallerHelp: undefined;
+  CallerRateUs: undefined;
   ReceiverCallHistory: undefined;
   ReceiverChats: undefined;
   ReceiverChat: { userId: string; userName: string; userImage?: string | null };

@@ -213,12 +213,19 @@ export type FixedPerMinuteWindow = {
   ratePerMinute: number;
 };
 
+export type ReceiverWelcomeSettings = {
+  enabled: boolean;
+  title: string;
+  body: string;
+};
+
 export type AdminSettingsResponse = {
   notificationControls: {
     kycSubmissionsEmail: boolean;
     pendingWithdrawalsEmail: boolean;
     dailyRevenueSummaryEmail: boolean;
   };
+  receiverWelcome: ReceiverWelcomeSettings;
   receiverEarningModel: ReceiverEarningModel;
   fixedPerMinuteWindows: FixedPerMinuteWindow[];
   rolesCatalog: Array<{ id: AdminRole; label: string; description: string }>;
@@ -259,6 +266,14 @@ export async function updateAdminSettingsNotifications(payload: {
     ok: boolean;
     notificationControls: AdminSettingsResponse['notificationControls'];
   }>('/admin/settings/notifications', payload);
+  return data;
+}
+
+export async function updateAdminReceiverWelcome(payload: ReceiverWelcomeSettings) {
+  const { data } = await api.patch<{ ok: boolean; receiverWelcome: ReceiverWelcomeSettings }>(
+    '/admin/settings/receiver-welcome',
+    payload
+  );
   return data;
 }
 
