@@ -3,31 +3,19 @@ import { useAdminAuth } from '../context/AdminAuthContext';
 import {
   fetchAdminSettings,
   updateAdminRole,
-  updateAdminReceiverEarningModel,
   updateAdminSettingsNotifications,
   type AdminRole,
   type AdminSettingsResponse,
-  type FixedPerMinuteWindow,
-  type ReceiverEarningModel,
 } from '../api/client';
-
-const DEFAULT_WINDOWS: FixedPerMinuteWindow[] = [
-  { id: 'day', label: '6 AM – 9 PM', from: '06:00', to: '21:00', ratePerMinute: 2 },
-  { id: 'evening', label: '9 PM – 11 PM', from: '21:00', to: '23:00', ratePerMinute: 2.2 },
-  { id: 'night', label: '11 PM – 6 AM', from: '23:00', to: '06:00', ratePerMinute: 2.5 },
-];
 
 export function SettingsPage() {
   const { admin } = useAdminAuth();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [savingEarning, setSavingEarning] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [ok, setOk] = useState<string | null>(null);
   const [data, setData] = useState<AdminSettingsResponse | null>(null);
   const [notifications, setNotifications] = useState<AdminSettingsResponse['notificationControls'] | null>(null);
-  const [earningModel, setEarningModel] = useState<ReceiverEarningModel>('score_based');
-  const [fixedWindows, setFixedWindows] = useState<FixedPerMinuteWindow[]>(DEFAULT_WINDOWS);
   const canManageRoles = admin?.role === 'super_admin';
 
   const roleLabelById = useMemo(() => {
@@ -43,10 +31,6 @@ export function SettingsPage() {
       const res = await fetchAdminSettings();
       setData(res);
       setNotifications(res.notificationControls);
-      setEarningModel(res.receiverEarningModel ?? 'score_based');
-      setFixedWindows(
-        res.fixedPerMinuteWindows?.length ? res.fixedPerMinuteWindows : DEFAULT_WINDOWS
-      );
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Failed to load settings');
     } finally {
@@ -74,28 +58,6 @@ export function SettingsPage() {
     }
   };
 
-  const onSaveEarningModel = async () => {
-    setSavingEarning(true);
-    setError(null);
-    setOk(null);
-    try {
-      const res = await updateAdminReceiverEarningModel({
-        receiverEarningModel: earningModel,
-        fixedPerMinuteWindows: fixedWindows.map((w) => ({
-          ...w,
-          ratePerMinute: Number(w.ratePerMinute) || 0,
-        })),
-      });
-      setEarningModel(res.receiverEarningModel);
-      setFixedWindows(res.fixedPerMinuteWindows);
-      setOk('Receiver earning model updated. Active receivers will use the new rates on the next call sync.');
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Failed to save earning model');
-    } finally {
-      setSavingEarning(false);
-    }
-  };
-
   const onChangeRole = async (adminId: string, role: AdminRole) => {
     if (!canManageRoles) return;
     setError(null);
@@ -114,12 +76,6 @@ export function SettingsPage() {
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Failed to update role');
     }
-  };
-
-  const updateWindowRate = (id: string, ratePerMinute: number) => {
-    setFixedWindows((prev) =>
-      prev.map((w) => (w.id === id ? { ...w, ratePerMinute: Math.max(0, ratePerMinute) } : w))
-    );
   };
 
   return (
