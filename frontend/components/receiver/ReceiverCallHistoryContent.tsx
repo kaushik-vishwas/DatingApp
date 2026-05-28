@@ -7,6 +7,7 @@ import { formatCallDurationCompact } from '../../utils/callDurationDisplay';
 import { SCREEN_FETCH_TIMEOUT_MS, withTimeout } from '../../utils/withTimeout';
 
 type RangeTab = 'all' | 'week' | 'month';
+const HISTORY_REFRESH_THROTTLE_MS = 12_000;
 
 type Props = {
   /** When true, only the recent calls list is shown (no summary / caller breakdown). */
@@ -23,8 +24,18 @@ export default function ReceiverCallHistoryContent({
   const [error, setError] = useState<string | null>(null);
   const [data, setData] = useState<ReceiverCallInsightsResponse | null>(null);
   const loadGenRef = useRef(0);
+  const lastLoadedAtRef = useRef<Record<RangeTab, number>>({
+    all: 0,
+    week: 0,
+    month: 0,
+  });
 
-  const load = useCallback(async (range: RangeTab) => {
+  const load = useCallback(async (range: RangeTab, opts?: { force?: boolean }) => {
+    const force = Boolean(opts?.force);
+    const now = Date.now();
+    if (!force && now - lastLoadedAtRef.current[range] < HISTORY_REFRESH_THROTTLE_MS) {
+      return;
+    }
     const id = ++loadGenRef.current;
     setLoading(true);
     setError(null);
@@ -35,6 +46,7 @@ export default function ReceiverCallHistoryContent({
       );
       if (loadGenRef.current !== id) return;
       setData(res);
+      lastLoadedAtRef.current[range] = Date.now();
     } catch (e) {
       if (loadGenRef.current !== id) return;
       setError(getErrorMessage(e));
@@ -75,7 +87,11 @@ export default function ReceiverCallHistoryContent({
       ) : error ? (
         <View style={styles.errorBlock}>
           <Text style={styles.error}>{error}</Text>
-          <TouchableOpacity style={styles.retryBtn} onPress={() => void load(tab)} activeOpacity={0.85}>
+          <TouchableOpacity
+            style={styles.retryBtn}
+            onPress={() => void load(tab, { force: true })}
+            activeOpacity={0.85}
+          >
             <Text style={styles.retryBtnText}>Retry</Text>
           </TouchableOpacity>
         </View>

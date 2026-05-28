@@ -7,6 +7,7 @@ import type { ReceiverStackParamList } from '../../navigation/ReceiverStackParam
 import ReceiverNotificationActivityList from './ReceiverNotificationActivityList';
 
 type PaymentSubTab = 'earning' | 'withdrawal';
+const PAYMENT_RELOAD_THROTTLE_MS = 12_000;
 
 export default function ReceiverPaymentTabsContent(): React.JSX.Element {
   const navigation = useNavigation();
@@ -17,9 +18,13 @@ export default function ReceiverPaymentTabsContent(): React.JSX.Element {
   }, [navigation]);
   const { reload } = useReceiverNotificationData();
   const [subTab, setSubTab] = useState<PaymentSubTab>('earning');
+  const lastReloadAtRef = React.useRef(0);
 
   useFocusEffect(
     useCallback(() => {
+      const now = Date.now();
+      if (now - lastReloadAtRef.current < PAYMENT_RELOAD_THROTTLE_MS) return;
+      lastReloadAtRef.current = now;
       void reload();
     }, [reload])
   );

@@ -5,6 +5,7 @@ import { Ionicons } from '@expo/vector-icons';
 import {
   Alert,
   Animated,
+  AppState,
   BackHandler,
   Easing,
   Image,
@@ -270,6 +271,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
   const [error, setError] = useState<string | null>(null);
   const [elapsedSec, setElapsedSec] = useState(0);
   const [talkActive, setTalkActive] = useState(false);
+  const [systemCallHold, setSystemCallHold] = useState(false);
   const [muted, setMuted] = useState(false);
   const [speakerOn, setSpeakerOn] = useState(true);
   const [liveSettledAmountInr, setLiveSettledAmountInr] = useState(0);
@@ -365,6 +367,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
   /** Kept in refs so the signaling socket effect does not re-run when duration crosses the rating threshold (that was disconnecting the socket at the 1‑min mark). */
   const callerCanRateByDurationRef = useRef(callerCanRateByDuration);
   const userRoleRef = useRef(user?.role);
+  const appStateRef = useRef(AppState.currentState);
   const receiverAvailabilitySessionRef = useRef(receiverAvailabilitySession);
   const userAvailableRef = useRef(Boolean(user?.isAvailable));
   useEffect(() => {
@@ -381,6 +384,26 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
     receiverAvailabilitySessionRef.current = receiverAvailabilitySession;
     userAvailableRef.current = Boolean(user?.isAvailable);
   }, [callerCanRateByDuration, user?.role, receiverAvailabilitySession, user?.isAvailable]);
+
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (nextState) => {
+      appStateRef.current = nextState;
+      const interrupted = nextState !== 'active';
+      if (interrupted && readyRef.current && !endingRef.current) {
+        setSystemCallHold(true);
+        return;
+      }
+      if (!interrupted) {
+        setSystemCallHold(false);
+        if (readyRef.current && !endingRef.current) {
+          void applyVoiceCallAudioMode(speakerOn).catch(() => {
+            // Best-effort audio route restore after interruption.
+          });
+        }
+      }
+    });
+    return () => sub.remove();
+  }, [speakerOn]);
 
   useEffect(() => {
     readyRef.current = ready;
@@ -953,6 +976,11 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
       signalSocketRef.current = socket;
       const onReconnectFailed = (): void => {
         if (!readyRef.current || endingRef.current) return;
+        // Temporary app interruptions (e.g., mobile carrier call UI) should not tear down the app call.
+        if (appStateRef.current !== 'active') {
+          setSystemCallHold(true);
+          return;
+        }
         endingRef.current = true;
         Alert.alert('Connection lost', networkDropMessage, [
           {
@@ -1142,12 +1170,16 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
         : null;
   const shellPeerEmpty = receiverAvailabilitySession && receiverSessionPhase === 'waiting';
   const shellStatusLabel = receiverAvailabilitySession
-    ? receiverSessionPhase === 'incoming'
+    ? systemCallHold
+      ? 'On hold · phone call in progress'
+      : receiverSessionPhase === 'incoming'
       ? 'Incoming call'
       : streamBootstrap
         ? 'Connecting…'
         : 'You are online'
-    : outgoingCallerPhase === 'ringing'
+    : systemCallHold
+      ? 'On hold · phone call in progress'
+      : outgoingCallerPhase === 'ringing'
       ? 'Calling…'
       : 'Connecting';
   const shellHangupLabel =
@@ -1416,7 +1448,9 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
         <sdk.StreamCall call={call}>
           <View style={[styles.overlay, { paddingTop: Math.max(insets.top + 16, 36) }]}>
             <View style={styles.statusPill}>
-              <Text style={styles.statusText}>Call Active</Text>
+              <Text style={styles.statusText}>
+                {systemCallHold ? 'On hold · phone call in progress' : 'Call Active'}
+              </Text>
             </View>
             <View style={styles.avatarRow}>
               <View style={styles.avatarCol}>

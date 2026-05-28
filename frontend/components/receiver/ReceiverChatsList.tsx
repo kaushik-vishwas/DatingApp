@@ -18,6 +18,7 @@ import type { ChatPeerSummary } from '../../types/api';
 import { resolveProfileImageSource } from '../../utils/avatarSource';
 
 const PURPLE = '#7b2cff';
+const CHAT_LIST_REFRESH_THROTTLE_MS = 12_000;
 
 export default function ReceiverChatsList({
   listPaddingBottom = 24,
@@ -35,22 +36,33 @@ export default function ReceiverChatsList({
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [loadedOnce, setLoadedOnce] = useState(false);
+  const lastLoadedAtRef = React.useRef(0);
+  const inFlightRef = React.useRef(false);
 
-  const load = useCallback(async (): Promise<void> => {
+  const load = useCallback(async (opts?: { force?: boolean }): Promise<void> => {
+    const force = Boolean(opts?.force);
+    const now = Date.now();
+    if (!force && inFlightRef.current) return;
+    if (!force && loadedOnce && now - lastLoadedAtRef.current < CHAT_LIST_REFRESH_THROTTLE_MS) return;
+    inFlightRef.current = true;
     try {
       const { data } = await chatApi.conversations();
       setRows(data.conversations);
       setError(null);
+      setLoadedOnce(true);
+      lastLoadedAtRef.current = Date.now();
     } catch (e) {
       setError(getErrorMessage(e));
     } finally {
+      inFlightRef.current = false;
       setLoading(false);
       setRefreshing(false);
     }
-  }, []);
+  }, [loadedOnce]);
 
   useEffect(() => {
-    void load();
+    void load({ force: true });
   }, [load]);
 
   useFocusEffect(
@@ -62,7 +74,7 @@ export default function ReceiverChatsList({
 
   const onRefresh = (): void => {
     setRefreshing(true);
-    void load();
+    void load({ force: true });
   };
 
   const openConversation = useCallback(

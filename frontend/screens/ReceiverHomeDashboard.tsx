@@ -244,21 +244,11 @@ export default function ReceiverHomeDashboard(): React.JSX.Element {
   const onToggleAvailability = async (next: boolean) => {
     const prev = available;
     setAvailable(next);
-    if (next) {
-      navigation.navigate('VoiceCall', { receiverAvailabilitySession: true });
-    }
     try {
       await profileApi.updateReceiverProfile({ isAvailable: next });
       void refreshUser();
     } catch (e) {
       setAvailable(prev);
-      if (next) {
-        try {
-          if (navigation.canGoBack()) navigation.goBack();
-        } catch {
-          // ignore
-        }
-      }
       Alert.alert('Update failed', getErrorMessage(e));
     }
   };
@@ -539,72 +529,6 @@ export default function ReceiverHomeDashboard(): React.JSX.Element {
               </LinearGradient>
             </View>
 
-            <CompactInfoCard
-              colors={[SKY_BLUE_START, SKY_BLUE_END]}
-              bgImage={EarningsCardBg}
-              title="Earning Levels"
-              subtitle={isFixedEarning ? 'IST time slots' : 'Score badges'}
-            >
-              <View style={styles.earningLevelsGrid}>
-                <View style={styles.earningLevelsRow}>
-                  {earningLevelRows.map((row) => (
-                    <View key={row.id} style={styles.earningGridCol}>
-                      <View style={styles.earningGridTopRow}>
-                        <View style={styles.levelIconBadge}>
-                          <MaterialCommunityIcons name={row.icon} size={14} color="white" />
-                        </View>
-                        <View style={styles.earningTextStack}>
-                          <Text style={styles.earningGridLabel} numberOfLines={2}>
-                            {row.label}
-                          </Text>
-                          <Text style={styles.earningGridRate}>{row.rate}</Text>
-                        </View>
-                      </View>
-                    </View>
-                  ))}
-                </View>
-                <View style={styles.earningLevelDivider} />
-                <View style={styles.earningGridLabelRow}>
-                  <View style={styles.levelIconBadge}>
-                    <MaterialCommunityIcons name="message-text-outline" size={14} color="white" />
-                  </View>
-                  <Text style={styles.chatEarnSideNote}>
-                    You will earn {CHAT_RECEIVER_EARN_LABEL} per text
-                  </Text>
-                </View>
-              </View>
-            </CompactInfoCard>
-
-
-
-            <CompactInfoCard
-              colors={[INSTRUCTIONS_GRADIENT_START, INSTRUCTIONS_GRADIENT_END]}
-              bgImage={InstructionsCardBg}
-              title="Instructions"
-              subtitle="Stay safe & professional"
-            >
-              <View style={styles.guidelinesList}>
-                <View style={styles.guidelineRow}>
-                  <View style={styles.guideIconBadge}>
-                    <MaterialCommunityIcons name="clock-check-outline" size={14} color="white" />
-                  </View>
-                  <Text style={styles.guidelineText}>Stay online at least 8 hours per day.</Text>
-                </View>
-                <View style={styles.guidelineRow}>
-                  <View style={styles.guideIconBadge}>
-                    <MaterialCommunityIcons name="shield-lock-outline" size={14} color="white" />
-                  </View>
-                  <Text style={styles.guidelineText}>Don't share phone, UPI, or personal IDs.</Text>
-                </View>
-                <View style={styles.guidelineRow}>
-                  <View style={styles.guideIconBadge}>
-                    <MaterialCommunityIcons name="phone-cancel-outline" size={14} color="white" />
-                  </View>
-                  <Text style={styles.guidelineText}>Block rude or inappropriate callers.</Text>
-                </View>
-              </View>
-            </CompactInfoCard>
-
             <View style={styles.infoSection}>
               {summaryError ? <Text style={styles.summaryErrInline}>{summaryError}</Text> : null}
               <View style={styles.smallEarningsRow}>
@@ -648,6 +572,78 @@ export default function ReceiverHomeDashboard(): React.JSX.Element {
                 </LinearGradient>
               </View>
             </View>
+            
+
+            <CompactInfoCard
+              colors={[SKY_BLUE_START, SKY_BLUE_END]}
+              bgImage={EarningsCardBg}
+              title="Earning Levels"
+              subtitle={isFixedEarning ? 'IST time slots' : 'Score badges'}
+            >
+              <View style={styles.earningLevelsGrid}>
+                <View style={styles.earningLevelsRow}>
+                  {earningLevelRows.map((row) => (
+                    <View key={row.id} style={styles.earningGridCol}>
+                      <View style={styles.earningGridTopRow}>
+                        <View style={styles.levelIconBadge}>
+                          <MaterialCommunityIcons name={row.icon} size={14} color="white" />
+                        </View>
+                        <View style={styles.earningTextStack}>
+                          <Text style={styles.earningGridLabel} numberOfLines={2}>
+                            {row.label}
+                          </Text>
+                          <Text style={styles.earningGridRate}>{row.rate}</Text>
+                        </View>
+                      </View>
+                    </View>
+                  ))}
+                </View>
+                <View style={styles.earningLevelDivider} />
+                <View style={styles.earningGridLabelRow}>
+                  <View style={styles.levelIconBadge}>
+                    <MaterialCommunityIcons name="message-text-outline" size={14} color="white" />
+                  </View>
+                  <Text style={styles.chatEarnSideNote}>
+                    You will earn {CHAT_RECEIVER_EARN_LABEL} per text
+                  </Text>
+                </View>
+              </View>
+            </CompactInfoCard>
+
+
+            
+
+
+
+            <CompactInfoCard
+              colors={[INSTRUCTIONS_GRADIENT_START, INSTRUCTIONS_GRADIENT_END]}
+              bgImage={InstructionsCardBg}
+              title="Instructions"
+              subtitle="Stay safe & professional"
+            >
+              <View style={styles.guidelinesList}>
+                <View style={styles.guidelineRow}>
+                  <View style={styles.guideIconBadge}>
+                    <MaterialCommunityIcons name="clock-check-outline" size={14} color="white" />
+                  </View>
+                  <Text style={styles.guidelineText}>Stay online at least 8 hours per day.</Text>
+                </View>
+                <View style={styles.guidelineRow}>
+                  <View style={styles.guideIconBadge}>
+                    <MaterialCommunityIcons name="shield-lock-outline" size={14} color="white" />
+                  </View>
+                  <Text style={styles.guidelineText}>Don't share phone, UPI, or personal IDs.</Text>
+                </View>
+                <View style={styles.guidelineRow}>
+                  <View style={styles.guideIconBadge}>
+                    <MaterialCommunityIcons name="phone-cancel-outline" size={14} color="white" />
+                  </View>
+                  <Text style={styles.guidelineText}>Block rude or inappropriate callers.</Text>
+                </View>
+              </View>
+            </CompactInfoCard>
+
+          
           </>
         ) : (
           <Text style={styles.muted}>Could not load profile.</Text>
@@ -1050,7 +1046,7 @@ const styles = StyleSheet.create({
   },
   chatEarnSideNote: {
     flex: 1,
-    fontSize: 12  ,
+    fontSize: 12,
     fontWeight: '700',
     color: 'rgba(255,255,255,0.95)',
     textAlign: 'left',
