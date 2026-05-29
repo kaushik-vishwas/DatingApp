@@ -22,6 +22,7 @@ import { blockReceiverUntilApproved } from '../utils/accountAccess';
 import { CHAT_TEXT_FEE_INR } from '../constants/chatPricing';
 import { scheduleReceiverAvailabilityNotifications } from '../services/receiverAvailabilityNotifier';
 import { syncReceiverQueueState } from '../services/callQueue';
+import { finalizeReceiverOnlineSession } from '../services/receiverScore';
 import { trackAndFinalizeRazorpayXPayout } from '../services/razorpayXPayoutService';
 import { emitReceiverWithdrawalUpdate } from '../socket/socketRegistry';
 import { beginApiTrace, mongoErrCode, reuseOrCreateApiTrace } from '../utils/apiTraceLog';
@@ -2223,6 +2224,24 @@ export const updateReceiverProfile = async (
     receiver.audioCallRate = RECEIVER_AUDIO_CALL_RATE_INR_PER_MIN;
     if (typeof req.body.isAvailable === 'boolean') {
       receiver.isAvailable = req.body.isAvailable;
+      if (!req.body.isAvailable) {
+        const endedAt = new Date();
+        const onlineSince = receiver.onlineSince;
+        receiver.isOnline = false;
+        receiver.onlineSince = null;
+        if (onlineSince instanceof Date) {
+          await finalizeReceiverOnlineSession({
+            receiverId,
+            onlineSince,
+            endedAt,
+          });
+        }
+      } else if (!receiver.isOnline) {
+        receiver.isOnline = true;
+        if (!(receiver.onlineSince instanceof Date)) {
+          receiver.onlineSince = new Date();
+        }
+      }
     }
 
     if (receiver.accountStatus === 'pending_profile') {

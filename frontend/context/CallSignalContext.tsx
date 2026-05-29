@@ -1,5 +1,5 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert } from 'react-native';
+import { Alert, AppState, type AppStateStatus } from 'react-native';
 import { CommonActions } from '@react-navigation/native';
 import { io, type Socket } from 'socket.io-client';
 import RandomCallMatchingOverlay from '../components/caller/RandomCallMatchingOverlay';
@@ -195,6 +195,12 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   useEffect(() => {
     userRoleRef.current = user?.role ?? null;
   }, [user?.role]);
+
+  useEffect(() => {
+    if (user?.role === 'receiver') {
+      queueModeRef.current = Boolean(user.isAvailable);
+    }
+  }, [user?.role, user?.isAvailable]);
 
   const dismissCallerVoiceCallScreen = useCallback((): void => {
     const nav = navigationRef.current;
@@ -779,6 +785,21 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
   const signedInAccountId = user?._id ?? null;
 
+  useEffect(() => {
+    if (!isSignedIn || user?.role !== 'receiver') return;
+    const keepCallSocketAlive = (): void => {
+      const socket = socketRef.current;
+      if (socket && !socket.connected) socket.connect();
+    };
+    keepCallSocketAlive();
+    const sub = AppState.addEventListener('change', (state: AppStateStatus) => {
+      if (state === 'active' || state === 'background' || state === 'inactive') {
+        keepCallSocketAlive();
+      }
+    });
+    return () => sub.remove();
+  }, [isSignedIn, signedInAccountId, user?.role]);
+
   const setQueueMode = useCallback(async (active: boolean): Promise<void> => {
     queueModeRef.current = active;
     if (!active) {
@@ -820,9 +841,10 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         auth: { token },
         transports: ['polling', 'websocket'],
         timeout: 20000,
-        reconnectionAttempts: 10,
+        reconnection: true,
+        reconnectionAttempts: 50,
         reconnectionDelay: 1000,
-        reconnectionDelayMax: 5000,
+        reconnectionDelayMax: 10000,
       });
       socketRef.current = socket;
       socket.on('connect_error', (err: Error) => {

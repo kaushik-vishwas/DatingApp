@@ -19,6 +19,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useAuth } from '../context/AuthContext';
+import { useCallSignals } from '../context/CallSignalContext';
 import { useChatInbox } from '../context/ChatInboxContext';
 import type { ReceiverStackParamList } from '../navigation/ReceiverStackParamList';
 import {
@@ -241,11 +242,25 @@ export default function ReceiverHomeDashboard(): React.JSX.Element {
     setRefreshing(false);
   };
 
+  const { setQueueMode } = useCallSignals();
+
+  useFocusEffect(
+    useCallback(() => {
+      if (!receiverId || !available) return;
+      void setQueueMode(true).catch(() => {});
+    }, [receiverId, available, setQueueMode])
+  );
+
   const onToggleAvailability = async (next: boolean) => {
     const prev = available;
     setAvailable(next);
     try {
       await profileApi.updateReceiverProfile({ isAvailable: next });
+      try {
+        await setQueueMode(next);
+      } catch {
+        // Queue sync is best-effort if the call socket is still connecting.
+      }
       void refreshUser();
     } catch (e) {
       setAvailable(prev);

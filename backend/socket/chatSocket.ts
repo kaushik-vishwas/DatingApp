@@ -276,37 +276,51 @@ export function attachChatSocket(httpServer: HTTPServer): Server {
       const leavingId = String(socket.data.accountId);
       const leavingType = socket.data.typ as AccountType;
       setTimeout(() => {
-        if (hasActiveSocketForAccount(leavingType, leavingId)) return;
-        waitingCallQueueAccounts.delete(queueKey(leavingType, leavingId));
-        if (leavingType === 'r') {
-          setReceiverQueuePresence(leavingId, false);
-        }
-        cancelPendingInvitesFor(leavingType, leavingId);
-        for (const [callId, invite] of activeCallInvites) {
-          if (
-            (invite.inviterId === leavingId && invite.inviterType === leavingType) ||
-            (invite.targetId === leavingId && invite.targetType === leavingType)
-          ) {
-            if (invite.timeoutHandle) {
-              clearTimeout(invite.timeoutHandle);
-              invite.timeoutHandle = null;
+        void (async () => {
+          if (hasActiveSocketForAccount(leavingType, leavingId)) return;
+          if (leavingType === 'r') {
+            const recv = await Receiver.findById(leavingId).select('isAvailable').lean();
+            // App backgrounded: keep queue/invites and DB presence while still "Go Online".
+            if (recv?.isAvailable) {
+              await syncReceiverQueueState(leavingId);
+              return;
             }
-            activeCallInvites.delete(callId);
-            void settleAndReleaseCall(
-              callId,
-              invite.receiverId,
-              inviteCallerId(invite),
-              invite.invitedAt
-            );
           }
-        }
+          waitingCallQueueAccounts.delete(queueKey(leavingType, leavingId));
+          if (leavingType === 'r') {
+            setReceiverQueuePresence(leavingId, false);
+          }
+          cancelPendingInvitesFor(leavingType, leavingId);
+          for (const [callId, invite] of activeCallInvites) {
+            if (
+              (invite.inviterId === leavingId && invite.inviterType === leavingType) ||
+              (invite.targetId === leavingId && invite.targetType === leavingType)
+            ) {
+              if (invite.timeoutHandle) {
+                clearTimeout(invite.timeoutHandle);
+                invite.timeoutHandle = null;
+              }
+              activeCallInvites.delete(callId);
+              void settleAndReleaseCall(
+                callId,
+                invite.receiverId,
+                inviteCallerId(invite),
+                invite.invitedAt
+              );
+            }
+          }
+        })();
       }, DISCONNECT_GRACE_MS);
       if (leavingType === 'r') {
-        // Keep online=true while any receiver socket remains connected for this account.
         setTimeout(() => {
           const stillConnected = hasActiveSocketForAccount('r', leavingId);
           if (!stillConnected) {
             void (async () => {
+              const recv = await Receiver.findById(leavingId).select('isAvailable onlineSince').lean();
+              if (recv?.isAvailable) {
+                await syncReceiverQueueState(leavingId);
+                return;
+              }
               const prev = await Receiver.findOneAndUpdate(
                 { _id: leavingId },
                 { $set: { isOnline: false, onlineSince: null } },
@@ -707,8 +721,8 @@ export function attachChatSocket(httpServer: HTTPServer): Server {
             ack?.({ ok: false, error: 'Cannot call this receiver right now.' });
             return;
           }
-          const targetOnline = (io.sockets.adapter.rooms.get(accountRoom('r', targetId))?.size ?? 0) > 0;
-          if (!targetOnline) {
+          const targetSocketOnline = hasActiveSocketForAccount('r', targetId);
+          if (!targetSocketOnline && (!recv.isOnline || !recv.isAvailable)) {
             ack?.({ ok: false, error: 'Receiver is offline right now.' });
             return;
           }

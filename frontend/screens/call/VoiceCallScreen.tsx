@@ -4,10 +4,8 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Ionicons } from '@expo/vector-icons';
 import {
   Alert,
-  Animated,
   AppState,
   BackHandler,
-  Easing,
   Image,
   Modal,
   StyleSheet,
@@ -35,6 +33,11 @@ import { useAuth } from '../../context/AuthContext';
 import { callApi, getErrorMessage, getJwt, getResolvedApiBaseUrl, profileApi } from '../../services/api';
 import { startOutboundRingtoneLoop } from '../../utils/callSounds';
 import { profileImageUrlForStreamOrNetwork, resolveProfileImageSource } from '../../utils/avatarSource';
+import {
+  AvatarSoundWaveRings,
+  StreamParticipantMutedIndicator,
+  StreamParticipantVoiceWaves,
+} from '../../components/call/AvatarVoiceWaves';
 
 type Props =
   | NativeStackScreenProps<CallerStackParamList, 'VoiceCall'>
@@ -67,67 +70,6 @@ async function resetVoiceCallAudioMode(): Promise<void> {
     // ignore
   }
 }
-
-function AvatarSoundWaveRings(): React.JSX.Element {
-  const pulse = useRef(new Animated.Value(0)).current;
-  useEffect(() => {
-    const loop = Animated.loop(
-      Animated.timing(pulse, {
-        toValue: 1,
-        duration: 2000,
-        easing: Easing.out(Easing.quad),
-        useNativeDriver: true,
-      })
-    );
-    loop.start();
-    return () => {
-      loop.stop();
-      pulse.setValue(0);
-    };
-  }, [pulse]);
-
-  const scale = pulse.interpolate({ inputRange: [0, 1], outputRange: [0.88, 1.38] });
-  const opacity = pulse.interpolate({ inputRange: [0, 0.65, 1], outputRange: [0.55, 0.2, 0] });
-
-  return (
-    <View style={waveStyles.halo} pointerEvents="none">
-      <Animated.View style={[waveStyles.ring, { transform: [{ scale }], opacity }]} />
-      <Animated.View
-        style={[
-          waveStyles.ring,
-          waveStyles.ringDelay,
-          {
-            transform: [
-              {
-                scale: pulse.interpolate({ inputRange: [0, 1], outputRange: [0.92, 1.52] }),
-              },
-            ],
-            opacity: pulse.interpolate({ inputRange: [0, 0.55, 1], outputRange: [0.4, 0.12, 0] }),
-          },
-        ]}
-      />
-    </View>
-  );
-}
-
-const waveStyles = StyleSheet.create({
-  halo: {
-    ...StyleSheet.absoluteFillObject,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  ring: {
-    position: 'absolute',
-    width: 104,
-    height: 104,
-    borderRadius: 52,
-    borderWidth: 2,
-    borderColor: 'rgba(196, 181, 253, 0.65)',
-  },
-  ringDelay: {
-    borderColor: 'rgba(167, 139, 250, 0.45)',
-  },
-});
 
 function getOutgoingCallerPhase(params: VoiceCallScreenParams): 'ringing' | 'joining' | undefined {
   if ('outgoingCallerPhase' in params && params.outgoingCallerPhase) {
@@ -1218,7 +1160,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
           <View style={styles.avatarRow}>
             <View style={styles.avatarCol}>
               <View style={styles.avatarRingHost}>
-                {showPeerPulse ? <AvatarSoundWaveRings /> : null}
+                {showPeerPulse ? <AvatarSoundWaveRings active /> : null}
                 <View style={styles.avatarWrap}>
                   {peerSrc ? (
                     <Image source={peerSrc} style={styles.avatar} />
@@ -1237,7 +1179,6 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
             </View>
             <View style={styles.avatarCol}>
               <View style={styles.avatarRingHost}>
-                <AvatarSoundWaveRings />
                 <View style={styles.avatarWrap}>
                   {(() => {
                     const selfSrc = user?.profileImage
@@ -1455,7 +1396,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
             <View style={styles.avatarRow}>
               <View style={styles.avatarCol}>
                 <View style={styles.avatarRingHost}>
-                  <AvatarSoundWaveRings />
+                  <StreamParticipantVoiceWaves side="remote" />
                   <View style={styles.avatarWrap}>
                     {(() => {
                       const peerSrc = route.params.peerImage
@@ -1471,6 +1412,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
                         </View>
                       );
                     })()}
+                    <StreamParticipantMutedIndicator />
                   </View>
                 </View>
                 <Text style={styles.avatarCaption} numberOfLines={1}>
@@ -1479,7 +1421,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
               </View>
               <View style={styles.avatarCol}>
                 <View style={styles.avatarRingHost}>
-                  <AvatarSoundWaveRings />
+                  <StreamParticipantVoiceWaves side="local" microphoneMuted={muted} />
                   <View style={styles.avatarWrap}>
                     {(() => {
                       const selfSrc = user?.profileImage
