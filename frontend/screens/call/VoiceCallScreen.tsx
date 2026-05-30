@@ -33,11 +33,24 @@ import { useAuth } from '../../context/AuthContext';
 import { callApi, getErrorMessage, getJwt, getResolvedApiBaseUrl, profileApi } from '../../services/api';
 import { startOutboundRingtoneLoop } from '../../utils/callSounds';
 import { profileImageUrlForStreamOrNetwork, resolveProfileImageSource } from '../../utils/avatarSource';
-import {
-  AvatarSoundWaveRings,
-  StreamParticipantMutedIndicator,
-  StreamParticipantVoiceWaves,
-} from '../../components/call/AvatarVoiceWaves';
+import { AvatarSoundWaveRings } from '../../components/call/AvatarVoiceWaves';
+
+type StreamCallAvatarExtrasModule = {
+  StreamParticipantVoiceWaves: React.ComponentType<{
+    side: 'local' | 'remote';
+    microphoneMuted?: boolean;
+  }>;
+  StreamParticipantMutedIndicator: React.ComponentType;
+};
+
+function loadStreamCallAvatarExtras(): StreamCallAvatarExtrasModule | null {
+  if (Constants.appOwnership === 'expo') return null;
+  try {
+    return require('../../components/call/StreamCallAvatarExtras') as StreamCallAvatarExtrasModule;
+  } catch {
+    return null;
+  }
+}
 
 type Props =
   | NativeStackScreenProps<CallerStackParamList, 'VoiceCall'>
@@ -1091,6 +1104,10 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
   };
 
   const showStreamChrome = ready && Boolean(client) && Boolean(call) && Boolean(sdk);
+  const streamAvatarExtras = useMemo(
+    () => (showStreamChrome ? loadStreamCallAvatarExtras() : null),
+    [showStreamChrome]
+  );
 
   const showCallShell =
     !error &&
@@ -1396,7 +1413,9 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
             <View style={styles.avatarRow}>
               <View style={styles.avatarCol}>
                 <View style={styles.avatarRingHost}>
-                  <StreamParticipantVoiceWaves side="remote" />
+                  {streamAvatarExtras ? (
+                    <streamAvatarExtras.StreamParticipantVoiceWaves side="remote" />
+                  ) : null}
                   <View style={styles.avatarWrap}>
                     {(() => {
                       const peerSrc = route.params.peerImage
@@ -1412,7 +1431,9 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
                         </View>
                       );
                     })()}
-                    <StreamParticipantMutedIndicator />
+                    {streamAvatarExtras ? (
+                      <streamAvatarExtras.StreamParticipantMutedIndicator />
+                    ) : null}
                   </View>
                 </View>
                 <Text style={styles.avatarCaption} numberOfLines={1}>
@@ -1421,7 +1442,12 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
               </View>
               <View style={styles.avatarCol}>
                 <View style={styles.avatarRingHost}>
-                  <StreamParticipantVoiceWaves side="local" microphoneMuted={muted} />
+                  {streamAvatarExtras ? (
+                    <streamAvatarExtras.StreamParticipantVoiceWaves
+                      side="local"
+                      microphoneMuted={muted}
+                    />
+                  ) : null}
                   <View style={styles.avatarWrap}>
                     {(() => {
                       const selfSrc = user?.profileImage

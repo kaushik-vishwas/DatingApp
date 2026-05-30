@@ -57,6 +57,7 @@ const accountAccess_1 = require("../utils/accountAccess");
 const chatPricing_1 = require("../constants/chatPricing");
 const receiverAvailabilityNotifier_1 = require("../services/receiverAvailabilityNotifier");
 const callQueue_1 = require("../services/callQueue");
+const receiverScore_1 = require("../services/receiverScore");
 const razorpayXPayoutService_1 = require("../services/razorpayXPayoutService");
 const socketRegistry_1 = require("../socket/socketRegistry");
 const apiTraceLog_1 = require("../utils/apiTraceLog");
@@ -1851,6 +1852,25 @@ const updateReceiverProfile = async (req, res) => {
         receiver.audioCallRate = Receiver_1.RECEIVER_AUDIO_CALL_RATE_INR_PER_MIN;
         if (typeof req.body.isAvailable === 'boolean') {
             receiver.isAvailable = req.body.isAvailable;
+            if (!req.body.isAvailable) {
+                const endedAt = new Date();
+                const onlineSince = receiver.onlineSince;
+                receiver.isOnline = false;
+                receiver.onlineSince = null;
+                if (onlineSince instanceof Date) {
+                    await (0, receiverScore_1.finalizeReceiverOnlineSession)({
+                        receiverId,
+                        onlineSince,
+                        endedAt,
+                    });
+                }
+            }
+            else if (!receiver.isOnline) {
+                receiver.isOnline = true;
+                if (!(receiver.onlineSince instanceof Date)) {
+                    receiver.onlineSince = new Date();
+                }
+            }
         }
         if (receiver.accountStatus === 'pending_profile') {
             const audioOk = Boolean(receiver.userAudio?.trim()) && /^https?:\/\//i.test(String(receiver.userAudio).trim());
