@@ -1865,12 +1865,7 @@ const updateReceiverProfile = async (req, res) => {
                     });
                 }
             }
-            else if (!receiver.isOnline) {
-                receiver.isOnline = true;
-                if (!(receiver.onlineSince instanceof Date)) {
-                    receiver.onlineSince = new Date();
-                }
-            }
+            // Go Online only sets isAvailable; isOnline is set when the receiver socket connects.
         }
         if (receiver.accountStatus === 'pending_profile') {
             const audioOk = Boolean(receiver.userAudio?.trim()) && /^https?:\/\//i.test(String(receiver.userAudio).trim());

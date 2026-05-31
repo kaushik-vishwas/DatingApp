@@ -2236,12 +2236,8 @@ export const updateReceiverProfile = async (
             endedAt,
           });
         }
-      } else if (!receiver.isOnline) {
-        receiver.isOnline = true;
-        if (!(receiver.onlineSince instanceof Date)) {
-          receiver.onlineSince = new Date();
-        }
       }
+      // Go Online only sets isAvailable; isOnline is set when the receiver socket connects.
     }
 
     if (receiver.accountStatus === 'pending_profile') {
