@@ -1,11 +1,11 @@
 import { Ionicons } from '@expo/vector-icons';
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { useCallStateHooks } from '@stream-io/video-react-native-sdk';
 import { CallingState, hasAudio, type StreamVideoParticipant } from '@stream-io/video-client';
 import { AvatarSoundWaveRings } from './AvatarVoiceWaves';
 
-const SPEAK_AUDIO_LEVEL_THRESHOLD = 0.06;
+const SPEAK_AUDIO_LEVEL_THRESHOLD = 0.035;
 
 function participantIsAudible(
   participant: StreamVideoParticipant | undefined,
@@ -27,7 +27,8 @@ function participantAudioIntensity(participant: StreamVideoParticipant | undefin
     typeof participant.audioLevel === 'number' && Number.isFinite(participant.audioLevel)
       ? participant.audioLevel
       : 0;
-  return Math.min(1, Math.max(0, level));
+  const boosted = level * 2.2 + (participant.isSpeaking ? 0.3 : 0);
+  return Math.min(1, Math.max(0, boosted));
 }
 
 type StreamParticipantVoiceWavesProps = {
@@ -50,6 +51,34 @@ export function StreamParticipantVoiceWaves({
   const intensity = participantAudioIntensity(participant);
 
   return <AvatarSoundWaveRings active={active} intensity={intensity} />;
+}
+
+/**
+ * Fires once when Stream reports JOINED with a remote participant (both sides in the call).
+ * Used to start the talk timer immediately instead of waiting on slow HTTP polling.
+ */
+export function StreamTalkTimingBridge({
+  onBothConnected,
+}: {
+  onBothConnected: () => void;
+}): null {
+  const { useCallCallingState, useParticipants } = useCallStateHooks();
+  const callingState = useCallCallingState();
+  const participants = useParticipants();
+  const firedRef = useRef(false);
+  const onBothConnectedRef = useRef(onBothConnected);
+  onBothConnectedRef.current = onBothConnected;
+
+  useEffect(() => {
+    if (firedRef.current) return;
+    if (callingState !== CallingState.JOINED) return;
+    const hasRemote = participants.some((p) => !p.isLocalParticipant);
+    if (!hasRemote) return;
+    firedRef.current = true;
+    onBothConnectedRef.current();
+  }, [callingState, participants]);
+
+  return null;
 }
 
 /** Peer muted badge — render inside `avatarWrap` on the remote participant column only. */

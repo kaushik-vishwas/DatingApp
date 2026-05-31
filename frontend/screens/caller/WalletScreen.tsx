@@ -5,6 +5,7 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 
 import { walletApi } from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
+import { Ionicons } from '@expo/vector-icons';
 import type { CallerStackParamList } from '../../navigation/CallerStackParamList';
 import type { WalletOfferRow } from '../../types/api';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -165,9 +166,9 @@ export default function WalletScreen({ navigation }: Props): React.JSX.Element {
         ) : null}
 
         <View style={styles.header}>
-          <TouchableOpacity onPress={() => navigation.goBack()} style={styles.back}>
-            <Text style={styles.backTxt}>←</Text>
-          </TouchableOpacity>
+        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backWrapper}>
+  <Ionicons name="chevron-back" size={24}  />
+</TouchableOpacity>
           <Text style={styles.title}>Wallet</Text>
           <View style={{ flexDirection: 'row', gap: 8 }}>
             <TouchableOpacity onPress={() => navigation.navigate('WalletTransactions')}>
@@ -326,6 +327,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     margin: 16,
     borderRadius: 10,
+  },
+  backWrapper: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#FFF0FA',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   bannerButtonText: {
     color: '#fff',

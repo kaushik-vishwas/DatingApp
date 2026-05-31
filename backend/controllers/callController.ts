@@ -521,7 +521,21 @@ export const startVoiceSession = async (
 
     const session = await recordVoiceParticipantJoined(callId, accountKind);
 
-    res.status(200).json({ ok: true, ...callTalkApiFields(session) });
+    let callerWalletBalanceInr: number | undefined;
+    if (accountKind === 'receiver') {
+      const callerDoc = await User.findById(callerId).select('walletBalance').lean();
+      callerWalletBalanceInr =
+        typeof callerDoc?.walletBalance === 'number' && Number.isFinite(callerDoc.walletBalance)
+          ? roundInr(Math.max(0, callerDoc.walletBalance))
+          : 0;
+    }
+
+    res.status(200).json({
+      ok: true,
+      ...callTalkApiFields(session),
+      callRatePerMinute: ratePerMinute,
+      ...(callerWalletBalanceInr !== undefined ? { callerWalletBalanceInr } : {}),
+    });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error('startVoiceSession error:', msg);
@@ -639,6 +653,16 @@ export const syncVoiceSession = async (
     const settled = await settleCallSession(callId, false);
     const latest = await CallSession.findOne({ callId });
     const talkFields = callTalkApiFields((latest ?? current) as CallSessionDocument);
+
+    let callerWalletBalanceInr: number | undefined;
+    if (accountKind === 'receiver') {
+      const callerDoc = await User.findById(current.callerId).select('walletBalance').lean();
+      callerWalletBalanceInr =
+        typeof callerDoc?.walletBalance === 'number' && Number.isFinite(callerDoc.walletBalance)
+          ? roundInr(Math.max(0, callerDoc.walletBalance))
+          : 0;
+    }
+
     res.status(200).json({
       ok: true,
       durationSec: settled.durationSec,
@@ -646,6 +670,8 @@ export const syncVoiceSession = async (
       receiverEarnedInr: settled.receiverEarnedInr,
       canRate: settled.durationSec >= MISSED_OR_INCOMPLETE_MAX_SEC,
       status: settled.status,
+      callRatePerMinute: Math.max(0, Number((latest ?? current).ratePerMinute) || 0),
+      ...(callerWalletBalanceInr !== undefined ? { callerWalletBalanceInr } : {}),
       ...talkFields,
     });
   } catch (err) {

@@ -251,6 +251,9 @@ export const profileApi = {
   updateReceiverProfile: (payload: UpdateReceiverProfilePayload) =>
     api.patch<CompleteProfileResponse>('/profile/receiver', payload),
 
+  updateReceiverExpoPushToken: (expoPushToken: string) =>
+    api.patch<{ ok: boolean }>('/profile/receiver/push-token', { expoPushToken }),
+
   completeReceiverAudioOnboarding: () =>
     api.post<CompleteProfileResponse>('/profile/receiver/complete-audio-onboarding'),
 
@@ -379,6 +382,8 @@ export const callApi = {
       ok: boolean;
       talkStartedAt: string | null;
       talkActive: boolean;
+      callRatePerMinute?: number;
+      callerWalletBalanceInr?: number;
     }>('/calls/session/start', { callId, peerId }),
   sessionSync: (callId: string) =>
     api.post<{
@@ -390,6 +395,8 @@ export const callApi = {
       status: string;
       talkStartedAt: string | null;
       talkActive: boolean;
+      callRatePerMinute?: number;
+      callerWalletBalanceInr?: number;
     }>(
       '/calls/session/sync',
       { callId }

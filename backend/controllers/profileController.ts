@@ -2276,6 +2276,31 @@ export const updateReceiverProfile = async (
 };
 
 /**
+ * PATCH /profile/receiver/push-token — store Expo push token for incoming-call notifications.
+ */
+export const updateReceiverExpoPushToken = async (req: Request, res: Response): Promise<void> => {
+  try {
+    if (req.accountKind !== 'receiver') {
+      res.status(403).json({ message: 'This endpoint is only for receiver accounts' });
+      return;
+    }
+    const token =
+      typeof req.body.expoPushToken === 'string' ? req.body.expoPushToken.trim() : '';
+    if (!token || !token.startsWith('ExponentPushToken')) {
+      res.status(400).json({ message: 'A valid expoPushToken is required' });
+      return;
+    }
+    const receiverId = String(req.receiver!._id);
+    await Receiver.updateOne({ _id: receiverId }, { $set: { expoPushToken: token } });
+    res.status(200).json({ ok: true });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error('updateReceiverExpoPushToken error:', msg);
+    res.status(500).json({ message: msg || 'Server error' });
+  }
+};
+
+/**
  * POST /profile/receiver/complete-audio-onboarding
  * Called when the receiver finishes the audio verification step and continues to the dashboard.
  * Always persists `accountStatus: 'approved'` (does not depend on other profile fields or voice URL).

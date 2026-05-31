@@ -28,10 +28,12 @@ import {
   syncReceiverQueueState,
   tryReserveReceiver,
 } from '../services/callQueue';
+import { sendReceiverIncomingCallPush } from '../services/expoPush';
 
 type CallInvitePayload = { callId?: unknown; targetId?: unknown };
 type CallResponsePayload = { callId?: unknown; accepted?: unknown };
 type CallEndPayload = { callId?: unknown };
+type CallHoldPayload = { callId?: unknown; onHold?: unknown };
 type CallQueuePayload = { active?: unknown };
 type ChatTypingPayload = { typing?: unknown };
 type AccountType = 'u' | 'r';
@@ -848,6 +850,28 @@ export function attachChatSocket(httpServer: HTTPServer): Server {
           fromName,
           fromImage,
         });
+        if (targetType === 'r') {
+          void (async () => {
+            try {
+              const recv = await Receiver.findById(targetId)
+                .select('expoPushToken isAvailable')
+                .lean<{ expoPushToken?: string | null; isAvailable?: boolean } | null>();
+              const pushToken = recv?.expoPushToken?.trim();
+              if (recv?.isAvailable && pushToken) {
+                await sendReceiverIncomingCallPush({
+                  expoPushToken: pushToken,
+                  callId,
+                  fromId: myId,
+                  fromName,
+                  fromImage,
+                });
+              }
+            } catch (e) {
+              const msg = e instanceof Error ? e.message : String(e);
+              console.error('incoming call push error:', msg);
+            }
+          })();
+        }
         ack?.({ ok: true });
       })();
     });
@@ -899,6 +923,49 @@ export function attachChatSocket(httpServer: HTTPServer): Server {
         );
       }
       ack?.({ ok: true });
+    });
+
+    socket.on('call:hold', (payload: CallHoldPayload, ack?: (r: unknown) => void) => {
+      const callId = typeof payload?.callId === 'string' ? payload.callId.trim() : '';
+      const onHold = typeof payload?.onHold === 'boolean' ? payload.onHold : null;
+      if (!callId || onHold === null) {
+        ack?.({ ok: false, error: 'callId and onHold are required' });
+        return;
+      }
+      const fromType = socket.data.typ as AccountType;
+      const fromId = String(socket.data.accountId);
+      void (async () => {
+        try {
+          const session = await CallSession.findOne({ callId, status: 'ongoing' })
+            .select('callerId receiverId')
+            .lean<{ callerId: mongoose.Types.ObjectId; receiverId: mongoose.Types.ObjectId } | null>();
+          if (!session) {
+            ack?.({ ok: false, error: 'Call not active' });
+            return;
+          }
+          const callerId = String(session.callerId);
+          const receiverId = String(session.receiverId);
+          const isParticipant =
+            (fromType === 'u' && fromId === callerId) || (fromType === 'r' && fromId === receiverId);
+          if (!isParticipant) {
+            ack?.({ ok: false, error: 'Forbidden' });
+            return;
+          }
+          const peerType: AccountType = fromType === 'u' ? 'r' : 'u';
+          const peerId = fromType === 'u' ? receiverId : callerId;
+          io.to(accountRoom(peerType, peerId)).emit('call:hold', {
+            callId,
+            onHold,
+            fromType,
+            fromId,
+          });
+          ack?.({ ok: true });
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e);
+          console.error('call:hold error:', msg);
+          ack?.({ ok: false, error: 'Server error' });
+        }
+      })();
     });
 
     socket.on('call:end', (payload: CallEndPayload, ack?: (r: unknown) => void) => {

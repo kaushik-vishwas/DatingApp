@@ -12,6 +12,7 @@ import {
   getReceiverWithdrawalOverview,
   getReceiverEarningsBreakdown,
   updateReceiverProfile,
+  updateReceiverExpoPushToken,
   sendReceiverBankUpdateOtp,
   verifyReceiverBankUpdateOtp,
   saveCallerUserAudio,
@@ -48,6 +49,7 @@ router.patch('/receiver/kyc/profile-info', protect, saveReceiverKycProfileInfo);
 router.patch('/receiver/kyc/documents', protect, saveReceiverKycDocuments);
 router.patch('/receiver/kyc/bank', protect, saveReceiverKycBankFinalize);
 router.patch('/receiver', protect, updateReceiverProfile);
+router.patch('/receiver/push-token', protect, updateReceiverExpoPushToken);
 router.post('/receiver/complete-audio-onboarding', protect, completeReceiverAudioOnboarding);
 router.post('/receiver/reopen-kyc', protect, reopenRejectedReceiverKyc);
 router.delete('/receiver', protect, deleteReceiverAccount);

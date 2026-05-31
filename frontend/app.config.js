@@ -50,6 +50,8 @@ module.exports = {
         'android.permission.RECORD_AUDIO',
         'android.permission.INTERNET',
         'android.permission.ACCESS_NETWORK_STATE',
+        'android.permission.POST_NOTIFICATIONS',
+        'android.permission.VIBRATE',
       ],
       usesCleartextTraffic: false,
     },
@@ -57,6 +59,13 @@ module.exports = {
       ...(appJson.expo.plugins || []),
       '@react-native-community/datetimepicker',
       '@stream-io/video-react-native-sdk',
+      [
+        'expo-notifications',
+        {
+          icon: './assets/SelectoLogo.png',
+          color: '#7c3aed',
+        },
+      ],
     ],
     extra: {
       ...(appJson.expo.extra || {}),

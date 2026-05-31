@@ -41,6 +41,7 @@ type StreamCallAvatarExtrasModule = {
     microphoneMuted?: boolean;
   }>;
   StreamParticipantMutedIndicator: React.ComponentType;
+  StreamTalkTimingBridge: React.ComponentType<{ onBothConnected: () => void }>;
 };
 
 function loadStreamCallAvatarExtras(): StreamCallAvatarExtrasModule | null {
@@ -168,7 +169,9 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
     setIncomingCallHandler,
     setIncomingCallDismissHandler,
     setRemoteCallEndedHandler,
+    setPeerCallHoldHandler,
     emitCallEnd: emitCallEndSignal,
+    emitCallHold: emitCallHoldSignal,
     setQueueMode,
     rejectIncomingCall,
     acceptIncomingCallStayOnScreen,
@@ -227,9 +230,12 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
   const [elapsedSec, setElapsedSec] = useState(0);
   const [talkActive, setTalkActive] = useState(false);
   const [systemCallHold, setSystemCallHold] = useState(false);
+  const [peerCallHold, setPeerCallHold] = useState(false);
   const [muted, setMuted] = useState(false);
   const [speakerOn, setSpeakerOn] = useState(true);
   const [liveSettledAmountInr, setLiveSettledAmountInr] = useState(0);
+  /** Receiver view: caller wallet after server sync (updates as call is billed). */
+  const [callerWalletBalanceInr, setCallerWalletBalanceInr] = useState<number | null>(null);
   const [ratingOpen, setRatingOpen] = useState(false);
   const [selectedRating, setSelectedRating] = useState(0);
   const [submittingRating, setSubmittingRating] = useState(false);
@@ -306,16 +312,26 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
     user?.role === 'caller' && typeof user.walletBalance === 'number' && Number.isFinite(user.walletBalance)
       ? Math.max(0, user.walletBalance)
       : 0;
-  const callerRatePerMinute = getReceiverChargeRatePerMinute(callParams);
-  const initialCallerTalkSec =
-    user?.role === 'caller' && callerRatePerMinute > 0
-      ? Math.floor((callerWalletInr / callerRatePerMinute) * 60)
-      : 0;
-  const callerRemainingTalkSec =
+  const callChargeRatePerMinute = getReceiverChargeRatePerMinute(callParams);
+  const walletForRemainingTalkSec =
     user?.role === 'caller'
-      ? Math.max(0, initialCallerTalkSec - elapsedSec)
+      ? callerWalletInr
+      : callerWalletBalanceInr !== null
+        ? callerWalletBalanceInr
+        : 0;
+  const initialRemainingTalkSec =
+    callChargeRatePerMinute > 0
+      ? Math.floor((walletForRemainingTalkSec / callChargeRatePerMinute) * 60)
       : 0;
-  const showCallerCountdown = user?.role === 'caller' && callerRatePerMinute > 0;
+  const remainingTalkSec = Math.max(0, initialRemainingTalkSec - elapsedSec);
+  const showRemainingTalkCountdown =
+    callChargeRatePerMinute > 0 &&
+    (user?.role === 'caller' ||
+      (user?.role === 'receiver' &&
+        callerWalletBalanceInr !== null &&
+        (ready || talkActive || Boolean(streamBootstrap))));
+  const remainingTalkCountdownTitle =
+    user?.role === 'receiver' ? "Caller's remaining talk time" : 'Remaining Talk Time';
 
   const callerCanRateByDuration = user?.role === 'caller' && elapsedSec >= MIN_RATING_SECONDS;
 
@@ -340,16 +356,27 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
     userAvailableRef.current = Boolean(user?.isAvailable);
   }, [callerCanRateByDuration, user?.role, receiverAvailabilitySession, user?.isAvailable]);
 
+  const notifyPeerCallHold = useCallback(
+    (onHold: boolean) => {
+      const callId = callIdRef.current.trim();
+      if (!callId || !readyRef.current || endingRef.current) return;
+      emitCallHoldSignal(callId, onHold);
+    },
+    [emitCallHoldSignal]
+  );
+
   useEffect(() => {
     const sub = AppState.addEventListener('change', (nextState) => {
       appStateRef.current = nextState;
       const interrupted = nextState !== 'active';
       if (interrupted && readyRef.current && !endingRef.current) {
         setSystemCallHold(true);
+        notifyPeerCallHold(true);
         return;
       }
       if (!interrupted) {
         setSystemCallHold(false);
+        notifyPeerCallHold(false);
         if (readyRef.current && !endingRef.current) {
           void applyVoiceCallAudioMode(speakerOn).catch(() => {
             // Best-effort audio route restore after interruption.
@@ -358,7 +385,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
       }
     });
     return () => sub.remove();
-  }, [speakerOn]);
+  }, [speakerOn, notifyPeerCallHold]);
 
   useEffect(() => {
     readyRef.current = ready;
@@ -371,6 +398,18 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
       }
     };
   }, [messageEligibility, user?.role]);
+
+  const applyCallerWalletFromSession = (payload: {
+    callerWalletBalanceInr?: number;
+  }): void => {
+    if (user?.role !== 'receiver') return;
+    if (
+      typeof payload.callerWalletBalanceInr === 'number' &&
+      Number.isFinite(payload.callerWalletBalanceInr)
+    ) {
+      setCallerWalletBalanceInr(Math.max(0, payload.callerWalletBalanceInr));
+    }
+  };
 
   const applyTalkTimingFromServer = (payload: {
     talkStartedAt?: string | null;
@@ -679,6 +718,21 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
   }, [user?.role, matchesActiveCallId, setRemoteCallEndedHandler]);
 
   useEffect(() => {
+    if (user?.role !== 'caller' && user?.role !== 'receiver') {
+      setPeerCallHoldHandler(null);
+      return;
+    }
+    setPeerCallHoldHandler((holdCallId, onHold) => {
+      if (!matchesActiveCallId(holdCallId)) return;
+      setPeerCallHold(onHold);
+    });
+    return () => {
+      setPeerCallHoldHandler(null);
+      setPeerCallHold(false);
+    };
+  }, [user?.role, matchesActiveCallId, setPeerCallHoldHandler]);
+
+  useEffect(() => {
     if (!receiverAvailabilitySession) return;
     setIncomingCallDismissHandler(dismissIncomingOnSession);
     setIncomingCallHandler((incoming) => {
@@ -866,10 +920,15 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
 
         const nextCall = nextClient.call(boot.callType, boot.callId);
         activeCallRef.current = nextCall;
-        const [, startRes] = await Promise.all([
-          nextCall.getOrCreate(),
-          callApi.sessionStart(boot.callId, boot.peerAccountId),
-        ]);
+
+        const { data: startData } = await callApi.sessionStart(boot.callId, boot.peerAccountId);
+        if (cancelled || attemptId !== streamJoinAttemptRef.current) {
+          return;
+        }
+        applyTalkTimingFromServer(startData);
+        applyCallerWalletFromSession(startData);
+
+        await nextCall.getOrCreate();
         if (cancelled || attemptId !== streamJoinAttemptRef.current) {
           return;
         }
@@ -877,7 +936,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
         if (cancelled || attemptId !== streamJoinAttemptRef.current) {
           return;
         }
-        applyTalkTimingFromServer(startRes.data);
+        void syncTalkTimingOnce();
 
         setClient(nextClient);
         setCall(nextCall);
@@ -934,6 +993,8 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
         // Temporary app interruptions (e.g., mobile carrier call UI) should not tear down the app call.
         if (appStateRef.current !== 'active') {
           setSystemCallHold(true);
+          const callId = callIdRef.current.trim();
+          if (callId) emitCallHoldSignal(callId, true);
           return;
         }
         endingRef.current = true;
@@ -981,6 +1042,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
       const { data } = await callApi.sessionSync(callIdRef.current);
       if (!data?.ok) return;
       applyTalkTimingFromServer(data);
+      applyCallerWalletFromSession(data);
       if (
         typeof data.receiverEarnedInr === 'number' &&
         Number.isFinite(data.receiverEarnedInr) &&
@@ -996,6 +1058,15 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
     }
   }, [refreshReceiverEarningMeta, user?.role]);
 
+  const beginTalkTimingLocal = useCallback((): void => {
+    if (talkActiveRef.current) return;
+    setTalkActive(true);
+    void syncTalkTimingOnce();
+  }, [syncTalkTimingOnce]);
+
+  const beginTalkTimingLocalRef = useRef(beginTalkTimingLocal);
+  beginTalkTimingLocalRef.current = beginTalkTimingLocal;
+
   useEffect(() => {
     if (!ready || !talkActive) return;
     const timer = setInterval(() => setElapsedSec((prev) => prev + 1), 1000);
@@ -1009,7 +1080,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
 
   useEffect(() => {
     if (!ready || endingRef.current) return;
-    const pollMs = talkActive ? 5000 : 500;
+    const pollMs = talkActive ? 5000 : 200;
     const poll = setInterval(() => {
       if (endingRef.current) return;
       void syncTalkTimingOnce();
@@ -1020,15 +1091,15 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
   useEffect(() => {
     if (!ready) return;
     if (user?.role !== 'caller') return;
-    if (!showCallerCountdown) return;
-    if (callerRemainingTalkSec > 0) return;
+    if (!showRemainingTalkCountdown) return;
+    if (remainingTalkSec > 0) return;
     if (endingRef.current || autoEndByBalanceRef.current) return;
     autoEndByBalanceRef.current = true;
     void (async () => {
       Alert.alert('Call ended', 'Your talk time is over.');
       await hangup();
     })();
-  }, [callerRemainingTalkSec, ready, showCallerCountdown, user?.role]);
+  }, [remainingTalkSec, ready, showRemainingTalkCountdown, user?.role]);
 
   const hangup = async () => {
     if (receiverAvailabilitySession && receiverSessionPhase === 'waiting') {
@@ -1128,9 +1199,13 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
         ? callParams.peerImage
         : null;
   const shellPeerEmpty = receiverAvailabilitySession && receiverSessionPhase === 'waiting';
+  const peerDisplayName =
+    ('peerName' in callParams ? callParams.peerName : undefined) || 'Contact';
   const shellStatusLabel = receiverAvailabilitySession
     ? systemCallHold
       ? 'On hold · phone call in progress'
+      : peerCallHold
+        ? `${peerDisplayName} is on hold`
       : receiverSessionPhase === 'incoming'
       ? 'Incoming call'
       : streamBootstrap
@@ -1138,6 +1213,8 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
         : 'You are online'
     : systemCallHold
       ? 'On hold · phone call in progress'
+      : peerCallHold
+        ? `${peerDisplayName} is on hold`
       : outgoingCallerPhase === 'ringing'
       ? 'Calling…'
       : 'Connecting';
@@ -1191,7 +1268,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
                 </View>
               </View>
               <Text style={styles.avatarCaption} numberOfLines={1}>
-                {shellPeerEmpty ? 'Waiting…' : shellPeerName}
+                {shellPeerEmpty ? 'Waiting…' : peerCallHold ? 'On hold' : shellPeerName}
               </Text>
             </View>
             <View style={styles.avatarCol}>
@@ -1213,7 +1290,9 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
                   })()}
                 </View>
               </View>
-              <Text style={styles.avatarCaption}>You</Text>
+              <Text style={styles.avatarCaption}>
+                {systemCallHold ? 'On hold' : 'You'}
+              </Text>
             </View>
           </View>
           <Text style={[
@@ -1227,10 +1306,10 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
           {receiverAvailabilitySession && streamBootstrap && !talkActive ? (
             <Text style={styles.waitingHint}>Someone will join soon..s</Text>
           ) : null}
-          {showCallerCountdown ? (
+          {showRemainingTalkCountdown ? (
             <View style={styles.countdownCard}>
-              <Text style={styles.countdownTitle}>Remaining Talk Time</Text>
-              <Text style={styles.countdownValue}>{formatHms(callerRemainingTalkSec)}</Text>
+              <Text style={styles.countdownTitle}>{remainingTalkCountdownTitle}</Text>
+              <Text style={styles.countdownValue}>{formatHms(remainingTalkSec)}</Text>
             </View>
           ) : null}
           {shellShowIncomingActions && incomingReq ? (
@@ -1404,6 +1483,11 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
       />
       <sdk.StreamVideo client={client}>
         <sdk.StreamCall call={call}>
+          {streamAvatarExtras ? (
+            <streamAvatarExtras.StreamTalkTimingBridge
+              onBothConnected={() => beginTalkTimingLocalRef.current()}
+            />
+          ) : null}
           <View style={[styles.overlay, { paddingTop: Math.max(insets.top + 16, 36) }]}>
             <View style={styles.statusPill}>
               <Text style={styles.statusText}>
@@ -1437,7 +1521,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
                   </View>
                 </View>
                 <Text style={styles.avatarCaption} numberOfLines={1}>
-                  {route.params.peerName || 'Contact'}
+                  {peerCallHold ? 'On hold' : route.params.peerName || 'Contact'}
                 </Text>
               </View>
               <View style={styles.avatarCol}>
@@ -1465,7 +1549,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
                     })()}
                   </View>
                 </View>
-                <Text style={styles.avatarCaption}>You</Text>
+                <Text style={styles.avatarCaption}>{systemCallHold ? 'On hold' : 'You'}</Text>
               </View>
             </View>
             <Text style={styles.peerName}>
@@ -1491,10 +1575,10 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
                 <Text style={styles.durationValue}>Connecting…</Text>
               </>
             )}
-            {showCallerCountdown ? (
+            {showRemainingTalkCountdown ? (
               <View style={styles.countdownCard}>
-                <Text style={styles.countdownTitle}>Remaining Talk Time</Text>
-                <Text style={styles.countdownValue}>{formatHms(callerRemainingTalkSec)}</Text>
+                <Text style={styles.countdownTitle}>{remainingTalkCountdownTitle}</Text>
+                <Text style={styles.countdownValue}>{formatHms(remainingTalkSec)}</Text>
               </View>
             ) : null}
             {showLiveEarning ? (

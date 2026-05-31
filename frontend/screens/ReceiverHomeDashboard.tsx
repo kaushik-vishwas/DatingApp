@@ -45,6 +45,8 @@ import { CHAT_RECEIVER_EARN_LABEL } from '../constants/chatPricing';
 const INSTRUCTIONS_GRADIENT_START = '#A855F7';
 const INSTRUCTIONS_GRADIENT_END = '#F4C430';
 
+
+
 const MAROON = 'purple'
 const GREEN1 = '#4ade80'
 const GREEN2 = '#059669'
@@ -247,7 +249,7 @@ export default function ReceiverHomeDashboard(): React.JSX.Element {
   useFocusEffect(
     useCallback(() => {
       if (!receiverId || !available) return;
-      void setQueueMode(true).catch(() => {});
+      void setQueueMode(true).catch(() => { });
     }, [receiverId, available, setQueueMode])
   );
 
@@ -501,7 +503,17 @@ export default function ReceiverHomeDashboard(): React.JSX.Element {
                       style={[
                         styles.publicStatusPillRight,
                         {
-                          backgroundColor: `${publicPresence.color}15`,
+                          backgroundColor:
+                            publicPresence.status === 'offline'
+                              ? '#ffedd5'
+                              : '#dcfce7',
+
+                          borderWidth: 1,
+
+                          borderColor:
+                            publicPresence.status === 'offline'
+                              ? '#f59e0b'
+                              : '#22c55e',
                         },
                       ]}
                     >
@@ -587,7 +599,7 @@ export default function ReceiverHomeDashboard(): React.JSX.Element {
                 </LinearGradient>
               </View>
             </View>
-            
+
 
             <CompactInfoCard
               colors={[SKY_BLUE_START, SKY_BLUE_END]}
@@ -626,7 +638,7 @@ export default function ReceiverHomeDashboard(): React.JSX.Element {
             </CompactInfoCard>
 
 
-            
+
 
 
 
@@ -658,7 +670,7 @@ export default function ReceiverHomeDashboard(): React.JSX.Element {
               </View>
             </CompactInfoCard>
 
-          
+
           </>
         ) : (
           <Text style={styles.muted}>Could not load profile.</Text>
@@ -749,9 +761,9 @@ const styles = StyleSheet.create({
 
   earningsCapsule: {
     borderRadius: 40,
-    borderWidth: 1.5,
-    borderColor: PURPLE,
-    backgroundColor: 'transparent',
+    borderWidth: 1,
+    borderColor: PINK,
+    backgroundColor: '#f3e7ff',
     maxWidth: 120,
   },
   earningsContainer: {
@@ -777,7 +789,9 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#f5f5f5',
+    backgroundColor: '#f3e7ff',
+    borderWidth: 1,
+    borderColor: PINK,
   },
   bellIcon: {
     fontSize: 18,
@@ -841,7 +855,7 @@ const styles = StyleSheet.create({
     fontWeight: '800',
   },
   publicCard: {
-    backgroundColor: '#fff',
+    backgroundColor: '#f3e7ff',
     borderRadius: 12,
     paddingLeft: 12,
     paddingRight: 12,
@@ -900,8 +914,8 @@ const styles = StyleSheet.create({
   },
   publicMiniLangText: { fontSize: 9, fontWeight: '600', color: '#666', textTransform: 'uppercase' },
   publicMoreLang: { fontSize: 9, color: '#999', fontWeight: '500' },
-  publicStatusPillRight: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 10 },
-  publicStatusTextRight: { fontSize: 10, fontWeight: '600' },
+  publicStatusPillRight: { paddingHorizontal: 13, paddingVertical: 5, borderRadius: 20 },
+  publicStatusTextRight: { fontSize: 12, fontWeight: '700' },
 
   availabilityCardWrapper: {
     marginHorizontal: 16,
@@ -1032,8 +1046,8 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   levelIconBadge: {
-    width: 22,
-    height: 22,
+    width: 18,
+    height: 18,
     borderRadius: 11,
     alignItems: 'center',
     justifyContent: 'center',
@@ -1041,7 +1055,7 @@ const styles = StyleSheet.create({
   },
   earningGridLabel: {
     flex: 1,
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '600',
     color: 'rgba(255,255,255,0.95)',
     textAlign: 'left',
@@ -1053,7 +1067,7 @@ const styles = StyleSheet.create({
     marginVertical: 5,
   },
   earningGridRate: {
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: '800',
     color: '#fff',
     textAlign: 'left',

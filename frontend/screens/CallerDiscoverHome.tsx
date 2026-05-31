@@ -472,7 +472,7 @@ export default function CallerDiscoverHome(): React.JSX.Element {
           style={styles.promoCard}
         >
           <LinearGradient
-            colors={['#7F00FF', '#A855F7', '#E100FF']}
+            colors={['#7F00FF', '#A855F7', '#fb5880']}
             start={{ x: 0, y: 0 }}
             end={{ x: 1, y: 1 }}
             style={styles.promoGradient}
@@ -482,19 +482,20 @@ export default function CallerDiscoverHome(): React.JSX.Element {
                 <View style={styles.promoBtn}>
                   <View style={styles.randomBtnContent}>
                     {!randomCallMatchingVisible && (
-                      <Ionicons
-                        name="shuffle-outline"
-                        size={24}
-                        color={PURPLE}
-                      />
-                    )}
+                      <>
+                        {/* Existing shuffle icon */}
+                        <Ionicons name="shuffle-outline" size={24} color={PURPLE} />
 
-                    <Text
-                      style={styles.promoBtnText}
-                      numberOfLines={1}
-                    >
+                     
+                      </>
+                    )}
+                    <Text style={styles.promoBtnText} numberOfLines={1}>
                       {randomCallMatchingVisible ? 'Please wait…' : 'Random Call'}
                     </Text>
+                       {/* New call icon with wrapper */}
+                       <View style={styles.callIconWrapper}>
+                          <Ionicons name="call-outline" size={15} color="#fff" />
+                        </View>
                   </View>
                 </View>
               </View>
@@ -674,9 +675,9 @@ const styles = StyleSheet.create({
 
   walletCapsule: {
     borderRadius: 40,
-    borderWidth: 1.5,
+    borderWidth: 1,
     borderColor: PURPLE,
-    backgroundColor: 'transparent',
+    backgroundColor: '#FFF0FA',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
@@ -870,7 +871,7 @@ const styles = StyleSheet.create({
     elevation: 1,
   },
   langChipActive: {
-    backgroundColor: 'rgba(123,44,255,0.12)',
+    backgroundColor: '#FFF0FA',
     borderColor: PURPLE,
   },
   langChipText: {
@@ -943,29 +944,31 @@ const styles = StyleSheet.create({
   },
   promoTitle: {
     color: '#fff',
-    fontSize: 11,
+    fontSize: 15,
     fontWeight: '800',
     textAlign: 'right',
     marginBottom: 4,
   },
   promoRate: {
     color: 'rgba(255,255,255,0.9)',
-    fontSize: 11,
+    fontSize: 14,
     fontWeight: '600',
     textAlign: 'right',
+    
   },
   randomBtnContent: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 5,
+    gap: 8,  // Increased gap for better spacing
   },
 
   promoBtn: {
     backgroundColor: 'rgba(255,255,255,0.95)',
-    paddingHorizontal: 11,
-    paddingVertical: 8,
-    borderRadius: 12,
+    paddingHorizontal: 15,
+    paddingVertical: 9,
+    borderRadius: 20,
+    paddingLeft: 28, 
     alignItems: 'center',
     justifyContent: 'center',
     minWidth: 150,
@@ -973,7 +976,7 @@ const styles = StyleSheet.create({
   promoBtnText: {
     color: PURPLE,
     fontWeight: '900',
-    fontSize: 12,
+    fontSize: 16,
   },
 
   leftColumn: {
@@ -1263,6 +1266,19 @@ const styles = StyleSheet.create({
     elevation: 3,
   },
 
+  callIconWrapper: {
+    width: 27,
+    height: 27,
+    borderRadius: 16,
+    backgroundColor: GREEN,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#fb5880',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    elevation: 3,
+  },
   nameInterestWrapper: {
     flexDirection: 'column',
     marginBottom: 0,

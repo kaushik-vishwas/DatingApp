@@ -93,6 +93,7 @@ const receiverSchema = new mongoose_1.Schema({
     earningRatePerMinute: { type: Number, default: 2.0, min: 0 },
     onlineSince: { type: Date, default: null },
     authSessionVersion: { type: Number, default: 0, min: 0 },
+    expoPushToken: { type: String, default: null },
 }, { timestamps: true });
 const Receiver = mongoose_1.default.model('Receiver', receiverSchema);
 exports.default = Receiver;

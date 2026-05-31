@@ -78,6 +78,8 @@ export interface IReceiver {
   onlineSince: Date | null;
   /** Incremented on each new login; JWT must match for single-device sessions. */
   authSessionVersion: number;
+  /** Expo push token for incoming-call alerts when the app is backgrounded. */
+  expoPushToken: string | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -142,6 +144,7 @@ const receiverSchema = new Schema<IReceiver>(
     earningRatePerMinute: { type: Number, default: 2.0, min: 0 },
     onlineSince: { type: Date, default: null },
     authSessionVersion: { type: Number, default: 0, min: 0 },
+    expoPushToken: { type: String, default: null },
   },
   { timestamps: true }
 );

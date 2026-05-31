@@ -12,6 +12,7 @@ import {
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { WebView } from 'react-native-webview';
+import { Ionicons } from '@expo/vector-icons';
 
 import { useAuth } from '../../context/AuthContext';
 import type { CallerStackParamList } from '../../navigation/CallerStackParamList';
@@ -121,8 +122,8 @@ export default function PaymentMethodScreen({ navigation, route }: Props): React
         showsVerticalScrollIndicator={false}
       >
         <View style={styles.header}>
-          <TouchableOpacity onPress={() => navigation.goBack()} style={styles.back}>
-            <Text style={styles.backTxt}>←</Text>
+          <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backWrapper}>
+            <Ionicons name="chevron-back" size={24} />
           </TouchableOpacity>
           <Text style={styles.title}>Select Payment Method</Text>
           <View style={{ width: 32 }} />
@@ -131,21 +132,21 @@ export default function PaymentMethodScreen({ navigation, route }: Props): React
         {/* GST Breakdown Section */}
         <View style={styles.breakdownCard}>
           <Text style={styles.breakdownTitle}>Payment Breakdown</Text>
-          
+
           <View style={styles.breakdownRow}>
             <Text style={styles.breakdownLabel}>Wallet Recharge:</Text>
             <Text style={styles.breakdownValue}>₹ {walletAmount.toLocaleString('en-IN')}</Text>
           </View>
-          
+
           {gstAmount && (
             <View style={styles.breakdownRow}>
               <Text style={styles.breakdownLabel}>GST ({GST_PERCENTAGE}%):</Text>
               <Text style={styles.breakdownValue}>₹ {gstAmount.toLocaleString('en-IN')}</Text>
             </View>
           )}
-          
+
           <View style={styles.divider} />
-          
+
           <View style={[styles.breakdownRow, styles.totalRow]}>
             <Text style={styles.totalLabel}>Total Payable</Text>
             <Text style={styles.totalValue}>₹ {(totalAmount || payAmount).toLocaleString('en-IN')}</Text>
@@ -250,10 +251,9 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     marginBottom: 12,
   },
-  back: { padding: 6 },
-  backTxt: { fontSize: 22 },
+
   title: { fontSize: 16, fontWeight: '900', color: '#111', flex: 1, textAlign: 'center' },
-  
+
   breakdownCard: {
     backgroundColor: '#fff',
     borderRadius: 14,
@@ -278,6 +278,16 @@ const styles = StyleSheet.create({
     color: '#666',
     fontWeight: '500',
   },
+
+  backWrapper: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#FFF0FA',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
   breakdownValue: {
     fontSize: 13,
     color: '#111',
@@ -301,13 +311,13 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#111',
     fontWeight: '400',
-  }, 
+  },
   totalValue: {
     fontSize: 16,
     color: PURPLE,
     fontWeight: '900',
   },
-  
+
   bonusCard: {
     backgroundColor: '#fff',
     borderRadius: 14,
@@ -355,7 +365,7 @@ const styles = StyleSheet.create({
     color: PURPLE,
     fontWeight: '900',
   },
-  
+
   opt: {
     backgroundColor: '#fff',
     borderRadius: 14,
@@ -366,7 +376,7 @@ const styles = StyleSheet.create({
   },
   optTitle: { fontSize: 16, fontWeight: '900', color: '#111' },
   optSub: { fontSize: 12, color: '#666', marginTop: 4, fontWeight: '600' },
-  
+
   cta: {
     marginTop: 'auto',
     marginBottom: 0,
@@ -377,7 +387,7 @@ const styles = StyleSheet.create({
   },
   ctaDis: { opacity: 0.7 },
   ctaTxt: { color: '#fff', fontSize: 16, fontWeight: '900' },
-  
+
   modalRoot: { flex: 1, backgroundColor: '#fff' },
   modalBar: {
     flexDirection: 'row',

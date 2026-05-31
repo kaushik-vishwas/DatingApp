@@ -172,7 +172,7 @@ const createRazorpayWalletOrder = async (req, res) => {
             amount: amountPaise,
             currency: order.currency ?? 'INR',
             keyId: process.env.RAZORPAY_KEY_ID,
-            businessName: process.env.RAZORPAY_BUSINESS_NAME?.trim() || 'Nesthama',
+            businessName: process.env.RAZORPAY_BUSINESS_NAME?.trim() || 'Selecto',
             prefillContact: authUser.phone ?? '',
             prefillName: authUser.name ?? 'User',
         });

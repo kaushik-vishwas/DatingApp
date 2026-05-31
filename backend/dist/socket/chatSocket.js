@@ -23,6 +23,7 @@ const receiverAvailabilityNotifier_1 = require("../services/receiverAvailability
 const callInviteRegistry_1 = require("../services/callInviteRegistry");
 const callController_1 = require("../controllers/callController");
 const callQueue_1 = require("../services/callQueue");
+const expoPush_1 = require("../services/expoPush");
 function inviteCallerId(invite) {
     return invite.inviterType === 'u' ? invite.inviterId : invite.targetId;
 }
@@ -750,6 +751,29 @@ function attachChatSocket(httpServer) {
                     fromName,
                     fromImage,
                 });
+                if (targetType === 'r') {
+                    void (async () => {
+                        try {
+                            const recv = await Receiver_1.default.findById(targetId)
+                                .select('expoPushToken isAvailable')
+                                .lean();
+                            const pushToken = recv?.expoPushToken?.trim();
+                            if (recv?.isAvailable && pushToken) {
+                                await (0, expoPush_1.sendReceiverIncomingCallPush)({
+                                    expoPushToken: pushToken,
+                                    callId,
+                                    fromId: myId,
+                                    fromName,
+                                    fromImage,
+                                });
+                            }
+                        }
+                        catch (e) {
+                            const msg = e instanceof Error ? e.message : String(e);
+                            console.error('incoming call push error:', msg);
+                        }
+                    })();
+                }
                 ack?.({ ok: true });
             })();
         });
@@ -793,6 +817,48 @@ function attachChatSocket(httpServer) {
                 void settleAndReleaseCall(callId, invite.receiverId, inviteCallerId(invite), invite.invitedAt);
             }
             ack?.({ ok: true });
+        });
+        socket.on('call:hold', (payload, ack) => {
+            const callId = typeof payload?.callId === 'string' ? payload.callId.trim() : '';
+            const onHold = typeof payload?.onHold === 'boolean' ? payload.onHold : null;
+            if (!callId || onHold === null) {
+                ack?.({ ok: false, error: 'callId and onHold are required' });
+                return;
+            }
+            const fromType = socket.data.typ;
+            const fromId = String(socket.data.accountId);
+            void (async () => {
+                try {
+                    const session = await CallSession_1.default.findOne({ callId, status: 'ongoing' })
+                        .select('callerId receiverId')
+                        .lean();
+                    if (!session) {
+                        ack?.({ ok: false, error: 'Call not active' });
+                        return;
+                    }
+                    const callerId = String(session.callerId);
+                    const receiverId = String(session.receiverId);
+                    const isParticipant = (fromType === 'u' && fromId === callerId) || (fromType === 'r' && fromId === receiverId);
+                    if (!isParticipant) {
+                        ack?.({ ok: false, error: 'Forbidden' });
+                        return;
+                    }
+                    const peerType = fromType === 'u' ? 'r' : 'u';
+                    const peerId = fromType === 'u' ? receiverId : callerId;
+                    io.to(accountRoom(peerType, peerId)).emit('call:hold', {
+                        callId,
+                        onHold,
+                        fromType,
+                        fromId,
+                    });
+                    ack?.({ ok: true });
+                }
+                catch (e) {
+                    const msg = e instanceof Error ? e.message : String(e);
+                    console.error('call:hold error:', msg);
+                    ack?.({ ok: false, error: 'Server error' });
+                }
+            })();
         });
         socket.on('call:end', (payload, ack) => {
             const callId = typeof payload?.callId === 'string' ? payload.callId.trim() : '';
