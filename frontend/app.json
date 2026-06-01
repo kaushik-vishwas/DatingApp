@@ -2,6 +2,7 @@
   "expo": {
     "name": "frontend",
     "slug": "frontend",
+    "scheme": "nestham",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/SelectoLogo.png",

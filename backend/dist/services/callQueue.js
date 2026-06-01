@@ -19,6 +19,7 @@ const CallSession_1 = __importDefault(require("../models/CallSession"));
 const Receiver_1 = __importDefault(require("../models/Receiver"));
 const ReceiverPriorityNotification_1 = __importDefault(require("../models/ReceiverPriorityNotification"));
 const callInviteRegistry_1 = require("./callInviteRegistry");
+const socketRegistry_1 = require("../socket/socketRegistry");
 const waitingReceiverIds = new Set();
 const busyReceiverIds = new Set();
 const queueActiveReceiverIds = new Set();
@@ -89,7 +90,7 @@ async function syncReceiverQueueState(receiverId) {
     const eligible = Boolean(receiver) &&
         receiver.accountStatus === 'approved' &&
         !receiver.suspended &&
-        receiver.isOnline &&
+        (0, socketRegistry_1.isReceiverSocketConnected)(rid) &&
         receiver.isAvailable;
     if (eligible && !busyReceiverIds.has(rid)) {
         waitingReceiverIds.add(rid);
@@ -117,7 +118,7 @@ async function pickRandomQueuedReceiverForCaller(callerId) {
         .lean();
     const eligibleRows = candidates.filter((r) => {
         const id = String(r._id);
-        return !busyReceiverIds.has(id);
+        return !busyReceiverIds.has(id) && (0, socketRegistry_1.isReceiverSocketConnected)(id);
     });
     if (eligibleRows.length === 0)
         return null;

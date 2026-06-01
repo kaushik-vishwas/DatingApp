@@ -56,10 +56,11 @@ const authController_1 = require("./authController");
 const accountAccess_1 = require("../utils/accountAccess");
 const chatPricing_1 = require("../constants/chatPricing");
 const receiverAvailabilityNotifier_1 = require("../services/receiverAvailabilityNotifier");
-const callQueue_1 = require("../services/callQueue");
+const receiverPresence_1 = require("../services/receiverPresence");
+const socketRegistry_1 = require("../socket/socketRegistry");
 const receiverScore_1 = require("../services/receiverScore");
 const razorpayXPayoutService_1 = require("../services/razorpayXPayoutService");
-const socketRegistry_1 = require("../socket/socketRegistry");
+const socketRegistry_2 = require("../socket/socketRegistry");
 const apiTraceLog_1 = require("../utils/apiTraceLog");
 const callerMessageEligibility_1 = require("../utils/callerMessageEligibility");
 const callController_1 = require("./callController");
@@ -1302,7 +1303,7 @@ const verifyReceiverWithdrawalOtpAndCreate = async (req, res) => {
         pendingVerification.walletRefundedAt = null;
         pendingVerification.payoutReferenceId = `wd_${String(pendingVerification._id).slice(-10)}`;
         await pendingVerification.save();
-        (0, socketRegistry_1.emitReceiverWithdrawalUpdate)(rid, {
+        (0, socketRegistry_2.emitReceiverWithdrawalUpdate)(rid, {
             withdrawalId: String(pendingVerification._id),
             amount: roundInr(pendingVerification.amount),
             payoutStatus: 'processing',
@@ -1705,7 +1706,7 @@ const notifyReceiverRecentUser = async (req, res) => {
             res.status(403).json({ message: 'Receiver account is not allowed for this action' });
             return;
         }
-        if (!receiver.isOnline || !receiver.isAvailable) {
+        if (!receiver.isAvailable || !(0, socketRegistry_1.isReceiverSocketConnected)(receiverId)) {
             res.status(409).json({ message: 'You can notify users only when online and available.' });
             return;
         }
@@ -1874,8 +1875,10 @@ const updateReceiverProfile = async (req, res) => {
             }
         }
         await receiver.save();
-        await (0, callQueue_1.syncReceiverQueueState)(receiverId);
-        const becameCallAvailable = !wasAvailable && Boolean(receiver.isAvailable) && Boolean(receiver.isOnline) && wasOnline;
+        await (0, receiverPresence_1.syncReceiverPresenceInDatabase)(receiverId);
+        const becameCallAvailable = !wasAvailable &&
+            Boolean(receiver.isAvailable) &&
+            (0, socketRegistry_1.isReceiverSocketConnected)(receiverId);
         if (becameCallAvailable) {
             void (0, receiverAvailabilityNotifier_1.scheduleReceiverAvailabilityNotifications)(receiverId).catch((e) => {
                 const msg = e instanceof Error ? e.message : String(e);
@@ -1942,8 +1945,10 @@ const completeReceiverAudioOnboarding = async (req, res) => {
         const wasOnline = Boolean(receiver.isOnline);
         receiver.accountStatus = 'approved';
         await receiver.save();
-        await (0, callQueue_1.syncReceiverQueueState)(receiverId);
-        const becameCallAvailable = !wasAvailable && Boolean(receiver.isAvailable) && Boolean(receiver.isOnline) && wasOnline;
+        await (0, receiverPresence_1.syncReceiverPresenceInDatabase)(receiverId);
+        const becameCallAvailable = !wasAvailable &&
+            Boolean(receiver.isAvailable) &&
+            (0, socketRegistry_1.isReceiverSocketConnected)(receiverId);
         if (becameCallAvailable) {
             void (0, receiverAvailabilityNotifier_1.scheduleReceiverAvailabilityNotifications)(receiverId).catch((e) => {
                 const msg = e instanceof Error ? e.message : String(e);

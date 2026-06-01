@@ -36,6 +36,7 @@ export async function sendReceiverIncomingCallPush(
       fromType: 'u',
       peerName: payload.fromName,
       peerImage: payload.fromImage,
+      url: `nestham://incoming-call/${encodeURIComponent(payload.callId)}?fromId=${encodeURIComponent(payload.fromId)}&fromType=u&peerName=${encodeURIComponent(payload.fromName)}${payload.fromImage ? `&peerImage=${encodeURIComponent(payload.fromImage)}` : ''}`,
     },
   };
 

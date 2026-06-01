@@ -34,12 +34,15 @@ function participantAudioIntensity(participant: StreamVideoParticipant | undefin
 type StreamParticipantVoiceWavesProps = {
   side: 'local' | 'remote';
   microphoneMuted?: boolean;
+  /** True when this side is on hold (external phone call) — suppress voice-reactive rings. */
+  onHold?: boolean;
 };
 
 /** Must render inside Stream `StreamCall` (uses Stream participant audio state). */
 export function StreamParticipantVoiceWaves({
   side,
   microphoneMuted = false,
+  onHold = false,
 }: StreamParticipantVoiceWavesProps): React.JSX.Element {
   const { useLocalParticipant, useRemoteParticipants } = useCallStateHooks();
   const localParticipant = useLocalParticipant();
@@ -47,10 +50,65 @@ export function StreamParticipantVoiceWaves({
   const remoteParticipant = remoteParticipants[0];
 
   const participant = side === 'local' ? localParticipant : remoteParticipant;
-  const active = participantIsAudible(participant, side === 'local' ? microphoneMuted : false);
-  const intensity = participantAudioIntensity(participant);
+  const active =
+    !onHold &&
+    participantIsAudible(participant, side === 'local' ? microphoneMuted : false);
+  const intensity = onHold ? 0 : participantAudioIntensity(participant);
 
   return <AvatarSoundWaveRings active={active} intensity={intensity} />;
+}
+
+/**
+ * Detects when the OS steals the mic (e.g. cellular call) while the user did not tap Mute.
+ * Must render inside Stream `StreamCall`.
+ */
+export function StreamSystemHoldBridge({
+  userMuted,
+  appInBackground,
+  onSystemHoldChange,
+}: {
+  userMuted: boolean;
+  appInBackground: boolean;
+  onSystemHoldChange: (onHold: boolean) => void;
+}): null {
+  const { useLocalParticipant, useCallCallingState } = useCallStateHooks();
+  const callingState = useCallCallingState();
+  const localParticipant = useLocalParticipant();
+  const onSystemHoldChangeRef = useRef(onSystemHoldChange);
+  const audioLostSinceRef = useRef<number | null>(null);
+  onSystemHoldChangeRef.current = onSystemHoldChange;
+
+  useEffect(() => {
+    if (callingState !== CallingState.JOINED) {
+      audioLostSinceRef.current = null;
+      return;
+    }
+    if (appInBackground) {
+      audioLostSinceRef.current = null;
+      return;
+    }
+    if (userMuted) {
+      audioLostSinceRef.current = null;
+      onSystemHoldChangeRef.current(false);
+      return;
+    }
+    const micLive = Boolean(localParticipant && hasAudio(localParticipant));
+    if (micLive) {
+      audioLostSinceRef.current = null;
+      onSystemHoldChangeRef.current(false);
+      return;
+    }
+    const now = Date.now();
+    if (audioLostSinceRef.current === null) {
+      audioLostSinceRef.current = now;
+      return;
+    }
+    if (now - audioLostSinceRef.current >= 400) {
+      onSystemHoldChangeRef.current(true);
+    }
+  }, [callingState, localParticipant, userMuted, appInBackground]);
+
+  return null;
 }
 
 /**
@@ -67,38 +125,58 @@ export function StreamTalkTimingBridge({
   const participants = useParticipants();
   const firedRef = useRef(false);
   const onBothConnectedRef = useRef(onBothConnected);
+  const callingStateRef = useRef(callingState);
+  const participantsRef = useRef(participants);
   onBothConnectedRef.current = onBothConnected;
+  callingStateRef.current = callingState;
+  participantsRef.current = participants;
 
   useEffect(() => {
     if (firedRef.current) return;
     if (callingState !== CallingState.JOINED) return;
     const hasRemote = participants.some((p) => !p.isLocalParticipant);
     if (!hasRemote) return;
-    firedRef.current = true;
-    onBothConnectedRef.current();
+
+    const timer = setTimeout(() => {
+      if (firedRef.current) return;
+      if (callingStateRef.current !== CallingState.JOINED) return;
+      const stillRemote = participantsRef.current.some((p) => !p.isLocalParticipant);
+      if (!stillRemote) return;
+      firedRef.current = true;
+      onBothConnectedRef.current();
+    }, 80);
+
+    return () => clearTimeout(timer);
   }, [callingState, participants]);
 
   return null;
 }
 
-/** Peer muted badge — render inside `avatarWrap` on the remote participant column only. */
-export function StreamParticipantMutedIndicator(): React.JSX.Element | null {
+/** Peer muted / on-hold badge — remote participant column only. */
+export function StreamParticipantMutedIndicator({
+  peerOnHold = false,
+}: {
+  peerOnHold?: boolean;
+}): React.JSX.Element | null {
   const { useRemoteParticipants, useCallCallingState } = useCallStateHooks();
   const remoteParticipants = useRemoteParticipants();
   const remoteParticipant = remoteParticipants[0];
   const callingState = useCallCallingState();
 
+  const showHold =
+    peerOnHold && callingState === CallingState.JOINED && Boolean(remoteParticipant);
   const showMuted =
+    !showHold &&
     callingState === CallingState.JOINED &&
     Boolean(remoteParticipant) &&
     !hasAudio(remoteParticipant as StreamVideoParticipant);
 
-  if (!showMuted) return null;
+  if (!showHold && !showMuted) return null;
 
   return (
     <View style={mutedStyles.badge} pointerEvents="none">
-      <Ionicons name="mic-off" size={12} color="#faf5ff" />
-      <Text style={mutedStyles.label}>Muted</Text>
+      <Ionicons name={showHold ? 'pause' : 'mic-off'} size={12} color="#faf5ff" />
+      <Text style={mutedStyles.label}>{showHold ? 'On hold' : 'Muted'}</Text>
     </View>
   );
 }

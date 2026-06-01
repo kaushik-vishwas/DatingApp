@@ -20,6 +20,7 @@ import {
   resolveFixedRatePerMinuteAt,
 } from '../services/receiverEarningModel';
 import { pickRandomQueuedReceiverForCaller } from '../services/callQueue';
+import { isReceiverSocketConnected } from '../socket/socketRegistry';
 import {
   releaseReceiverReservation,
   syncReceiverQueueState,
@@ -27,6 +28,14 @@ import {
 
 function roundInr(n: number): number {
   return Math.round(n * 100) / 100;
+}
+
+async function readCallerWalletBalanceInr(callerId: string): Promise<number> {
+  if (!mongoose.Types.ObjectId.isValid(callerId)) return 0;
+  const callerDoc = await User.findById(callerId).select('walletBalance').lean();
+  return typeof callerDoc?.walletBalance === 'number' && Number.isFinite(callerDoc.walletBalance)
+    ? roundInr(Math.max(0, callerDoc.walletBalance))
+    : 0;
 }
 
 function sleep(ms: number): Promise<void> {
@@ -425,6 +434,10 @@ export const getVoiceBootstrap = async (req: Request, res: Response): Promise<vo
     res.status(409).json({ message: 'Receiver is currently unavailable' });
     return;
   }
+  if (!isReceiverSocketConnected(receiverId)) {
+    res.status(409).json({ message: 'Receiver is offline right now' });
+    return;
+  }
   if (await ChatBlock.exists({ userId: callerUserId, receiverId })) {
     res.status(403).json({ message: 'This pair is blocked for communication' });
     return;
@@ -521,20 +534,13 @@ export const startVoiceSession = async (
 
     const session = await recordVoiceParticipantJoined(callId, accountKind);
 
-    let callerWalletBalanceInr: number | undefined;
-    if (accountKind === 'receiver') {
-      const callerDoc = await User.findById(callerId).select('walletBalance').lean();
-      callerWalletBalanceInr =
-        typeof callerDoc?.walletBalance === 'number' && Number.isFinite(callerDoc.walletBalance)
-          ? roundInr(Math.max(0, callerDoc.walletBalance))
-          : 0;
-    }
+    const callerWalletBalanceInr = await readCallerWalletBalanceInr(callerId);
 
     res.status(200).json({
       ok: true,
       ...callTalkApiFields(session),
       callRatePerMinute: ratePerMinute,
-      ...(callerWalletBalanceInr !== undefined ? { callerWalletBalanceInr } : {}),
+      callerWalletBalanceInr,
     });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -654,14 +660,7 @@ export const syncVoiceSession = async (
     const latest = await CallSession.findOne({ callId });
     const talkFields = callTalkApiFields((latest ?? current) as CallSessionDocument);
 
-    let callerWalletBalanceInr: number | undefined;
-    if (accountKind === 'receiver') {
-      const callerDoc = await User.findById(current.callerId).select('walletBalance').lean();
-      callerWalletBalanceInr =
-        typeof callerDoc?.walletBalance === 'number' && Number.isFinite(callerDoc.walletBalance)
-          ? roundInr(Math.max(0, callerDoc.walletBalance))
-          : 0;
-    }
+    const callerWalletBalanceInr = await readCallerWalletBalanceInr(String(current.callerId));
 
     res.status(200).json({
       ok: true,
@@ -671,7 +670,7 @@ export const syncVoiceSession = async (
       canRate: settled.durationSec >= MISSED_OR_INCOMPLETE_MAX_SEC,
       status: settled.status,
       callRatePerMinute: Math.max(0, Number((latest ?? current).ratePerMinute) || 0),
-      ...(callerWalletBalanceInr !== undefined ? { callerWalletBalanceInr } : {}),
+      callerWalletBalanceInr,
       ...talkFields,
     });
   } catch (err) {

@@ -1,9 +1,41 @@
+import mongoose from 'mongoose';
 import type { Server } from 'socket.io';
 
 let ioInstance: Server | null = null;
 
 export function registerSocketIOServer(io: Server): void {
   ioInstance = io;
+}
+
+function accountRoom(typ: 'u' | 'r', accountId: string): string {
+  const s = String(accountId).trim();
+  if (mongoose.Types.ObjectId.isValid(s)) {
+    return `account:${typ}:${new mongoose.Types.ObjectId(s).toString()}`;
+  }
+  return `account:${typ}:${s}`;
+}
+
+export function isAccountSocketConnected(typ: 'u' | 'r', accountId: string): boolean {
+  if (!ioInstance) return false;
+  const room = accountRoom(typ, accountId);
+  return (ioInstance.sockets.adapter.rooms.get(room)?.size ?? 0) > 0;
+}
+
+export function isReceiverSocketConnected(receiverId: string): boolean {
+  return isAccountSocketConnected('r', receiverId);
+}
+
+/** Receiver account rooms with at least one connected socket. */
+export function getConnectedReceiverIds(): Set<string> {
+  const ids = new Set<string>();
+  if (!ioInstance) return ids;
+  const prefix = 'account:r:';
+  for (const roomName of ioInstance.sockets.adapter.rooms.keys()) {
+    if (roomName.startsWith(prefix)) {
+      ids.add(roomName.slice(prefix.length));
+    }
+  }
+  return ids;
 }
 
 export function emitAuthSessionSuperseded(typ: 'u' | 'r', accountId: string, currentSessionVersion: number): void {

@@ -3,6 +3,7 @@ import CallSession from '../models/CallSession';
 import Receiver from '../models/Receiver';
 import ReceiverAvailabilityNotification from '../models/ReceiverAvailabilityNotification';
 import User from '../models/User';
+import { isReceiverSocketConnected } from '../socket/socketRegistry';
 
 const RECENT_CALL_WINDOW_DAYS = 14;
 const USER_RECEIVER_COOLDOWN_MS = 30 * 60 * 1000;
@@ -78,14 +79,14 @@ export async function scheduleReceiverAvailabilityNotifications(
   const rid = new mongoose.Types.ObjectId(receiverId);
 
   const receiver = await Receiver.findById(rid).select(
-    'name accountStatus suspended isOnline isAvailable'
+    'name accountStatus suspended isAvailable'
   );
   if (
     !receiver ||
     receiver.accountStatus !== 'approved' ||
     receiver.suspended ||
-    !receiver.isOnline ||
-    !receiver.isAvailable
+    !receiver.isAvailable ||
+    !isReceiverSocketConnected(receiverId)
   ) {
     return;
   }

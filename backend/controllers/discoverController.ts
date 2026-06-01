@@ -9,6 +9,7 @@ import ChatBlock from '../models/ChatBlock';
 import ReceiverRating from '../models/ReceiverRating';
 import { blockCallerUntilApproved } from '../utils/accountAccess';
 import { isReceiverBusy } from '../services/callQueue';
+import { getConnectedReceiverIds } from '../socket/socketRegistry';
 
 function iso(d: Date): string {
   return d.toISOString();
@@ -49,12 +50,16 @@ export type DiscoverReceiverCard = {
 function toCard(
   r: ReceiverDocument,
   ratingByReceiverId: Map<string, { avg: number; count: number }>,
-  busyByReceiverId: Set<string>
+  busyByReceiverId: Set<string>,
+  connectedReceiverIds: Set<string>
 ): DiscoverReceiverCard {
   const o = r.toObject();
   const rating = ratingByReceiverId.get(String(r._id));
+  const id = String(r._id);
+  const socketLive = connectedReceiverIds.has(id);
+  const switchOn = Boolean(o.isAvailable);
   return {
-    _id: String(r._id),
+    _id: id,
     name: o.name,
     age: o.age ?? null,
     state: o.state ?? null,
@@ -65,9 +70,9 @@ function toCard(
     updatedAt: iso(o.updatedAt),
     gender:
       o.gender === 'male' || o.gender === 'female' || o.gender === 'other' ? o.gender : null,
-    isAvailable: Boolean(o.isAvailable),
-    isOnline: Boolean(o.isOnline),
-    isBusyOnCall: busyByReceiverId.has(String(r._id)),
+    isAvailable: switchOn && socketLive,
+    isOnline: socketLive,
+    isBusyOnCall: busyByReceiverId.has(id),
     ratingAvg: rating ? Math.round(rating.avg * 10) / 10 : 0,
     ratingCount: rating?.count ?? 0,
   };
@@ -145,10 +150,11 @@ export const listReceiversForCaller = async (req: Request, res: Response): Promi
     const busyByReceiverId = new Set(
       receivers.map((r) => String(r._id)).filter((id) => isReceiverBusy(id))
     );
+    const connectedReceiverIds = getConnectedReceiverIds();
 
     res.status(200).json({
       receivers: receivers.map((r) =>
-        toCard(r as ReceiverDocument, ratingByReceiverId, busyByReceiverId)
+        toCard(r as ReceiverDocument, ratingByReceiverId, busyByReceiverId, connectedReceiverIds)
       ),
     });
   } catch (err) {

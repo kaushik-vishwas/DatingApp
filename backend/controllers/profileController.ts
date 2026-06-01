@@ -21,7 +21,8 @@ import { toApiReceiver, toApiUser } from './authController';
 import { blockReceiverUntilApproved } from '../utils/accountAccess';
 import { CHAT_TEXT_FEE_INR } from '../constants/chatPricing';
 import { scheduleReceiverAvailabilityNotifications } from '../services/receiverAvailabilityNotifier';
-import { syncReceiverQueueState } from '../services/callQueue';
+import { syncReceiverPresenceInDatabase } from '../services/receiverPresence';
+import { isReceiverSocketConnected } from '../socket/socketRegistry';
 import { finalizeReceiverOnlineSession } from '../services/receiverScore';
 import { trackAndFinalizeRazorpayXPayout } from '../services/razorpayXPayoutService';
 import { emitReceiverWithdrawalUpdate } from '../socket/socketRegistry';
@@ -2063,7 +2064,7 @@ export const notifyReceiverRecentUser = async (
       res.status(403).json({ message: 'Receiver account is not allowed for this action' });
       return;
     }
-    if (!receiver.isOnline || !receiver.isAvailable) {
+    if (!receiver.isAvailable || !isReceiverSocketConnected(receiverId)) {
       res.status(409).json({ message: 'You can notify users only when online and available.' });
       return;
     }
@@ -2249,10 +2250,12 @@ export const updateReceiverProfile = async (
     }
 
     await receiver.save();
-    await syncReceiverQueueState(receiverId);
+    await syncReceiverPresenceInDatabase(receiverId);
 
     const becameCallAvailable =
-      !wasAvailable && Boolean(receiver.isAvailable) && Boolean(receiver.isOnline) && wasOnline;
+      !wasAvailable &&
+      Boolean(receiver.isAvailable) &&
+      isReceiverSocketConnected(receiverId);
     if (becameCallAvailable) {
       void scheduleReceiverAvailabilityNotifications(receiverId).catch((e: unknown) => {
         const msg = e instanceof Error ? e.message : String(e);
@@ -2321,10 +2324,12 @@ export const completeReceiverAudioOnboarding = async (req: Request, res: Respons
 
     receiver.accountStatus = 'approved';
     await receiver.save();
-    await syncReceiverQueueState(receiverId);
+    await syncReceiverPresenceInDatabase(receiverId);
 
     const becameCallAvailable =
-      !wasAvailable && Boolean(receiver.isAvailable) && Boolean(receiver.isOnline) && wasOnline;
+      !wasAvailable &&
+      Boolean(receiver.isAvailable) &&
+      isReceiverSocketConnected(receiverId);
     if (becameCallAvailable) {
       void scheduleReceiverAvailabilityNotifications(receiverId).catch((e: unknown) => {
         const msg = e instanceof Error ? e.message : String(e);

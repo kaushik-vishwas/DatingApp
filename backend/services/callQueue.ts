@@ -4,6 +4,7 @@ import CallSession from '../models/CallSession';
 import Receiver from '../models/Receiver';
 import ReceiverPriorityNotification from '../models/ReceiverPriorityNotification';
 import { hasPendingCallInviteForReceiver } from './callInviteRegistry';
+import { isReceiverSocketConnected } from '../socket/socketRegistry';
 
 const waitingReceiverIds = new Set<string>();
 const busyReceiverIds = new Set<string>();
@@ -81,7 +82,7 @@ export async function syncReceiverQueueState(receiverId: string): Promise<void> 
     Boolean(receiver) &&
     receiver!.accountStatus === 'approved' &&
     !receiver!.suspended &&
-    receiver!.isOnline &&
+    isReceiverSocketConnected(rid) &&
     receiver!.isAvailable;
 
   if (eligible && !busyReceiverIds.has(rid)) {
@@ -124,7 +125,7 @@ export async function pickRandomQueuedReceiverForCaller(callerId: string): Promi
 
   const eligibleRows = candidates.filter((r) => {
     const id = String(r._id);
-    return !busyReceiverIds.has(id);
+    return !busyReceiverIds.has(id) && isReceiverSocketConnected(id);
   });
   if (eligibleRows.length === 0) return null;
 

@@ -1,6 +1,12 @@
 "use strict";
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.registerSocketIOServer = registerSocketIOServer;
+exports.isAccountSocketConnected = isAccountSocketConnected;
+exports.isReceiverSocketConnected = isReceiverSocketConnected;
+exports.getConnectedReceiverIds = getConnectedReceiverIds;
 exports.emitAuthSessionSuperseded = emitAuthSessionSuperseded;
 exports.emitReceiverApproved = emitReceiverApproved;
 exports.emitReceiverRejected = emitReceiverRejected;
@@ -8,9 +14,39 @@ exports.emitCallerApproved = emitCallerApproved;
 exports.emitCallerRejected = emitCallerRejected;
 exports.emitCallerOnlineToReceiver = emitCallerOnlineToReceiver;
 exports.emitReceiverWithdrawalUpdate = emitReceiverWithdrawalUpdate;
+const mongoose_1 = __importDefault(require("mongoose"));
 let ioInstance = null;
 function registerSocketIOServer(io) {
     ioInstance = io;
+}
+function accountRoom(typ, accountId) {
+    const s = String(accountId).trim();
+    if (mongoose_1.default.Types.ObjectId.isValid(s)) {
+        return `account:${typ}:${new mongoose_1.default.Types.ObjectId(s).toString()}`;
+    }
+    return `account:${typ}:${s}`;
+}
+function isAccountSocketConnected(typ, accountId) {
+    if (!ioInstance)
+        return false;
+    const room = accountRoom(typ, accountId);
+    return (ioInstance.sockets.adapter.rooms.get(room)?.size ?? 0) > 0;
+}
+function isReceiverSocketConnected(receiverId) {
+    return isAccountSocketConnected('r', receiverId);
+}
+/** Receiver account rooms with at least one connected socket. */
+function getConnectedReceiverIds() {
+    const ids = new Set();
+    if (!ioInstance)
+        return ids;
+    const prefix = 'account:r:';
+    for (const roomName of ioInstance.sockets.adapter.rooms.keys()) {
+        if (roomName.startsWith(prefix)) {
+            ids.add(roomName.slice(prefix.length));
+        }
+    }
+    return ids;
 }
 function emitAuthSessionSuperseded(typ, accountId, currentSessionVersion) {
     if (!ioInstance)

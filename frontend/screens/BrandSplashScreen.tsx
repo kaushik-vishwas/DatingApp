@@ -300,7 +300,7 @@ export default function BrandSplashScreen({ navigation, route }: Props): React.J
             },
           ]}
         >
-          Premium Dating Experience
+          Premium Connection Experience
         </Animated.Text>
       </Animated.View>
 

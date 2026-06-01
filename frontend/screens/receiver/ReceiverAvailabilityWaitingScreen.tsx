@@ -15,6 +15,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useAuth } from '../../context/AuthContext';
+import { useCallSignals } from '../../context/CallSignalContext';
 import type { ReceiverStackParamList } from '../../navigation/ReceiverStackParamList';
 import { getErrorMessage, profileApi } from '../../services/api';
 import { resolveProfileImageSource } from '../../utils/avatarSource';
@@ -55,11 +56,14 @@ export default function ReceiverAvailabilityWaitingScreen(): React.JSX.Element {
     return () => loops.forEach((l) => l.stop());
   }, [ring0, ring1, ring2]);
 
+  const { setQueueMode } = useCallSignals();
+
   const onGoOffline = () => {
     if (goingOffline) return;
     setGoingOffline(true);
     void (async () => {
       try {
+        await setQueueMode(false).catch(() => {});
         await profileApi.updateReceiverProfile({ isAvailable: false });
         await refreshUser();
         navigation.navigate('ReceiverMainTabs', { screen: 'ReceiverHome' });

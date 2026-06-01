@@ -44,6 +44,7 @@ const ChatBlock_1 = __importDefault(require("../models/ChatBlock"));
 const ReceiverRating_1 = __importDefault(require("../models/ReceiverRating"));
 const accountAccess_1 = require("../utils/accountAccess");
 const callQueue_1 = require("../services/callQueue");
+const socketRegistry_1 = require("../socket/socketRegistry");
 function iso(d) {
     return d.toISOString();
 }
@@ -62,11 +63,14 @@ function parseIntQuery(val) {
     const n = parseInt(s, 10);
     return Number.isFinite(n) ? n : NaN;
 }
-function toCard(r, ratingByReceiverId, busyByReceiverId) {
+function toCard(r, ratingByReceiverId, busyByReceiverId, connectedReceiverIds) {
     const o = r.toObject();
     const rating = ratingByReceiverId.get(String(r._id));
+    const id = String(r._id);
+    const socketLive = connectedReceiverIds.has(id);
+    const switchOn = Boolean(o.isAvailable);
     return {
-        _id: String(r._id),
+        _id: id,
         name: o.name,
         age: o.age ?? null,
         state: o.state ?? null,
@@ -76,9 +80,9 @@ function toCard(r, ratingByReceiverId, busyByReceiverId) {
         audioCallRate: Receiver_1.RECEIVER_AUDIO_CALL_RATE_INR_PER_MIN,
         updatedAt: iso(o.updatedAt),
         gender: o.gender === 'male' || o.gender === 'female' || o.gender === 'other' ? o.gender : null,
-        isAvailable: Boolean(o.isAvailable),
-        isOnline: Boolean(o.isOnline),
-        isBusyOnCall: busyByReceiverId.has(String(r._id)),
+        isAvailable: switchOn && socketLive,
+        isOnline: socketLive,
+        isBusyOnCall: busyByReceiverId.has(id),
         ratingAvg: rating ? Math.round(rating.avg * 10) / 10 : 0,
         ratingCount: rating?.count ?? 0,
     };
@@ -140,8 +144,9 @@ const listReceiversForCaller = async (req, res) => {
             ]);
         const ratingByReceiverId = new Map(ratingRows.map((row) => [String(row.receiverId), { avg: row.avg, count: row.count }]));
         const busyByReceiverId = new Set(receivers.map((r) => String(r._id)).filter((id) => (0, callQueue_1.isReceiverBusy)(id)));
+        const connectedReceiverIds = (0, socketRegistry_1.getConnectedReceiverIds)();
         res.status(200).json({
-            receivers: receivers.map((r) => toCard(r, ratingByReceiverId, busyByReceiverId)),
+            receivers: receivers.map((r) => toCard(r, ratingByReceiverId, busyByReceiverId, connectedReceiverIds)),
         });
     }
     catch (err) {

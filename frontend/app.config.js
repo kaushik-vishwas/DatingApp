@@ -48,6 +48,7 @@ module.exports = {
       package: appKind ? `${baseAndroidPackage}.${appKind}` : baseAndroidPackage,
       permissions: [
         'android.permission.RECORD_AUDIO',
+        'android.permission.CAMERA',
         'android.permission.INTERNET',
         'android.permission.ACCESS_NETWORK_STATE',
         'android.permission.POST_NOTIFICATIONS',
@@ -57,6 +58,14 @@ module.exports = {
     },
     plugins: [
       ...(appJson.expo.plugins || []),
+      [
+        'expo-build-properties',
+        {
+          android: {
+            minSdkVersion: 24,
+          },
+        },
+      ],
       '@react-native-community/datetimepicker',
       '@stream-io/video-react-native-sdk',
       [

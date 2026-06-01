@@ -360,12 +360,12 @@ export default function ReceiverHomeDashboard(): React.JSX.Element {
                   onPress={() => navigation.navigate('ReceiverProfilePreview')}
                   activeOpacity={0.85}
                 >
-                  <View style={styles.scoreContainer}>
+                  {/* <View style={styles.scoreContainer}>
                     <Text style={styles.scoreIco}>🏆</Text>
                     <Text style={styles.scoreText}>
                       {trophyScoreRounded.toLocaleString('en-IN')}
                     </Text>
-                  </View>
+                  </View> */}
                 </TouchableOpacity>
               ) : null}
 

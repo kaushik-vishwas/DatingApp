@@ -9,9 +9,9 @@ import { callerHasSuccessfulCallWithReceiver } from '../utils/callerMessageEligi
 import User from '../models/User';
 import Receiver from '../models/Receiver';
 import { getPayloadSessionVersion, type AppJwtPayload } from '../utils/authToken';
-import { registerSocketIOServer } from './socketRegistry';
+import { isReceiverSocketConnected, registerSocketIOServer } from './socketRegistry';
 import { CHAT_TEXT_CHARGE_INR, CHAT_TEXT_EARN_INR } from '../constants/chatPricing';
-import { finalizeReceiverOnlineSession, recordReceiverCallScore } from '../services/receiverScore';
+import { recordReceiverCallScore } from '../services/receiverScore';
 import { scheduleCallerOnlineNotifications } from '../services/callerOnlineNotifier';
 import { scheduleReceiverAvailabilityNotifications } from '../services/receiverAvailabilityNotifier';
 import { registerPendingCallInvite, unregisterPendingCallInvite } from '../services/callInviteRegistry';
@@ -29,6 +29,7 @@ import {
   tryReserveReceiver,
 } from '../services/callQueue';
 import { sendReceiverIncomingCallPush } from '../services/expoPush';
+import { syncReceiverPresenceInDatabase } from '../services/receiverPresence';
 
 type CallInvitePayload = { callId?: unknown; targetId?: unknown };
 type CallResponsePayload = { callId?: unknown; accepted?: unknown };
@@ -246,27 +247,20 @@ export function attachChatSocket(httpServer: HTTPServer): Server {
     if (socketType === 'r') {
       void (async () => {
         try {
-          const prev = await Receiver.findOneAndUpdate(
-            { _id: socketAccountId },
-            { $set: { isOnline: true }, $setOnInsert: {} },
-            { new: false }
-          ).select('isOnline isAvailable accountStatus suspended onlineSince');
-          if (prev && !prev.isOnline) {
-            await Receiver.updateOne(
-              { _id: socketAccountId, onlineSince: null },
-              { $set: { onlineSince: new Date() } }
-            ).exec();
-          }
+          const prev = await Receiver.findById(socketAccountId)
+            .select('isOnline isAvailable accountStatus suspended onlineSince')
+            .lean();
+          await syncReceiverPresenceInDatabase(socketAccountId);
           if (
             prev &&
             !prev.isOnline &&
             prev.isAvailable &&
+            isReceiverSocketConnected(socketAccountId) &&
             prev.accountStatus === 'approved' &&
             !prev.suspended
           ) {
             await scheduleReceiverAvailabilityNotifications(socketAccountId);
           }
-          await syncReceiverQueueState(socketAccountId);
         } catch (e) {
           const msg = e instanceof Error ? e.message : String(e);
           console.error('receiver online notify error:', msg);
@@ -281,12 +275,7 @@ export function attachChatSocket(httpServer: HTTPServer): Server {
         void (async () => {
           if (hasActiveSocketForAccount(leavingType, leavingId)) return;
           if (leavingType === 'r') {
-            const recv = await Receiver.findById(leavingId).select('isAvailable').lean();
-            // App backgrounded: keep queue/invites and DB presence while still "Go Online".
-            if (recv?.isAvailable) {
-              await syncReceiverQueueState(leavingId);
-              return;
-            }
+            await syncReceiverPresenceInDatabase(leavingId);
           }
           waitingCallQueueAccounts.delete(queueKey(leavingType, leavingId));
           if (leavingType === 'r') {
@@ -318,25 +307,8 @@ export function attachChatSocket(httpServer: HTTPServer): Server {
           const stillConnected = hasActiveSocketForAccount('r', leavingId);
           if (!stillConnected) {
             void (async () => {
-              const recv = await Receiver.findById(leavingId).select('isAvailable onlineSince').lean();
-              if (recv?.isAvailable) {
-                await syncReceiverQueueState(leavingId);
-                return;
-              }
-              const prev = await Receiver.findOneAndUpdate(
-                { _id: leavingId },
-                { $set: { isOnline: false, onlineSince: null } },
-                { new: false }
-              ).select('onlineSince');
-              if (prev?.onlineSince) {
-                await finalizeReceiverOnlineSession({
-                  receiverId: leavingId,
-                  onlineSince: prev.onlineSince,
-                  endedAt: new Date(),
-                });
-              }
+              await syncReceiverPresenceInDatabase(leavingId);
               releaseReceiverReservation(leavingId);
-              await syncReceiverQueueState(leavingId);
             })();
           }
         }, 300);
@@ -723,8 +695,7 @@ export function attachChatSocket(httpServer: HTTPServer): Server {
             ack?.({ ok: false, error: 'Cannot call this receiver right now.' });
             return;
           }
-          const targetSocketOnline = hasActiveSocketForAccount('r', targetId);
-          if (!targetSocketOnline && (!recv.isOnline || !recv.isAvailable)) {
+          if (!hasActiveSocketForAccount('r', targetId)) {
             ack?.({ ok: false, error: 'Receiver is offline right now.' });
             return;
           }
@@ -748,13 +719,13 @@ export function attachChatSocket(httpServer: HTTPServer): Server {
             return;
           }
         } else {
-          const recv = await Receiver.findById(myId).select('accountStatus suspended isAvailable isOnline');
+          const recv = await Receiver.findById(myId).select('accountStatus suspended isAvailable');
           if (
             !recv ||
             recv.accountStatus !== 'approved' ||
             recv.suspended ||
             !recv.isAvailable ||
-            !recv.isOnline
+            !hasActiveSocketForAccount('r', myId)
           ) {
             ack?.({ ok: false, error: 'You are not available for calls right now.' });
             return;

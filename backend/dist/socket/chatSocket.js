@@ -24,6 +24,7 @@ const callInviteRegistry_1 = require("../services/callInviteRegistry");
 const callController_1 = require("../controllers/callController");
 const callQueue_1 = require("../services/callQueue");
 const expoPush_1 = require("../services/expoPush");
+const receiverPresence_1 = require("../services/receiverPresence");
 function inviteCallerId(invite) {
     return invite.inviterType === 'u' ? invite.inviterId : invite.targetId;
 }
@@ -212,18 +213,18 @@ function attachChatSocket(httpServer) {
         if (socketType === 'r') {
             void (async () => {
                 try {
-                    const prev = await Receiver_1.default.findOneAndUpdate({ _id: socketAccountId }, { $set: { isOnline: true }, $setOnInsert: {} }, { new: false }).select('isOnline isAvailable accountStatus suspended onlineSince');
-                    if (prev && !prev.isOnline) {
-                        await Receiver_1.default.updateOne({ _id: socketAccountId, onlineSince: null }, { $set: { onlineSince: new Date() } }).exec();
-                    }
+                    const prev = await Receiver_1.default.findById(socketAccountId)
+                        .select('isOnline isAvailable accountStatus suspended onlineSince')
+                        .lean();
+                    await (0, receiverPresence_1.syncReceiverPresenceInDatabase)(socketAccountId);
                     if (prev &&
                         !prev.isOnline &&
                         prev.isAvailable &&
+                        (0, socketRegistry_1.isReceiverSocketConnected)(socketAccountId) &&
                         prev.accountStatus === 'approved' &&
                         !prev.suspended) {
                         await (0, receiverAvailabilityNotifier_1.scheduleReceiverAvailabilityNotifications)(socketAccountId);
                     }
-                    await (0, callQueue_1.syncReceiverQueueState)(socketAccountId);
                 }
                 catch (e) {
                     const msg = e instanceof Error ? e.message : String(e);
@@ -239,12 +240,7 @@ function attachChatSocket(httpServer) {
                     if (hasActiveSocketForAccount(leavingType, leavingId))
                         return;
                     if (leavingType === 'r') {
-                        const recv = await Receiver_1.default.findById(leavingId).select('isAvailable').lean();
-                        // App backgrounded: keep queue/invites and DB presence while still "Go Online".
-                        if (recv?.isAvailable) {
-                            await (0, callQueue_1.syncReceiverQueueState)(leavingId);
-                            return;
-                        }
+                        await (0, receiverPresence_1.syncReceiverPresenceInDatabase)(leavingId);
                     }
                     waitingCallQueueAccounts.delete(queueKey(leavingType, leavingId));
                     if (leavingType === 'r') {
@@ -269,21 +265,8 @@ function attachChatSocket(httpServer) {
                     const stillConnected = hasActiveSocketForAccount('r', leavingId);
                     if (!stillConnected) {
                         void (async () => {
-                            const recv = await Receiver_1.default.findById(leavingId).select('isAvailable onlineSince').lean();
-                            if (recv?.isAvailable) {
-                                await (0, callQueue_1.syncReceiverQueueState)(leavingId);
-                                return;
-                            }
-                            const prev = await Receiver_1.default.findOneAndUpdate({ _id: leavingId }, { $set: { isOnline: false, onlineSince: null } }, { new: false }).select('onlineSince');
-                            if (prev?.onlineSince) {
-                                await (0, receiverScore_1.finalizeReceiverOnlineSession)({
-                                    receiverId: leavingId,
-                                    onlineSince: prev.onlineSince,
-                                    endedAt: new Date(),
-                                });
-                            }
+                            await (0, receiverPresence_1.syncReceiverPresenceInDatabase)(leavingId);
                             (0, callQueue_1.releaseReceiverReservation)(leavingId);
-                            await (0, callQueue_1.syncReceiverQueueState)(leavingId);
                         })();
                     }
                 }, 300);
@@ -644,8 +627,7 @@ function attachChatSocket(httpServer) {
                         ack?.({ ok: false, error: 'Cannot call this receiver right now.' });
                         return;
                     }
-                    const targetSocketOnline = hasActiveSocketForAccount('r', targetId);
-                    if (!targetSocketOnline && (!recv.isOnline || !recv.isAvailable)) {
+                    if (!hasActiveSocketForAccount('r', targetId)) {
                         ack?.({ ok: false, error: 'Receiver is offline right now.' });
                         return;
                     }
@@ -667,12 +649,12 @@ function attachChatSocket(httpServer) {
                     }
                 }
                 else {
-                    const recv = await Receiver_1.default.findById(myId).select('accountStatus suspended isAvailable isOnline');
+                    const recv = await Receiver_1.default.findById(myId).select('accountStatus suspended isAvailable');
                     if (!recv ||
                         recv.accountStatus !== 'approved' ||
                         recv.suspended ||
                         !recv.isAvailable ||
-                        !recv.isOnline) {
+                        !hasActiveSocketForAccount('r', myId)) {
                         ack?.({ ok: false, error: 'You are not available for calls right now.' });
                         return;
                     }

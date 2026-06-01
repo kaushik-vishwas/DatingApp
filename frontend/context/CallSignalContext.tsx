@@ -18,6 +18,8 @@ import {
 } from '../utils/callSounds';
 import {
   bindIncomingCallNotificationHandlers,
+  clearIncomingCallNotificationDedupe,
+  isAppInBackground,
   registerReceiverExpoPushToken,
   showIncomingCallNotification,
 } from '../utils/incomingCallNotifications';
@@ -659,6 +661,7 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
   const rejectIncomingCall = useCallback((req: IncomingCallRequest) => {
     void stopIncomingRingtonePlayback();
+    clearIncomingCallNotificationDedupe(req.callId);
     rejectedIncomingCallIdsRef.current.add(req.callId);
     if (activeIncomingCallUiCallIdRef.current === req.callId) {
       activeIncomingCallUiCallIdRef.current = null;
@@ -671,6 +674,7 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   const acceptIncomingCallStayOnScreen = useCallback(
     async (req: IncomingCallRequest): Promise<VoiceBootstrapResponse> => {
       await stopIncomingRingtonePlayback();
+      clearIncomingCallNotificationDedupe(req.callId);
       if (activeIncomingCallUiCallIdRef.current === req.callId) {
         activeIncomingCallUiCallIdRef.current = null;
       }
@@ -970,8 +974,10 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         if (userRoleRef.current === 'receiver') {
           activeIncomingCallUiCallIdRef.current = incoming.callId;
 
-          if (AppState.currentState !== 'active') {
+          if (isAppInBackground()) {
             void showIncomingCallNotification(incoming);
+          } else {
+            clearIncomingCallNotificationDedupe(incoming.callId);
           }
 
           void (async () => {
@@ -1091,6 +1097,7 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
       socket.on('call:ended', (payload: CallEndedPayload) => {
         if (payload.fromType === (userRoleRef.current === 'caller' ? 'u' : 'r')) return;
+        clearIncomingCallNotificationDedupe(payload.callId);
         peerCallHoldHandlerRef.current?.(payload.callId, false);
         seenIncomingCallIdsRef.current.delete(payload.callId);
         rejectedIncomingCallIdsRef.current.delete(payload.callId);

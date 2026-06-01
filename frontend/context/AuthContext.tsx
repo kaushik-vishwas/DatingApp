@@ -9,7 +9,7 @@ import React, {
 } from 'react';
 import { Alert } from 'react-native';
 import { io, type Socket } from 'socket.io-client';
-import { authApi, clearJwt, getJwt, getResolvedApiBaseUrl } from '../services/api';
+import { authApi, clearJwt, getJwt, getResolvedApiBaseUrl, profileApi } from '../services/api';
 import { markAuthWelcomeSeen } from '../services/authWelcomeStorage';
 import type { UserProfile } from '../types/user';
 
@@ -95,10 +95,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, []);
 
   const signOut = useCallback(async () => {
+    const role = user?.role;
+    if (role === 'receiver') {
+      try {
+        await profileApi.updateReceiverProfile({ isAvailable: false });
+      } catch {
+        // Best-effort: clear local session even if offline request fails.
+      }
+    }
     await clearJwt();
     setToken(null);
     setUser(null);
-  }, []);
+  }, [user?.role]);
 
   /** Single-device login: server emits when this account signs in elsewhere; older JWT `sv` is lower. */
   useEffect(() => {

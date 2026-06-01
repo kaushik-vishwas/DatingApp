@@ -9,6 +9,7 @@ const CallSession_1 = __importDefault(require("../models/CallSession"));
 const Receiver_1 = __importDefault(require("../models/Receiver"));
 const ReceiverAvailabilityNotification_1 = __importDefault(require("../models/ReceiverAvailabilityNotification"));
 const User_1 = __importDefault(require("../models/User"));
+const socketRegistry_1 = require("../socket/socketRegistry");
 const RECENT_CALL_WINDOW_DAYS = 14;
 const USER_RECEIVER_COOLDOWN_MS = 30 * 60 * 1000;
 const GROUP_WINDOW_MS = 20 * 1000;
@@ -68,12 +69,12 @@ async function scheduleReceiverAvailabilityNotifications(receiverId) {
     if (!mongoose_1.default.Types.ObjectId.isValid(receiverId))
         return;
     const rid = new mongoose_1.default.Types.ObjectId(receiverId);
-    const receiver = await Receiver_1.default.findById(rid).select('name accountStatus suspended isOnline isAvailable');
+    const receiver = await Receiver_1.default.findById(rid).select('name accountStatus suspended isAvailable');
     if (!receiver ||
         receiver.accountStatus !== 'approved' ||
         receiver.suspended ||
-        !receiver.isOnline ||
-        !receiver.isAvailable) {
+        !receiver.isAvailable ||
+        !(0, socketRegistry_1.isReceiverSocketConnected)(receiverId)) {
         return;
     }
     const since = new Date(Date.now() - RECENT_CALL_WINDOW_DAYS * 24 * 60 * 60 * 1000);

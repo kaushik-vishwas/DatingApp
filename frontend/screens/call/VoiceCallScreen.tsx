@@ -39,9 +39,15 @@ type StreamCallAvatarExtrasModule = {
   StreamParticipantVoiceWaves: React.ComponentType<{
     side: 'local' | 'remote';
     microphoneMuted?: boolean;
+    onHold?: boolean;
   }>;
-  StreamParticipantMutedIndicator: React.ComponentType;
+  StreamParticipantMutedIndicator: React.ComponentType<{ peerOnHold?: boolean }>;
   StreamTalkTimingBridge: React.ComponentType<{ onBothConnected: () => void }>;
+  StreamSystemHoldBridge: React.ComponentType<{
+    userMuted: boolean;
+    appInBackground: boolean;
+    onSystemHoldChange: (onHold: boolean) => void;
+  }>;
 };
 
 function loadStreamCallAvatarExtras(): StreamCallAvatarExtrasModule | null {
@@ -231,11 +237,13 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
   const [talkActive, setTalkActive] = useState(false);
   const [systemCallHold, setSystemCallHold] = useState(false);
   const [peerCallHold, setPeerCallHold] = useState(false);
+  const [appInBackground, setAppInBackground] = useState(AppState.currentState !== 'active');
   const [muted, setMuted] = useState(false);
   const [speakerOn, setSpeakerOn] = useState(true);
   const [liveSettledAmountInr, setLiveSettledAmountInr] = useState(0);
-  /** Receiver view: caller wallet after server sync (updates as call is billed). */
-  const [callerWalletBalanceInr, setCallerWalletBalanceInr] = useState<number | null>(null);
+  /** Caller wallet from server (both roles) — stays in sync as the call is billed. */
+  const [sessionCallerWalletInr, setSessionCallerWalletInr] = useState<number | null>(null);
+  const [sessionCallRatePerMinute, setSessionCallRatePerMinute] = useState<number | null>(null);
   const [ratingOpen, setRatingOpen] = useState(false);
   const [selectedRating, setSelectedRating] = useState(0);
   const [submittingRating, setSubmittingRating] = useState(false);
@@ -254,6 +262,9 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
   const endSessionPromiseRef = useRef<Promise<{ canRate: boolean; durationSec: number } | null> | null>(null);
   const elapsedSecRef = useRef(0);
   const talkActiveRef = useRef(false);
+  /** Server `talkStartedAt` — single source of truth so both sides show the same elapsed time. */
+  const talkAnchorMsRef = useRef<number | null>(null);
+  const syncTalkBurstInFlightRef = useRef(false);
   const callIdRef = useRef(getVoiceBootstrap(callParams)?.callId ?? '');
   useEffect(() => {
     const id = getVoiceBootstrap(callParams)?.callId;
@@ -312,24 +323,27 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
     user?.role === 'caller' && typeof user.walletBalance === 'number' && Number.isFinite(user.walletBalance)
       ? Math.max(0, user.walletBalance)
       : 0;
-  const callChargeRatePerMinute = getReceiverChargeRatePerMinute(callParams);
+  const callChargeRatePerMinute =
+    sessionCallRatePerMinute !== null
+      ? sessionCallRatePerMinute
+      : getReceiverChargeRatePerMinute(callParams);
   const walletForRemainingTalkSec =
-    user?.role === 'caller'
-      ? callerWalletInr
-      : callerWalletBalanceInr !== null
-        ? callerWalletBalanceInr
+    sessionCallerWalletInr !== null
+      ? sessionCallerWalletInr
+      : user?.role === 'caller'
+        ? callerWalletInr
         : 0;
   const initialRemainingTalkSec =
     callChargeRatePerMinute > 0
       ? Math.floor((walletForRemainingTalkSec / callChargeRatePerMinute) * 60)
       : 0;
   const remainingTalkSec = Math.max(0, initialRemainingTalkSec - elapsedSec);
+  const hasRemainingTalkWallet =
+    sessionCallerWalletInr !== null || (user?.role === 'caller' && callerWalletInr > 0);
   const showRemainingTalkCountdown =
     callChargeRatePerMinute > 0 &&
-    (user?.role === 'caller' ||
-      (user?.role === 'receiver' &&
-        callerWalletBalanceInr !== null &&
-        (ready || talkActive || Boolean(streamBootstrap))));
+    hasRemainingTalkWallet &&
+    (ready || talkActive || Boolean(streamBootstrap));
   const remainingTalkCountdownTitle =
     user?.role === 'receiver' ? "Caller's remaining talk time" : 'Remaining Talk Time';
 
@@ -339,6 +353,9 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
   const callerCanRateByDurationRef = useRef(callerCanRateByDuration);
   const userRoleRef = useRef(user?.role);
   const appStateRef = useRef(AppState.currentState);
+  const appInBackgroundRef = useRef(AppState.currentState !== 'active');
+  const holdForcedMicOffRef = useRef(false);
+  const userMutedBeforeHoldRef = useRef(false);
   const receiverAvailabilitySessionRef = useRef(receiverAvailabilitySession);
   const userAvailableRef = useRef(Boolean(user?.isAvailable));
   useEffect(() => {
@@ -356,28 +373,54 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
     userAvailableRef.current = Boolean(user?.isAvailable);
   }, [callerCanRateByDuration, user?.role, receiverAvailabilitySession, user?.isAvailable]);
 
-  const notifyPeerCallHold = useCallback(
+  const emitPeerCallHold = useCallback(
     (onHold: boolean) => {
       const callId = callIdRef.current.trim();
-      if (!callId || !readyRef.current || endingRef.current) return;
+      if (!callId || endingRef.current) return;
       emitCallHoldSignal(callId, onHold);
+      const signalSocket = signalSocketRef.current;
+      if (signalSocket?.connected) {
+        try {
+          signalSocket.emit('call:hold', { callId, onHold });
+        } catch {
+          // ignore
+        }
+      }
     },
     [emitCallHoldSignal]
   );
+
+  const systemCallHoldRef = useRef(false);
+  const applySystemCallHoldRef = useRef<(onHold: boolean) => void>(() => {});
+
+  const applySystemCallHold = useCallback(
+    (onHold: boolean) => {
+      if (systemCallHoldRef.current === onHold) return;
+      systemCallHoldRef.current = onHold;
+      setSystemCallHold(onHold);
+      emitPeerCallHold(onHold);
+    },
+    [emitPeerCallHold]
+  );
+  applySystemCallHoldRef.current = applySystemCallHold;
+
+  useEffect(() => {
+    systemCallHoldRef.current = systemCallHold;
+  }, [systemCallHold]);
 
   useEffect(() => {
     const sub = AppState.addEventListener('change', (nextState) => {
       appStateRef.current = nextState;
       const interrupted = nextState !== 'active';
-      if (interrupted && readyRef.current && !endingRef.current) {
-        setSystemCallHold(true);
-        notifyPeerCallHold(true);
+      appInBackgroundRef.current = interrupted;
+      setAppInBackground(interrupted);
+      if (interrupted && !endingRef.current && callIdRef.current.trim()) {
+        applySystemCallHold(true);
         return;
       }
-      if (!interrupted) {
-        setSystemCallHold(false);
-        notifyPeerCallHold(false);
-        if (readyRef.current && !endingRef.current) {
+      if (!interrupted && !endingRef.current) {
+        applySystemCallHold(false);
+        if (readyRef.current) {
           void applyVoiceCallAudioMode(speakerOn).catch(() => {
             // Best-effort audio route restore after interruption.
           });
@@ -385,7 +428,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
       }
     });
     return () => sub.remove();
-  }, [speakerOn, notifyPeerCallHold]);
+  }, [speakerOn, applySystemCallHold]);
 
   useEffect(() => {
     readyRef.current = ready;
@@ -399,43 +442,48 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
     };
   }, [messageEligibility, user?.role]);
 
-  const applyCallerWalletFromSession = (payload: {
+  const applySessionBillingFromServer = (payload: {
     callerWalletBalanceInr?: number;
+    callRatePerMinute?: number;
   }): void => {
-    if (user?.role !== 'receiver') return;
     if (
       typeof payload.callerWalletBalanceInr === 'number' &&
       Number.isFinite(payload.callerWalletBalanceInr)
     ) {
-      setCallerWalletBalanceInr(Math.max(0, payload.callerWalletBalanceInr));
+      setSessionCallerWalletInr(Math.max(0, payload.callerWalletBalanceInr));
+    }
+    if (typeof payload.callRatePerMinute === 'number' && Number.isFinite(payload.callRatePerMinute)) {
+      setSessionCallRatePerMinute(Math.max(0, payload.callRatePerMinute));
     }
   };
+
+  const updateElapsedFromAnchor = useCallback((): void => {
+    const anchorMs = talkAnchorMsRef.current;
+    if (anchorMs == null || !Number.isFinite(anchorMs)) return;
+    const next = Math.max(0, Math.floor((Date.now() - anchorMs) / 1000));
+    setElapsedSec(next);
+    elapsedSecRef.current = next;
+  }, []);
 
   const applyTalkTimingFromServer = (payload: {
     talkStartedAt?: string | null;
     talkActive?: boolean;
     durationSec?: number;
-  }): void => {
-    const active = Boolean(payload.talkActive) || Boolean(payload.talkStartedAt);
-    if (active) {
-      setTalkActive(true);
+  }): boolean => {
+    const startedAtRaw =
+      typeof payload.talkStartedAt === 'string' ? payload.talkStartedAt.trim() : '';
+    if (!startedAtRaw) {
+      return false;
     }
-    if (typeof payload.talkStartedAt === 'string' && payload.talkStartedAt.trim()) {
-      const anchorMs = new Date(payload.talkStartedAt).getTime();
-      if (Number.isFinite(anchorMs)) {
-        const fromAnchor = Math.max(0, Math.floor((Date.now() - anchorMs) / 1000));
-        setElapsedSec((prev) => Math.max(prev, fromAnchor));
-        return;
-      }
+    const anchorMs = new Date(startedAtRaw).getTime();
+    if (!Number.isFinite(anchorMs)) {
+      return false;
     }
-    if (
-      active &&
-      typeof payload.durationSec === 'number' &&
-      Number.isFinite(payload.durationSec) &&
-      payload.durationSec >= 0
-    ) {
-      setElapsedSec((prev) => (payload.durationSec! > prev ? payload.durationSec! : prev));
-    }
+    talkAnchorMsRef.current = anchorMs;
+    talkActiveRef.current = true;
+    setTalkActive(true);
+    updateElapsedFromAnchor();
+    return true;
   };
 
   const formatHms = (totalSec: number): string => {
@@ -445,6 +493,19 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
     const ss = String(safe % 60).padStart(2, '0');
     return `${hh}:${mm}:${ss}`;
   };
+
+  const remainingTalkCountdownEl = showRemainingTalkCountdown ? (
+    user?.role === 'receiver' ? (
+      <Text style={styles.remainingTalkCompact}>
+        {remainingTalkCountdownTitle} · {formatHms(remainingTalkSec)}
+      </Text>
+    ) : (
+      <View style={styles.countdownCard}>
+        <Text style={styles.countdownTitle}>{remainingTalkCountdownTitle}</Text>
+        <Text style={styles.countdownValue}>{formatHms(remainingTalkSec)}</Text>
+      </View>
+    )
+  ) : null;
 
   const ensureSessionEnded = async (): Promise<{ canRate: boolean; durationSec: number } | null> => {
     if (endedSessionRef.current) return endedSessionResultRef.current;
@@ -545,7 +606,10 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
     setClient(null);
     setCall(null);
     setTalkActive(false);
+    talkActiveRef.current = false;
+    talkAnchorMsRef.current = null;
     setElapsedSec(0);
+    elapsedSecRef.current = 0;
     setIncomingReq(null);
     setReceiverSessionPhase('waiting');
     (navigation as { replace: (name: 'VoiceCall', params: VoiceCallScreenParams) => void }).replace(
@@ -558,36 +622,43 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
 
   const allowAvailabilityLeaveRef = useRef(false);
 
-  const onReceiverGoOffline = () => {
+  /** Turn Go Online off and return home; optionally end an in-progress call first. */
+  const applyReceiverGoOffline = async (opts?: { endCallIfLive?: boolean }): Promise<void> => {
     if (goingOffline) return;
     setGoingOffline(true);
-    void (async () => {
-      try {
-        if (incomingReq) {
-          rejectIncomingCall(incomingReq);
-        }
-        const hasLiveCall =
-          Boolean(callIdRef.current.trim()) &&
-          (readyRef.current || talkActiveRef.current || Boolean(getVoiceBootstrap(callParams)));
-        if (hasLiveCall && !endingRef.current) {
-          endingRef.current = true;
-          emitCallEnd();
-          await leaveMedia();
-          void ensureSessionEnded();
-        }
-        await profileApi.updateReceiverProfile({ isAvailable: false });
-        await refreshUser();
-        allowAvailabilityLeaveRef.current = true;
-        (navigation as { navigate: (name: string, params?: object) => void }).navigate(
-          'ReceiverMainTabs',
-          { screen: 'ReceiverHome' }
-        );
-      } catch (e) {
-        Alert.alert('Could not go offline', getErrorMessage(e));
-      } finally {
-        setGoingOffline(false);
+    try {
+      if (incomingReq) {
+        rejectIncomingCall(incomingReq);
       }
-    })();
+      const endCallIfLive = opts?.endCallIfLive !== false;
+      const hasLiveCall =
+        Boolean(callIdRef.current.trim()) &&
+        (readyRef.current || talkActiveRef.current || Boolean(getVoiceBootstrap(callParams)));
+      if (endCallIfLive && hasLiveCall && !endingRef.current) {
+        endingRef.current = true;
+        emitCallEnd();
+        await leaveMedia();
+        void ensureSessionEnded();
+      }
+      await setQueueMode(false).catch(() => {
+        // ignore signaling failures
+      });
+      await profileApi.updateReceiverProfile({ isAvailable: false });
+      await refreshUser();
+      allowAvailabilityLeaveRef.current = true;
+      (navigation as { navigate: (name: string, params?: object) => void }).navigate(
+        'ReceiverMainTabs',
+        { screen: 'ReceiverHome' }
+      );
+    } catch (e) {
+      Alert.alert('Could not go offline', getErrorMessage(e));
+    } finally {
+      setGoingOffline(false);
+    }
+  };
+
+  const onReceiverGoOffline = (): void => {
+    void applyReceiverGoOffline({ endCallIfLive: true });
   };
 
   useEffect(() => {
@@ -921,13 +992,6 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
         const nextCall = nextClient.call(boot.callType, boot.callId);
         activeCallRef.current = nextCall;
 
-        const { data: startData } = await callApi.sessionStart(boot.callId, boot.peerAccountId);
-        if (cancelled || attemptId !== streamJoinAttemptRef.current) {
-          return;
-        }
-        applyTalkTimingFromServer(startData);
-        applyCallerWalletFromSession(startData);
-
         await nextCall.getOrCreate();
         if (cancelled || attemptId !== streamJoinAttemptRef.current) {
           return;
@@ -936,12 +1000,19 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
         if (cancelled || attemptId !== streamJoinAttemptRef.current) {
           return;
         }
-        void syncTalkTimingOnce();
+
+        const { data: startData } = await callApi.sessionStart(boot.callId, boot.peerAccountId);
+        if (cancelled || attemptId !== streamJoinAttemptRef.current) {
+          return;
+        }
+        applyTalkTimingFromServer(startData);
+        applySessionBillingFromServer(startData);
 
         setClient(nextClient);
         setCall(nextCall);
         setReady(true);
         setError(null);
+        void syncTalkTimingUntilBothJoined();
       } catch (e: unknown) {
         const msg = e instanceof Error ? e.message : 'Failed to join call';
         if (cancelled || attemptId !== streamJoinAttemptRef.current) {
@@ -988,13 +1059,18 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
         timeout: 20000,
       });
       signalSocketRef.current = socket;
+      socket.on('call:hold', (payload: { callId?: string; onHold?: boolean; fromType?: 'u' | 'r' }) => {
+        const myType = userRoleRef.current === 'caller' ? 'u' : 'r';
+        if (payload?.fromType === myType) return;
+        const id = typeof payload?.callId === 'string' ? payload.callId.trim() : '';
+        if (!id || id !== callIdRef.current.trim()) return;
+        setPeerCallHold(Boolean(payload.onHold));
+      });
       const onReconnectFailed = (): void => {
         if (!readyRef.current || endingRef.current) return;
         // Temporary app interruptions (e.g., mobile carrier call UI) should not tear down the app call.
         if (appStateRef.current !== 'active') {
-          setSystemCallHold(true);
-          const callId = callIdRef.current.trim();
-          if (callId) emitCallHoldSignal(callId, true);
+          applySystemCallHoldRef.current(true);
           return;
         }
         endingRef.current = true;
@@ -1036,13 +1112,13 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
     // Intentionally static: do not depend on callerCanRateByDuration (flips at 60s) or the socket will reconnect and drop the call.
   }, []);
 
-  const syncTalkTimingOnce = useCallback(async (): Promise<void> => {
-    if (!callIdRef.current || endingRef.current) return;
+  const syncTalkTimingOnce = useCallback(async (): Promise<boolean> => {
+    if (!callIdRef.current || endingRef.current) return false;
     try {
       const { data } = await callApi.sessionSync(callIdRef.current);
-      if (!data?.ok) return;
-      applyTalkTimingFromServer(data);
-      applyCallerWalletFromSession(data);
+      if (!data?.ok) return false;
+      const started = applyTalkTimingFromServer(data);
+      applySessionBillingFromServer(data);
       if (
         typeof data.receiverEarnedInr === 'number' &&
         Number.isFinite(data.receiverEarnedInr) &&
@@ -1053,34 +1129,54 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
       if (user?.role === 'receiver') {
         void refreshReceiverEarningMeta();
       }
+      return started;
     } catch {
       // Best-effort live settlement sync.
+      return false;
     }
-  }, [refreshReceiverEarningMeta, user?.role]);
+  }, [refreshReceiverEarningMeta, updateElapsedFromAnchor, user?.role]);
+
+  const syncTalkTimingUntilBothJoined = useCallback(async (): Promise<void> => {
+    if (talkActiveRef.current || syncTalkBurstInFlightRef.current) return;
+    syncTalkBurstInFlightRef.current = true;
+    try {
+      const pollMs = 80;
+      const maxAttempts = 30;
+      for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+        if (endingRef.current || talkActiveRef.current) return;
+        const started = await syncTalkTimingOnce();
+        if (started) return;
+        if (attempt < maxAttempts - 1) {
+          await new Promise((resolve) => setTimeout(resolve, pollMs));
+        }
+      }
+    } finally {
+      syncTalkBurstInFlightRef.current = false;
+    }
+  }, [syncTalkTimingOnce]);
 
   const beginTalkTimingLocal = useCallback((): void => {
-    if (talkActiveRef.current) return;
-    setTalkActive(true);
-    void syncTalkTimingOnce();
-  }, [syncTalkTimingOnce]);
+    void syncTalkTimingUntilBothJoined();
+  }, [syncTalkTimingUntilBothJoined]);
 
   const beginTalkTimingLocalRef = useRef(beginTalkTimingLocal);
   beginTalkTimingLocalRef.current = beginTalkTimingLocal;
 
   useEffect(() => {
     if (!ready || !talkActive) return;
-    const timer = setInterval(() => setElapsedSec((prev) => prev + 1), 1000);
+    updateElapsedFromAnchor();
+    const timer = setInterval(updateElapsedFromAnchor, 1000);
     return () => clearInterval(timer);
-  }, [ready, talkActive]);
+  }, [ready, talkActive, updateElapsedFromAnchor]);
+
+  useEffect(() => {
+    if (!ready || endingRef.current || talkActiveRef.current) return;
+    void syncTalkTimingUntilBothJoined();
+  }, [ready, syncTalkTimingUntilBothJoined]);
 
   useEffect(() => {
     if (!ready || endingRef.current) return;
-    void syncTalkTimingOnce();
-  }, [ready, syncTalkTimingOnce]);
-
-  useEffect(() => {
-    if (!ready || endingRef.current) return;
-    const pollMs = talkActive ? 5000 : 200;
+    const pollMs = talkActive ? 5000 : 100;
     const poll = setInterval(() => {
       if (endingRef.current) return;
       void syncTalkTimingOnce();
@@ -1132,6 +1228,15 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
     await leaveMedia();
     void ensureSessionEnded();
 
+    if (user?.role === 'receiver') {
+      const onActiveCall =
+        talkActive || ready || Boolean(getVoiceBootstrap(callParams as VoiceCallScreenParams));
+      if (onActiveCall) {
+        await applyReceiverGoOffline({ endCallIfLive: false });
+        return;
+      }
+    }
+
     if (receiverAvailabilitySession && Boolean(user?.isAvailable)) {
       resetReceiverToWaiting();
       return;
@@ -1150,29 +1255,82 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
     }
   };
 
-  const toggleMute = async () => {
-    try {
+  const setStreamMicEnabled = useCallback(
+    async (enabled: boolean): Promise<void> => {
       if (!call) {
-        setMuted((m) => !m);
+        setMuted(!enabled);
         return;
       }
-      const mic = (call as any).microphone;
-      if (mic?.disable && !muted) {
-        await mic.disable();
-        setMuted(true);
-      } else if (mic?.enable && muted) {
+      const mic = (call as {
+        microphone?: {
+          enable?: () => Promise<void>;
+          disable?: () => Promise<void>;
+          toggle?: () => Promise<void>;
+        };
+      }).microphone;
+      if (enabled && mic?.enable) {
         await mic.enable();
         setMuted(false);
+      } else if (!enabled && mic?.disable) {
+        await mic.disable();
+        setMuted(true);
       } else if (mic?.toggle) {
-        await mic.toggle();
-        setMuted((m) => !m);
+        if (enabled !== !muted) await mic.toggle();
+        setMuted(!enabled);
       } else {
-        setMuted((m) => !m);
+        setMuted(!enabled);
       }
+    },
+    [call]
+  );
+
+  useEffect(() => {
+    if (!systemCallHold) {
+      if (holdForcedMicOffRef.current) {
+        holdForcedMicOffRef.current = false;
+        if (!userMutedBeforeHoldRef.current) {
+          void setStreamMicEnabled(true).catch(() => {
+            // ignore restore errors
+          });
+        }
+      }
+      return;
+    }
+    if (!holdForcedMicOffRef.current) {
+      userMutedBeforeHoldRef.current = muted;
+      holdForcedMicOffRef.current = true;
+      if (!muted) {
+        void setStreamMicEnabled(false).catch(() => {
+          // ignore
+        });
+      }
+    }
+  }, [systemCallHold, muted, setStreamMicEnabled]);
+
+  const toggleMute = async () => {
+    if (systemCallHold) return;
+    try {
+      await setStreamMicEnabled(!muted);
     } catch (e) {
       Alert.alert('Mute failed', getErrorMessage(e));
     }
   };
+
+  const handleStreamSystemHold = useCallback(
+    (onHold: boolean) => {
+      if (endingRef.current) return;
+      if (onHold) {
+        if (!appInBackgroundRef.current) {
+          applySystemCallHold(true);
+        }
+        return;
+      }
+      if (!appInBackgroundRef.current) {
+        applySystemCallHold(false);
+      }
+    },
+    [applySystemCallHold]
+  );
 
   const showStreamChrome = ready && Boolean(client) && Boolean(call) && Boolean(sdk);
   const streamAvatarExtras = useMemo(
@@ -1235,6 +1393,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
       !shellPeerEmpty && shellPeerImage ? resolveProfileImageSource(shellPeerImage) : null;
     const peerInitial = (shellPeerName || 'U').trim().charAt(0).toUpperCase();
     const showPeerPulse =
+      !peerCallHold &&
       receiverAvailabilitySession &&
       (receiverSessionPhase === 'incoming' || Boolean(streamBootstrap));
 
@@ -1306,12 +1465,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
           {receiverAvailabilitySession && streamBootstrap && !talkActive ? (
             <Text style={styles.waitingHint}>Someone will join soon..s</Text>
           ) : null}
-          {showRemainingTalkCountdown ? (
-            <View style={styles.countdownCard}>
-              <Text style={styles.countdownTitle}>{remainingTalkCountdownTitle}</Text>
-              <Text style={styles.countdownValue}>{formatHms(remainingTalkSec)}</Text>
-            </View>
-          ) : null}
+          {remainingTalkCountdownEl}
           {shellShowIncomingActions && incomingReq ? (
             <View style={styles.incomingActions}>
               <TouchableOpacity
@@ -1488,17 +1642,31 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
               onBothConnected={() => beginTalkTimingLocalRef.current()}
             />
           ) : null}
+          {streamAvatarExtras ? (
+            <streamAvatarExtras.StreamSystemHoldBridge
+              userMuted={muted}
+              appInBackground={appInBackground}
+              onSystemHoldChange={handleStreamSystemHold}
+            />
+          ) : null}
           <View style={[styles.overlay, { paddingTop: Math.max(insets.top + 16, 36) }]}>
             <View style={styles.statusPill}>
               <Text style={styles.statusText}>
-                {systemCallHold ? 'On hold · phone call in progress' : 'Call Active'}
+                {systemCallHold
+                  ? 'On hold · phone call in progress'
+                  : peerCallHold
+                    ? `${peerDisplayName} is on hold`
+                    : 'Call Active'}
               </Text>
             </View>
             <View style={styles.avatarRow}>
               <View style={styles.avatarCol}>
                 <View style={styles.avatarRingHost}>
                   {streamAvatarExtras ? (
-                    <streamAvatarExtras.StreamParticipantVoiceWaves side="remote" />
+                    <streamAvatarExtras.StreamParticipantVoiceWaves
+                      side="remote"
+                      onHold={peerCallHold}
+                    />
                   ) : null}
                   <View style={styles.avatarWrap}>
                     {(() => {
@@ -1516,7 +1684,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
                       );
                     })()}
                     {streamAvatarExtras ? (
-                      <streamAvatarExtras.StreamParticipantMutedIndicator />
+                      <streamAvatarExtras.StreamParticipantMutedIndicator peerOnHold={peerCallHold} />
                     ) : null}
                   </View>
                 </View>
@@ -1529,7 +1697,8 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
                   {streamAvatarExtras ? (
                     <streamAvatarExtras.StreamParticipantVoiceWaves
                       side="local"
-                      microphoneMuted={muted}
+                      microphoneMuted={muted || systemCallHold}
+                      onHold={systemCallHold}
                     />
                   ) : null}
                   <View style={styles.avatarWrap}>
@@ -1575,12 +1744,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
                 <Text style={styles.durationValue}>Connecting…</Text>
               </>
             )}
-            {showRemainingTalkCountdown ? (
-              <View style={styles.countdownCard}>
-                <Text style={styles.countdownTitle}>{remainingTalkCountdownTitle}</Text>
-                <Text style={styles.countdownValue}>{formatHms(remainingTalkSec)}</Text>
-              </View>
-            ) : null}
+            {remainingTalkCountdownEl}
             {showLiveEarning ? (
               <LinearGradient
                 colors={['#5b21b6', '#7c3aed', '#a78bfa']}
@@ -1817,6 +1981,15 @@ const styles = StyleSheet.create({
   },
   countdownTitle: { color: '#c4b5fd', fontSize: 11, fontWeight: '700' },
   countdownValue: { color: '#faf5ff', fontSize: 28, fontWeight: '900', marginTop: 2 },
+  remainingTalkCompact: {
+    marginTop: 4,
+    marginBottom: 0,
+    color: '#c4b5fd',
+    fontSize: 11,
+    fontWeight: '600',
+    textAlign: 'center',
+    opacity: 0.92,
+  },
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(46, 16, 101, 0.55)',
