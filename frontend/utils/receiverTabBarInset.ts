@@ -3,21 +3,20 @@ import { Platform, type ViewStyle } from 'react-native';
 
 /**
  * Extra space below scroll/list content so the last row clears the tab bar.
- * Increase if content still sits under the bar on your device.
  */
 export const RECEIVER_TAB_SCROLL_EXTRA = 28;
 
 /**
- * Visual-only tab bar styles. Do NOT set `height` or `paddingBottom` here —
- * React Navigation adds safe-area padding itself; duplicating it breaks
- * `useBottomTabBarHeight()` and causes content to slide under the bar.
+ * Tab bar styles for caller/receiver main tabs.
+ * Do not set a fixed `height` or manual `paddingBottom` — React Navigation applies
+ * bottom safe-area inset itself; a fixed height (e.g. 110) plus edge-to-edge on
+ * Android APK leaves an empty strip under the tab icons.
  */
-export function getReceiverTabBarStyle(): ViewStyle {
+export function useAppTabBarStyle(): ViewStyle {
   return {
     backgroundColor: '#fff',
     borderTopColor: '#ececec',
     borderTopWidth: 1,
-    height: 110,
     paddingTop: Platform.OS === 'ios' ? 6 : 8,
   };
 }

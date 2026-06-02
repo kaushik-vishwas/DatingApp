@@ -375,6 +375,14 @@ export function ensureIncomingCallNotificationInfrastructure(): () => void {
         void checkLastNotificationResponse();
         setTimeout(() => void checkLastNotificationResponse(), 400);
         setTimeout(() => void checkLastNotificationResponse(), 1200);
+        // Some Android builds deliver tap intent URL without response callback (drawer-tap path).
+        void Linking.getInitialURL().then((url) => {
+          if (!url) return;
+          const fromUrl = parseIncomingCallDeepLink(url);
+          if (!fromUrl) return;
+          void dismissIncomingCallNotification(fromUrl.callId);
+          dispatchIncomingOpen(fromUrl);
+        });
         flushPendingOpens();
       }
     };

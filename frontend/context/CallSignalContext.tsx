@@ -196,6 +196,7 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   const pendingInviteOutcomeRef = useRef<Map<string, InviteOutcomeWaiter>>(new Map());
   const seenIncomingCallIdsRef = useRef<Map<string, number>>(new Map());
   const rejectedIncomingCallIdsRef = useRef<Set<string>>(new Set());
+  const acceptedIncomingCallIdsRef = useRef<Set<string>>(new Set());
   const activeIncomingCallUiCallIdRef = useRef<string | null>(null);
   const incomingBootstrapByCallIdRef = useRef<Map<string, VoiceBootstrapResponse>>(new Map());
   const incomingBootstrapPromiseByCallIdRef = useRef<Map<string, Promise<VoiceBootstrapResponse>>>(new Map());
@@ -675,6 +676,7 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     async (req: IncomingCallRequest): Promise<VoiceBootstrapResponse> => {
       await stopIncomingRingtonePlayback();
       clearIncomingCallNotificationDedupe(req.callId);
+      acceptedIncomingCallIdsRef.current.add(req.callId);
       if (activeIncomingCallUiCallIdRef.current === req.callId) {
         activeIncomingCallUiCallIdRef.current = null;
       }
@@ -709,6 +711,7 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   const acceptIncomingCall = useCallback(
     async (req: IncomingCallRequest): Promise<void> => {
       await stopIncomingRingtonePlayback();
+      acceptedIncomingCallIdsRef.current.add(req.callId);
       if (activeIncomingCallUiCallIdRef.current === req.callId) {
         activeIncomingCallUiCallIdRef.current = null;
       }
@@ -936,6 +939,9 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
       socket.on('call:incoming', (payload: CallIncomingPayload) => {
         if (payload.fromType === (userRoleRef.current === 'caller' ? 'u' : 'r')) return;
+        if (acceptedIncomingCallIdsRef.current.has(payload.callId)) {
+          return;
+        }
         if (rejectedIncomingCallIdsRef.current.has(payload.callId)) {
           socket.emit('call:response', { callId: payload.callId, accepted: false });
           return;
@@ -1036,7 +1042,7 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
       socket.on('call:response', (payload: CallResponsePayload) => {
         if (payload.fromType === (userRoleRef.current === 'caller' ? 'u' : 'r')) return;
-        if (payload.accepted) {
+        if (payload.accepted && userRoleRef.current === 'caller') {
           seenIncomingCallIdsRef.current.delete(payload.callId);
           rejectedIncomingCallIdsRef.current.delete(payload.callId);
         }
@@ -1101,6 +1107,7 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         peerCallHoldHandlerRef.current?.(payload.callId, false);
         seenIncomingCallIdsRef.current.delete(payload.callId);
         rejectedIncomingCallIdsRef.current.delete(payload.callId);
+        acceptedIncomingCallIdsRef.current.delete(payload.callId);
         clearOutgoingCallSessionRef.current(payload.callId);
 
         const onVoiceCallScreen = Boolean(remoteCallEndedHandlerRef.current);

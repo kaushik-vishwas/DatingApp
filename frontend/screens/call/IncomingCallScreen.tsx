@@ -1,6 +1,6 @@
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Animated, Image, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Animated, AppState, Image, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -91,10 +91,11 @@ export default function IncomingCallScreen({ navigation, route }: Props): React.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [responding]);
 
-  // Auto-accept if receiver does not act within 5 seconds.
+  // Auto-accept only while app is active (never from background).
   useEffect(() => {
+    if (AppState.currentState !== 'active') return;
     const timeout = setTimeout(() => {
-      if (!responding && !respondedRef.current) {
+      if (AppState.currentState === 'active' && !responding && !respondedRef.current) {
         void onAccept();
       }
     }, AUTO_ACCEPT_MS);

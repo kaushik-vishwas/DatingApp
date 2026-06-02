@@ -1,7 +1,7 @@
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Ionicons } from '@expo/vector-icons';
 import React from 'react';
-import { getReceiverTabBarStyle } from '../utils/receiverTabBarInset';
+import { useAppTabBarStyle } from '../utils/receiverTabBarInset';
 
 import ReceiverHomeDashboard from '../screens/ReceiverHomeDashboard';
 import ReceiverPaymentTabScreen from '../screens/receiver/tabs/ReceiverPaymentTabScreen';
@@ -15,6 +15,7 @@ const TAB_PURPLE = '#7b2cff';
 const TAB_INACTIVE = '#9ca3af';
 
 export default function ReceiverMainTabsNavigator(): React.JSX.Element {
+  const tabBarStyle = useAppTabBarStyle();
   return (
     <Tab.Navigator
       initialRouteName="ReceiverHome"
@@ -22,7 +23,7 @@ export default function ReceiverMainTabsNavigator(): React.JSX.Element {
         headerShown: false,
         tabBarActiveTintColor: TAB_PURPLE,
         tabBarInactiveTintColor: TAB_INACTIVE,
-        tabBarStyle: getReceiverTabBarStyle(),
+        tabBarStyle,
         tabBarLabelStyle: { fontSize: 11, fontWeight: '700' },
       }}
     >

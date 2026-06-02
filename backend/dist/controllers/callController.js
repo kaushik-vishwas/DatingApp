@@ -57,6 +57,14 @@ const callQueue_2 = require("../services/callQueue");
 function roundInr(n) {
     return Math.round(n * 100) / 100;
 }
+async function readCallerWalletBalanceInr(callerId) {
+    if (!mongoose_1.default.Types.ObjectId.isValid(callerId))
+        return 0;
+    const callerDoc = await User_1.default.findById(callerId).select('walletBalance').lean();
+    return typeof callerDoc?.walletBalance === 'number' && Number.isFinite(callerDoc.walletBalance)
+        ? roundInr(Math.max(0, callerDoc.walletBalance))
+        : 0;
+}
 function sleep(ms) {
     return new Promise((resolve) => {
         setTimeout(resolve, ms);
@@ -449,19 +457,12 @@ const startVoiceSession = async (req, res) => {
             },
         }, { upsert: true, setDefaultsOnInsert: true });
         const session = await recordVoiceParticipantJoined(callId, accountKind);
-        let callerWalletBalanceInr;
-        if (accountKind === 'receiver') {
-            const callerDoc = await User_1.default.findById(callerId).select('walletBalance').lean();
-            callerWalletBalanceInr =
-                typeof callerDoc?.walletBalance === 'number' && Number.isFinite(callerDoc.walletBalance)
-                    ? roundInr(Math.max(0, callerDoc.walletBalance))
-                    : 0;
-        }
+        const callerWalletBalanceInr = await readCallerWalletBalanceInr(callerId);
         res.status(200).json({
             ok: true,
             ...callTalkApiFields(session),
             callRatePerMinute: ratePerMinute,
-            ...(callerWalletBalanceInr !== undefined ? { callerWalletBalanceInr } : {}),
+            callerWalletBalanceInr,
         });
     }
     catch (err) {
@@ -566,14 +567,7 @@ const syncVoiceSession = async (req, res) => {
         const settled = await settleCallSession(callId, false);
         const latest = await CallSession_1.default.findOne({ callId });
         const talkFields = callTalkApiFields((latest ?? current));
-        let callerWalletBalanceInr;
-        if (accountKind === 'receiver') {
-            const callerDoc = await User_1.default.findById(current.callerId).select('walletBalance').lean();
-            callerWalletBalanceInr =
-                typeof callerDoc?.walletBalance === 'number' && Number.isFinite(callerDoc.walletBalance)
-                    ? roundInr(Math.max(0, callerDoc.walletBalance))
-                    : 0;
-        }
+        const callerWalletBalanceInr = await readCallerWalletBalanceInr(String(current.callerId));
         res.status(200).json({
             ok: true,
             durationSec: settled.durationSec,
@@ -582,7 +576,7 @@ const syncVoiceSession = async (req, res) => {
             canRate: settled.durationSec >= exports.MISSED_OR_INCOMPLETE_MAX_SEC,
             status: settled.status,
             callRatePerMinute: Math.max(0, Number((latest ?? current).ratePerMinute) || 0),
-            ...(callerWalletBalanceInr !== undefined ? { callerWalletBalanceInr } : {}),
+            callerWalletBalanceInr,
             ...talkFields,
         });
     }

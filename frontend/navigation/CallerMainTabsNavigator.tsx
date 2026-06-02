@@ -1,7 +1,7 @@
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Ionicons } from '@expo/vector-icons';
 import React from 'react';
-import { getReceiverTabBarStyle } from '../utils/receiverTabBarInset';
+import { useAppTabBarStyle } from '../utils/receiverTabBarInset';
 import { useCallerAlertsTabBadge } from '../hooks/useCallerAlertsTabBadge';
 
 import CallerDiscoverHome from '../screens/CallerDiscoverHome';
@@ -17,6 +17,7 @@ const TAB_INACTIVE = '#9ca3af';
 
 export default function CallerMainTabsNavigator(): React.JSX.Element {
   const { badge: alertsBadge, clearBadge: clearAlertsBadge } = useCallerAlertsTabBadge();
+  const tabBarStyle = useAppTabBarStyle();
 
   return (
     <Tab.Navigator
@@ -25,7 +26,7 @@ export default function CallerMainTabsNavigator(): React.JSX.Element {
         headerShown: false,
         tabBarActiveTintColor: TAB_PURPLE,
         tabBarInactiveTintColor: TAB_INACTIVE,
-        tabBarStyle: getReceiverTabBarStyle(),
+        tabBarStyle,
         tabBarLabelStyle: { fontSize: 11, fontWeight: '700' },
       }}
     >
