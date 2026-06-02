@@ -11,12 +11,15 @@ export type IncomingCallNotificationPayload = {
 };
 
 const INCOMING_CALL_CHANNEL_ID = 'incoming_calls';
+const INCOMING_CALL_NOTIFICATION_ID_PREFIX = 'incoming-';
 export const INCOMING_CALL_DEEP_LINK_PREFIX = 'nestham://incoming-call/';
 
 let setupDone = false;
 let infrastructureReady = false;
 const notifiedCallIds = new Set<string>();
-const handledNotificationResponseKeys = new Set<string>();
+/** Short debounce so listener + app-active + Linking do not triple-navigate. */
+const lastHandledTapAtByCallId = new Map<string, number>();
+const TAP_DEDUPE_MS = 2000;
 let openHandler: ((incoming: IncomingCallNotificationPayload) => void) | null = null;
 const pendingOpens = new Map<string, IncomingCallNotificationPayload>();
 
@@ -84,10 +87,38 @@ export function parseIncomingCallDeepLink(url: string): IncomingCallNotification
   };
 }
 
+function parseCallIdFromNotificationIdentifier(identifier: string | undefined): string | null {
+  const id = identifier?.trim() ?? '';
+  if (!id.startsWith(INCOMING_CALL_NOTIFICATION_ID_PREFIX)) return null;
+  const callId = id.slice(INCOMING_CALL_NOTIFICATION_ID_PREFIX.length).trim();
+  return callId || null;
+}
+
+function parseJsonRecord(raw: string): Record<string, unknown> | null {
+  const trimmed = raw.trim();
+  if (!trimmed.startsWith('{')) return null;
+  try {
+    const parsed: unknown = JSON.parse(trimmed);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 function parseIncomingFromData(
   data: Record<string, unknown> | undefined
 ): IncomingCallNotificationPayload | null {
-  if (!data || data.type !== 'call_incoming') return null;
+  if (!data) return null;
+  if (data.type !== 'call_incoming') {
+    const payloadRaw = typeof data.payload === 'string' ? data.payload : '';
+    if (payloadRaw) {
+      const parsed = parseJsonRecord(payloadRaw);
+      if (parsed) return parseIncomingFromData(parsed);
+    }
+    return null;
+  }
   const callId = typeof data.callId === 'string' ? data.callId.trim() : '';
   const fromId = typeof data.fromId === 'string' ? data.fromId.trim() : '';
   if (!callId) return null;
@@ -130,7 +161,48 @@ function parseIncomingFromNotificationContent(
   content: { data?: Record<string, unknown> } | undefined
 ): IncomingCallNotificationPayload | null {
   const data = content?.data as Record<string, unknown> | undefined;
-  return parseIncomingFromData(data) ?? parseIncomingFromUrlField(data);
+  const fromData = parseIncomingFromData(data) ?? parseIncomingFromUrlField(data);
+  if (fromData) return fromData;
+
+  const dataString =
+    typeof data?.dataString === 'string'
+      ? data.dataString
+      : typeof (content as { dataString?: string } | undefined)?.dataString === 'string'
+        ? (content as { dataString?: string }).dataString
+        : '';
+  if (dataString) {
+    const parsed = parseJsonRecord(dataString);
+    if (parsed) {
+      return parseIncomingFromData(parsed) ?? parseIncomingFromUrlField(parsed);
+    }
+  }
+  return null;
+}
+
+function parseIncomingFromNotificationRequest(request: {
+  identifier?: string;
+  content?: { data?: Record<string, unknown> };
+}): IncomingCallNotificationPayload | null {
+  const fromContent = parseIncomingFromNotificationContent(request.content);
+  if (fromContent) return fromContent;
+
+  const callId = parseCallIdFromNotificationIdentifier(request.identifier);
+  if (!callId) return null;
+
+  const data = request.content?.data as Record<string, unknown> | undefined;
+  const fromType: 'u' | 'r' = data?.fromType === 'r' ? 'r' : 'u';
+  const fromId = typeof data?.fromId === 'string' ? data.fromId.trim() : '';
+  const peerName =
+    typeof data?.peerName === 'string' && data.peerName.trim()
+      ? data.peerName.trim()
+      : 'Caller';
+  const peerImage =
+    typeof data?.peerImage === 'string'
+      ? data.peerImage
+      : data?.peerImage === null
+        ? null
+        : undefined;
+  return { callId, fromType, fromId, peerName, peerImage };
 }
 
 function queuePendingOpen(incoming: IncomingCallNotificationPayload): void {
@@ -146,6 +218,14 @@ function flushPendingOpens(): void {
   }
 }
 
+function shouldSkipDuplicateTap(callId: string): boolean {
+  const now = Date.now();
+  const last = lastHandledTapAtByCallId.get(callId) ?? 0;
+  if (now - last < TAP_DEDUPE_MS) return true;
+  lastHandledTapAtByCallId.set(callId, now);
+  return false;
+}
+
 function dispatchIncomingOpen(incoming: IncomingCallNotificationPayload): void {
   const merged: IncomingCallNotificationPayload = {
     callId: incoming.callId.trim(),
@@ -155,6 +235,7 @@ function dispatchIncomingOpen(incoming: IncomingCallNotificationPayload): void {
     peerImage: incoming.peerImage ?? null,
   };
   if (!merged.callId) return;
+  if (shouldSkipDuplicateTap(merged.callId)) return;
   if (openHandler) {
     openHandler(merged);
     return;
@@ -162,32 +243,48 @@ function dispatchIncomingOpen(incoming: IncomingCallNotificationPayload): void {
   queuePendingOpen(merged);
 }
 
+function openIncomingFromNotificationTap(incoming: IncomingCallNotificationPayload): void {
+  void dismissIncomingCallNotification(incoming.callId);
+  if (!openHandler && Platform.OS === 'android') {
+    void Linking.openURL(incomingCallDeepLink(incoming)).catch(() => {});
+  }
+  dispatchIncomingOpen(incoming);
+}
+
+const MAX_NOTIFICATION_TAP_AGE_MS = 5 * 60 * 1000;
+
+function isNotificationResponseFresh(
+  response: import('expo-notifications').NotificationResponse
+): boolean {
+  const date = response.notification?.date;
+  if (date == null) return true;
+  const ms = date instanceof Date ? date.getTime() : Number(date);
+  if (!Number.isFinite(ms)) return true;
+  return Date.now() - ms < MAX_NOTIFICATION_TAP_AGE_MS;
+}
+
 async function processNotificationResponse(
   Notifications: typeof import('expo-notifications'),
   response: import('expo-notifications').NotificationResponse | null
 ): Promise<void> {
   if (!response) return;
-  const notificationId =
-    typeof response.notification?.request?.identifier === 'string'
-      ? response.notification.request.identifier
-      : '';
   const actionId = response.actionIdentifier;
   const defaultAction =
     Notifications.DEFAULT_ACTION_IDENTIFIER ?? 'expo.modules.notifications.actions.DEFAULT';
   if (actionId && actionId !== defaultAction) return;
 
-  const incoming = parseIncomingFromNotificationContent(
-    response.notification.request.content as { data?: Record<string, unknown> }
-  );
-  if (!incoming) return;
-  const responseKey = `${notificationId}:${incoming.callId}:${actionId ?? defaultAction}`;
-  if (handledNotificationResponseKeys.has(responseKey)) {
+  if (!isNotificationResponseFresh(response)) {
+    if (typeof Notifications.clearLastNotificationResponseAsync === 'function') {
+      void Notifications.clearLastNotificationResponseAsync().catch(() => {});
+    }
     return;
   }
-  handledNotificationResponseKeys.add(responseKey);
-  await dismissIncomingCallNotification(incoming.callId);
-  dispatchIncomingOpen(incoming);
-  // Avoid replaying the same "last response" on future app-active transitions.
+
+  const incoming = parseIncomingFromNotificationRequest(response.notification.request);
+  if (!incoming) return;
+
+  openIncomingFromNotificationTap(incoming);
+
   if (typeof Notifications.clearLastNotificationResponseAsync === 'function') {
     void Notifications.clearLastNotificationResponseAsync().catch(() => {});
   }
@@ -198,6 +295,14 @@ async function checkLastNotificationResponse(): Promise<void> {
   if (!Notifications) return;
   const last = await Notifications.getLastNotificationResponseAsync();
   await processNotificationResponse(Notifications, last);
+}
+
+/** Call after navigation + call-signal handlers are ready (receiver signed in). */
+export function consumePendingNotificationTap(): void {
+  flushPendingOpens();
+  void checkLastNotificationResponse();
+  setTimeout(() => void checkLastNotificationResponse(), 250);
+  setTimeout(() => void checkLastNotificationResponse(), 900);
 }
 
 export async function ensureIncomingCallNotificationSetup(): Promise<void> {
@@ -251,15 +356,26 @@ async function ensureNotificationPermission(): Promise<boolean> {
   return requested.status === 'granted';
 }
 
-function buildNotificationData(incoming: IncomingCallNotificationPayload): Record<string, unknown> {
+/** Android delivers notification `data` reliably only when values are strings. */
+function buildNotificationData(incoming: IncomingCallNotificationPayload): Record<string, string> {
+  const url = incomingCallDeepLink(incoming);
   return {
     type: 'call_incoming',
     callId: incoming.callId,
     fromId: incoming.fromId,
     fromType: incoming.fromType,
     peerName: incoming.peerName,
-    peerImage: incoming.peerImage ?? null,
-    url: incomingCallDeepLink(incoming),
+    peerImage: incoming.peerImage ?? '',
+    url,
+    payload: JSON.stringify({
+      type: 'call_incoming',
+      callId: incoming.callId,
+      fromId: incoming.fromId,
+      fromType: incoming.fromType,
+      peerName: incoming.peerName,
+      peerImage: incoming.peerImage ?? null,
+      url,
+    }),
   };
 }
 
@@ -279,7 +395,7 @@ export async function showIncomingCallNotification(
     if (!(await ensureNotificationPermission())) return;
 
     await Notifications.scheduleNotificationAsync({
-      identifier: `incoming-${callId}`,
+      identifier: `${INCOMING_CALL_NOTIFICATION_ID_PREFIX}${callId}`,
       content: {
         title: 'Incoming call',
         body: `${incoming.peerName} is calling you`,
@@ -289,8 +405,9 @@ export async function showIncomingCallNotification(
         ...(Platform.OS === 'android'
           ? {
               channelId: INCOMING_CALL_CHANNEL_ID,
-              sticky: true,
-              autoDismiss: false,
+              // Sticky notifications are harder to open from the drawer on some OEMs (Samsung).
+              sticky: false,
+              autoDismiss: true,
             }
           : {}),
       },
@@ -309,7 +426,7 @@ export async function dismissIncomingCallNotification(callId?: string): Promise<
   try {
     const Notifications = await loadNotificationsModule();
     if (!Notifications || !id) return;
-    await Notifications.dismissNotificationAsync(`incoming-${id}`);
+    await Notifications.dismissNotificationAsync(`${INCOMING_CALL_NOTIFICATION_ID_PREFIX}${id}`);
   } catch {
     // ignore
   }
@@ -377,9 +494,7 @@ export function ensureIncomingCallNotificationInfrastructure(): () => void {
     });
 
     receivedSub = Notifications.addNotificationReceivedListener((notification) => {
-      const incoming = parseIncomingFromNotificationContent(
-        notification.request.content as { data?: Record<string, unknown> }
-      );
+      const incoming = parseIncomingFromNotificationRequest(notification.request);
       if (!incoming || !isAppInBackground()) return;
       void showIncomingCallNotification(incoming);
     });
@@ -389,14 +504,6 @@ export function ensureIncomingCallNotificationInfrastructure(): () => void {
         void checkLastNotificationResponse();
         setTimeout(() => void checkLastNotificationResponse(), 400);
         setTimeout(() => void checkLastNotificationResponse(), 1200);
-        // Some Android builds deliver tap intent URL without response callback (drawer-tap path).
-        void Linking.getInitialURL().then((url) => {
-          if (!url) return;
-          const fromUrl = parseIncomingCallDeepLink(url);
-          if (!fromUrl) return;
-          void dismissIncomingCallNotification(fromUrl.callId);
-          dispatchIncomingOpen(fromUrl);
-        });
         flushPendingOpens();
       }
     };
@@ -405,8 +512,7 @@ export function ensureIncomingCallNotificationInfrastructure(): () => void {
     const onUrl = (event: { url: string }): void => {
       const fromUrl = parseIncomingCallDeepLink(event.url);
       if (!fromUrl) return;
-      void dismissIncomingCallNotification(fromUrl.callId);
-      dispatchIncomingOpen(fromUrl);
+      openIncomingFromNotificationTap(fromUrl);
     };
     linkingSub = Linking.addEventListener('url', onUrl);
     void Linking.getInitialURL().then((url) => {
@@ -444,8 +550,7 @@ export function bindIncomingCallNotificationHandlers(
 
   ensureIncomingCallNotificationInfrastructure();
   openHandler = onOpenIncoming;
-  flushPendingOpens();
-  void checkLastNotificationResponse();
+  consumePendingNotificationTap();
 
   return () => {
     openHandler = null;

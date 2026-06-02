@@ -45,6 +45,7 @@ type StreamCallAvatarExtrasModule = {
   StreamTalkTimingBridge: React.ComponentType<{ onBothConnected: () => void }>;
   StreamSystemHoldBridge: React.ComponentType<{
     userMuted: boolean;
+    userMutedRef: React.MutableRefObject<boolean>;
     appInBackground: boolean;
     onSystemHoldChange: (onHold: boolean) => void;
   }>;
@@ -239,6 +240,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
   const [peerCallHold, setPeerCallHold] = useState(false);
   const [appInBackground, setAppInBackground] = useState(AppState.currentState !== 'active');
   const [muted, setMuted] = useState(false);
+  const mutedRef = useRef(false);
   const [speakerOn, setSpeakerOn] = useState(true);
   const [liveSettledAmountInr, setLiveSettledAmountInr] = useState(0);
   /** Caller wallet from server (both roles) — stays in sync as the call is billed. */
@@ -250,6 +252,10 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
   const autoEndByBalanceRef = useRef(false);
   const activeCallRef = useRef<{
     leave: () => Promise<void>;
+    microphone?: {
+      enable?: () => Promise<void>;
+      disable?: () => Promise<void>;
+    };
   } | null>(null);
   const activeClientRef = useRef<{
     disconnectUser: () => Promise<void>;
@@ -433,6 +439,10 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
   useEffect(() => {
     readyRef.current = ready;
   }, [ready]);
+
+  useEffect(() => {
+    mutedRef.current = muted;
+  }, [muted]);
 
   useEffect(() => {
     return () => {
@@ -1001,18 +1011,25 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
           return;
         }
 
-        const { data: startData } = await callApi.sessionStart(boot.callId, boot.peerAccountId);
-        if (cancelled || attemptId !== streamJoinAttemptRef.current) {
-          return;
-        }
-        applyTalkTimingFromServer(startData);
-        applySessionBillingFromServer(startData);
-
         setClient(nextClient);
         setCall(nextCall);
         setReady(true);
         setError(null);
         void syncTalkTimingUntilBothJoined();
+
+        // Do not block UI on sessionStart — call is already joined on Stream.
+        void (async () => {
+          try {
+            const { data: startData } = await callApi.sessionStart(boot.callId, boot.peerAccountId);
+            if (cancelled || attemptId !== streamJoinAttemptRef.current) {
+              return;
+            }
+            applyTalkTimingFromServer(startData);
+            applySessionBillingFromServer(startData);
+          } catch {
+            // Keep call running; periodic sync will recover timing/billing state.
+          }
+        })();
       } catch (e: unknown) {
         const msg = e instanceof Error ? e.message : 'Failed to join call';
         if (cancelled || attemptId !== streamJoinAttemptRef.current) {
@@ -1255,34 +1272,33 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
     }
   };
 
-  const setStreamMicEnabled = useCallback(
-    async (enabled: boolean): Promise<void> => {
-      if (!call) {
-        setMuted(!enabled);
-        return;
-      }
-      const mic = (call as {
-        microphone?: {
-          enable?: () => Promise<void>;
-          disable?: () => Promise<void>;
-          toggle?: () => Promise<void>;
-        };
-      }).microphone;
-      if (enabled && mic?.enable) {
+  const setStreamMicEnabled = useCallback(async (enabled: boolean): Promise<void> => {
+    const wantMuted = !enabled;
+    mutedRef.current = wantMuted;
+    setMuted(wantMuted);
+
+    const streamCall = activeCallRef.current;
+    const mic = streamCall?.microphone;
+    if (!mic?.enable || !mic?.disable) {
+      return;
+    }
+
+    try {
+      if (enabled) {
         await mic.enable();
-        setMuted(false);
-      } else if (!enabled && mic?.disable) {
-        await mic.disable();
-        setMuted(true);
-      } else if (mic?.toggle) {
-        if (enabled !== !muted) await mic.toggle();
-        setMuted(!enabled);
       } else {
-        setMuted(!enabled);
+        await mic.disable();
+        // Mic-off from manual mute must not stay latched as "system hold".
+        if (systemCallHoldRef.current) {
+          applySystemCallHoldRef.current(false);
+        }
       }
-    },
-    [call]
-  );
+    } catch (err) {
+      mutedRef.current = !wantMuted;
+      setMuted(!wantMuted);
+      throw err;
+    }
+  }, []);
 
   useEffect(() => {
     if (!systemCallHold) {
@@ -1308,9 +1324,9 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
   }, [systemCallHold, muted, setStreamMicEnabled]);
 
   const toggleMute = async () => {
-    if (systemCallHold) return;
+    if (systemCallHold && !mutedRef.current) return;
     try {
-      await setStreamMicEnabled(!muted);
+      await setStreamMicEnabled(!mutedRef.current);
     } catch (e) {
       Alert.alert('Mute failed', getErrorMessage(e));
     }
@@ -1645,6 +1661,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
           {streamAvatarExtras ? (
             <streamAvatarExtras.StreamSystemHoldBridge
               userMuted={muted}
+              userMutedRef={mutedRef}
               appInBackground={appInBackground}
               onSystemHoldChange={handleStreamSystemHold}
             />

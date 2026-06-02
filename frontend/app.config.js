@@ -45,6 +45,13 @@ module.exports = {
     slug: `${baseSlug}${nameSuffix}`,
     android: {
       ...(appJson.expo.android || {}),
+      intentFilters: appJson.expo.android?.intentFilters ?? [
+        {
+          action: 'VIEW',
+          data: [{ scheme: 'nestham' }],
+          category: ['BROWSABLE', 'DEFAULT'],
+        },
+      ],
       package: appKind ? `${baseAndroidPackage}.${appKind}` : baseAndroidPackage,
       permissions: [
         'android.permission.RECORD_AUDIO',

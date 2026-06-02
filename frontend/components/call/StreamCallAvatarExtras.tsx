@@ -64,10 +64,12 @@ export function StreamParticipantVoiceWaves({
  */
 export function StreamSystemHoldBridge({
   userMuted,
+  userMutedRef,
   appInBackground,
   onSystemHoldChange,
 }: {
   userMuted: boolean;
+  userMutedRef: React.MutableRefObject<boolean>;
   appInBackground: boolean;
   onSystemHoldChange: (onHold: boolean) => void;
 }): null {
@@ -87,7 +89,7 @@ export function StreamSystemHoldBridge({
       audioLostSinceRef.current = null;
       return;
     }
-    if (userMuted) {
+    if (userMutedRef.current || userMuted) {
       audioLostSinceRef.current = null;
       onSystemHoldChangeRef.current(false);
       return;
