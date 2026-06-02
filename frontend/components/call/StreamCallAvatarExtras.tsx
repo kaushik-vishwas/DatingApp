@@ -58,6 +58,53 @@ export function StreamParticipantVoiceWaves({
   return <AvatarSoundWaveRings active={active} intensity={intensity} />;
 }
 
+export type StreamMicControl = {
+  toggle: () => Promise<void>;
+  setEnabled: (enabled: boolean) => Promise<void>;
+};
+
+/**
+ * Bridges Stream microphone API to the parent screen (must render inside `StreamCall`).
+ */
+export function StreamMicControlBridge({
+  controlRef,
+  onMutedChange,
+  userMutedRef,
+}: {
+  controlRef: React.MutableRefObject<StreamMicControl | null>;
+  onMutedChange: (muted: boolean) => void;
+  userMutedRef: React.MutableRefObject<boolean>;
+}): null {
+  const { useMicrophoneState } = useCallStateHooks();
+  const { microphone, optimisticIsMute, isMute } = useMicrophoneState();
+  const muted = Boolean(optimisticIsMute ?? isMute);
+
+  useEffect(() => {
+    userMutedRef.current = muted;
+    onMutedChange(muted);
+  }, [muted, onMutedChange, userMutedRef]);
+
+  useEffect(() => {
+    controlRef.current = {
+      toggle: async () => {
+        await microphone.toggle();
+      },
+      setEnabled: async (enabled: boolean) => {
+        if (enabled) {
+          await microphone.enable();
+        } else {
+          await microphone.disable();
+        }
+      },
+    };
+    return () => {
+      controlRef.current = null;
+    };
+  }, [controlRef, microphone]);
+
+  return null;
+}
+
 /**
  * Detects when the OS steals the mic (e.g. cellular call) while the user did not tap Mute.
  * Must render inside Stream `StreamCall`.
@@ -85,27 +132,27 @@ export function StreamSystemHoldBridge({
       audioLostSinceRef.current = null;
       return;
     }
-    if (appInBackground) {
-      audioLostSinceRef.current = null;
-      return;
-    }
     if (userMutedRef.current || userMuted) {
       audioLostSinceRef.current = null;
-      onSystemHoldChangeRef.current(false);
       return;
     }
     const micLive = Boolean(localParticipant && hasAudio(localParticipant));
     if (micLive) {
       audioLostSinceRef.current = null;
-      onSystemHoldChangeRef.current(false);
+      if (!appInBackground) {
+        onSystemHoldChangeRef.current(false);
+      }
       return;
     }
     const now = Date.now();
     if (audioLostSinceRef.current === null) {
       audioLostSinceRef.current = now;
+      if (appInBackground) {
+        onSystemHoldChangeRef.current(true);
+      }
       return;
     }
-    if (now - audioLostSinceRef.current >= 400) {
+    if (now - audioLostSinceRef.current >= 250) {
       onSystemHoldChangeRef.current(true);
     }
   }, [callingState, localParticipant, userMuted, appInBackground]);
@@ -139,16 +186,12 @@ export function StreamTalkTimingBridge({
     const hasRemote = participants.some((p) => !p.isLocalParticipant);
     if (!hasRemote) return;
 
-    const timer = setTimeout(() => {
-      if (firedRef.current) return;
-      if (callingStateRef.current !== CallingState.JOINED) return;
-      const stillRemote = participantsRef.current.some((p) => !p.isLocalParticipant);
-      if (!stillRemote) return;
-      firedRef.current = true;
-      onBothConnectedRef.current();
-    }, 80);
-
-    return () => clearTimeout(timer);
+    if (firedRef.current) return;
+    if (callingStateRef.current !== CallingState.JOINED) return;
+    const stillRemote = participantsRef.current.some((p) => !p.isLocalParticipant);
+    if (!stillRemote) return;
+    firedRef.current = true;
+    onBothConnectedRef.current();
   }, [callingState, participants]);
 
   return null;

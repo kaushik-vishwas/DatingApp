@@ -80,7 +80,7 @@ export default function IncomingCallScreen({ navigation, route }: Props): React.
     respondedRef.current = true;
     setResponding(true);
     try {
-      await stopIncomingRingtone();
+      void stopIncomingRingtone();
       await acceptIncomingCall(req);
     } catch {
       setResponding(false);

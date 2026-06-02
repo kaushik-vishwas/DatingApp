@@ -385,7 +385,7 @@ export const callApi = {
       callRatePerMinute?: number;
       callerWalletBalanceInr?: number;
     }>('/calls/session/start', { callId, peerId }),
-  sessionSync: (callId: string) =>
+  sessionSync: (callId: string, opts?: { light?: boolean }) =>
     api.post<{
       ok: boolean;
       durationSec: number;
@@ -397,10 +397,7 @@ export const callApi = {
       talkActive: boolean;
       callRatePerMinute?: number;
       callerWalletBalanceInr?: number;
-    }>(
-      '/calls/session/sync',
-      { callId }
-    ),
+    }>('/calls/session/sync', { callId, ...(opts?.light ? { light: true } : {}) }),
   sessionEnd: (callId: string) =>
     api.post<{
       ok: boolean;

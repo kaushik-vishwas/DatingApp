@@ -27,7 +27,19 @@
       "intentFilters": [
         {
           "action": "VIEW",
+          "autoVerify": false,
           "data": [{ "scheme": "nestham" }],
+          "category": ["BROWSABLE", "DEFAULT"]
+        },
+        {
+          "action": "VIEW",
+          "autoVerify": false,
+          "data": [
+            {
+              "scheme": "nestham",
+              "host": "incoming-call"
+            }
+          ],
           "category": ["BROWSABLE", "DEFAULT"]
         }
       ],

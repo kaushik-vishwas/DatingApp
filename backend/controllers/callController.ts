@@ -502,39 +502,47 @@ export const startVoiceSession = async (
     const callerId = accountKind === 'user' ? meId : peerId;
     const receiverId = accountKind === 'receiver' ? meId : peerId;
 
-    const receiver = await Receiver.findById(receiverId).select('audioCallRate earningRatePerMinute');
-    if (!receiver) {
-      res.status(404).json({ message: 'Receiver not found' });
-      return;
-    }
-    const ratePerMinute = RECEIVER_AUDIO_CALL_RATE_INR_PER_MIN;
-    const earningSettings = await getReceiverEarningSettings();
-    const receiverPayoutRatePerMinute =
-      earningSettings.receiverEarningModel === 'fixed_per_minute'
-        ? resolveFixedRatePerMinuteAt(new Date(), earningSettings.fixedPerMinuteWindows)
-        : typeof receiver.earningRatePerMinute === 'number' && Number.isFinite(receiver.earningRatePerMinute)
-          ? Math.max(0, receiver.earningRatePerMinute)
-          : 0;
-
-    await CallSession.findOneAndUpdate(
-      { callId },
-      {
-        $setOnInsert: {
-          callId,
-          callerId: new mongoose.Types.ObjectId(callerId),
-          receiverId: new mongoose.Types.ObjectId(receiverId),
-          startedAt: new Date(),
-          status: 'ongoing',
-          ratePerMinute,
-          receiverPayoutRatePerMinute,
-        },
-      },
-      { upsert: true, setDefaultsOnInsert: true }
+    const existing = await CallSession.findOne({ callId }).select(
+      'ratePerMinute receiverPayoutRatePerMinute'
     );
+    const ratePerMinute = RECEIVER_AUDIO_CALL_RATE_INR_PER_MIN;
 
-    const session = await recordVoiceParticipantJoined(callId, accountKind);
+    if (!existing) {
+      const receiver = await Receiver.findById(receiverId).select('earningRatePerMinute');
+      if (!receiver) {
+        res.status(404).json({ message: 'Receiver not found' });
+        return;
+      }
+      const earningSettings = await getReceiverEarningSettings();
+      const receiverPayoutRatePerMinute =
+        earningSettings.receiverEarningModel === 'fixed_per_minute'
+          ? resolveFixedRatePerMinuteAt(new Date(), earningSettings.fixedPerMinuteWindows)
+          : typeof receiver.earningRatePerMinute === 'number' &&
+              Number.isFinite(receiver.earningRatePerMinute)
+            ? Math.max(0, receiver.earningRatePerMinute)
+            : 0;
 
-    const callerWalletBalanceInr = await readCallerWalletBalanceInr(callerId);
+      await CallSession.findOneAndUpdate(
+        { callId },
+        {
+          $setOnInsert: {
+            callId,
+            callerId: new mongoose.Types.ObjectId(callerId),
+            receiverId: new mongoose.Types.ObjectId(receiverId),
+            startedAt: new Date(),
+            status: 'ongoing',
+            ratePerMinute,
+            receiverPayoutRatePerMinute,
+          },
+        },
+        { upsert: true, setDefaultsOnInsert: true }
+      );
+    }
+
+    const [session, callerWalletBalanceInr] = await Promise.all([
+      recordVoiceParticipantJoined(callId, accountKind),
+      readCallerWalletBalanceInr(callerId),
+    ]);
 
     res.status(200).json({
       ok: true,
@@ -628,13 +636,14 @@ export const endVoiceSession = async (
 };
 
 export const syncVoiceSession = async (
-  req: Request<{}, {}, { callId?: string }>,
+  req: Request<{}, {}, { callId?: string; light?: boolean }>,
   res: Response
 ): Promise<void> => {
   try {
     const accountKind = req.accountKind;
     const meId = accountKind === 'user' ? String(req.user?._id ?? '') : String(req.receiver?._id ?? '');
     const callId = String(req.body.callId ?? '').trim();
+    const light = req.body.light === true;
     if (!accountKind || !meId) {
       res.status(401).json({ message: 'Not authorized' });
       return;
@@ -653,6 +662,22 @@ export const syncVoiceSession = async (
       String(current.callerId) === meId || String(current.receiverId) === meId;
     if (!isParticipant) {
       res.status(403).json({ message: 'Not allowed for this call' });
+      return;
+    }
+
+    if (light) {
+      const talkFields = callTalkApiFields(current as CallSessionDocument);
+      const durationSec = callTalkDurationSec(current as CallTalkTimingFields);
+      res.status(200).json({
+        ok: true,
+        durationSec,
+        settledAmountInr: roundInr(current.settledAmountInr || 0),
+        receiverEarnedInr: roundInr(current.receiverEarnedInr || 0),
+        canRate: durationSec >= MISSED_OR_INCOMPLETE_MAX_SEC,
+        status: current.status,
+        callRatePerMinute: Math.max(0, Number(current.ratePerMinute) || 0),
+        ...talkFields,
+      });
       return;
     }
 

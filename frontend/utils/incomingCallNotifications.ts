@@ -1,6 +1,11 @@
 import Constants from 'expo-constants';
 import * as Device from 'expo-device';
 import { AppState, Linking, Platform, type AppStateStatus } from 'react-native';
+import {
+  clearPendingIncomingCallTap,
+  persistPendingIncomingCallTap,
+  readPendingIncomingCallTap,
+} from './pendingIncomingCallTapStorage';
 
 export type IncomingCallNotificationPayload = {
   callId: string;
@@ -179,7 +184,7 @@ function parseIncomingFromNotificationContent(
   return null;
 }
 
-function parseIncomingFromNotificationRequest(request: {
+export function parseIncomingFromNotificationRequest(request: {
   identifier?: string;
   content?: { data?: Record<string, unknown> };
 }): IncomingCallNotificationPayload | null {
@@ -207,6 +212,7 @@ function parseIncomingFromNotificationRequest(request: {
 
 function queuePendingOpen(incoming: IncomingCallNotificationPayload): void {
   pendingOpens.set(incoming.callId, incoming);
+  void persistPendingIncomingCallTap(incoming);
 }
 
 function flushPendingOpens(): void {
@@ -243,11 +249,19 @@ function dispatchIncomingOpen(incoming: IncomingCallNotificationPayload): void {
   queuePendingOpen(merged);
 }
 
-function openIncomingFromNotificationTap(incoming: IncomingCallNotificationPayload): void {
+async function openIncomingFromNotificationTap(
+  incoming: IncomingCallNotificationPayload
+): Promise<void> {
   void dismissIncomingCallNotification(incoming.callId);
-  if (!openHandler && Platform.OS === 'android') {
-    void Linking.openURL(incomingCallDeepLink(incoming)).catch(() => {});
+  void persistPendingIncomingCallTap(incoming);
+
+  const deepLink = incomingCallDeepLink(incoming);
+  try {
+    await Linking.openURL(deepLink);
+  } catch {
+    // Linking may fail if the activity is already foreground; navigation linking still runs.
   }
+
   dispatchIncomingOpen(incoming);
 }
 
@@ -283,7 +297,7 @@ async function processNotificationResponse(
   const incoming = parseIncomingFromNotificationRequest(response.notification.request);
   if (!incoming) return;
 
-  openIncomingFromNotificationTap(incoming);
+  await openIncomingFromNotificationTap(incoming);
 
   if (typeof Notifications.clearLastNotificationResponseAsync === 'function') {
     void Notifications.clearLastNotificationResponseAsync().catch(() => {});
@@ -299,10 +313,22 @@ async function checkLastNotificationResponse(): Promise<void> {
 
 /** Call after navigation + call-signal handlers are ready (receiver signed in). */
 export function consumePendingNotificationTap(): void {
-  flushPendingOpens();
-  void checkLastNotificationResponse();
-  setTimeout(() => void checkLastNotificationResponse(), 250);
-  setTimeout(() => void checkLastNotificationResponse(), 900);
+  void (async () => {
+    const persisted = await readPendingIncomingCallTap();
+    if (persisted) {
+      await clearPendingIncomingCallTap();
+      if (openHandler) {
+        openHandler(persisted);
+      } else {
+        queuePendingOpen(persisted);
+      }
+    }
+    flushPendingOpens();
+    void checkLastNotificationResponse();
+    setTimeout(() => void checkLastNotificationResponse(), 300);
+    setTimeout(() => void checkLastNotificationResponse(), 1200);
+    setTimeout(() => void checkLastNotificationResponse(), 2800);
+  })();
 }
 
 export async function ensureIncomingCallNotificationSetup(): Promise<void> {
@@ -405,7 +431,6 @@ export async function showIncomingCallNotification(
         ...(Platform.OS === 'android'
           ? {
               channelId: INCOMING_CALL_CHANNEL_ID,
-              // Sticky notifications are harder to open from the drawer on some OEMs (Samsung).
               sticky: false,
               autoDismiss: true,
             }
@@ -512,7 +537,7 @@ export function ensureIncomingCallNotificationInfrastructure(): () => void {
     const onUrl = (event: { url: string }): void => {
       const fromUrl = parseIncomingCallDeepLink(event.url);
       if (!fromUrl) return;
-      openIncomingFromNotificationTap(fromUrl);
+      void openIncomingFromNotificationTap(fromUrl);
     };
     linkingSub = Linking.addEventListener('url', onUrl);
     void Linking.getInitialURL().then((url) => {

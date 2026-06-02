@@ -7,6 +7,7 @@ import { hasSeenAuthWelcome } from '../services/authWelcomeStorage';
 import { getForcedAppKind } from '../config/appKind';
 import type { PostBrandSplashRoute, RootStackParamList } from './RootStackParamList';
 import { navigationRef } from './navigationRef';
+import { appLinking } from './appLinking';
 
 import ReceiverEducationScreen from '../screens/onboarding/ReceiverEducationScreen';
 import BrandSplashScreen from '../screens/BrandSplashScreen';
@@ -136,7 +137,7 @@ export default function AppNavigator(): React.JSX.Element {
   }
 
   return (
-    <NavigationContainer<RootStackParamList> ref={navigationRef}>
+    <NavigationContainer<RootStackParamList> ref={navigationRef} linking={appLinking}>
       <Stack.Navigator screenOptions={{ headerShown: false }}>
         {user.role === 'caller' ? (
           accountStatus === 'pending_profile' ? (

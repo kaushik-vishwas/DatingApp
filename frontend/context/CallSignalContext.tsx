@@ -19,10 +19,12 @@ import {
 import {
   bindIncomingCallNotificationHandlers,
   clearIncomingCallNotificationDedupe,
+  consumePendingNotificationTap,
   isAppInBackground,
   registerReceiverExpoPushToken,
   showIncomingCallNotification,
 } from '../utils/incomingCallNotifications';
+import { prefetchVoiceSessionStart } from '../utils/voiceCallSessionStart';
 
 let outgoingNavigateGeneration = 0;
 
@@ -691,18 +693,19 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   const acceptIncomingCallStayOnScreen = useCallback(
     async (req: IncomingCallRequest): Promise<VoiceBootstrapResponse> => {
       acceptedIncomingCallIdsRef.current.add(req.callId);
-      await stopIncomingRingtonePlayback();
       clearIncomingCallNotificationDedupe(req.callId);
       if (activeIncomingCallUiCallIdRef.current === req.callId) {
         activeIncomingCallUiCallIdRef.current = null;
       }
       const socket = await ensureCallSocketReady(socketRef);
       socket.emit('call:response', { callId: req.callId, accepted: true });
+      void stopIncomingRingtonePlayback();
 
       const cachedBootstrap = incomingBootstrapByCallIdRef.current.get(req.callId) ?? null;
       if (cachedBootstrap) {
         incomingBootstrapByCallIdRef.current.delete(req.callId);
         incomingBootstrapPromiseByCallIdRef.current.delete(req.callId);
+        prefetchVoiceSessionStart(cachedBootstrap.callId, cachedBootstrap.peerAccountId);
         return cachedBootstrap;
       }
 
@@ -719,6 +722,7 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
       incomingBootstrapByCallIdRef.current.delete(req.callId);
       incomingBootstrapPromiseByCallIdRef.current.delete(req.callId);
+      prefetchVoiceSessionStart(bootstrapped.callId, bootstrapped.peerAccountId);
       return bootstrapped;
     },
     []
@@ -727,17 +731,18 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   const acceptIncomingCall = useCallback(
     async (req: IncomingCallRequest): Promise<void> => {
       acceptedIncomingCallIdsRef.current.add(req.callId);
-      await stopIncomingRingtonePlayback();
       if (activeIncomingCallUiCallIdRef.current === req.callId) {
         activeIncomingCallUiCallIdRef.current = null;
       }
       const socket = await ensureCallSocketReady(socketRef);
       socket.emit('call:response', { callId: req.callId, accepted: true });
+      void stopIncomingRingtonePlayback();
 
       const cachedBootstrap = incomingBootstrapByCallIdRef.current.get(req.callId) ?? null;
       if (cachedBootstrap) {
         incomingBootstrapByCallIdRef.current.delete(req.callId);
         incomingBootstrapPromiseByCallIdRef.current.delete(req.callId);
+        prefetchVoiceSessionStart(cachedBootstrap.callId, cachedBootstrap.peerAccountId);
         openVoiceCall(cachedBootstrap, req.peerName, req.peerImage ?? null);
         return;
       }
@@ -755,6 +760,7 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
       incomingBootstrapByCallIdRef.current.delete(req.callId);
       incomingBootstrapPromiseByCallIdRef.current.delete(req.callId);
+      prefetchVoiceSessionStart(bootstrapped.callId, bootstrapped.peerAccountId);
       openVoiceCall(bootstrapped, req.peerName, req.peerImage ?? null);
     },
     [openVoiceCall]
@@ -876,7 +882,7 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
   useEffect(() => {
     if (!isSignedIn || user?.role !== 'receiver') return;
-    return bindIncomingCallNotificationHandlers((incoming) => {
+    const unbind = bindIncomingCallNotificationHandlers((incoming) => {
       const req: IncomingCallRequest = {
         callId: incoming.callId,
         fromType: incoming.fromType,
@@ -892,6 +898,16 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       activeIncomingCallUiCallIdRef.current = req.callId;
       openIncomingCallRef.current(req);
     });
+    const retryDelays = [400, 1200, 2500];
+    const timers = retryDelays.map((ms) =>
+      setTimeout(() => {
+        consumePendingNotificationTap();
+      }, ms)
+    );
+    return () => {
+      unbind();
+      timers.forEach(clearTimeout);
+    };
   }, [isSignedIn, user?.role]);
 
   const setQueueMode = useCallback(async (active: boolean): Promise<void> => {
@@ -1088,6 +1104,7 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         pendingOutgoingByCallIdRef.current.delete(payload.callId);
 
         if (pending) {
+          prefetchVoiceSessionStart(pending.bootstrap.callId, pending.bootstrap.peerAccountId);
           openCallerJoiningVoiceCallRef.current(pending);
           return;
         }
@@ -1105,6 +1122,7 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
               bootstrap: data,
             };
             outgoingSessionByCallIdRef.current.set(payload.callId, session);
+            prefetchVoiceSessionStart(data.callId, data.peerAccountId);
             openCallerJoiningVoiceCallRef.current(session);
           } catch {
             Alert.alert('Call accepted', 'The user accepted, but joining failed. Please try again.');

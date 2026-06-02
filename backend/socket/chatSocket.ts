@@ -907,9 +907,14 @@ export function attachChatSocket(httpServer: HTTPServer): Server {
       const fromId = String(socket.data.accountId);
       void (async () => {
         try {
-          const session = await CallSession.findOne({ callId, status: 'ongoing' })
+          let session = await CallSession.findOne({ callId, status: 'ongoing' })
             .select('callerId receiverId')
             .lean<{ callerId: mongoose.Types.ObjectId; receiverId: mongoose.Types.ObjectId } | null>();
+          if (!session) {
+            session = await CallSession.findOne({ callId })
+              .select('callerId receiverId')
+              .lean<{ callerId: mongoose.Types.ObjectId; receiverId: mongoose.Types.ObjectId } | null>();
+          }
           if (!session) {
             ack?.({ ok: false, error: 'Call not active' });
             return;
