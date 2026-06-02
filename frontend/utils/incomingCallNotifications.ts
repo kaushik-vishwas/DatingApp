@@ -16,6 +16,7 @@ export const INCOMING_CALL_DEEP_LINK_PREFIX = 'nestham://incoming-call/';
 let setupDone = false;
 let infrastructureReady = false;
 const notifiedCallIds = new Set<string>();
+const handledNotificationResponseKeys = new Set<string>();
 let openHandler: ((incoming: IncomingCallNotificationPayload) => void) | null = null;
 const pendingOpens = new Map<string, IncomingCallNotificationPayload>();
 
@@ -166,6 +167,10 @@ async function processNotificationResponse(
   response: import('expo-notifications').NotificationResponse | null
 ): Promise<void> {
   if (!response) return;
+  const notificationId =
+    typeof response.notification?.request?.identifier === 'string'
+      ? response.notification.request.identifier
+      : '';
   const actionId = response.actionIdentifier;
   const defaultAction =
     Notifications.DEFAULT_ACTION_IDENTIFIER ?? 'expo.modules.notifications.actions.DEFAULT';
@@ -175,8 +180,17 @@ async function processNotificationResponse(
     response.notification.request.content as { data?: Record<string, unknown> }
   );
   if (!incoming) return;
+  const responseKey = `${notificationId}:${incoming.callId}:${actionId ?? defaultAction}`;
+  if (handledNotificationResponseKeys.has(responseKey)) {
+    return;
+  }
+  handledNotificationResponseKeys.add(responseKey);
   await dismissIncomingCallNotification(incoming.callId);
   dispatchIncomingOpen(incoming);
+  // Avoid replaying the same "last response" on future app-active transitions.
+  if (typeof Notifications.clearLastNotificationResponseAsync === 'function') {
+    void Notifications.clearLastNotificationResponseAsync().catch(() => {});
+  }
 }
 
 async function checkLastNotificationResponse(): Promise<void> {

@@ -26,7 +26,15 @@ export default function IncomingCallScreen({ navigation, route }: Props): React.
   const peerAvatarSource = useMemo(() => resolveProfileImageSource(peerImage), [peerImage]);
 
   const [responding, setResponding] = useState(false);
+  const [appActive, setAppActive] = useState(AppState.currentState === 'active');
   const respondedRef = useRef(false);
+
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (state) => {
+      setAppActive(state === 'active');
+    });
+    return () => sub.remove();
+  }, []);
 
   useEffect(() => {
     return () => {
@@ -93,15 +101,15 @@ export default function IncomingCallScreen({ navigation, route }: Props): React.
 
   // Auto-accept only while app is active (never from background).
   useEffect(() => {
-    if (AppState.currentState !== 'active') return;
+    if (!appActive) return;
     const timeout = setTimeout(() => {
-      if (AppState.currentState === 'active' && !responding && !respondedRef.current) {
+      if (appActive && !responding && !respondedRef.current) {
         void onAccept();
       }
     }, AUTO_ACCEPT_MS);
     return () => clearTimeout(timeout);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [responding]);
+  }, [appActive, responding]);
 
   const peerInitial = (peerName || 'U').trim().charAt(0).toUpperCase();
 

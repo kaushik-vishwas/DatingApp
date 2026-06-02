@@ -303,16 +303,32 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     const navigate = () => {
       const nav = navigationRef.current;
       if (!nav || !nav.isReady()) return false;
-      nav.navigate('Home', {
-        screen: 'IncomingCall',
-        params: {
-          callId: incoming.callId,
-          fromType: incoming.fromType,
-          fromId: incoming.fromId,
-          peerName: incoming.peerName,
-          peerImage: incoming.peerImage ?? null,
-        },
-      });
+      nav.dispatch(
+        CommonActions.reset({
+          index: 0,
+          routes: [
+            {
+              name: 'Home',
+              state: {
+                routes: [
+                  { name: 'ReceiverMainTabs', state: { routes: [{ name: 'ReceiverHome' }], index: 0 } },
+                  {
+                    name: 'IncomingCall',
+                    params: {
+                      callId: incoming.callId,
+                      fromType: incoming.fromType,
+                      fromId: incoming.fromId,
+                      peerName: incoming.peerName,
+                      peerImage: incoming.peerImage ?? null,
+                    },
+                  },
+                ],
+                index: 1,
+              },
+            },
+          ],
+        })
+      );
       return true;
     };
     if (navigate()) return;
@@ -674,9 +690,9 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
   const acceptIncomingCallStayOnScreen = useCallback(
     async (req: IncomingCallRequest): Promise<VoiceBootstrapResponse> => {
+      acceptedIncomingCallIdsRef.current.add(req.callId);
       await stopIncomingRingtonePlayback();
       clearIncomingCallNotificationDedupe(req.callId);
-      acceptedIncomingCallIdsRef.current.add(req.callId);
       if (activeIncomingCallUiCallIdRef.current === req.callId) {
         activeIncomingCallUiCallIdRef.current = null;
       }
@@ -710,8 +726,8 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
   const acceptIncomingCall = useCallback(
     async (req: IncomingCallRequest): Promise<void> => {
-      await stopIncomingRingtonePlayback();
       acceptedIncomingCallIdsRef.current.add(req.callId);
+      await stopIncomingRingtonePlayback();
       if (activeIncomingCallUiCallIdRef.current === req.callId) {
         activeIncomingCallUiCallIdRef.current = null;
       }
