@@ -47,6 +47,19 @@ function scheduleNavigateWhenReady(tryNavigate: () => boolean, navGeneration: nu
   requestAnimationFrame(tick);
 }
 
+/** Incoming-call navigation after notification tap — Samsung can need several seconds. */
+function scheduleIncomingNavigateWhenReady(tryNavigate: () => boolean): void {
+  if (tryNavigate()) return;
+  let attempts = 0;
+  const maxAttempts = 100;
+  const id = setInterval(() => {
+    attempts += 1;
+    if (tryNavigate() || attempts >= maxAttempts) {
+      clearInterval(id);
+    }
+  }, 100);
+}
+
 type CallIncomingPayload = {
   callId: string;
   fromType: 'u' | 'r';
@@ -334,7 +347,7 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       return true;
     };
     if (navigate()) return;
-    scheduleNavigateWhenReady(navigate, outgoingNavigateGeneration);
+    scheduleIncomingNavigateWhenReady(navigate);
   }, []);
 
   const openVoiceCall = useCallback(
@@ -898,7 +911,7 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       activeIncomingCallUiCallIdRef.current = req.callId;
       openIncomingCallRef.current(req);
     });
-    const retryDelays = [400, 1200, 2500];
+    const retryDelays = [400, 1200, 2500, 4500, 7000, 10000];
     const timers = retryDelays.map((ms) =>
       setTimeout(() => {
         consumePendingNotificationTap();

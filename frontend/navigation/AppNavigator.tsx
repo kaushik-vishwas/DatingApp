@@ -8,6 +8,7 @@ import { getForcedAppKind } from '../config/appKind';
 import type { PostBrandSplashRoute, RootStackParamList } from './RootStackParamList';
 import { navigationRef } from './navigationRef';
 import { appLinking } from './appLinking';
+import { consumePendingNotificationTap } from '../utils/incomingCallNotifications';
 
 import ReceiverEducationScreen from '../screens/onboarding/ReceiverEducationScreen';
 import BrandSplashScreen from '../screens/BrandSplashScreen';
@@ -137,7 +138,13 @@ export default function AppNavigator(): React.JSX.Element {
   }
 
   return (
-    <NavigationContainer<RootStackParamList> ref={navigationRef} linking={appLinking}>
+    <NavigationContainer<RootStackParamList>
+      ref={navigationRef}
+      linking={appLinking}
+      onReady={() => {
+        consumePendingNotificationTap();
+      }}
+    >
       <Stack.Navigator screenOptions={{ headerShown: false }}>
         {user.role === 'caller' ? (
           accountStatus === 'pending_profile' ? (

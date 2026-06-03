@@ -1,6 +1,5 @@
 import type { LinkingOptions } from '@react-navigation/native';
-import * as ExpoLinking from 'expo-linking';
-import { Platform } from 'react-native';
+import { Linking, Platform } from 'react-native';
 import type { RootStackParamList } from './RootStackParamList';
 import {
   INCOMING_CALL_DEEP_LINK_PREFIX,
@@ -8,12 +7,9 @@ import {
   parseIncomingCallDeepLink,
   parseIncomingFromNotificationRequest,
 } from '../utils/incomingCallNotifications';
+import { readPendingIncomingCallTap } from '../utils/pendingIncomingCallTapStorage';
 
-const APP_PREFIXES = [
-  ExpoLinking.createURL('/'),
-  'nestham://',
-  'com.kaushikvishwas.frontend://',
-];
+const APP_PREFIXES = ['nestham://', 'com.kaushikvishwas.frontend://'];
 
 function urlFromNotificationResponse(
   response: import('expo-notifications').NotificationResponse | null
@@ -24,6 +20,61 @@ function urlFromNotificationResponse(
   const data = response.notification.request.content.data as Record<string, unknown> | undefined;
   const url = typeof data?.url === 'string' ? data.url.trim() : '';
   if (url.startsWith(INCOMING_CALL_DEEP_LINK_PREFIX)) return url;
+  return null;
+}
+
+/** Samsung cold start: native last-response may arrive after the first JS tick. */
+const INITIAL_URL_NOTIFICATION_DELAYS_MS = [0, 100, 250, 500, 800, 1200, 1800, 2500, 3500];
+
+function readLastNotificationTapUrl(
+  Notifications: typeof import('expo-notifications')
+): string | null {
+  const last =
+    typeof Notifications.getLastNotificationResponse === 'function'
+      ? Notifications.getLastNotificationResponse()
+      : null;
+  return urlFromNotificationResponse(last);
+}
+
+async function readInitialNotificationTapUrl(): Promise<string | null> {
+  if (Platform.OS === 'web') return null;
+
+  const persisted = await readPendingIncomingCallTap();
+  if (persisted) return incomingCallDeepLink(persisted);
+
+  try {
+    const Notifications = await import('expo-notifications');
+    let previousDelayMs = 0;
+    let consecutiveNullResponses = 0;
+
+    for (const delayMs of INITIAL_URL_NOTIFICATION_DELAYS_MS) {
+      const waitMs = delayMs - previousDelayMs;
+      if (waitMs > 0) {
+        await new Promise((resolve) => setTimeout(resolve, waitMs));
+      }
+      previousDelayMs = delayMs;
+
+      const fromNotif = readLastNotificationTapUrl(Notifications);
+      if (fromNotif) return fromNotif;
+
+      const last =
+        typeof Notifications.getLastNotificationResponse === 'function'
+          ? Notifications.getLastNotificationResponse()
+          : await Notifications.getLastNotificationResponseAsync();
+
+      if (!last) {
+        consecutiveNullResponses += 1;
+        // Normal app launch — stop polling once we have several empty reads after ~800ms.
+        if (delayMs >= 800 && consecutiveNullResponses >= 3) {
+          return null;
+        }
+      } else {
+        consecutiveNullResponses = 0;
+      }
+    }
+  } catch {
+    // ignore
+  }
   return null;
 }
 
@@ -50,26 +101,18 @@ export const appLinking: LinkingOptions<RootStackParamList> = {
     },
   },
   async getInitialURL() {
-    const initialUrl = await ExpoLinking.getInitialURL();
+    const initialUrl = await Linking.getInitialURL();
     if (initialUrl && parseIncomingCallDeepLink(initialUrl)) {
       return initialUrl;
     }
 
-    if (Platform.OS === 'web') return initialUrl;
-
-    try {
-      const Notifications = await import('expo-notifications');
-      const last = await Notifications.getLastNotificationResponseAsync();
-      const fromNotif = urlFromNotificationResponse(last);
-      if (fromNotif) return fromNotif;
-    } catch {
-      // ignore
-    }
+    const fromNotif = await readInitialNotificationTapUrl();
+    if (fromNotif) return fromNotif;
 
     return initialUrl;
   },
   subscribe(listener) {
-    const urlSub = ExpoLinking.addEventListener('url', (event) => {
+    const urlSub = Linking.addEventListener('url', (event) => {
       if (event.url) listener(event.url);
     });
 

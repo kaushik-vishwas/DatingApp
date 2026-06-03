@@ -3,8 +3,11 @@ import * as Device from 'expo-device';
 import { AppState, Linking, Platform, type AppStateStatus } from 'react-native';
 import {
   clearPendingIncomingCallTap,
+  clearShownIncomingCallNotification,
   persistPendingIncomingCallTap,
+  persistShownIncomingCallNotification,
   readPendingIncomingCallTap,
+  readShownIncomingCallNotification,
 } from './pendingIncomingCallTapStorage';
 
 export type IncomingCallNotificationPayload = {
@@ -24,7 +27,10 @@ let infrastructureReady = false;
 const notifiedCallIds = new Set<string>();
 /** Short debounce so listener + app-active + Linking do not triple-navigate. */
 const lastHandledTapAtByCallId = new Map<string, number>();
-const TAP_DEDUPE_MS = 2000;
+const TAP_DEDUPE_MS = 800;
+/** Samsung / slow devices may deliver the tap before navigation is ready — keep retrying. */
+const NOTIFICATION_TAP_RECOVERY_DELAYS_MS = [0, 300, 600, 1000, 1800, 3000, 5000, 8000, 12000];
+const CLEAR_LAST_RESPONSE_DELAY_MS = 12000;
 let openHandler: ((incoming: IncomingCallNotificationPayload) => void) | null = null;
 const pendingOpens = new Map<string, IncomingCallNotificationPayload>();
 
@@ -255,11 +261,15 @@ async function openIncomingFromNotificationTap(
   void dismissIncomingCallNotification(incoming.callId);
   void persistPendingIncomingCallTap(incoming);
 
-  const deepLink = incomingCallDeepLink(incoming);
-  try {
-    await Linking.openURL(deepLink);
-  } catch {
-    // Linking may fail if the activity is already foreground; navigation linking still runs.
+  // Direct handler navigation is reliable on Android; Linking.openURL can race with
+  // NotificationForwarderActivity on Samsung and drop the deep link.
+  if (Platform.OS === 'ios') {
+    const deepLink = incomingCallDeepLink(incoming);
+    try {
+      await Linking.openURL(deepLink);
+    } catch {
+      // Linking may fail if the activity is already foreground.
+    }
   }
 
   dispatchIncomingOpen(incoming);
@@ -295,20 +305,47 @@ async function processNotificationResponse(
   }
 
   const incoming = parseIncomingFromNotificationRequest(response.notification.request);
-  if (!incoming) return;
+  if (!incoming) {
+    const callId = parseCallIdFromNotificationIdentifier(
+      response.notification.request.identifier
+    );
+    if (callId) {
+      const shown = await readShownIncomingCallNotification();
+      if (shown?.callId === callId) {
+        await openIncomingFromNotificationTap(shown);
+        scheduleClearLastNotificationResponse(Notifications);
+      }
+    }
+    return;
+  }
 
   await openIncomingFromNotificationTap(incoming);
+  scheduleClearLastNotificationResponse(Notifications);
+}
 
-  if (typeof Notifications.clearLastNotificationResponseAsync === 'function') {
-    void Notifications.clearLastNotificationResponseAsync().catch(() => {});
-  }
+function scheduleClearLastNotificationResponse(
+  Notifications: typeof import('expo-notifications')
+): void {
+  if (typeof Notifications.clearLastNotificationResponseAsync !== 'function') return;
+  setTimeout(() => {
+    void Notifications.clearLastNotificationResponseAsync?.().catch(() => {});
+  }, CLEAR_LAST_RESPONSE_DELAY_MS);
 }
 
 async function checkLastNotificationResponse(): Promise<void> {
   const Notifications = await loadNotificationsModule();
   if (!Notifications) return;
-  const last = await Notifications.getLastNotificationResponseAsync();
+  const last =
+    typeof Notifications.getLastNotificationResponse === 'function'
+      ? Notifications.getLastNotificationResponse()
+      : await Notifications.getLastNotificationResponseAsync();
   await processNotificationResponse(Notifications, last);
+}
+
+function scheduleNotificationTapRecoveryChecks(): void {
+  for (const delayMs of NOTIFICATION_TAP_RECOVERY_DELAYS_MS) {
+    setTimeout(() => void checkLastNotificationResponse(), delayMs);
+  }
 }
 
 /** Call after navigation + call-signal handlers are ready (receiver signed in). */
@@ -316,18 +353,15 @@ export function consumePendingNotificationTap(): void {
   void (async () => {
     const persisted = await readPendingIncomingCallTap();
     if (persisted) {
-      await clearPendingIncomingCallTap();
       if (openHandler) {
         openHandler(persisted);
+        await clearPendingIncomingCallTap();
       } else {
         queuePendingOpen(persisted);
       }
     }
     flushPendingOpens();
-    void checkLastNotificationResponse();
-    setTimeout(() => void checkLastNotificationResponse(), 300);
-    setTimeout(() => void checkLastNotificationResponse(), 1200);
-    setTimeout(() => void checkLastNotificationResponse(), 2800);
+    scheduleNotificationTapRecoveryChecks();
   })();
 }
 
@@ -433,11 +467,13 @@ export async function showIncomingCallNotification(
               channelId: INCOMING_CALL_CHANNEL_ID,
               sticky: false,
               autoDismiss: true,
+              color: '#7c3aed',
             }
           : {}),
       },
       trigger: null,
     });
+    void persistShownIncomingCallNotification(incoming);
     notifiedCallIds.add(callId);
   } catch {
     notifiedCallIds.delete(callId);
@@ -452,6 +488,7 @@ export async function dismissIncomingCallNotification(callId?: string): Promise<
     const Notifications = await loadNotificationsModule();
     if (!Notifications || !id) return;
     await Notifications.dismissNotificationAsync(`${INCOMING_CALL_NOTIFICATION_ID_PREFIX}${id}`);
+    void clearShownIncomingCallNotification();
   } catch {
     // ignore
   }
@@ -526,9 +563,8 @@ export function ensureIncomingCallNotificationInfrastructure(): () => void {
 
     const onAppState = (state: AppStateStatus): void => {
       if (state === 'active') {
-        void checkLastNotificationResponse();
-        setTimeout(() => void checkLastNotificationResponse(), 400);
-        setTimeout(() => void checkLastNotificationResponse(), 1200);
+        lastHandledTapAtByCallId.clear();
+        scheduleNotificationTapRecoveryChecks();
         flushPendingOpens();
       }
     };
@@ -545,7 +581,7 @@ export function ensureIncomingCallNotificationInfrastructure(): () => void {
     });
 
     void checkLastNotificationResponse();
-    setTimeout(() => void checkLastNotificationResponse(), 500);
+    scheduleNotificationTapRecoveryChecks();
   })();
 
   infrastructureReady = true;
