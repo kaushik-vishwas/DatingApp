@@ -58,6 +58,15 @@
       "backgroundColor": "#ffffff",
       "barStyle": "dark-content"
     },
+    "plugins": [
+      [
+        "expo-notifications",
+        {
+          "defaultChannel": "incoming_calls"
+        }
+      ],
+      "./plugins/withIncomingCallFcm.js"
+    ],
     "web": {
       "favicon": "./assets/SelectoLogo.png"
     },

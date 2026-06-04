@@ -29,7 +29,12 @@ export type IncomingCallNotifLogStep =
   | 'consume.pending'
   | 'consume.flush'
   | 'linking.url'
-  | 'app_state.active';
+  | 'app_state.active'
+  | 'bg_task.error'
+  | 'bg_task.skip'
+  | 'bg_task.incoming'
+  | 'bg_task.registered'
+  | 'bg_task.register_fail';
 
 export function logIncomingCallNotif(
   step: IncomingCallNotifLogStep,

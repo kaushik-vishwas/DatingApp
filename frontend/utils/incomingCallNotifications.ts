@@ -154,7 +154,7 @@ function parseJsonRecord(raw: string): Record<string, unknown> | null {
   }
 }
 
-function parseIncomingFromData(
+export function parseIncomingFromData(
   data: Record<string, unknown> | undefined
 ): IncomingCallNotificationPayload | null {
   if (!data) return null;
