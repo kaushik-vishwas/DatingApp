@@ -18,10 +18,12 @@ import {
 } from '../utils/callSounds';
 import {
   bindIncomingCallNotificationHandlers,
+  canNavigateToIncomingCall,
   clearIncomingCallNotificationDedupe,
-  consumePendingNotificationTap,
   isAppInBackground,
+  markIncomingCallHandled,
   registerReceiverExpoPushToken,
+  setIncomingCallNavigationGuard,
   showIncomingCallNotification,
 } from '../utils/incomingCallNotifications';
 import { prefetchVoiceSessionStart } from '../utils/voiceCallSessionStart';
@@ -213,6 +215,8 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   const rejectedIncomingCallIdsRef = useRef<Set<string>>(new Set());
   const acceptedIncomingCallIdsRef = useRef<Set<string>>(new Set());
   const activeIncomingCallUiCallIdRef = useRef<string | null>(null);
+  /** Active ring; used when the tray tap only resumes the task without notification-response extras. */
+  const pendingIncomingCallRequestRef = useRef<IncomingCallRequest | null>(null);
   const incomingBootstrapByCallIdRef = useRef<Map<string, VoiceBootstrapResponse>>(new Map());
   const incomingBootstrapPromiseByCallIdRef = useRef<Map<string, Promise<VoiceBootstrapResponse>>>(new Map());
   const userRoleRef = useRef(user?.role ?? null);
@@ -315,6 +319,7 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   }, []);
 
   const openIncomingCall = useCallback((incoming: IncomingCallRequest) => {
+    if (!canNavigateToIncomingCall(incoming.callId)) return;
     const navigate = () => {
       const nav = navigationRef.current;
       if (!nav || !nav.isReady()) return false;
@@ -692,11 +697,13 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   }, [startRandomCallEngagement]);
 
   const rejectIncomingCall = useCallback((req: IncomingCallRequest) => {
+    void markIncomingCallHandled(req.callId);
     void stopIncomingRingtonePlayback();
     clearIncomingCallNotificationDedupe(req.callId);
     rejectedIncomingCallIdsRef.current.add(req.callId);
     if (activeIncomingCallUiCallIdRef.current === req.callId) {
       activeIncomingCallUiCallIdRef.current = null;
+      pendingIncomingCallRequestRef.current = null;
     }
     incomingBootstrapByCallIdRef.current.delete(req.callId);
     incomingBootstrapPromiseByCallIdRef.current.delete(req.callId);
@@ -705,10 +712,12 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
   const acceptIncomingCallStayOnScreen = useCallback(
     async (req: IncomingCallRequest): Promise<VoiceBootstrapResponse> => {
+      void markIncomingCallHandled(req.callId);
       acceptedIncomingCallIdsRef.current.add(req.callId);
       clearIncomingCallNotificationDedupe(req.callId);
       if (activeIncomingCallUiCallIdRef.current === req.callId) {
         activeIncomingCallUiCallIdRef.current = null;
+        pendingIncomingCallRequestRef.current = null;
       }
       const socket = await ensureCallSocketReady(socketRef);
       socket.emit('call:response', { callId: req.callId, accepted: true });
@@ -743,9 +752,11 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
   const acceptIncomingCall = useCallback(
     async (req: IncomingCallRequest): Promise<void> => {
+      void markIncomingCallHandled(req.callId);
       acceptedIncomingCallIdsRef.current.add(req.callId);
       if (activeIncomingCallUiCallIdRef.current === req.callId) {
         activeIncomingCallUiCallIdRef.current = null;
+        pendingIncomingCallRequestRef.current = null;
       }
       const socket = await ensureCallSocketReady(socketRef);
       socket.emit('call:response', { callId: req.callId, accepted: true });
@@ -849,6 +860,7 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     void stopIncomingRingtonePlayback();
     if (activeIncomingCallUiCallIdRef.current === callId) {
       activeIncomingCallUiCallIdRef.current = null;
+      pendingIncomingCallRequestRef.current = null;
     }
     incomingBootstrapByCallIdRef.current.delete(callId);
     incomingBootstrapPromiseByCallIdRef.current.delete(callId);
@@ -888,6 +900,17 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       }
       if (state === 'active') {
         refreshPushToken();
+        const pending = pendingIncomingCallRequestRef.current;
+        if (
+          pending &&
+          canNavigateToIncomingCall(pending.callId) &&
+          activeIncomingCallUiCallIdRef.current === pending.callId &&
+          !acceptedIncomingCallIdsRef.current.has(pending.callId) &&
+          !rejectedIncomingCallIdsRef.current.has(pending.callId) &&
+          !incomingCallHandlerRef.current
+        ) {
+          openIncomingCallRef.current(pending);
+        }
       }
     });
     return () => sub.remove();
@@ -895,7 +918,13 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
   useEffect(() => {
     if (!isSignedIn || user?.role !== 'receiver') return;
+    setIncomingCallNavigationGuard(
+      (callId) =>
+        !acceptedIncomingCallIdsRef.current.has(callId) &&
+        !rejectedIncomingCallIdsRef.current.has(callId)
+    );
     const unbind = bindIncomingCallNotificationHandlers((incoming) => {
+      if (!canNavigateToIncomingCall(incoming.callId)) return;
       const req: IncomingCallRequest = {
         callId: incoming.callId,
         fromType: incoming.fromType,
@@ -911,15 +940,9 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       activeIncomingCallUiCallIdRef.current = req.callId;
       openIncomingCallRef.current(req);
     });
-    const retryDelays = [400, 1200, 2500, 4500, 7000, 10000];
-    const timers = retryDelays.map((ms) =>
-      setTimeout(() => {
-        consumePendingNotificationTap();
-      }, ms)
-    );
     return () => {
+      setIncomingCallNavigationGuard(null);
       unbind();
-      timers.forEach(clearTimeout);
     };
   }, [isSignedIn, user?.role]);
 
@@ -1024,6 +1047,7 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
         if (userRoleRef.current === 'receiver') {
           activeIncomingCallUiCallIdRef.current = incoming.callId;
+          pendingIncomingCallRequestRef.current = incoming;
 
           if (isAppInBackground()) {
             void showIncomingCallNotification(incoming);

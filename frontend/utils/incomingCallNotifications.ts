@@ -9,6 +9,7 @@ import {
   readPendingIncomingCallTap,
   readShownIncomingCallNotification,
 } from './pendingIncomingCallTapStorage';
+import { logIncomingCallNotif } from './incomingCallNotificationDebug';
 
 export type IncomingCallNotificationPayload = {
   callId: string;
@@ -25,14 +26,49 @@ export const INCOMING_CALL_DEEP_LINK_PREFIX = 'nestham://incoming-call/';
 let setupDone = false;
 let infrastructureReady = false;
 const notifiedCallIds = new Set<string>();
-/** Short debounce so listener + app-active + Linking do not triple-navigate. */
+/** Burst debounce so notification + linking + consumePending do not triple-navigate. */
 const lastHandledTapAtByCallId = new Map<string, number>();
-const TAP_DEDUPE_MS = 800;
-/** Samsung / slow devices may deliver the tap before navigation is ready — keep retrying. */
-const NOTIFICATION_TAP_RECOVERY_DELAYS_MS = [0, 300, 600, 1000, 1800, 3000, 5000, 8000, 12000];
-const CLEAR_LAST_RESPONSE_DELAY_MS = 12000;
+const TAP_DEDUPE_MS = 5000;
+const CLEAR_LAST_RESPONSE_DELAY_MS = 5000;
+/** After accept/reject, block all notification/linking routes to IncomingCall for this id. */
+const handledIncomingCallIds = new Set<string>();
+let incomingCallNavigationGuard: ((callId: string) => boolean) | null = null;
 let openHandler: ((incoming: IncomingCallNotificationPayload) => void) | null = null;
 const pendingOpens = new Map<string, IncomingCallNotificationPayload>();
+
+export function setIncomingCallNavigationGuard(
+  guard: ((callId: string) => boolean) | null
+): void {
+  incomingCallNavigationGuard = guard;
+}
+
+export function canNavigateToIncomingCall(callId: string): boolean {
+  const id = callId.trim();
+  if (!id) return false;
+  if (handledIncomingCallIds.has(id)) return false;
+  if (incomingCallNavigationGuard && !incomingCallNavigationGuard(id)) return false;
+  return true;
+}
+
+/** Call as soon as the user accepts/rejects — stops repeat IncomingCall screens. */
+export async function markIncomingCallHandled(callId: string): Promise<void> {
+  const id = callId.trim();
+  if (!id) return;
+  handledIncomingCallIds.add(id);
+  pendingOpens.delete(id);
+  logIncomingCallNotif('nav.handled', { callId: id });
+  await clearPendingIncomingCallTap();
+  await clearShownIncomingCallNotification();
+  const Notifications = await loadNotificationsModule();
+  if (Notifications && typeof Notifications.clearLastNotificationResponseAsync === 'function') {
+    void Notifications.clearLastNotificationResponseAsync().catch(() => {});
+  }
+  void dismissIncomingCallNotification(id);
+}
+
+export function releaseIncomingCallNavigation(callId: string): void {
+  handledIncomingCallIds.delete(callId.trim());
+}
 
 let notificationsModulePromise: Promise<typeof import('expo-notifications') | null> | null =
   null;
@@ -217,6 +253,7 @@ export function parseIncomingFromNotificationRequest(request: {
 }
 
 function queuePendingOpen(incoming: IncomingCallNotificationPayload): void {
+  if (!canNavigateToIncomingCall(incoming.callId)) return;
   pendingOpens.set(incoming.callId, incoming);
   void persistPendingIncomingCallTap(incoming);
 }
@@ -231,9 +268,16 @@ function flushPendingOpens(): void {
 }
 
 function shouldSkipDuplicateTap(callId: string): boolean {
+  if (!canNavigateToIncomingCall(callId)) {
+    logIncomingCallNotif('nav.blocked', { callId, reason: 'handled_or_guard' });
+    return true;
+  }
   const now = Date.now();
   const last = lastHandledTapAtByCallId.get(callId) ?? 0;
-  if (now - last < TAP_DEDUPE_MS) return true;
+  if (now - last < TAP_DEDUPE_MS) {
+    logIncomingCallNotif('tap.dedupe_skip', { callId });
+    return true;
+  }
   lastHandledTapAtByCallId.set(callId, now);
   return false;
 }
@@ -247,17 +291,29 @@ function dispatchIncomingOpen(incoming: IncomingCallNotificationPayload): void {
     peerImage: incoming.peerImage ?? null,
   };
   if (!merged.callId) return;
-  if (shouldSkipDuplicateTap(merged.callId)) return;
+  if (shouldSkipDuplicateTap(merged.callId)) {
+    return;
+  }
   if (openHandler) {
+    logIncomingCallNotif('tap.dispatch_handler', { callId: merged.callId });
     openHandler(merged);
     return;
   }
+  logIncomingCallNotif('tap.dispatch_queue', { callId: merged.callId });
   queuePendingOpen(merged);
 }
 
 async function openIncomingFromNotificationTap(
   incoming: IncomingCallNotificationPayload
 ): Promise<void> {
+  if (!canNavigateToIncomingCall(incoming.callId)) {
+    logIncomingCallNotif('nav.blocked', { callId: incoming.callId, reason: 'tap_pipeline' });
+    return;
+  }
+  logIncomingCallNotif('tap.open_start', {
+    callId: incoming.callId,
+    identifier: `${INCOMING_CALL_NOTIFICATION_ID_PREFIX}${incoming.callId}`,
+  });
   void dismissIncomingCallNotification(incoming.callId);
   void persistPendingIncomingCallTap(incoming);
 
@@ -295,9 +351,19 @@ async function processNotificationResponse(
   const actionId = response.actionIdentifier;
   const defaultAction =
     Notifications.DEFAULT_ACTION_IDENTIFIER ?? 'expo.modules.notifications.actions.DEFAULT';
-  if (actionId && actionId !== defaultAction) return;
+  if (actionId && actionId !== defaultAction) {
+    logIncomingCallNotif('response.action_skip', { actionId });
+    return;
+  }
+
+  const identifier = response.notification.request.identifier ?? '';
+  logIncomingCallNotif('response.listener', {
+    identifier,
+    actionId: actionId ?? defaultAction,
+  });
 
   if (!isNotificationResponseFresh(response)) {
+    logIncomingCallNotif('response.stale', { identifier });
     if (typeof Notifications.clearLastNotificationResponseAsync === 'function') {
       void Notifications.clearLastNotificationResponseAsync().catch(() => {});
     }
@@ -306,12 +372,17 @@ async function processNotificationResponse(
 
   const incoming = parseIncomingFromNotificationRequest(response.notification.request);
   if (!incoming) {
-    const callId = parseCallIdFromNotificationIdentifier(
-      response.notification.request.identifier
-    );
+    logIncomingCallNotif('response.parse_fail', {
+      identifier,
+      dataKeys: Object.keys(
+        (response.notification.request.content?.data as Record<string, unknown>) ?? {}
+      ),
+    });
+    const callId = parseCallIdFromNotificationIdentifier(identifier);
     if (callId) {
       const shown = await readShownIncomingCallNotification();
       if (shown?.callId === callId) {
+        logIncomingCallNotif('response.parse_ok', { callId, source: 'shown_storage' });
         await openIncomingFromNotificationTap(shown);
         scheduleClearLastNotificationResponse(Notifications);
       }
@@ -319,6 +390,11 @@ async function processNotificationResponse(
     return;
   }
 
+  logIncomingCallNotif('response.parse_ok', {
+    callId: incoming.callId,
+    identifier,
+    isLocalTag: identifier.startsWith(INCOMING_CALL_NOTIFICATION_ID_PREFIX),
+  });
   await openIncomingFromNotificationTap(incoming);
   scheduleClearLastNotificationResponse(Notifications);
 }
@@ -335,6 +411,7 @@ function scheduleClearLastNotificationResponse(
 async function checkLastNotificationResponse(): Promise<void> {
   const Notifications = await loadNotificationsModule();
   if (!Notifications) return;
+  logIncomingCallNotif('response.check_last');
   const last =
     typeof Notifications.getLastNotificationResponse === 'function'
       ? Notifications.getLastNotificationResponse()
@@ -342,9 +419,42 @@ async function checkLastNotificationResponse(): Promise<void> {
   await processNotificationResponse(Notifications, last);
 }
 
-function scheduleNotificationTapRecoveryChecks(): void {
-  for (const delayMs of NOTIFICATION_TAP_RECOVERY_DELAYS_MS) {
-    setTimeout(() => void checkLastNotificationResponse(), delayMs);
+/**
+ * Keep a single incoming-call row in the shade (tag `incoming-{callId}`).
+ * Duplicate rows (e.g. FCM alert + local) share one PendingIntent slot on Android 12+
+ * and expanded-panel taps can open the app without notification-response extras.
+ */
+async function collapseIncomingCallTrayToSingle(
+  incoming: IncomingCallNotificationPayload
+): Promise<void> {
+  const Notifications = await loadNotificationsModule();
+  if (!Notifications?.getPresentedNotificationsAsync) return;
+
+  const targetIdentifier = `${INCOMING_CALL_NOTIFICATION_ID_PREFIX}${incoming.callId}`;
+  try {
+    const presented = await Notifications.getPresentedNotificationsAsync();
+    logIncomingCallNotif('collapse.scan', {
+      callId: incoming.callId,
+      targetIdentifier,
+      presentedCount: presented.length,
+      presentedIds: presented.map((n) => n.request.identifier ?? ''),
+    });
+
+    for (const notification of presented) {
+      const parsed = parseIncomingFromNotificationRequest(notification.request);
+      if (!parsed || parsed.callId !== incoming.callId) continue;
+
+      const identifier = notification.request.identifier ?? '';
+      if (identifier === targetIdentifier) continue;
+
+      logIncomingCallNotif('collapse.dismiss', {
+        dismissIdentifier: identifier,
+        keepIdentifier: targetIdentifier,
+      });
+      await Notifications.dismissNotificationAsync(identifier);
+    }
+  } catch (e) {
+    logIncomingCallNotif('collapse.error', { message: e instanceof Error ? e.message : String(e) });
   }
 }
 
@@ -352,16 +462,20 @@ function scheduleNotificationTapRecoveryChecks(): void {
 export function consumePendingNotificationTap(): void {
   void (async () => {
     const persisted = await readPendingIncomingCallTap();
-    if (persisted) {
+    if (persisted && canNavigateToIncomingCall(persisted.callId)) {
+      logIncomingCallNotif('consume.pending', { callId: persisted.callId });
       if (openHandler) {
         openHandler(persisted);
         await clearPendingIncomingCallTap();
       } else {
         queuePendingOpen(persisted);
       }
+    } else if (persisted) {
+      await clearPendingIncomingCallTap();
     }
     flushPendingOpens();
-    scheduleNotificationTapRecoveryChecks();
+    logIncomingCallNotif('consume.flush');
+    void checkLastNotificationResponse();
   })();
 }
 
@@ -375,6 +489,31 @@ export async function ensureIncomingCallNotificationSetup(): Promise<void> {
     handleNotification: async (notification) => {
       const isIncomingCall = notification.request.content.data?.type === 'call_incoming';
       const appActive = AppState.currentState === 'active';
+      const identifier = notification.request.identifier ?? '';
+
+      // Background incoming-call push: do not add a second tray row; socket/push handler
+      // presents one local notification with tag incoming-{callId} and correct tap intent.
+      if (isIncomingCall && !appActive) {
+        logIncomingCallNotif('handler.decision', {
+          identifier,
+          suppressTray: true,
+          appActive,
+        });
+        return {
+          shouldShowAlert: false,
+          shouldPlaySound: false,
+          shouldSetBadge: false,
+          shouldShowBanner: false,
+          shouldShowList: false,
+        };
+      }
+
+      logIncomingCallNotif('handler.decision', {
+        identifier,
+        isIncomingCall,
+        appActive,
+        suppressTray: false,
+      });
       return {
         shouldShowAlert: !appActive || !isIncomingCall,
         shouldPlaySound: true,
@@ -454,6 +593,9 @@ export async function showIncomingCallNotification(
     await ensureIncomingCallNotificationSetup();
     if (!(await ensureNotificationPermission())) return;
 
+    logIncomingCallNotif('show.start', { callId });
+    await collapseIncomingCallTrayToSingle(incoming);
+
     await Notifications.scheduleNotificationAsync({
       identifier: `${INCOMING_CALL_NOTIFICATION_ID_PREFIX}${callId}`,
       content: {
@@ -475,8 +617,17 @@ export async function showIncomingCallNotification(
     });
     void persistShownIncomingCallNotification(incoming);
     notifiedCallIds.add(callId);
-  } catch {
+    logIncomingCallNotif('show.scheduled', {
+      callId,
+      identifier: `${INCOMING_CALL_NOTIFICATION_ID_PREFIX}${callId}`,
+    });
+    await collapseIncomingCallTrayToSingle(incoming);
+  } catch (e) {
     notifiedCallIds.delete(callId);
+    logIncomingCallNotif('show.error', {
+      callId,
+      message: e instanceof Error ? e.message : String(e),
+    });
   }
 }
 
@@ -498,9 +649,11 @@ export function clearIncomingCallNotificationDedupe(callId?: string): void {
   const id = callId?.trim();
   if (!id) {
     notifiedCallIds.clear();
+    handledIncomingCallIds.clear();
     return;
   }
   notifiedCallIds.delete(id);
+  releaseIncomingCallNavigation(id);
   void dismissIncomingCallNotification(id);
 }
 
@@ -558,19 +711,25 @@ export function ensureIncomingCallNotificationInfrastructure(): () => void {
     receivedSub = Notifications.addNotificationReceivedListener((notification) => {
       const incoming = parseIncomingFromNotificationRequest(notification.request);
       if (!incoming || !isAppInBackground()) return;
+      logIncomingCallNotif('received.background', {
+        identifier: notification.request.identifier ?? '',
+        callId: incoming.callId,
+      });
       void showIncomingCallNotification(incoming);
     });
 
     const onAppState = (state: AppStateStatus): void => {
       if (state === 'active') {
+        logIncomingCallNotif('app_state.active');
         lastHandledTapAtByCallId.clear();
-        scheduleNotificationTapRecoveryChecks();
+        void checkLastNotificationResponse();
         flushPendingOpens();
       }
     };
     appStateSub = AppState.addEventListener('change', onAppState);
 
     const onUrl = (event: { url: string }): void => {
+      logIncomingCallNotif('linking.url', { url: event.url });
       const fromUrl = parseIncomingCallDeepLink(event.url);
       if (!fromUrl) return;
       void openIncomingFromNotificationTap(fromUrl);
@@ -581,7 +740,6 @@ export function ensureIncomingCallNotificationInfrastructure(): () => void {
     });
 
     void checkLastNotificationResponse();
-    scheduleNotificationTapRecoveryChecks();
   })();
 
   infrastructureReady = true;

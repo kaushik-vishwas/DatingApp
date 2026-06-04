@@ -83,11 +83,10 @@ type StreamCallAvatarExtrasModule = {
   StreamMicControlBridge: React.ComponentType<{
     controlRef: React.MutableRefObject<StreamMicControl | null>;
     onMutedChange: (muted: boolean) => void;
-    userMutedRef: React.MutableRefObject<boolean>;
+    userChosenMuteRef: React.MutableRefObject<boolean>;
   }>;
   StreamSystemHoldBridge: React.ComponentType<{
-    userMuted: boolean;
-    userMutedRef: React.MutableRefObject<boolean>;
+    userChosenMuteRef: React.MutableRefObject<boolean>;
     appInBackground: boolean;
     onSystemHoldChange: (onHold: boolean) => void;
   }>;
@@ -263,6 +262,8 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
   const [appInBackground, setAppInBackground] = useState(AppState.currentState !== 'active');
   const [muted, setMuted] = useState(false);
   const mutedRef = useRef(false);
+  /** Only set when the user taps Mute/Unmute — not when Stream briefly reports mute during connect. */
+  const userChosenMuteRef = useRef(false);
   const [speakerOn, setSpeakerOn] = useState(true);
   const [liveSettledAmountInr, setLiveSettledAmountInr] = useState(0);
   /** Caller wallet from server (both roles) — stays in sync as the call is billed. */
@@ -380,7 +381,6 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
   const appStateRef = useRef(AppState.currentState);
   const appInBackgroundRef = useRef(AppState.currentState !== 'active');
   const holdForcedMicOffRef = useRef(false);
-  const userMutedBeforeHoldRef = useRef(false);
   const peerHoldPausedMicRef = useRef(false);
   const peerCallHoldRef = useRef(false);
   const receiverAvailabilitySessionRef = useRef(receiverAvailabilitySession);
@@ -410,7 +410,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
     }
     if (peerHoldPausedMicRef.current) {
       peerHoldPausedMicRef.current = false;
-      if (!systemCallHoldRef.current && !userMutedBeforeHoldRef.current) {
+      if (!systemCallHoldRef.current && !userChosenMuteRef.current) {
         void streamMicControlRef.current?.setEnabled(true).catch(() => {});
       }
     }
@@ -451,7 +451,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
       const interrupted = nextState !== 'active';
       appInBackgroundRef.current = interrupted;
       setAppInBackground(interrupted);
-      if (interrupted && !endingRef.current && callIdRef.current.trim()) {
+      if (interrupted && !endingRef.current && callIdRef.current.trim() && readyRef.current) {
         applySystemCallHold(true);
         return;
       }
@@ -950,6 +950,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
   useEffect(() => {
     const id = streamBootstrap?.callId;
     if (id) callIdRef.current = id;
+    userChosenMuteRef.current = false;
   }, [streamBootstrap?.callId]);
 
   useEffect(() => {
@@ -1380,7 +1381,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
     if (!systemCallHold) {
       if (holdForcedMicOffRef.current) {
         holdForcedMicOffRef.current = false;
-        if (!userMutedBeforeHoldRef.current) {
+        if (!userChosenMuteRef.current) {
           void setStreamMicEnabled(true).catch(() => {
             // ignore restore errors
           });
@@ -1389,15 +1390,14 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
       return;
     }
     if (!holdForcedMicOffRef.current) {
-      userMutedBeforeHoldRef.current = muted;
       holdForcedMicOffRef.current = true;
-      if (!muted) {
+      if (!userChosenMuteRef.current) {
         void setStreamMicEnabled(false).catch(() => {
           // ignore
         });
       }
     }
-  }, [systemCallHold, muted, setStreamMicEnabled]);
+  }, [systemCallHold, setStreamMicEnabled]);
 
   const toggleMute = async () => {
     if (!streamMicControlRef.current) {
@@ -1735,7 +1735,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
             <streamAvatarExtras.StreamMicControlBridge
               controlRef={streamMicControlRef}
               onMutedChange={setMuted}
-              userMutedRef={mutedRef}
+              userChosenMuteRef={userChosenMuteRef}
             />
           ) : null}
           {streamAvatarExtras ? (
@@ -1754,8 +1754,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
           ) : null}
           {streamAvatarExtras ? (
             <streamAvatarExtras.StreamSystemHoldBridge
-              userMuted={muted}
-              userMutedRef={mutedRef}
+              userChosenMuteRef={userChosenMuteRef}
               appInBackground={appInBackground}
               onSystemHoldChange={handleStreamSystemHold}
             />

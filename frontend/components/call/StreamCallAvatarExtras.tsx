@@ -69,24 +69,39 @@ export type StreamMicControl = {
 export function StreamMicControlBridge({
   controlRef,
   onMutedChange,
-  userMutedRef,
+  userChosenMuteRef,
 }: {
   controlRef: React.MutableRefObject<StreamMicControl | null>;
   onMutedChange: (muted: boolean) => void;
-  userMutedRef: React.MutableRefObject<boolean>;
+  /** True only after the user taps Mute/Unmute — not when Stream reports mute during connect. */
+  userChosenMuteRef: React.MutableRefObject<boolean>;
 }): null {
-  const { useMicrophoneState } = useCallStateHooks();
+  const { useMicrophoneState, useCallCallingState } = useCallStateHooks();
+  const callingState = useCallCallingState();
   const { microphone, optimisticIsMute, isMute } = useMicrophoneState();
   const muted = Boolean(optimisticIsMute ?? isMute);
+  const ensuredUnmuteAfterJoinRef = useRef(false);
 
   useEffect(() => {
-    userMutedRef.current = muted;
     onMutedChange(muted);
-  }, [muted, onMutedChange, userMutedRef]);
+  }, [muted, onMutedChange]);
+
+  useEffect(() => {
+    if (callingState !== CallingState.JOINED) {
+      ensuredUnmuteAfterJoinRef.current = false;
+      return;
+    }
+    if (ensuredUnmuteAfterJoinRef.current || userChosenMuteRef.current) return;
+    ensuredUnmuteAfterJoinRef.current = true;
+    void microphone.enable().catch(() => {
+      ensuredUnmuteAfterJoinRef.current = false;
+    });
+  }, [callingState, microphone, userChosenMuteRef]);
 
   useEffect(() => {
     controlRef.current = {
       toggle: async () => {
+        userChosenMuteRef.current = !muted;
         await microphone.toggle();
       },
       setEnabled: async (enabled: boolean) => {
@@ -100,7 +115,7 @@ export function StreamMicControlBridge({
     return () => {
       controlRef.current = null;
     };
-  }, [controlRef, microphone]);
+  }, [controlRef, microphone, muted, userChosenMuteRef]);
 
   return null;
 }
@@ -109,14 +124,16 @@ export function StreamMicControlBridge({
  * Detects when the OS steals the mic (e.g. cellular call) while the user did not tap Mute.
  * Must render inside Stream `StreamCall`.
  */
+/** Ignore transient missing mic right after JOINED (common when opening from a notification). */
+const MIC_JOIN_GRACE_MS = 2000;
+const AUDIO_LOST_HOLD_MS = 500;
+
 export function StreamSystemHoldBridge({
-  userMuted,
-  userMutedRef,
+  userChosenMuteRef,
   appInBackground,
   onSystemHoldChange,
 }: {
-  userMuted: boolean;
-  userMutedRef: React.MutableRefObject<boolean>;
+  userChosenMuteRef: React.MutableRefObject<boolean>;
   appInBackground: boolean;
   onSystemHoldChange: (onHold: boolean) => void;
 }): null {
@@ -125,14 +142,22 @@ export function StreamSystemHoldBridge({
   const localParticipant = useLocalParticipant();
   const onSystemHoldChangeRef = useRef(onSystemHoldChange);
   const audioLostSinceRef = useRef<number | null>(null);
+  const joinedAtRef = useRef<number | null>(null);
   onSystemHoldChangeRef.current = onSystemHoldChange;
 
   useEffect(() => {
     if (callingState !== CallingState.JOINED) {
       audioLostSinceRef.current = null;
+      joinedAtRef.current = null;
       return;
     }
-    if (userMutedRef.current || userMuted) {
+    if (joinedAtRef.current === null) {
+      joinedAtRef.current = Date.now();
+    }
+    if (Date.now() - joinedAtRef.current < MIC_JOIN_GRACE_MS) {
+      return;
+    }
+    if (userChosenMuteRef.current) {
       audioLostSinceRef.current = null;
       return;
     }
@@ -147,15 +172,12 @@ export function StreamSystemHoldBridge({
     const now = Date.now();
     if (audioLostSinceRef.current === null) {
       audioLostSinceRef.current = now;
-      if (appInBackground) {
-        onSystemHoldChangeRef.current(true);
-      }
       return;
     }
-    if (now - audioLostSinceRef.current >= 250) {
+    if (now - audioLostSinceRef.current >= AUDIO_LOST_HOLD_MS) {
       onSystemHoldChangeRef.current(true);
     }
-  }, [callingState, localParticipant, userMuted, appInBackground]);
+  }, [callingState, localParticipant, appInBackground, userChosenMuteRef]);
 
   return null;
 }

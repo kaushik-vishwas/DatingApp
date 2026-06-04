@@ -3,10 +3,12 @@ import { Linking, Platform } from 'react-native';
 import type { RootStackParamList } from './RootStackParamList';
 import {
   INCOMING_CALL_DEEP_LINK_PREFIX,
+  canNavigateToIncomingCall,
   incomingCallDeepLink,
   parseIncomingCallDeepLink,
   parseIncomingFromNotificationRequest,
 } from '../utils/incomingCallNotifications';
+import { logIncomingCallNotif } from '../utils/incomingCallNotificationDebug';
 import { readPendingIncomingCallTap } from '../utils/pendingIncomingCallTapStorage';
 
 const APP_PREFIXES = ['nestham://', 'com.kaushikvishwas.frontend://'];
@@ -20,61 +22,6 @@ function urlFromNotificationResponse(
   const data = response.notification.request.content.data as Record<string, unknown> | undefined;
   const url = typeof data?.url === 'string' ? data.url.trim() : '';
   if (url.startsWith(INCOMING_CALL_DEEP_LINK_PREFIX)) return url;
-  return null;
-}
-
-/** Samsung cold start: native last-response may arrive after the first JS tick. */
-const INITIAL_URL_NOTIFICATION_DELAYS_MS = [0, 100, 250, 500, 800, 1200, 1800, 2500, 3500];
-
-function readLastNotificationTapUrl(
-  Notifications: typeof import('expo-notifications')
-): string | null {
-  const last =
-    typeof Notifications.getLastNotificationResponse === 'function'
-      ? Notifications.getLastNotificationResponse()
-      : null;
-  return urlFromNotificationResponse(last);
-}
-
-async function readInitialNotificationTapUrl(): Promise<string | null> {
-  if (Platform.OS === 'web') return null;
-
-  const persisted = await readPendingIncomingCallTap();
-  if (persisted) return incomingCallDeepLink(persisted);
-
-  try {
-    const Notifications = await import('expo-notifications');
-    let previousDelayMs = 0;
-    let consecutiveNullResponses = 0;
-
-    for (const delayMs of INITIAL_URL_NOTIFICATION_DELAYS_MS) {
-      const waitMs = delayMs - previousDelayMs;
-      if (waitMs > 0) {
-        await new Promise((resolve) => setTimeout(resolve, waitMs));
-      }
-      previousDelayMs = delayMs;
-
-      const fromNotif = readLastNotificationTapUrl(Notifications);
-      if (fromNotif) return fromNotif;
-
-      const last =
-        typeof Notifications.getLastNotificationResponse === 'function'
-          ? Notifications.getLastNotificationResponse()
-          : await Notifications.getLastNotificationResponseAsync();
-
-      if (!last) {
-        consecutiveNullResponses += 1;
-        // Normal app launch — stop polling once we have several empty reads after ~800ms.
-        if (delayMs >= 800 && consecutiveNullResponses >= 3) {
-          return null;
-        }
-      } else {
-        consecutiveNullResponses = 0;
-      }
-    }
-  } catch {
-    // ignore
-  }
   return null;
 }
 
@@ -102,12 +49,34 @@ export const appLinking: LinkingOptions<RootStackParamList> = {
   },
   async getInitialURL() {
     const initialUrl = await Linking.getInitialURL();
-    if (initialUrl && parseIncomingCallDeepLink(initialUrl)) {
+    const fromLink = initialUrl ? parseIncomingCallDeepLink(initialUrl) : null;
+    if (fromLink && canNavigateToIncomingCall(fromLink.callId)) {
       return initialUrl;
     }
 
-    const fromNotif = await readInitialNotificationTapUrl();
-    if (fromNotif) return fromNotif;
+    if (Platform.OS !== 'web') {
+      const persisted = await readPendingIncomingCallTap();
+      if (persisted && canNavigateToIncomingCall(persisted.callId)) {
+        return incomingCallDeepLink(persisted);
+      }
+
+      try {
+        const Notifications = await import('expo-notifications');
+        const last =
+          typeof Notifications.getLastNotificationResponse === 'function'
+            ? Notifications.getLastNotificationResponse()
+            : await Notifications.getLastNotificationResponseAsync();
+        const fromNotif = urlFromNotificationResponse(last);
+        if (fromNotif) {
+          const parsed = parseIncomingCallDeepLink(fromNotif);
+          if (parsed && canNavigateToIncomingCall(parsed.callId)) {
+            return fromNotif;
+          }
+        }
+      } catch {
+        // ignore
+      }
+    }
 
     return initialUrl;
   },
@@ -121,7 +90,15 @@ export const appLinking: LinkingOptions<RootStackParamList> = {
       .then((Notifications) => {
         notifSub = Notifications.addNotificationResponseReceivedListener((response) => {
           const url = urlFromNotificationResponse(response);
-          if (url) listener(url);
+          if (!url) return;
+          const parsed = parseIncomingCallDeepLink(url);
+          if (!parsed || !canNavigateToIncomingCall(parsed.callId)) return;
+          logIncomingCallNotif('linking.url', {
+            url,
+            identifier: response.notification.request.identifier ?? '',
+            source: 'response_listener',
+          });
+          listener(url);
         });
       })
       .catch(() => {});
