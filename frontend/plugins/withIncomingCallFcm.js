@@ -10,6 +10,45 @@ const {
 const APP_PACKAGE = 'com.kaushikvishwas.frontend';
 const FCM_SERVICE = `${APP_PACKAGE}.fcm.NesthamFirebaseMessagingService`;
 const EXPO_FCM_SERVICE = 'expo.modules.notifications.service.ExpoFirebaseMessagingService';
+const FIREBASE_MESSAGING_DEP = 'implementation("com.google.firebase:firebase-messaging")';
+const CLEAN_WORKAROUND_MARKER = '[nestham] RN new-arch clean workaround';
+
+function ensureGradleCleanWorkaround(appBuildGradlePath) {
+  if (!fs.existsSync(appBuildGradlePath)) return;
+  const gradle = fs.readFileSync(appBuildGradlePath, 'utf8');
+  if (gradle.includes(CLEAN_WORKAROUND_MARKER)) return;
+  const snippet = `
+
+// ${CLEAN_WORKAROUND_MARKER}
+gradle.taskGraph.whenReady { taskGraph ->
+    if (taskGraph.allTasks.any { it.name == "clean" }) {
+        ["externalNativeBuildCleanDebug", "externalNativeBuildCleanRelease"].each { taskName ->
+            def nativeClean = tasks.findByName(taskName)
+            if (nativeClean != null) {
+                nativeClean.enabled = false
+            }
+        }
+    }
+}
+tasks.matching { it.name == "clean" }.configureEach {
+    doLast {
+        delete file("\${projectDir}/.cxx")
+    }
+}
+`;
+  fs.appendFileSync(appBuildGradlePath, snippet);
+}
+
+function ensureFirebaseMessagingDependency(appBuildGradlePath) {
+  if (!fs.existsSync(appBuildGradlePath)) return;
+  const gradle = fs.readFileSync(appBuildGradlePath, 'utf8');
+  if (gradle.includes('com.google.firebase:firebase-messaging')) return;
+  const updated = gradle.replace(
+    /dependencies\s*\{\s*\n\s*\/\/ The version of react-native is set by the React Native Gradle Plugin\s*\n\s*implementation\("com\.facebook\.react:react-android"\)/m,
+    (match) => `${match}\n    ${FIREBASE_MESSAGING_DEP}`
+  );
+  fs.writeFileSync(appBuildGradlePath, updated);
+}
 
 /**
  * Replaces Expo's FirebaseMessagingService so data-only incoming_call pushes
@@ -86,6 +125,10 @@ function withIncomingCallFcm(config) {
       for (const file of ['NesthamFirebaseMessagingService.kt', 'IncomingCallFcmPresenter.kt']) {
         fs.copyFileSync(path.join(sourceDir, file), path.join(targetDir, file));
       }
+
+      const appBuildGradlePath = path.join(projectRoot, 'android', 'app', 'build.gradle');
+      ensureFirebaseMessagingDependency(appBuildGradlePath);
+      ensureGradleCleanWorkaround(appBuildGradlePath);
       return config;
     },
   ]);

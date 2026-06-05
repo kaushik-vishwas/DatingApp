@@ -377,14 +377,18 @@ object IncomingCallNotificationTapEnhancer {
     return ActionCopyResult(preserved = preserved, wrapped = wrapped)
   }
 
+  /**
+   * Shade compact-row taps use [Notification.contentIntent]; the Open button uses the action
+   * [PendingIntent]. Expo wires only the action with notification extras — prefer it so tray
+   * taps (without expanding) open the incoming-call flow like Open.
+   */
   private fun resolveTapPendingIntent(notification: Notification): PendingIntent? {
-    notification.contentIntent?.let { return it }
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
       notification.actions?.firstOrNull { it.actionIntent != null }?.actionIntent?.let {
         return it
       }
     }
-    return null
+    return notification.contentIntent
   }
 
   private fun applySmallIcon(builder: NotificationCompat.Builder, existing: Notification) {

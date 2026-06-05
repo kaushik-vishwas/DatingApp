@@ -144,7 +144,7 @@ const styles = StyleSheet.create({
   btnGhostText: { color: '#6b7280', fontWeight: '600' },
 });
 
-/** Shown only on notification-debug APK builds. Does not appear in production. */
+/** Shown when incomingCallNotifDebug is enabled (default on; disable with EXPO_PUBLIC_INCOMING_CALL_NOTIF_DEBUG=0). */
 export default function IncomingCallNotifDebugOverlay(): React.JSX.Element | null {
   if (!isIncomingCallNotifDebugBuild()) {
     return null;

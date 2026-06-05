@@ -1,10 +1,9 @@
-import { PermissionsAndroid, Platform } from 'react-native';
+import { Platform } from 'react-native';
 import { EventEmitter, type EventSubscription } from 'expo-modules-core';
 
 type IncomingCallAndroidNative = {
   startCellularCallHoldWatch(): boolean;
   stopCellularCallHoldWatch(): void;
-  applyFullScreenIntentAsync(identifier: string): Promise<boolean>;
 };
 
 let nativeModule: IncomingCallAndroidNative | null | undefined;
@@ -31,36 +30,12 @@ function getEmitter(): EventEmitter | null {
   return emitter;
 }
 
-async function ensurePhoneStatePermission(): Promise<boolean> {
-  if (Platform.OS !== 'android') return false;
-  try {
-    const granted = await PermissionsAndroid.check(
-      PermissionsAndroid.PERMISSIONS.READ_PHONE_STATE
-    );
-    if (granted) return true;
-    const result = await PermissionsAndroid.request(
-      PermissionsAndroid.PERMISSIONS.READ_PHONE_STATE,
-      {
-        title: 'Phone call detection',
-        message:
-          'Allow phone state access so your contact sees "On hold" when you take a mobile call.',
-        buttonPositive: 'Allow',
-        buttonNegative: 'Not now',
-      }
-    );
-    return result === PermissionsAndroid.RESULTS.GRANTED;
-  } catch {
-    return false;
-  }
-}
-
-/** Start native cellular-call watcher (ref-counted). */
-export async function startAndroidCellularCallHoldWatch(): Promise<void> {
+/** Audio-mode watcher only — no READ_PHONE_STATE permission. */
+export function startAndroidCellularCallHoldWatch(): void {
   const mod = getNativeModule();
   if (!mod) return;
   watchRefCount += 1;
   if (watchRefCount > 1) return;
-  await ensurePhoneStatePermission();
   try {
     mod.startCellularCallHoldWatch();
   } catch {
@@ -68,7 +43,6 @@ export async function startAndroidCellularCallHoldWatch(): Promise<void> {
   }
 }
 
-/** Stop native cellular-call watcher when no subscribers remain. */
 export function stopAndroidCellularCallHoldWatch(): void {
   const mod = getNativeModule();
   if (!mod) return;

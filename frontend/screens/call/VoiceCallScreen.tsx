@@ -1354,14 +1354,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
     if (!control) {
       throw new Error('Call audio is not ready yet');
     }
-    try {
-      await control.setEnabled(enabled);
-      if (!enabled && systemCallHoldRef.current) {
-        applySystemCallHoldRef.current(false);
-      }
-    } catch (err) {
-      throw err;
-    }
+    await control.setEnabled(enabled);
   }, []);
 
   useEffect(() => {

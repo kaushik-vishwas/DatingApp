@@ -5,13 +5,11 @@ import * as FileSystem from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 import { AppState, Platform } from 'react-native';
 
-/**
- * Samsung / notification tap field diagnostics.
- * Enabled only when this env is set at build time (debug APK script).
- * Does not run in normal production builds.
- */
+import { isIncomingCallNotifDebugBuild } from './incomingCallNotificationDebug';
+
+/** Same gate as the purple Debug report FAB. */
 export function isIncomingCallNotifFileDebugEnabled(): boolean {
-  return process.env.EXPO_PUBLIC_INCOMING_CALL_NOTIF_DEBUG === '1';
+  return isIncomingCallNotifDebugBuild();
 }
 
 const LOG_FILE_NAME = 'incoming-call-notification-debug.log';
