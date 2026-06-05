@@ -81,12 +81,14 @@ type StreamCallAvatarExtrasModule = {
   }>;
   StreamParticipantMutedIndicator: React.ComponentType<{
     peerOnHold?: boolean;
+    peerMuted?: boolean;
     talkActive?: boolean;
   }>;
   StreamTalkTimingBridge: React.ComponentType<{ onBothConnected: () => void }>;
   StreamMicControlBridge: React.ComponentType<{
     controlRef: React.MutableRefObject<StreamMicControl | null>;
     onMutedChange: (muted: boolean) => void;
+    onUserMuteToggled?: (muted: boolean) => void;
     userChosenMuteRef: React.MutableRefObject<boolean>;
   }>;
   StreamSystemHoldBridge: React.ComponentType<{
@@ -222,8 +224,10 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
     setIncomingCallDismissHandler,
     setRemoteCallEndedHandler,
     setPeerCallHoldHandler,
+    setPeerCallMuteHandler,
     emitCallEnd: emitCallEndSignal,
     emitCallHold: emitCallHoldSignal,
+    emitCallMute: emitCallMuteSignal,
     setQueueMode,
     rejectIncomingCall,
     acceptIncomingCallStayOnScreen,
@@ -263,6 +267,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
   const [talkActive, setTalkActive] = useState(false);
   const [systemCallHold, setSystemCallHold] = useState(false);
   const [peerCallHold, setPeerCallHold] = useState(false);
+  const [peerCallMuted, setPeerCallMuted] = useState(false);
   const [appInBackground, setAppInBackground] = useState(AppState.currentState !== 'active');
   const [muted, setMuted] = useState(false);
   const mutedRef = useRef(false);
@@ -421,6 +426,29 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
   }, []);
   const applyPeerHoldFromRemoteRef = useRef(applyPeerHoldFromRemote);
   applyPeerHoldFromRemoteRef.current = applyPeerHoldFromRemote;
+
+  const applyPeerMuteFromRemote = useCallback((muted: boolean) => {
+    setPeerCallMuted(muted);
+  }, []);
+  const applyPeerMuteFromRemoteRef = useRef(applyPeerMuteFromRemote);
+  applyPeerMuteFromRemoteRef.current = applyPeerMuteFromRemote;
+
+  const emitPeerCallMute = useCallback(
+    (muted: boolean) => {
+      const callId = callIdRef.current.trim();
+      if (!callId || endingRef.current) return;
+      emitCallMuteSignal(callId, muted);
+      const voiceSocket = signalSocketRef.current;
+      if (voiceSocket?.connected) {
+        try {
+          voiceSocket.emit('call:mute', { callId, muted });
+        } catch {
+          // CallSignal socket is primary; this is a low-latency duplicate on the call screen.
+        }
+      }
+    },
+    [emitCallMuteSignal]
+  );
 
   const emitPeerCallHold = useCallback(
     (onHold: boolean) => {
@@ -862,6 +890,21 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
   }, [user?.role, matchesActiveCallId, setPeerCallHoldHandler, applyPeerHoldFromRemote]);
 
   useEffect(() => {
+    if (user?.role !== 'caller' && user?.role !== 'receiver') {
+      setPeerCallMuteHandler(null);
+      return;
+    }
+    setPeerCallMuteHandler((muteCallId, muted) => {
+      if (!matchesActiveCallId(muteCallId)) return;
+      applyPeerMuteFromRemote(muted);
+    });
+    return () => {
+      setPeerCallMuteHandler(null);
+      setPeerCallMuted(false);
+    };
+  }, [user?.role, matchesActiveCallId, setPeerCallMuteHandler, applyPeerMuteFromRemote]);
+
+  useEffect(() => {
     if (!receiverAvailabilitySession) return;
     setIncomingCallDismissHandler(dismissIncomingOnSession);
     setIncomingCallHandler((incoming) => {
@@ -955,6 +998,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
     if (id) callIdRef.current = id;
     userChosenMuteRef.current = false;
     setMuted(false);
+    setPeerCallMuted(false);
   }, [streamBootstrap?.callId]);
 
   useEffect(() => {
@@ -1162,22 +1206,30 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
         reconnectionDelayMax: 10000,
       });
       signalSocketRef.current = socket;
-      const emitLocalHoldState = (): void => {
+      const emitLocalCallState = (): void => {
         const callId = callIdRef.current.trim();
         if (!callId) return;
         try {
           socket.emit('call:hold', { callId, onHold: systemCallHoldRef.current });
+          socket.emit('call:mute', { callId, muted: userChosenMuteRef.current });
         } catch {
           // ignore
         }
       };
-      socket.on('connect', emitLocalHoldState);
+      socket.on('connect', emitLocalCallState);
       socket.on('call:hold', (payload: { callId?: string; onHold?: boolean; fromType?: 'u' | 'r' }) => {
         const myType = userRoleRef.current === 'caller' ? 'u' : 'r';
         if (payload?.fromType === myType) return;
         const id = typeof payload?.callId === 'string' ? payload.callId.trim() : '';
         if (!id || id !== callIdRef.current.trim()) return;
         applyPeerHoldFromRemoteRef.current(Boolean(payload.onHold));
+      });
+      socket.on('call:mute', (payload: { callId?: string; muted?: boolean; fromType?: 'u' | 'r' }) => {
+        const myType = userRoleRef.current === 'caller' ? 'u' : 'r';
+        if (payload?.fromType === myType) return;
+        const id = typeof payload?.callId === 'string' ? payload.callId.trim() : '';
+        if (!id || id !== callIdRef.current.trim()) return;
+        applyPeerMuteFromRemoteRef.current(Boolean(payload.muted));
       });
       // Best-effort hold duplicate socket — must never end the voice call. Stream WebRTC and
       // CallSignalContext own call lifecycle; hold still works via the main signaling socket.
@@ -1715,6 +1767,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
             <streamAvatarExtras.StreamMicControlBridge
               controlRef={streamMicControlRef}
               onMutedChange={setMuted}
+              onUserMuteToggled={emitPeerCallMute}
               userChosenMuteRef={userChosenMuteRef}
             />
           ) : null}
@@ -1776,6 +1829,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
                     {streamAvatarExtras ? (
                       <streamAvatarExtras.StreamParticipantMutedIndicator
                         peerOnHold={peerCallHold}
+                        peerMuted={peerCallMuted}
                         talkActive={talkActive}
                       />
                     ) : null}

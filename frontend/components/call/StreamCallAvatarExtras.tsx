@@ -2,7 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import React, { useEffect, useRef } from 'react';
 import { Platform, StyleSheet, Text, View } from 'react-native';
 import { useCallStateHooks } from '@stream-io/video-react-native-sdk';
-import { CallingState, hasAudio, type StreamVideoParticipant } from '@stream-io/video-client';
+import { CallingState, type StreamVideoParticipant } from '@stream-io/video-client';
 import { AvatarSoundWaveRings } from './AvatarVoiceWaves';
 import {
   startAndroidCellularCallHoldWatch,
@@ -74,10 +74,13 @@ export type StreamMicControl = {
 export function StreamMicControlBridge({
   controlRef,
   onMutedChange,
+  onUserMuteToggled,
   userChosenMuteRef,
 }: {
   controlRef: React.MutableRefObject<StreamMicControl | null>;
   onMutedChange: (muted: boolean) => void;
+  /** Fired only when the user taps Mute/Unmute — used to signal the remote peer instantly. */
+  onUserMuteToggled?: (muted: boolean) => void;
   /** True only after the user taps Mute/Unmute — not when Stream reports mute during connect. */
   userChosenMuteRef: React.MutableRefObject<boolean>;
 }): null {
@@ -105,6 +108,7 @@ export function StreamMicControlBridge({
         const nextMuted = !userChosenMuteRef.current;
         userChosenMuteRef.current = nextMuted;
         onMutedChange(nextMuted);
+        onUserMuteToggled?.(nextMuted);
         if (nextMuted) {
           await microphone.disable();
         } else {
@@ -123,45 +127,30 @@ export function StreamMicControlBridge({
     return () => {
       controlRef.current = null;
     };
-  }, [controlRef, microphone, onMutedChange, userChosenMuteRef]);
+  }, [controlRef, microphone, onMutedChange, onUserMuteToggled, userChosenMuteRef]);
 
   return null;
 }
 
 /**
- * Detects when the OS steals the mic (e.g. cellular call) while the user did not tap Mute.
+ * Detects an active external cellular call (Android audio mode only).
  * Must render inside Stream `StreamCall`.
  */
-/** Ignore transient missing mic right after JOINED (not applied to cellular audio-mode hold). */
-const MIC_JOIN_GRACE_MS = 1200;
-/** External call stole mic — short sustain to avoid Samsung flicker. */
-const HOLD_ON_MS = 280;
-/** Mic back — clear hold quickly for real-time peer UI. */
-const HOLD_OFF_MS = 150;
-const HOLD_POLL_MS = 80;
-
 export function StreamSystemHoldBridge({
   userChosenMuteRef,
   onSystemHoldChange,
 }: {
   userChosenMuteRef: React.MutableRefObject<boolean>;
-  /** Unused; hold is driven only by OS mic loss (external phone call), not app background. */
+  /** Unused; hold is driven only by external cellular calls, not app background. */
   appInBackground: boolean;
   onSystemHoldChange: (onHold: boolean) => void;
 }): null {
-  const { useLocalParticipant, useCallCallingState } = useCallStateHooks();
+  const { useCallCallingState } = useCallStateHooks();
   const callingState = useCallCallingState();
-  const localParticipant = useLocalParticipant();
   const onSystemHoldChangeRef = useRef(onSystemHoldChange);
-  const localParticipantRef = useRef(localParticipant);
   const callingStateRef = useRef(callingState);
   const holdActiveRef = useRef(false);
-  const cellularActiveRef = useRef(false);
-  const audioLostSinceRef = useRef<number | null>(null);
-  const micLiveSinceRef = useRef<number | null>(null);
-  const joinedAtRef = useRef<number | null>(null);
   onSystemHoldChangeRef.current = onSystemHoldChange;
-  localParticipantRef.current = localParticipant;
   callingStateRef.current = callingState;
 
   const applyHoldState = (next: boolean): void => {
@@ -170,105 +159,34 @@ export function StreamSystemHoldBridge({
     onSystemHoldChangeRef.current(next);
   };
 
-  const evaluateHold = (): void => {
-    if (callingStateRef.current !== CallingState.JOINED) return;
-
-    if (userChosenMuteRef.current) {
-      audioLostSinceRef.current = null;
-      micLiveSinceRef.current = null;
-      if (holdActiveRef.current) {
-        applyHoldState(false);
-      }
-      return;
-    }
-
-    const joinedAt = joinedAtRef.current;
-    const inJoinGrace =
-      joinedAt !== null && Date.now() - joinedAt < MIC_JOIN_GRACE_MS;
-
-    const cellularHold = Platform.OS === 'android' && cellularActiveRef.current;
-    const participant = localParticipantRef.current;
-    const micLive = Boolean(participant && hasAudio(participant));
-
-    let micHold = false;
-    if (!micLive) {
-      const now = Date.now();
-      if (audioLostSinceRef.current === null) {
-        audioLostSinceRef.current = now;
-      }
-      micHold = !inJoinGrace && now - audioLostSinceRef.current >= HOLD_ON_MS;
-    } else {
-      audioLostSinceRef.current = null;
-    }
-
-    const shouldHoldOn = cellularHold || micHold;
-    if (shouldHoldOn) {
-      micLiveSinceRef.current = null;
-      applyHoldState(true);
-      return;
-    }
-
-    if (!holdActiveRef.current) return;
-
-    if (micLive) {
-      const now = Date.now();
-      if (micLiveSinceRef.current === null) {
-        micLiveSinceRef.current = now;
-      }
-      if (now - micLiveSinceRef.current >= HOLD_OFF_MS) {
-        micLiveSinceRef.current = null;
-        applyHoldState(false);
-      }
-      return;
-    }
-
-    micLiveSinceRef.current = null;
-  };
-
   useEffect(() => {
     if (callingState !== CallingState.JOINED) {
       holdActiveRef.current = false;
-      cellularActiveRef.current = false;
-      audioLostSinceRef.current = null;
-      micLiveSinceRef.current = null;
-      joinedAtRef.current = null;
       if (Platform.OS === 'android') {
         stopAndroidCellularCallHoldWatch();
       }
       return;
     }
-    if (joinedAtRef.current === null) {
-      joinedAtRef.current = Date.now();
+
+    if (Platform.OS !== 'android') {
+      return;
     }
 
-    let unsubCellular = (): void => {};
-    if (Platform.OS === 'android') {
-      unsubCellular = subscribeAndroidCellularCallHold((active) => {
-        cellularActiveRef.current = active;
-        if (userChosenMuteRef.current) return;
-        if (callingStateRef.current !== CallingState.JOINED) return;
-        if (active) {
-          audioLostSinceRef.current = null;
-          micLiveSinceRef.current = null;
-          applyHoldState(true);
-          return;
-        }
-        evaluateHold();
-      });
-      startAndroidCellularCallHoldWatch();
-    }
-
-    evaluateHold();
-    const intervalId = setInterval(evaluateHold, HOLD_POLL_MS);
-    return () => {
-      clearInterval(intervalId);
-      unsubCellular();
-      if (Platform.OS === 'android') {
-        stopAndroidCellularCallHoldWatch();
+    const unsubCellular = subscribeAndroidCellularCallHold((active) => {
+      if (userChosenMuteRef.current) {
+        if (holdActiveRef.current) applyHoldState(false);
+        return;
       }
-      cellularActiveRef.current = false;
+      if (callingStateRef.current !== CallingState.JOINED) return;
+      applyHoldState(active);
+    });
+    startAndroidCellularCallHoldWatch();
+
+    return () => {
+      unsubCellular();
+      stopAndroidCellularCallHoldWatch();
     };
-  }, [callingState, localParticipant, userChosenMuteRef]);
+  }, [callingState, userChosenMuteRef]);
 
   return null;
 }
@@ -310,11 +228,13 @@ export function StreamTalkTimingBridge({
   return null;
 }
 
-/** Peer on-hold badge only — no "Muted" badge (Stream mic publish lags look like mute on connect). */
+/** Peer hold/mute badges on the remote avatar (signaled via socket, not Stream mic heuristics). */
 export function StreamParticipantMutedIndicator({
   peerOnHold = false,
+  peerMuted = false,
 }: {
   peerOnHold?: boolean;
+  peerMuted?: boolean;
   talkActive?: boolean;
 }): React.JSX.Element | null {
   const { useRemoteParticipants, useCallCallingState } = useCallStateHooks();
@@ -322,15 +242,25 @@ export function StreamParticipantMutedIndicator({
   const remoteParticipant = remoteParticipants[0];
   const callingState = useCallCallingState();
 
-  const showHold =
-    peerOnHold && callingState === CallingState.JOINED && Boolean(remoteParticipant);
+  const joined = callingState === CallingState.JOINED && Boolean(remoteParticipant);
+  const showHold = peerOnHold && joined;
+  const showMuted = !showHold && peerMuted && joined;
 
-  if (!showHold) return null;
+  if (!showHold && !showMuted) return null;
+
+  if (showHold) {
+    return (
+      <View style={[mutedStyles.badge, mutedStyles.holdBadge]} pointerEvents="none">
+        <Ionicons name="pause" size={12} color="#faf5ff" />
+        <Text style={mutedStyles.label}>On hold</Text>
+      </View>
+    );
+  }
 
   return (
-    <View style={mutedStyles.badge} pointerEvents="none">
-      <Ionicons name="pause" size={12} color="#faf5ff" />
-      <Text style={mutedStyles.label}>On hold</Text>
+    <View style={[mutedStyles.badge, mutedStyles.muteBadge]} pointerEvents="none">
+      <Ionicons name="mic-off" size={12} color="#faf5ff" />
+      <Text style={mutedStyles.label}>Muted</Text>
     </View>
   );
 }
@@ -343,12 +273,18 @@ const mutedStyles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 3,
-    backgroundColor: 'rgba(127, 29, 29, 0.92)',
     borderRadius: 10,
     paddingHorizontal: 7,
     paddingVertical: 3,
     borderWidth: 1,
+  },
+  holdBadge: {
+    backgroundColor: 'rgba(127, 29, 29, 0.92)',
     borderColor: 'rgba(254, 202, 202, 0.45)',
+  },
+  muteBadge: {
+    backgroundColor: 'rgba(55, 48, 163, 0.92)',
+    borderColor: 'rgba(199, 210, 254, 0.45)',
   },
   label: {
     color: '#fef2f2',

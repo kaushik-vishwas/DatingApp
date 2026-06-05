@@ -7,7 +7,7 @@ import android.os.Looper
 
 /**
  * Detects cellular call interruption via [AudioManager] mode only — no phone permission.
- * VoIP uses MODE_IN_COMMUNICATION; carrier calls typically switch to MODE_IN_CALL / RINGTONE.
+ * VoIP uses MODE_IN_COMMUNICATION; an answered carrier call uses MODE_IN_CALL.
  */
 object CellularCallHoldWatcher {
   private const val POLL_MS = 100L
@@ -48,7 +48,6 @@ object CellularCallHoldWatcher {
     val am = audioManager ?: return false
     return when (am.mode) {
       AudioManager.MODE_IN_CALL,
-      AudioManager.MODE_RINGTONE,
       AudioManager.MODE_CALL_SCREENING -> true
       else -> false
     }

@@ -92,6 +92,13 @@ type CallHoldPayload = {
   fromId: string;
 };
 
+type CallMutePayload = {
+  callId: string;
+  muted: boolean;
+  fromType: 'u' | 'r';
+  fromId: string;
+};
+
 type CallInviteAck = { ok?: boolean; error?: string };
 type CallQueueAck = { ok?: boolean; error?: string; active?: boolean };
 
@@ -148,8 +155,12 @@ type CallSignalContextValue = {
   emitCallEnd: (callId: string) => void;
   /** Tell peer this party is on hold (e.g. external phone call). */
   emitCallHold: (callId: string, onHold: boolean) => void;
+  /** Tell peer this party muted/unmuted their microphone. */
+  emitCallMute: (callId: string, muted: boolean) => void;
   /** VoiceCall screen: show when the remote party enters/leaves hold. */
   setPeerCallHoldHandler: (handler: ((callId: string, onHold: boolean) => void) | null) => void;
+  /** VoiceCall screen: show when the remote party mutes/unmutes. */
+  setPeerCallMuteHandler: (handler: ((callId: string, muted: boolean) => void) | null) => void;
   acceptIncomingCall: (req: IncomingCallRequest) => Promise<void>;
   rejectIncomingCall: (req: IncomingCallRequest) => void;
   setQueueMode: (active: boolean) => Promise<void>;
@@ -235,8 +246,10 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   const incomingCallDismissHandlerRef = useRef<((callId: string) => void) | null>(null);
   const remoteCallEndedHandlerRef = useRef<((callId: string) => void) | null>(null);
   const peerCallHoldHandlerRef = useRef<((callId: string, onHold: boolean) => void) | null>(null);
+  const peerCallMuteHandlerRef = useRef<((callId: string, muted: boolean) => void) | null>(null);
   /** Re-emit on socket reconnect (Samsung cellular call can drop WebSocket briefly). */
   const pendingCallHoldEmitRef = useRef<{ callId: string; onHold: boolean } | null>(null);
+  const pendingCallMuteEmitRef = useRef<{ callId: string; muted: boolean } | null>(null);
   const queueModeRef = useRef<boolean>(false);
   /** Receiver accepted — never re-apply `outgoingCallerPhase: 'ringing'` (race with delayed navigate). */
   const callerInviteAcceptedCallIdsRef = useRef<Set<string>>(new Set());
@@ -883,6 +896,13 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     []
   );
 
+  const setPeerCallMuteHandler = useCallback(
+    (handler: ((callId: string, muted: boolean) => void) | null) => {
+      peerCallMuteHandlerRef.current = handler;
+    },
+    []
+  );
+
   const emitCallHold = useCallback((callId: string, onHold: boolean) => {
     const normalized = callId.trim();
     if (!normalized) return;
@@ -908,11 +928,35 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       .catch(() => {});
   }, []);
 
+  const emitCallMute = useCallback((callId: string, muted: boolean) => {
+    const normalized = callId.trim();
+    if (!normalized) return;
+    pendingCallMuteEmitRef.current = { callId: normalized, muted };
+    const emitOn = (socket: Socket): void => {
+      try {
+        socket.emit('call:mute', { callId: normalized, muted });
+      } catch {
+        // ignore signaling failures
+      }
+    };
+    const socket = socketRef.current;
+    if (socket?.connected) {
+      emitOn(socket);
+      return;
+    }
+    void ensureCallSocketReady(socketRef)
+      .then(emitOn)
+      .catch(() => {});
+  }, []);
+
   const emitCallEnd = useCallback((callId: string) => {
     const normalized = callId.trim();
     if (!normalized) return;
     if (pendingCallHoldEmitRef.current?.callId === normalized) {
       pendingCallHoldEmitRef.current = null;
+    }
+    if (pendingCallMuteEmitRef.current?.callId === normalized) {
+      pendingCallMuteEmitRef.current = null;
     }
     const emitOn = (socket: Socket): void => {
       try {
@@ -1084,6 +1128,13 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
             onHold: pendingHold.onHold,
           });
         }
+        const pendingMute = pendingCallMuteEmitRef.current;
+        if (pendingMute) {
+          socket.emit('call:mute', {
+            callId: pendingMute.callId,
+            muted: pendingMute.muted,
+          });
+        }
         if (userRoleRef.current === 'receiver') {
           void ensureIncomingRingtoneLoaded();
         }
@@ -1241,10 +1292,16 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         peerCallHoldHandlerRef.current?.(payload.callId, Boolean(payload.onHold));
       });
 
+      socket.on('call:mute', (payload: CallMutePayload) => {
+        if (payload.fromType === (userRoleRef.current === 'caller' ? 'u' : 'r')) return;
+        peerCallMuteHandlerRef.current?.(payload.callId, Boolean(payload.muted));
+      });
+
       socket.on('call:ended', (payload: CallEndedPayload) => {
         if (payload.fromType === (userRoleRef.current === 'caller' ? 'u' : 'r')) return;
         clearIncomingCallNotificationDedupe(payload.callId);
         peerCallHoldHandlerRef.current?.(payload.callId, false);
+        peerCallMuteHandlerRef.current?.(payload.callId, false);
         seenIncomingCallIdsRef.current.delete(payload.callId);
         rejectedIncomingCallIdsRef.current.delete(payload.callId);
         acceptedIncomingCallIdsRef.current.delete(payload.callId);
@@ -1309,8 +1366,10 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       setIncomingCallDismissHandler,
       setRemoteCallEndedHandler,
       setPeerCallHoldHandler,
+      setPeerCallMuteHandler,
       emitCallEnd,
       emitCallHold,
+      emitCallMute,
       acceptIncomingCall,
       rejectIncomingCall,
       setQueueMode,
@@ -1329,8 +1388,10 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       setIncomingCallDismissHandler,
       setRemoteCallEndedHandler,
       setPeerCallHoldHandler,
+      setPeerCallMuteHandler,
       emitCallEnd,
       emitCallHold,
+      emitCallMute,
       acceptIncomingCall,
       rejectIncomingCall,
       setQueueMode,
