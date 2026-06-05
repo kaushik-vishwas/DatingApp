@@ -79,7 +79,10 @@ type StreamCallAvatarExtrasModule = {
     microphoneMuted?: boolean;
     onHold?: boolean;
   }>;
-  StreamParticipantMutedIndicator: React.ComponentType<{ peerOnHold?: boolean }>;
+  StreamParticipantMutedIndicator: React.ComponentType<{
+    peerOnHold?: boolean;
+    talkActive?: boolean;
+  }>;
   StreamTalkTimingBridge: React.ComponentType<{ onBothConnected: () => void }>;
   StreamMicControlBridge: React.ComponentType<{
     controlRef: React.MutableRefObject<StreamMicControl | null>;
@@ -782,9 +785,6 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
     setTalkActive(false);
   };
 
-  const networkDropMessage =
-    'Call disconnected due to network issues. Please check your internet connection.';
-
   const ensureSessionEndedRef = useRef(ensureSessionEnded);
   const leaveMediaRef = useRef(leaveMedia);
   const stopQueueAndExitRef = useRef(stopQueueAndExit);
@@ -954,6 +954,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
     const id = streamBootstrap?.callId;
     if (id) callIdRef.current = id;
     userChosenMuteRef.current = false;
+    setMuted(false);
   }, [streamBootstrap?.callId]);
 
   useEffect(() => {
@@ -1147,7 +1148,6 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
 
   useEffect(() => {
     let cancelled = false;
-    const reconnectFailedHandlerRef: { current: (() => void) | null } = { current: null };
     const base = getResolvedApiBaseUrl();
     void (async () => {
       const token = await getJwt();
@@ -1155,8 +1155,11 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
       const socket = io(base, {
         auth: { token },
         transports: Platform.OS === 'android' ? ['websocket'] : ['websocket', 'polling'],
-        timeout: 12000,
-        reconnectionAttempts: 4,
+        timeout: 20000,
+        reconnection: true,
+        reconnectionAttempts: 50,
+        reconnectionDelay: 1000,
+        reconnectionDelayMax: 10000,
       });
       signalSocketRef.current = socket;
       const emitLocalHoldState = (): void => {
@@ -1176,44 +1179,14 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
         if (!id || id !== callIdRef.current.trim()) return;
         applyPeerHoldFromRemoteRef.current(Boolean(payload.onHold));
       });
-      const onReconnectFailed = (): void => {
-        if (!readyRef.current || endingRef.current) return;
-        // Temporary app interruptions (e.g., mobile carrier call UI) — keep call alive; do not
-        // emit hold (hold is only when the OS steals the mic, via StreamSystemHoldBridge).
-        if (appStateRef.current !== 'active') {
-          return;
-        }
-        endingRef.current = true;
-        Alert.alert('Connection lost', networkDropMessage, [
-          {
-            text: 'OK',
-            onPress: () => {
-              void (async () => {
-                if (userRoleRef.current === 'caller') {
-                  await finishCallerCallEndRef.current();
-                  return;
-                }
-                await leaveMediaRef.current();
-                void ensureSessionEndedRef.current();
-                exitCallScreenRef.current();
-              })();
-            },
-          },
-        ]);
-      };
-      reconnectFailedHandlerRef.current = onReconnectFailed;
-      const ioMgr = (socket as unknown as { io?: { on: (ev: string, fn: () => void) => void; off: (ev: string, fn: () => void) => void } }).io;
-      ioMgr?.on('reconnect_failed', onReconnectFailed);
-
+      // Best-effort hold duplicate socket — must never end the voice call. Stream WebRTC and
+      // CallSignalContext own call lifecycle; hold still works via the main signaling socket.
     })();
 
     return () => {
       cancelled = true;
       const s = signalSocketRef.current;
       if (s) {
-        const ioMgr = (s as unknown as { io?: { off: (ev: string, fn: () => void) => void } }).io;
-        const h = reconnectFailedHandlerRef.current;
-        if (h) ioMgr?.off('reconnect_failed', h);
         s.removeAllListeners();
         s.disconnect();
       }
@@ -1808,7 +1781,10 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
                       );
                     })()}
                     {streamAvatarExtras ? (
-                      <streamAvatarExtras.StreamParticipantMutedIndicator peerOnHold={peerCallHold} />
+                      <streamAvatarExtras.StreamParticipantMutedIndicator
+                        peerOnHold={peerCallHold}
+                        talkActive={talkActive}
+                      />
                     ) : null}
                   </View>
                 </View>

@@ -130,7 +130,7 @@ function buildBootHeader(): string {
       executionEnvironment: Constants.executionEnvironment,
     },
     diagnosisHint:
-      'Compare compact (heads-up) vs expanded (shade) tap: look for response.listener + response.parse_ok vs app_state.active with snapshot.last_response=null and linking.url without call data.',
+      'Samsung expanded tap: show.tap_enhance overlayExpandedBound=true; title tap should log native.tap_relayed tapSource=overlay_expanded|title_expanded; Open button tapSource=open_button. Compare with response.listener if JS layer also fires.',
   };
   return `${safeJson(header)}\n`;
 }

@@ -16,6 +16,7 @@ import {
 } from './incomingCallNotificationDebug';
 import { prefetchIncomingCallBootstrapFromNotification } from './incomingCallBootstrapPrefetch';
 import { applyIncomingCallFullScreenIntent } from './incomingCallAndroidFullScreen';
+import { ensureIncomingCallNativeTapDebugListener } from './incomingCallAndroidTapDebug';
 
 export type IncomingCallNotificationPayload = {
   callId: string;
@@ -784,6 +785,7 @@ export function ensureIncomingCallNotificationInfrastructure(): () => void {
   let receivedSub: { remove: () => void } | null = null;
   let appStateSub: { remove: () => void } | null = null;
   let linkingSub: { remove: () => void } | null = null;
+  const removeNativeTapDebug = ensureIncomingCallNativeTapDebugListener();
 
   void (async () => {
     const Notifications = await loadNotificationsModule();
@@ -855,6 +857,7 @@ export function ensureIncomingCallNotificationInfrastructure(): () => void {
     receivedSub?.remove();
     appStateSub?.remove();
     linkingSub?.remove();
+    removeNativeTapDebug();
     responseSub = null;
     receivedSub = null;
     appStateSub = null;

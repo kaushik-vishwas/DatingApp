@@ -1,33 +1,58 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/incoming_call_notification_root"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
-    android:orientation="vertical"
-    android:paddingStart="8dp"
-    android:paddingTop="8dp"
-    android:paddingEnd="8dp"
-    android:paddingBottom="8dp"
-    android:clickable="true"
-    android:focusable="true">
+    android:minHeight="@dimen/incoming_call_notification_expanded_min_height"
+    android:descendantFocusability="blocksDescendants">
 
-    <TextView
-        android:id="@+id/incoming_call_notification_title"
+    <LinearLayout
+        android:id="@+id/incoming_call_notification_content"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:textStyle="bold"
-        android:textSize="16sp"
-        android:textColor="?android:attr/textColorPrimary"
-        android:maxLines="3"
-        android:ellipsize="end" />
+        android:layout_gravity="top"
+        android:orientation="vertical"
+        android:paddingStart="8dp"
+        android:paddingTop="10dp"
+        android:paddingEnd="8dp"
+        android:paddingBottom="10dp"
+        android:clickable="false"
+        android:focusable="false">
 
-    <TextView
-        android:id="@+id/incoming_call_notification_body"
+        <TextView
+            android:id="@+id/incoming_call_notification_title"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:clickable="false"
+            android:ellipsize="end"
+            android:focusable="false"
+            android:maxLines="3"
+            android:textColor="?android:attr/textColorPrimary"
+            android:textSize="16sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/incoming_call_notification_body"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:clickable="false"
+            android:ellipsize="end"
+            android:focusable="false"
+            android:maxLines="6"
+            android:textColor="?android:attr/textColorSecondary"
+            android:textSize="14sp" />
+    </LinearLayout>
+
+    <ImageView
+        android:id="@+id/incoming_call_notification_tap_overlay"
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="4dp"
-        android:textSize="14sp"
-        android:textColor="?android:attr/textColorSecondary"
-        android:maxLines="6"
-        android:ellipsize="end" />
-</LinearLayout>
+        android:layout_height="match_parent"
+        android:layout_gravity="fill"
+        android:background="#01000000"
+        android:clickable="true"
+        android:contentDescription="@null"
+        android:focusable="true"
+        android:scaleType="fitXY"
+        android:src="@android:color/transparent" />
+</FrameLayout>

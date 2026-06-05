@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Platform, StyleSheet, Text, View } from 'react-native';
 import { useCallStateHooks } from '@stream-io/video-react-native-sdk';
 import { CallingState, hasAudio, type StreamVideoParticipant } from '@stream-io/video-client';
@@ -84,12 +84,18 @@ export function StreamMicControlBridge({
   const { useMicrophoneState, useCallCallingState } = useCallStateHooks();
   const callingState = useCallCallingState();
   const { microphone, optimisticIsMute, isMute } = useMicrophoneState();
-  const muted = Boolean(optimisticIsMute ?? isMute);
+  const streamMuted = Boolean(optimisticIsMute ?? isMute);
   const ensuredUnmuteAfterJoinRef = useRef(false);
 
+  // Stream often reports muted for a moment while publishing audio — never mirror that in UI
+  // unless the user explicitly tapped Mute.
   useEffect(() => {
-    onMutedChange(muted);
-  }, [muted, onMutedChange]);
+    if (!userChosenMuteRef.current) {
+      onMutedChange(false);
+      return;
+    }
+    onMutedChange(streamMuted);
+  }, [streamMuted, onMutedChange, userChosenMuteRef]);
 
   useEffect(() => {
     if (callingState !== CallingState.JOINED) {
@@ -106,8 +112,14 @@ export function StreamMicControlBridge({
   useEffect(() => {
     controlRef.current = {
       toggle: async () => {
-        userChosenMuteRef.current = !muted;
-        await microphone.toggle();
+        const next = !userChosenMuteRef.current;
+        userChosenMuteRef.current = next;
+        onMutedChange(next);
+        if (next) {
+          await microphone.disable();
+        } else {
+          await microphone.enable();
+        }
       },
       setEnabled: async (enabled: boolean) => {
         if (enabled) {
@@ -120,7 +132,7 @@ export function StreamMicControlBridge({
     return () => {
       controlRef.current = null;
     };
-  }, [controlRef, microphone, muted, userChosenMuteRef]);
+  }, [controlRef, microphone, onMutedChange, userChosenMuteRef]);
 
   return null;
 }
@@ -310,24 +322,84 @@ export function StreamTalkTimingBridge({
   return null;
 }
 
+/** Grace after connect before showing peer "Muted" (Stream mic publish lag). */
+const REMOTE_MUTE_GRACE_MS = 3000;
+const REMOTE_MUTE_SUSTAIN_MS = 600;
+
 /** Peer muted / on-hold badge — remote participant column only. */
 export function StreamParticipantMutedIndicator({
   peerOnHold = false,
+  talkActive = false,
 }: {
   peerOnHold?: boolean;
+  /** When false, never show connect-time muted flicker on the peer avatar. */
+  talkActive?: boolean;
 }): React.JSX.Element | null {
   const { useRemoteParticipants, useCallCallingState } = useCallStateHooks();
   const remoteParticipants = useRemoteParticipants();
   const remoteParticipant = remoteParticipants[0];
   const callingState = useCallCallingState();
+  const talkActiveSinceRef = useRef<number | null>(null);
+  const noAudioSinceRef = useRef<number | null>(null);
+  const [showMutedBadge, setShowMutedBadge] = useState(false);
+  const remoteParticipantRef = useRef(remoteParticipant);
+  const callingStateRef = useRef(callingState);
+  remoteParticipantRef.current = remoteParticipant;
+  callingStateRef.current = callingState;
 
   const showHold =
     peerOnHold && callingState === CallingState.JOINED && Boolean(remoteParticipant);
-  const showMuted =
-    !showHold &&
-    callingState === CallingState.JOINED &&
-    Boolean(remoteParticipant) &&
-    !hasAudio(remoteParticipant as StreamVideoParticipant);
+
+  useEffect(() => {
+    if (!talkActive) {
+      talkActiveSinceRef.current = null;
+      noAudioSinceRef.current = null;
+      setShowMutedBadge(false);
+      return;
+    }
+    if (talkActiveSinceRef.current === null) {
+      talkActiveSinceRef.current = Date.now();
+    }
+
+    const evaluate = (): void => {
+      if (peerOnHold || callingStateRef.current !== CallingState.JOINED) {
+        noAudioSinceRef.current = null;
+        setShowMutedBadge(false);
+        return;
+      }
+      const remote = remoteParticipantRef.current;
+      if (!remote) {
+        noAudioSinceRef.current = null;
+        setShowMutedBadge(false);
+        return;
+      }
+      const sinceTalk =
+        talkActiveSinceRef.current !== null
+          ? Date.now() - talkActiveSinceRef.current
+          : REMOTE_MUTE_GRACE_MS;
+      if (sinceTalk < REMOTE_MUTE_GRACE_MS) {
+        noAudioSinceRef.current = null;
+        setShowMutedBadge(false);
+        return;
+      }
+      if (hasAudio(remote as StreamVideoParticipant)) {
+        noAudioSinceRef.current = null;
+        setShowMutedBadge(false);
+        return;
+      }
+      const now = Date.now();
+      if (noAudioSinceRef.current === null) {
+        noAudioSinceRef.current = now;
+      }
+      setShowMutedBadge(now - noAudioSinceRef.current >= REMOTE_MUTE_SUSTAIN_MS);
+    };
+
+    evaluate();
+    const intervalId = setInterval(evaluate, 200);
+    return () => clearInterval(intervalId);
+  }, [talkActive, peerOnHold, callingState, remoteParticipant]);
+
+  const showMuted = showMutedBadge && !showHold;
 
   if (!showHold && !showMuted) return null;
 

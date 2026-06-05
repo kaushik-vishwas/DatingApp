@@ -1,3 +1,13 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
   <uses-permission android:name="android.permission.READ_PHONE_STATE" />
+
+  <application>
+    <receiver
+      android:name=".IncomingCallNotificationTapRelayReceiver"
+      android:exported="false">
+      <intent-filter>
+        <action android:name="expo.modules.incomingcallandroid.NOTIFICATION_TAP_RELAY" />
+      </intent-filter>
+    </receiver>
+  </application>
 </manifest>

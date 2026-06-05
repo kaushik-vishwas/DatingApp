@@ -72,10 +72,13 @@ function IncomingCallNotifDebugOverlayInner(): React.JSX.Element {
               3. Try the small popup (compact) tap — note if Incoming Call opens.
             </Text>
             <Text style={styles.step}>
-              4. Open the notification shade, expand the call row, tap the large area — note if it
-              fails.
+              4. Open the notification shade, expand the call row, tap the title/body area (not only
+              Open).
             </Text>
-            <Text style={styles.step}>5. Open this screen and tap Send report.</Text>
+            <Text style={styles.step}>
+              5. Open this screen and tap Send report. The log records overlay vs Open button taps
+              (native.tap_relayed) and whether overlays were applied (show.tap_enhance).
+            </Text>
             <Text style={styles.hint}>
               Log file: {getIncomingCallNotifDebugLogPath()}
             </Text>

@@ -4,23 +4,30 @@ import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
 
 /**
- * Re-posts incoming-call tray notifications so the title/body region and expanded
- * panel share the same tap [PendingIntent] as the Open action (Samsung M31 fix).
- *
- * Also exposes cellular call detection for in-app "On hold" while on a carrier call.
+ * Samsung incoming-call notification tap fix + cellular hold detection.
  */
 class IncomingCallAndroidModule : Module() {
   override fun definition() = ModuleDefinition {
     Name("IncomingCallAndroid")
 
-    Events("onCellularCallStateChanged")
+    Events("onCellularCallStateChanged", "onNotificationTapRelayed")
 
-    AsyncFunction("applyFullScreenIntentAsync") { identifier: String ->
-      val context = appContext.reactContext ?: return@AsyncFunction false
-      IncomingCallNotificationTapEnhancer.enhancePostedNotification(
-        context,
-        identifier.trim()
-      )
+    OnCreate {
+      IncomingCallNotificationTapEventSink.emit = { payload ->
+        sendEvent("onNotificationTapRelayed", payload)
+      }
+    }
+
+    AsyncFunction("applyFullScreenIntentAsync") { identifier: String, debugEnabled: Boolean ->
+      val context = appContext.reactContext
+        ?: return@AsyncFunction mapOf("applied" to false, "failureReason" to "no_context")
+      val result =
+        IncomingCallNotificationTapEnhancer.enhancePostedNotification(
+          context,
+          identifier.trim(),
+          debugEnabled
+        )
+      result.toLogMap()
     }
 
     Function("startCellularCallHoldWatch") {
@@ -38,4 +45,24 @@ class IncomingCallAndroidModule : Module() {
       CellularCallHoldWatcher.stop()
     }
   }
+
+  private fun EnhanceTapResult.toLogMap(): Map<String, Any?> =
+    mapOf(
+      "applied" to applied,
+      "failureReason" to failureReason,
+      "notificationTag" to notificationTag,
+      "notificationId" to notificationId,
+      "overlayCollapsedBound" to overlayCollapsedBound,
+      "overlayExpandedBound" to overlayExpandedBound,
+      "titleCollapsedBound" to titleCollapsedBound,
+      "bodyCollapsedBound" to bodyCollapsedBound,
+      "titleExpandedBound" to titleExpandedBound,
+      "bodyExpandedBound" to bodyExpandedBound,
+      "rootCollapsedBound" to rootCollapsedBound,
+      "rootExpandedBound" to rootExpandedBound,
+      "contentIntentWrapped" to contentIntentWrapped,
+      "openButtonPreserved" to openButtonPreserved,
+      "openButtonWrapped" to openButtonWrapped,
+      "usedDecoratedStyle" to usedDecoratedStyle
+    )
 }
