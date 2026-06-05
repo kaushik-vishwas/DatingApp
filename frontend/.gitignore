@@ -40,3 +40,7 @@ yarn-error.*
 # generated native folders
 /ios
 /android
+
+# Local Expo module Android build outputs (Gradle paths exceed Windows MAX_PATH)
+modules/**/android/build/
+modules/**/android/.gradle/

@@ -9,7 +9,13 @@ import {
   readPendingIncomingCallTap,
   readShownIncomingCallNotification,
 } from './pendingIncomingCallTapStorage';
-import { logIncomingCallNotif } from './incomingCallNotificationDebug';
+import {
+  captureIncomingCallNotifDebugSnapshot,
+  isIncomingCallNotifDebugBuild,
+  logIncomingCallNotif,
+} from './incomingCallNotificationDebug';
+import { prefetchIncomingCallBootstrapFromNotification } from './incomingCallBootstrapPrefetch';
+import { applyIncomingCallFullScreenIntent } from './incomingCallAndroidFullScreen';
 
 export type IncomingCallNotificationPayload = {
   callId: string;
@@ -20,6 +26,8 @@ export type IncomingCallNotificationPayload = {
 };
 
 const INCOMING_CALL_CHANNEL_ID = 'incoming_calls';
+/** expo-notifications: `categoryIdentifier` (iOS + Android action category). */
+const INCOMING_CALL_CATEGORY_ID = 'call';
 const INCOMING_CALL_NOTIFICATION_ID_PREFIX = 'incoming-';
 export const INCOMING_CALL_DEEP_LINK_PREFIX = 'nestham://incoming-call/';
 
@@ -74,6 +82,8 @@ let notificationsModulePromise: Promise<typeof import('expo-notifications') | nu
   null;
 
 let disposeInfrastructure: (() => void) | null = null;
+/** Debug: time of last notification response listener (expanded vs compact tap diagnosis). */
+let lastNotificationResponseListenerAtMs = 0;
 
 /** Expo Go on Android (SDK 53+) crashes if expo-notifications is loaded (remote push removed). */
 export function canUseLocalNotifications(): boolean {
@@ -314,6 +324,10 @@ async function openIncomingFromNotificationTap(
     callId: incoming.callId,
     identifier: `${INCOMING_CALL_NOTIFICATION_ID_PREFIX}${incoming.callId}`,
   });
+  void captureIncomingCallNotifDebugSnapshot('tap_open_start', {
+    callId: incoming.callId,
+    fromId: incoming.fromId,
+  });
   void dismissIncomingCallNotification(incoming.callId);
   void persistPendingIncomingCallTap(incoming);
 
@@ -356,8 +370,21 @@ async function processNotificationResponse(
     return;
   }
 
+  lastNotificationResponseListenerAtMs = Date.now();
   const identifier = response.notification.request.identifier ?? '';
+
+  if (isIncomingCallNotifDebugBuild()) {
+    const fileDbg = await import('./incomingCallNotificationFileDebug');
+    logIncomingCallNotif('response.raw', {
+      response: fileDbg.sanitizeNotificationResponse(response),
+    });
+  }
   logIncomingCallNotif('response.listener', {
+    identifier,
+    actionId: actionId ?? defaultAction,
+    tapPath: 'notification_response_listener',
+  });
+  await captureIncomingCallNotifDebugSnapshot('response_listener_start', {
     identifier,
     actionId: actionId ?? defaultAction,
   });
@@ -397,6 +424,10 @@ async function processNotificationResponse(
   });
   await openIncomingFromNotificationTap(incoming);
   scheduleClearLastNotificationResponse(Notifications);
+  await captureIncomingCallNotifDebugSnapshot('response_listener_done', {
+    callId: incoming.callId,
+    identifier,
+  });
 }
 
 function scheduleClearLastNotificationResponse(
@@ -412,11 +443,15 @@ async function checkLastNotificationResponse(): Promise<void> {
   const Notifications = await loadNotificationsModule();
   if (!Notifications) return;
   logIncomingCallNotif('response.check_last');
+  await captureIncomingCallNotifDebugSnapshot('check_last_before', {});
   const last =
     typeof Notifications.getLastNotificationResponse === 'function'
       ? Notifications.getLastNotificationResponse()
       : await Notifications.getLastNotificationResponseAsync();
   await processNotificationResponse(Notifications, last);
+  await captureIncomingCallNotifDebugSnapshot('check_last_after', {
+    hadLast: last != null,
+  });
 }
 
 /**
@@ -531,10 +566,34 @@ export async function ensureIncomingCallNotificationSetup(): Promise<void> {
       vibrationPattern: [0, 280, 200, 280],
       lightColor: '#7c3aed',
       sound: 'default',
+      enableLights: true,
+      enableVibrate: true,
       lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
       bypassDnd: true,
+      audioAttributes: {
+        usage: Notifications.AndroidAudioUsage.NOTIFICATION_RINGTONE,
+        contentType: Notifications.AndroidAudioContentType.SONIFICATION,
+        flags: {
+          enforceAudibility: true,
+          requestHardwareAudioVideoSynchronization: false,
+        },
+      },
     });
   }
+
+  const defaultAction =
+    Notifications.DEFAULT_ACTION_IDENTIFIER ?? 'expo.modules.notifications.actions.DEFAULT';
+  await Notifications.setNotificationCategoryAsync(
+    INCOMING_CALL_CATEGORY_ID,
+    [
+      {
+        identifier: defaultAction,
+        buttonTitle: 'Open',
+        options: { opensAppToForeground: true },
+      },
+    ],
+    { allowInCarPlay: true, showTitle: true, showSubtitle: true }
+  );
 
   setupDone = true;
 }
@@ -553,6 +612,33 @@ async function ensureNotificationPermission(): Promise<boolean> {
     },
   });
   return requested.status === 'granted';
+}
+
+function buildIncomingCallNotificationContent(
+  Notifications: typeof import('expo-notifications'),
+  incoming: IncomingCallNotificationPayload
+): import('expo-notifications').NotificationContentInput {
+  const base = {
+    title: 'Incoming call',
+    body: `${incoming.peerName} is calling you`,
+    data: buildNotificationData(incoming),
+    sound: Platform.OS === 'ios' ? ('defaultCritical' as const) : 'default',
+    categoryIdentifier: INCOMING_CALL_CATEGORY_ID,
+    interruptionLevel: 'critical' as const,
+    priority: Notifications.AndroidNotificationPriority.MAX,
+    ...(Platform.OS === 'ios'
+      ? {
+          threadIdentifier: `incoming-${incoming.callId}`,
+        }
+      : {
+          channelId: INCOMING_CALL_CHANNEL_ID,
+          sticky: false,
+          autoDismiss: true,
+          color: '#7c3aed',
+          vibrate: [0, 280, 200, 280],
+        }),
+  };
+  return base;
 }
 
 /** Android delivers notification `data` reliably only when values are strings. */
@@ -593,27 +679,28 @@ export async function showIncomingCallNotification(
     await ensureIncomingCallNotificationSetup();
     if (!(await ensureNotificationPermission())) return;
 
-    logIncomingCallNotif('show.start', { callId });
+    let showSessionId = callId;
+    if (isIncomingCallNotifDebugBuild()) {
+      const fileDbg = await import('./incomingCallNotificationFileDebug');
+      showSessionId = fileDbg.startIncomingCallNotifShowSession(callId);
+    }
+    logIncomingCallNotif('show.start', { callId, showSessionId });
+    prefetchIncomingCallBootstrapFromNotification(incoming);
     await collapseIncomingCallTrayToSingle(incoming);
 
+    const identifier = `${INCOMING_CALL_NOTIFICATION_ID_PREFIX}${callId}`;
     await Notifications.scheduleNotificationAsync({
-      identifier: `${INCOMING_CALL_NOTIFICATION_ID_PREFIX}${callId}`,
-      content: {
-        title: 'Incoming call',
-        body: `${incoming.peerName} is calling you`,
-        data: buildNotificationData(incoming),
-        sound: 'default',
-        priority: Notifications.AndroidNotificationPriority.MAX,
-        ...(Platform.OS === 'android'
-          ? {
-              channelId: INCOMING_CALL_CHANNEL_ID,
-              sticky: false,
-              autoDismiss: true,
-              color: '#7c3aed',
-            }
-          : {}),
-      },
+      identifier,
+      content: buildIncomingCallNotificationContent(Notifications, incoming),
       trigger: null,
+    });
+    if (Platform.OS === 'android') {
+      void applyIncomingCallFullScreenIntent(identifier);
+    }
+    await captureIncomingCallNotifDebugSnapshot('after_show_scheduled', {
+      callId,
+      identifier,
+      showSessionId,
     });
     void persistShownIncomingCallNotification(incoming);
     notifiedCallIds.add(callId);
@@ -719,8 +806,22 @@ export function ensureIncomingCallNotificationInfrastructure(): () => void {
     });
 
     const onAppState = (state: AppStateStatus): void => {
+      logIncomingCallNotif('app_state.change', { state });
       if (state === 'active') {
-        logIncomingCallNotif('app_state.active');
+        const msSinceResponse =
+          lastNotificationResponseListenerAtMs > 0
+            ? Date.now() - lastNotificationResponseListenerAtMs
+            : null;
+        logIncomingCallNotif('app_state.active', {
+          msSinceResponseListener: msSinceResponse,
+          likelyExpandedShadeOnlyOpen:
+            msSinceResponse == null || msSinceResponse > 1500,
+        });
+        void captureIncomingCallNotifDebugSnapshot('app_became_active', {
+          msSinceResponseListener: msSinceResponse,
+          note:
+            'If compact tap works but expanded fails: compact often has msSinceResponseListener small; expanded may show large ms or null lastResponse in snapshot.',
+        });
         lastHandledTapAtByCallId.clear();
         void checkLastNotificationResponse();
         flushPendingOpens();
@@ -736,9 +837,13 @@ export function ensureIncomingCallNotificationInfrastructure(): () => void {
     };
     linkingSub = Linking.addEventListener('url', onUrl);
     void Linking.getInitialURL().then((url) => {
-      if (url) onUrl({ url });
+      if (url) {
+        logIncomingCallNotif('linking.initial', { url });
+        onUrl({ url });
+      }
     });
 
+    void captureIncomingCallNotifDebugSnapshot('infrastructure_ready', {});
     void checkLastNotificationResponse();
   })();
 

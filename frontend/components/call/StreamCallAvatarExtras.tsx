@@ -1,9 +1,14 @@
 import { Ionicons } from '@expo/vector-icons';
 import React, { useEffect, useRef } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { Platform, StyleSheet, Text, View } from 'react-native';
 import { useCallStateHooks } from '@stream-io/video-react-native-sdk';
 import { CallingState, hasAudio, type StreamVideoParticipant } from '@stream-io/video-client';
 import { AvatarSoundWaveRings } from './AvatarVoiceWaves';
+import {
+  startAndroidCellularCallHoldWatch,
+  stopAndroidCellularCallHoldWatch,
+  subscribeAndroidCellularCallHold,
+} from '../../utils/androidCellularCallHold';
 
 const SPEAK_AUDIO_LEVEL_THRESHOLD = 0.035;
 
@@ -126,14 +131,18 @@ export function StreamMicControlBridge({
  */
 /** Ignore transient missing mic right after JOINED (common when opening from a notification). */
 const MIC_JOIN_GRACE_MS = 2000;
-const AUDIO_LOST_HOLD_MS = 500;
+/** External call stole mic — require sustained loss before hold ON (Samsung mic flicker). */
+const HOLD_ON_MS = 450;
+/** Mic back — clear hold quickly for real-time UI on peer side. */
+const HOLD_OFF_MS = 200;
+const HOLD_POLL_MS = 100;
 
 export function StreamSystemHoldBridge({
   userChosenMuteRef,
-  appInBackground,
   onSystemHoldChange,
 }: {
   userChosenMuteRef: React.MutableRefObject<boolean>;
+  /** Unused; hold is driven only by OS mic loss (external phone call), not app background. */
   appInBackground: boolean;
   onSystemHoldChange: (onHold: boolean) => void;
 }): null {
@@ -141,43 +150,125 @@ export function StreamSystemHoldBridge({
   const callingState = useCallCallingState();
   const localParticipant = useLocalParticipant();
   const onSystemHoldChangeRef = useRef(onSystemHoldChange);
+  const localParticipantRef = useRef(localParticipant);
+  const callingStateRef = useRef(callingState);
+  const holdActiveRef = useRef(false);
+  const cellularActiveRef = useRef(false);
   const audioLostSinceRef = useRef<number | null>(null);
+  const micLiveSinceRef = useRef<number | null>(null);
   const joinedAtRef = useRef<number | null>(null);
   onSystemHoldChangeRef.current = onSystemHoldChange;
+  localParticipantRef.current = localParticipant;
+  callingStateRef.current = callingState;
+
+  const applyHoldState = (next: boolean): void => {
+    if (holdActiveRef.current === next) return;
+    holdActiveRef.current = next;
+    onSystemHoldChangeRef.current(next);
+  };
+
+  const evaluateMicHold = (): void => {
+    if (callingStateRef.current !== CallingState.JOINED) return;
+    if (Platform.OS === 'android' && cellularActiveRef.current) return;
+
+    const joinedAt = joinedAtRef.current;
+    if (joinedAt !== null && Date.now() - joinedAt < MIC_JOIN_GRACE_MS) {
+      return;
+    }
+    if (userChosenMuteRef.current) {
+      audioLostSinceRef.current = null;
+      micLiveSinceRef.current = null;
+      if (holdActiveRef.current) {
+        applyHoldState(false);
+      }
+      return;
+    }
+
+    const participant = localParticipantRef.current;
+    const micLive = Boolean(participant && hasAudio(participant));
+
+    if (micLive) {
+      audioLostSinceRef.current = null;
+      if (!holdActiveRef.current) {
+        micLiveSinceRef.current = null;
+        return;
+      }
+      const now = Date.now();
+      if (micLiveSinceRef.current === null) {
+        micLiveSinceRef.current = now;
+      }
+      if (now - micLiveSinceRef.current >= HOLD_OFF_MS) {
+        micLiveSinceRef.current = null;
+        applyHoldState(false);
+      }
+      return;
+    }
+
+    micLiveSinceRef.current = null;
+    const now = Date.now();
+    if (audioLostSinceRef.current === null) {
+      audioLostSinceRef.current = now;
+    }
+    if (!holdActiveRef.current && now - audioLostSinceRef.current >= HOLD_ON_MS) {
+      applyHoldState(true);
+    }
+  };
 
   useEffect(() => {
     if (callingState !== CallingState.JOINED) {
+      holdActiveRef.current = false;
+      cellularActiveRef.current = false;
       audioLostSinceRef.current = null;
+      micLiveSinceRef.current = null;
       joinedAtRef.current = null;
       return;
     }
     if (joinedAtRef.current === null) {
       joinedAtRef.current = Date.now();
     }
-    if (Date.now() - joinedAtRef.current < MIC_JOIN_GRACE_MS) {
+
+    evaluateMicHold();
+    const intervalId = setInterval(evaluateMicHold, HOLD_POLL_MS);
+    return () => clearInterval(intervalId);
+  }, [callingState, localParticipant, userChosenMuteRef]);
+
+  useEffect(() => {
+    if (Platform.OS !== 'android') return;
+    if (callingState !== CallingState.JOINED) {
+      stopAndroidCellularCallHoldWatch();
       return;
     }
-    if (userChosenMuteRef.current) {
-      audioLostSinceRef.current = null;
-      return;
-    }
-    const micLive = Boolean(localParticipant && hasAudio(localParticipant));
-    if (micLive) {
-      audioLostSinceRef.current = null;
-      if (!appInBackground) {
-        onSystemHoldChangeRef.current(false);
+
+    let cancelled = false;
+    const unsub = subscribeAndroidCellularCallHold((active) => {
+      if (cancelled) return;
+      cellularActiveRef.current = active;
+      if (userChosenMuteRef.current) {
+        if (holdActiveRef.current) {
+          applyHoldState(false);
+        }
+        return;
       }
-      return;
-    }
-    const now = Date.now();
-    if (audioLostSinceRef.current === null) {
-      audioLostSinceRef.current = now;
-      return;
-    }
-    if (now - audioLostSinceRef.current >= AUDIO_LOST_HOLD_MS) {
-      onSystemHoldChangeRef.current(true);
-    }
-  }, [callingState, localParticipant, appInBackground, userChosenMuteRef]);
+      if (active) {
+        audioLostSinceRef.current = null;
+        micLiveSinceRef.current = null;
+        applyHoldState(true);
+        return;
+      }
+      if (holdActiveRef.current) {
+        applyHoldState(false);
+      }
+    });
+
+    void startAndroidCellularCallHoldWatch();
+
+    return () => {
+      cancelled = true;
+      unsub();
+      stopAndroidCellularCallHoldWatch();
+      cellularActiveRef.current = false;
+    };
+  }, [callingState, userChosenMuteRef]);
 
   return null;
 }

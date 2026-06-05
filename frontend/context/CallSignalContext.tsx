@@ -26,7 +26,9 @@ import {
   setIncomingCallNavigationGuard,
   showIncomingCallNotification,
 } from '../utils/incomingCallNotifications';
+import { registerIncomingCallBootstrapPrefetch } from '../utils/incomingCallBootstrapPrefetch';
 import { prefetchVoiceSessionStart } from '../utils/voiceCallSessionStart';
+import { clearVoiceCallStreamWarmup, warmVoiceCallStreamClient } from '../utils/voiceCallStreamWarmup';
 
 let outgoingNavigateGeneration = 0;
 
@@ -171,20 +173,28 @@ const CALL_SIGNAL_NOT_CONNECTED_MSG =
 async function ensureCallSocketReady(
   socketRef: React.MutableRefObject<Socket | null>
 ): Promise<Socket> {
-  const deadline = Date.now() + CALL_SIGNAL_CONNECT_WAIT_MS;
-  while (Date.now() < deadline) {
+  const kickConnect = (): void => {
     const socket = socketRef.current;
-    if (socket?.connected) return socket;
-    if (socket && !socket.active) {
+    if (socket && !socket.connected) {
       try {
         socket.connect();
       } catch {
-        // ignore — wait loop will retry or time out
+        // wait loop retries
       }
     }
+  };
+  kickConnect();
+
+  const deadline = Date.now() + CALL_SIGNAL_CONNECT_WAIT_MS;
+  let delayMs = 40;
+  while (Date.now() < deadline) {
+    const socket = socketRef.current;
+    if (socket?.connected) return socket;
+    kickConnect();
     await new Promise<void>((resolve) => {
-      setTimeout(resolve, 200);
+      setTimeout(resolve, delayMs);
     });
+    delayMs = Math.min(120, delayMs + 20);
   }
   throw new Error(CALL_SIGNAL_NOT_CONNECTED_MSG);
 }
@@ -225,11 +235,71 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   const incomingCallDismissHandlerRef = useRef<((callId: string) => void) | null>(null);
   const remoteCallEndedHandlerRef = useRef<((callId: string) => void) | null>(null);
   const peerCallHoldHandlerRef = useRef<((callId: string, onHold: boolean) => void) | null>(null);
+  /** Re-emit on socket reconnect (Samsung cellular call can drop WebSocket briefly). */
+  const pendingCallHoldEmitRef = useRef<{ callId: string; onHold: boolean } | null>(null);
   const queueModeRef = useRef<boolean>(false);
   /** Receiver accepted — never re-apply `outgoingCallerPhase: 'ringing'` (race with delayed navigate). */
   const callerInviteAcceptedCallIdsRef = useRef<Set<string>>(new Set());
   /** Bootstrap session kept until call ends (survives pending map cleanup on accept). */
   const outgoingSessionByCallIdRef = useRef<Map<string, PendingOutgoingCall>>(new Map());
+
+  const onIncomingBootstrapReady = useCallback(
+    (boot: VoiceBootstrapResponse) => {
+      prefetchVoiceSessionStart(boot.callId, boot.peerAccountId);
+      const name =
+        user?.name?.trim() ||
+        (user?.role === 'receiver' ? 'Receiver' : 'Caller');
+      const image =
+        typeof user?.profileImage === 'string' ? user.profileImage : null;
+      void warmVoiceCallStreamClient(boot, name, image);
+    },
+    [user?.name, user?.profileImage, user?.role]
+  );
+
+  const ensureIncomingBootstrapPromise = useCallback(
+    (req: IncomingCallRequest): Promise<VoiceBootstrapResponse> => {
+      const cached = incomingBootstrapByCallIdRef.current.get(req.callId) ?? null;
+      if (cached) {
+        return Promise.resolve(cached);
+      }
+      const inFlight = incomingBootstrapPromiseByCallIdRef.current.get(req.callId);
+      if (inFlight) {
+        return inFlight;
+      }
+      const promise = callApi.bootstrap(req.fromId, req.callId).then(({ data }) => {
+        if (activeIncomingCallUiCallIdRef.current === req.callId) {
+          incomingBootstrapByCallIdRef.current.set(req.callId, data);
+        }
+        onIncomingBootstrapReady(data);
+        return data;
+      });
+      incomingBootstrapPromiseByCallIdRef.current.set(req.callId, promise);
+      void promise.catch(() => {
+        incomingBootstrapByCallIdRef.current.delete(req.callId);
+        incomingBootstrapPromiseByCallIdRef.current.delete(req.callId);
+      });
+      return promise;
+    },
+    [onIncomingBootstrapReady]
+  );
+
+  const prefetchIncomingBootstrapFromPayload = useCallback(
+    (incoming: IncomingCallRequest) => {
+      if (
+        incomingBootstrapByCallIdRef.current.has(incoming.callId) ||
+        incomingBootstrapPromiseByCallIdRef.current.has(incoming.callId)
+      ) {
+        return;
+      }
+      void ensureIncomingBootstrapPromise(incoming);
+    },
+    [ensureIncomingBootstrapPromise]
+  );
+
+  useEffect(() => {
+    registerIncomingCallBootstrapPrefetch(prefetchIncomingBootstrapFromPayload);
+    return () => registerIncomingCallBootstrapPrefetch(null);
+  }, [prefetchIncomingBootstrapFromPayload]);
 
   useEffect(() => {
     userRoleRef.current = user?.role ?? null;
@@ -500,8 +570,6 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       }
       registerPeer(id, name, peerImage);
 
-      const socket = await ensureCallSocketReady(socketRef);
-
       const abort = new AbortController();
       outgoingInviteAbortRef.current = abort;
       const navGen = outgoingNavigateGeneration;
@@ -515,7 +583,10 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       });
 
       try {
-        const { data } = await callApi.bootstrap(id);
+        const [{ data }, socket] = await Promise.all([
+          callApi.bootstrap(id),
+          ensureCallSocketReady(socketRef),
+        ]);
         if (abort.signal.aborted) {
           return;
         }
@@ -528,6 +599,11 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         };
         outgoingSessionByCallIdRef.current.set(data.callId, session);
         pendingOutgoingByCallIdRef.current.set(data.callId, session);
+        prefetchVoiceSessionStart(data.callId, data.peerAccountId);
+        const callerName = user?.name?.trim() || 'Caller';
+        const callerImage =
+          typeof user?.profileImage === 'string' ? user.profileImage : null;
+        void warmVoiceCallStreamClient(data, callerName, callerImage);
 
         const ringingParams: VoiceCallScreenParams = {
           ...data,
@@ -602,6 +678,8 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       openCallerJoiningVoiceCall,
       openVoiceCallRinging,
       registerPeer,
+      user?.name,
+      user?.profileImage,
     ]
   );
 
@@ -719,35 +797,31 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         activeIncomingCallUiCallIdRef.current = null;
         pendingIncomingCallRequestRef.current = null;
       }
-      const socket = await ensureCallSocketReady(socketRef);
-      socket.emit('call:response', { callId: req.callId, accepted: true });
       void stopIncomingRingtonePlayback();
 
-      const cachedBootstrap = incomingBootstrapByCallIdRef.current.get(req.callId) ?? null;
-      if (cachedBootstrap) {
-        incomingBootstrapByCallIdRef.current.delete(req.callId);
-        incomingBootstrapPromiseByCallIdRef.current.delete(req.callId);
-        prefetchVoiceSessionStart(cachedBootstrap.callId, cachedBootstrap.peerAccountId);
-        return cachedBootstrap;
-      }
-
+      const bootstrapPromise = ensureIncomingBootstrapPromise(req);
+      let socket: Socket;
       let bootstrapped: VoiceBootstrapResponse;
       try {
-        const inFlight = incomingBootstrapPromiseByCallIdRef.current.get(req.callId) ?? null;
-        bootstrapped = inFlight
-          ? await inFlight
-          : (await callApi.bootstrap(req.fromId, req.callId)).data;
+        [socket, bootstrapped] = await Promise.all([
+          ensureCallSocketReady(socketRef),
+          bootstrapPromise,
+        ]);
       } catch (e) {
-        socket.emit('call:end', { callId: req.callId });
+        const s = socketRef.current;
+        if (s?.connected) {
+          s.emit('call:end', { callId: req.callId });
+        }
         throw e;
       }
+      socket.emit('call:response', { callId: req.callId, accepted: true });
 
       incomingBootstrapByCallIdRef.current.delete(req.callId);
       incomingBootstrapPromiseByCallIdRef.current.delete(req.callId);
       prefetchVoiceSessionStart(bootstrapped.callId, bootstrapped.peerAccountId);
       return bootstrapped;
     },
-    []
+    [ensureIncomingBootstrapPromise]
   );
 
   const acceptIncomingCall = useCallback(
@@ -758,36 +832,31 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         activeIncomingCallUiCallIdRef.current = null;
         pendingIncomingCallRequestRef.current = null;
       }
-      const socket = await ensureCallSocketReady(socketRef);
-      socket.emit('call:response', { callId: req.callId, accepted: true });
       void stopIncomingRingtonePlayback();
 
-      const cachedBootstrap = incomingBootstrapByCallIdRef.current.get(req.callId) ?? null;
-      if (cachedBootstrap) {
-        incomingBootstrapByCallIdRef.current.delete(req.callId);
-        incomingBootstrapPromiseByCallIdRef.current.delete(req.callId);
-        prefetchVoiceSessionStart(cachedBootstrap.callId, cachedBootstrap.peerAccountId);
-        openVoiceCall(cachedBootstrap, req.peerName, req.peerImage ?? null);
-        return;
-      }
-
+      const bootstrapPromise = ensureIncomingBootstrapPromise(req);
+      let socket: Socket;
       let bootstrapped: VoiceBootstrapResponse;
       try {
-        const inFlight = incomingBootstrapPromiseByCallIdRef.current.get(req.callId) ?? null;
-        bootstrapped = inFlight
-          ? await inFlight
-          : (await callApi.bootstrap(req.fromId, req.callId)).data;
+        [socket, bootstrapped] = await Promise.all([
+          ensureCallSocketReady(socketRef),
+          bootstrapPromise,
+        ]);
       } catch (e) {
-        socket.emit('call:end', { callId: req.callId });
+        const s = socketRef.current;
+        if (s?.connected) {
+          s.emit('call:end', { callId: req.callId });
+        }
         throw e;
       }
+      socket.emit('call:response', { callId: req.callId, accepted: true });
 
       incomingBootstrapByCallIdRef.current.delete(req.callId);
       incomingBootstrapPromiseByCallIdRef.current.delete(req.callId);
       prefetchVoiceSessionStart(bootstrapped.callId, bootstrapped.peerAccountId);
       openVoiceCall(bootstrapped, req.peerName, req.peerImage ?? null);
     },
-    [openVoiceCall]
+    [ensureIncomingBootstrapPromise, openVoiceCall]
   );
 
   const stopIncomingRingtone = useCallback(() => stopIncomingRingtonePlayback(), []);
@@ -817,6 +886,11 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   const emitCallHold = useCallback((callId: string, onHold: boolean) => {
     const normalized = callId.trim();
     if (!normalized) return;
+    if (onHold) {
+      pendingCallHoldEmitRef.current = { callId: normalized, onHold: true };
+    } else {
+      pendingCallHoldEmitRef.current = { callId: normalized, onHold: false };
+    }
     const emitOn = (socket: Socket): void => {
       try {
         socket.emit('call:hold', { callId: normalized, onHold });
@@ -837,6 +911,9 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   const emitCallEnd = useCallback((callId: string) => {
     const normalized = callId.trim();
     if (!normalized) return;
+    if (pendingCallHoldEmitRef.current?.callId === normalized) {
+      pendingCallHoldEmitRef.current = null;
+    }
     const emitOn = (socket: Socket): void => {
       try {
         socket.emit('call:end', { callId: normalized });
@@ -1000,6 +1077,13 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       });
       socket.on('connect', () => {
         socket.emit('call:queue:set', { active: queueModeRef.current }, () => {});
+        const pendingHold = pendingCallHoldEmitRef.current;
+        if (pendingHold) {
+          socket.emit('call:hold', {
+            callId: pendingHold.callId,
+            onHold: pendingHold.onHold,
+          });
+        }
         if (userRoleRef.current === 'receiver') {
           void ensureIncomingRingtoneLoaded();
         }
@@ -1064,22 +1148,7 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
             }
           })();
 
-          if (
-            !incomingBootstrapByCallIdRef.current.has(incoming.callId) &&
-            !incomingBootstrapPromiseByCallIdRef.current.has(incoming.callId)
-          ) {
-            const promise = (async () => {
-              const { data } = await callApi.bootstrap(incoming.fromId, incoming.callId);
-              if (activeIncomingCallUiCallIdRef.current === incoming.callId) {
-                incomingBootstrapByCallIdRef.current.set(incoming.callId, data);
-              }
-              return data;
-            })();
-            incomingBootstrapPromiseByCallIdRef.current.set(incoming.callId, promise);
-            void promise.catch(() => {
-              incomingBootstrapByCallIdRef.current.delete(incoming.callId);
-            });
-          }
+          void ensureIncomingBootstrapPromise(incoming);
 
           openIncomingCallRef.current(incoming);
           return;

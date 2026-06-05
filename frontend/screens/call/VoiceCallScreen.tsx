@@ -6,6 +6,7 @@ import {
   Alert,
   AppState,
   BackHandler,
+  Platform,
   Image,
   Modal,
   StyleSheet,
@@ -423,6 +424,14 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
       const callId = callIdRef.current.trim();
       if (!callId || endingRef.current) return;
       emitCallHoldSignal(callId, onHold);
+      const voiceSocket = signalSocketRef.current;
+      if (voiceSocket?.connected) {
+        try {
+          voiceSocket.emit('call:hold', { callId, onHold });
+        } catch {
+          // CallSignal socket is primary; this is a low-latency duplicate on the call screen.
+        }
+      }
     },
     [emitCallHoldSignal]
   );
@@ -451,21 +460,15 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
       const interrupted = nextState !== 'active';
       appInBackgroundRef.current = interrupted;
       setAppInBackground(interrupted);
-      if (interrupted && !endingRef.current && callIdRef.current.trim() && readyRef.current) {
-        applySystemCallHold(true);
-        return;
-      }
-      if (!interrupted && !endingRef.current && !peerCallHoldRef.current) {
-        applySystemCallHold(false);
-        if (readyRef.current) {
-          void applyVoiceCallAudioMode(speakerOn).catch(() => {
-            // Best-effort audio route restore after interruption.
-          });
-        }
+      // Hold is only for external phone calls (mic stolen) — not generic background.
+      if (!interrupted && !endingRef.current && readyRef.current) {
+        void applyVoiceCallAudioMode(speakerOn).catch(() => {
+          // Best-effort audio route restore after interruption.
+        });
       }
     });
     return () => sub.remove();
-  }, [speakerOn, applySystemCallHold]);
+  }, [speakerOn]);
 
   useEffect(() => {
     readyRef.current = ready;
@@ -1151,10 +1154,21 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
       if (!token || cancelled) return;
       const socket = io(base, {
         auth: { token },
-        transports: ['websocket', 'polling'],
-        timeout: 20000,
+        transports: Platform.OS === 'android' ? ['websocket'] : ['websocket', 'polling'],
+        timeout: 12000,
+        reconnectionAttempts: 4,
       });
       signalSocketRef.current = socket;
+      const emitLocalHoldState = (): void => {
+        const callId = callIdRef.current.trim();
+        if (!callId) return;
+        try {
+          socket.emit('call:hold', { callId, onHold: systemCallHoldRef.current });
+        } catch {
+          // ignore
+        }
+      };
+      socket.on('connect', emitLocalHoldState);
       socket.on('call:hold', (payload: { callId?: string; onHold?: boolean; fromType?: 'u' | 'r' }) => {
         const myType = userRoleRef.current === 'caller' ? 'u' : 'r';
         if (payload?.fromType === myType) return;
@@ -1164,9 +1178,9 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
       });
       const onReconnectFailed = (): void => {
         if (!readyRef.current || endingRef.current) return;
-        // Temporary app interruptions (e.g., mobile carrier call UI) should not tear down the app call.
+        // Temporary app interruptions (e.g., mobile carrier call UI) — keep call alive; do not
+        // emit hold (hold is only when the OS steals the mic, via StreamSystemHoldBridge).
         if (appStateRef.current !== 'active') {
-          applySystemCallHoldRef.current(true);
           return;
         }
         endingRef.current = true;
@@ -1245,13 +1259,13 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
       if (boot) {
         prefetchVoiceSessionStart(boot.callId, boot.peerAccountId);
       }
-      const maxAttempts = 20;
+      const maxAttempts = 24;
       for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
         if (endingRef.current || talkActiveRef.current) return;
         const started = await syncTalkTimingOnce();
         if (started) return;
         if (attempt < maxAttempts - 1) {
-          const delayMs = attempt < 4 ? 0 : 25;
+          const delayMs = attempt < 10 ? 0 : 40;
           if (delayMs > 0) {
             await new Promise((resolve) => setTimeout(resolve, delayMs));
           }
@@ -1283,7 +1297,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
 
   useEffect(() => {
     if (!ready || endingRef.current) return;
-    const pollMs = talkActive ? 5000 : 250;
+    const pollMs = talkActive ? 5000 : 120;
     const poll = setInterval(() => {
       if (endingRef.current) return;
       void syncTalkTimingOnce();
@@ -1419,7 +1433,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
         applySystemCallHold(true);
         return;
       }
-      if (!appInBackgroundRef.current && !peerCallHoldRef.current) {
+      if (!peerCallHoldRef.current) {
         applySystemCallHold(false);
       }
     },
