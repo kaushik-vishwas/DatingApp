@@ -35,6 +35,7 @@ type CallInvitePayload = { callId?: unknown; targetId?: unknown };
 type CallResponsePayload = { callId?: unknown; accepted?: unknown };
 type CallEndPayload = { callId?: unknown };
 type CallHoldPayload = { callId?: unknown; onHold?: unknown };
+type CallMutePayload = { callId?: unknown; muted?: unknown };
 type CallQueuePayload = { active?: unknown };
 type ChatTypingPayload = { typing?: unknown };
 type AccountType = 'u' | 'r';
@@ -894,6 +895,54 @@ export function attachChatSocket(httpServer: HTTPServer): Server {
         );
       }
       ack?.({ ok: true });
+    });
+
+    socket.on('call:mute', (payload: CallMutePayload, ack?: (r: unknown) => void) => {
+      const callId = typeof payload?.callId === 'string' ? payload.callId.trim() : '';
+      const muted = typeof payload?.muted === 'boolean' ? payload.muted : null;
+      if (!callId || muted === null) {
+        ack?.({ ok: false, error: 'callId and muted are required' });
+        return;
+      }
+      const fromType = socket.data.typ as AccountType;
+      const fromId = String(socket.data.accountId);
+      void (async () => {
+        try {
+          let session = await CallSession.findOne({ callId, status: 'ongoing' })
+            .select('callerId receiverId')
+            .lean<{ callerId: mongoose.Types.ObjectId; receiverId: mongoose.Types.ObjectId } | null>();
+          if (!session) {
+            session = await CallSession.findOne({ callId })
+              .select('callerId receiverId')
+              .lean<{ callerId: mongoose.Types.ObjectId; receiverId: mongoose.Types.ObjectId } | null>();
+          }
+          if (!session) {
+            ack?.({ ok: false, error: 'Call not active' });
+            return;
+          }
+          const callerId = String(session.callerId);
+          const receiverId = String(session.receiverId);
+          const isParticipant =
+            (fromType === 'u' && fromId === callerId) || (fromType === 'r' && fromId === receiverId);
+          if (!isParticipant) {
+            ack?.({ ok: false, error: 'Forbidden' });
+            return;
+          }
+          const peerType: AccountType = fromType === 'u' ? 'r' : 'u';
+          const peerId = fromType === 'u' ? receiverId : callerId;
+          io.to(accountRoom(peerType, peerId)).emit('call:mute', {
+            callId,
+            muted,
+            fromType,
+            fromId,
+          });
+          ack?.({ ok: true });
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e);
+          console.error('call:mute error:', msg);
+          ack?.({ ok: false, error: 'Server error' });
+        }
+      })();
     });
 
     socket.on('call:hold', (payload: CallHoldPayload, ack?: (r: unknown) => void) => {

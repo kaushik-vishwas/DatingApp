@@ -55,7 +55,7 @@ export default function CallerAppNavigator(): React.JSX.Element {
       <Stack.Screen
         name="VoiceCall"
         component={VoiceCallScreen}
-        options={{ contentStyle: { paddingBottom: 0 } }}
+        options={{ contentStyle: { paddingBottom: 0 }, gestureEnabled: false }}
       />
       <Stack.Screen name="ReceiverProfile" component={ReceiverProfileScreen} />
       <Stack.Screen name="Wallet" component={WalletScreen} />

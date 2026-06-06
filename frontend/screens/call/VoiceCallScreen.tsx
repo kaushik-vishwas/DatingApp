@@ -709,7 +709,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
   const resetReceiverToWaitingRef = useRef(resetReceiverToWaiting);
   resetReceiverToWaitingRef.current = resetReceiverToWaiting;
 
-  const allowAvailabilityLeaveRef = useRef(false);
+  const allowLeaveCallScreenRef = useRef(false);
 
   /** Turn Go Online off and return home; optionally end an in-progress call first. */
   const applyReceiverGoOffline = async (opts?: { endCallIfLive?: boolean }): Promise<void> => {
@@ -734,7 +734,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
       });
       await profileApi.updateReceiverProfile({ isAvailable: false });
       await refreshUser();
-      allowAvailabilityLeaveRef.current = true;
+      allowLeaveCallScreenRef.current = true;
       (navigation as { navigate: (name: string, params?: object) => void }).navigate(
         'ReceiverMainTabs',
         { screen: 'ReceiverHome' }
@@ -751,23 +751,33 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
   };
 
   useEffect(() => {
-    const blockBack = receiverAvailabilitySession && receiverSessionPhase === 'waiting';
-    if (!blockBack) return;
-
     const onHardwareBack = (): boolean => true;
-    const backHandlerSub = BackHandler.addEventListener('hardwareBackPress', onHardwareBack);
+
     const navSub = navigation.addListener('beforeRemove', (e) => {
-      if (allowAvailabilityLeaveRef.current) return;
+      if (allowLeaveCallScreenRef.current) return;
+      const action = e.data.action;
+      if (action.type === 'REPLACE') {
+        const target =
+          'payload' in action &&
+          action.payload &&
+          typeof action.payload === 'object' &&
+          'name' in action.payload
+            ? String((action.payload as { name?: string }).name ?? '')
+            : '';
+        if (target === 'VoiceCall') return;
+      }
       e.preventDefault();
     });
+    const backHandlerSub = BackHandler.addEventListener('hardwareBackPress', onHardwareBack);
 
     return () => {
       backHandlerSub.remove();
       navSub();
     };
-  }, [navigation, receiverAvailabilitySession, receiverSessionPhase]);
+  }, [navigation]);
 
   const exitCallScreen = () => {
+    allowLeaveCallScreenRef.current = true;
     try {
       if (navigation.canGoBack()) {
         navigation.goBack();
@@ -1162,7 +1172,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
           return;
         }
         setError(msg);
-        Alert.alert('Voice call error', msg, [{ text: 'OK', onPress: () => navigation.goBack() }]);
+        Alert.alert('Voice call error', msg, [{ text: 'OK', onPress: () => exitCallScreenRef.current() }]);
       }
     })();
 
@@ -1740,7 +1750,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
         <Text style={styles.loadingText}>{error}</Text>
         <TouchableOpacity
           style={styles.preJoinBackBtn}
-          onPress={() => navigation.goBack()}
+          onPress={() => exitCallScreenRef.current()}
           activeOpacity={0.88}
         >
           <Text style={styles.preJoinBackBtnText}>Go back</Text>
