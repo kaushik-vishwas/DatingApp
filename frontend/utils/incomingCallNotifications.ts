@@ -440,6 +440,34 @@ function scheduleClearLastNotificationResponse(
   }, CLEAR_LAST_RESPONSE_DELAY_MS);
 }
 
+async function resumeIncomingFromTrayIfNeeded(msSinceResponse: number | null): Promise<void> {
+  if (msSinceResponse != null && msSinceResponse < 2000) return;
+
+  const shown = await readShownIncomingCallNotification();
+  if (!shown || !canNavigateToIncomingCall(shown.callId)) return;
+
+  const Notifications = await loadNotificationsModule();
+  if (!Notifications?.getPresentedNotificationsAsync) {
+    await openIncomingFromNotificationTap(shown);
+    return;
+  }
+
+  try {
+    const presented = await Notifications.getPresentedNotificationsAsync();
+    const targetId = `${INCOMING_CALL_NOTIFICATION_ID_PREFIX}${shown.callId}`;
+    const stillRinging = presented.some((n) => (n.request.identifier ?? '') === targetId);
+    if (!stillRinging) return;
+
+    logIncomingCallNotif('tap.open_start', {
+      callId: shown.callId,
+      tapPath: 'app_active_tray_fallback',
+    });
+    await openIncomingFromNotificationTap(shown);
+  } catch {
+    // ignore
+  }
+}
+
 async function checkLastNotificationResponse(): Promise<void> {
   const Notifications = await loadNotificationsModule();
   if (!Notifications) return;
@@ -827,6 +855,7 @@ export function ensureIncomingCallNotificationInfrastructure(): () => void {
         lastHandledTapAtByCallId.clear();
         void checkLastNotificationResponse();
         flushPendingOpens();
+        void resumeIncomingFromTrayIfNeeded(msSinceResponse);
       }
     };
     appStateSub = AppState.addEventListener('change', onAppState);

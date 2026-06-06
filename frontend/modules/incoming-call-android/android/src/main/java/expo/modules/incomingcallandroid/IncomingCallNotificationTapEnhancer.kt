@@ -39,10 +39,12 @@ object IncomingCallNotificationTapEnhancer {
   private const val SLOT_TITLE_COLLAPSED = 12
   private const val SLOT_BODY_COLLAPSED = 13
   private const val SLOT_ROOT_COLLAPSED = 14
+  private const val SLOT_CONTENT_COLLAPSED = 15
   private const val SLOT_OVERLAY_EXPANDED = 21
   private const val SLOT_TITLE_EXPANDED = 22
   private const val SLOT_BODY_EXPANDED = 23
   private const val SLOT_ROOT_EXPANDED = 24
+  private const val SLOT_CONTENT_EXPANDED = 25
   private const val SLOT_CONTENT_INTENT = 31
   private const val SLOT_OPEN_BUTTON = 32
 
@@ -174,6 +176,29 @@ object IncomingCallNotificationTapEnhancer {
         tag,
         "root_expanded",
         SLOT_ROOT_EXPANDED,
+        debugEnabled
+      )
+
+    val contentCollapsedBound =
+      bindTapTarget(
+        context,
+        collapsed,
+        R.id.incoming_call_notification_content,
+        tapIntent,
+        tag,
+        "content_collapsed",
+        SLOT_CONTENT_COLLAPSED,
+        debugEnabled
+      )
+    val contentExpandedBound =
+      bindTapTarget(
+        context,
+        expanded,
+        R.id.incoming_call_notification_content,
+        tapIntent,
+        tag,
+        "content_expanded",
+        SLOT_CONTENT_EXPANDED,
         debugEnabled
       )
 

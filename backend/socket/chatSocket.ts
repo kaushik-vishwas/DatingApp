@@ -697,8 +697,14 @@ export function attachChatSocket(httpServer: HTTPServer): Server {
             return;
           }
           if (!hasActiveSocketForAccount('r', targetId)) {
-            ack?.({ ok: false, error: 'Receiver is offline right now.' });
-            return;
+            const recvPush = await Receiver.findById(targetId)
+              .select('expoPushToken')
+              .lean<{ expoPushToken?: string | null } | null>();
+            const pushToken = recvPush?.expoPushToken?.trim();
+            if (!pushToken) {
+              ack?.({ ok: false, error: 'Receiver is offline right now.' });
+              return;
+            }
           }
           receiverForInviteId = targetId;
           await releaseIfStaleReceiverBusy(receiverForInviteId);

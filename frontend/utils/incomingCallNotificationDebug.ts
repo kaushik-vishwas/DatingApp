@@ -1,24 +1,12 @@
-import Constants from 'expo-constants';
-
 /**
- * Incoming-call notification tap tracing (console).
+ * Incoming-call notification tap tracing (console only in __DEV__).
  * Console: __DEV__ or EXPO_PUBLIC_INCOMING_CALL_NOTIF_LOG=1
- *
- * File log + purple Debug report FAB: on by default in release APK builds.
- * Disable with EXPO_PUBLIC_INCOMING_CALL_NOTIF_DEBUG=0 in .env before building.
- * See frontend/docs/NOTIFICATION_DEBUG_APK.md
  */
 const CONSOLE_ENABLED =
   __DEV__ || process.env.EXPO_PUBLIC_INCOMING_CALL_NOTIF_LOG === '1';
 
-export const INCOMING_CALL_NOTIF_DEBUG_ENV = 'EXPO_PUBLIC_INCOMING_CALL_NOTIF_DEBUG';
-
 export function isIncomingCallNotifDebugBuild(): boolean {
-  const fromEnv = process.env[INCOMING_CALL_NOTIF_DEBUG_ENV];
-  if (fromEnv === '1') return true;
-  if (fromEnv === '0') return false;
-  const extra = Constants.expoConfig?.extra as { incomingCallNotifDebug?: boolean } | undefined;
-  return extra?.incomingCallNotifDebug === true;
+  return false;
 }
 
 export type IncomingCallNotifLogStep =

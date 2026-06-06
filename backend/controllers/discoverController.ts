@@ -58,6 +58,9 @@ function toCard(
   const id = String(r._id);
   const socketLive = connectedReceiverIds.has(id);
   const switchOn = Boolean(o.isAvailable);
+  /** Go Online stays visible while backgrounded; socket may drop on Android. */
+  const discoverAvailable = switchOn;
+  const discoverOnline = switchOn || socketLive;
   return {
     _id: id,
     name: o.name,
@@ -70,8 +73,8 @@ function toCard(
     updatedAt: iso(o.updatedAt),
     gender:
       o.gender === 'male' || o.gender === 'female' || o.gender === 'other' ? o.gender : null,
-    isAvailable: switchOn && socketLive,
-    isOnline: socketLive,
+    isAvailable: discoverAvailable,
+    isOnline: discoverOnline,
     isBusyOnCall: busyByReceiverId.has(id),
     ratingAvg: rating ? Math.round(rating.avg * 10) / 10 : 0,
     ratingCount: rating?.count ?? 0,

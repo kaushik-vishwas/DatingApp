@@ -9,11 +9,6 @@ const PROD_API = 'https://backend.nesthamapp.com';
 
 require('dotenv').config({ path: path.join(__dirname, '.env') });
 
-// Embed EXPO_PUBLIC flag for Metro when building via Gradle (assembleRelease).
-if (process.env.EXPO_PUBLIC_INCOMING_CALL_NOTIF_DEBUG !== '0') {
-  process.env.EXPO_PUBLIC_INCOMING_CALL_NOTIF_DEBUG = '1';
-}
-
 const appJson = JSON.parse(fs.readFileSync(path.join(__dirname, 'app.json'), 'utf8'));
 
 const fromEnv = process.env.EXPO_PUBLIC_API_BASE_URL?.trim();
@@ -100,8 +95,6 @@ module.exports = {
       cloudinaryCloudName,
       cloudinaryUploadPreset,
       appKind: appKind || undefined,
-      /** Purple Debug report FAB + notification tap log file. Set EXPO_PUBLIC_INCOMING_CALL_NOTIF_DEBUG=0 to disable. */
-      incomingCallNotifDebug: process.env.EXPO_PUBLIC_INCOMING_CALL_NOTIF_DEBUG !== '0',
     },
   },
 };

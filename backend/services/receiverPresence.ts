@@ -56,10 +56,10 @@ export function isReceiverLoggedInForDiscover(receiverId: string): boolean {
   return isReceiverSocketConnected(receiverId);
 }
 
-/** Callable on discover: logged in (socket) and Go Online switch on in DB. */
+/** Callable on discover: Go Online switch on (socket optional while app is backgrounded). */
 export function isReceiverDiscoverAvailable(
   receiverId: string,
   isAvailableFlag: boolean
 ): boolean {
-  return isAvailableFlag && isReceiverSocketConnected(receiverId);
+  return isAvailableFlag;
 }

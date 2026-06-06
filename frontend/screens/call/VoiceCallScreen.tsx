@@ -486,6 +486,20 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
   }, [systemCallHold]);
 
   useEffect(() => {
+    if (!receiverAvailabilitySession || !user?.isAvailable) return;
+    const affirmQueue = (): void => {
+      void setQueueMode(true).catch(() => {});
+    };
+    affirmQueue();
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state === 'active' || state === 'background' || state === 'inactive') {
+        affirmQueue();
+      }
+    });
+    return () => sub.remove();
+  }, [receiverAvailabilitySession, user?.isAvailable, setQueueMode]);
+
+  useEffect(() => {
     const sub = AppState.addEventListener('change', (nextState) => {
       appStateRef.current = nextState;
       const interrupted = nextState !== 'active';

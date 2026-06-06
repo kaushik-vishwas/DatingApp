@@ -1018,6 +1018,16 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     const sub = AppState.addEventListener('change', (state: AppStateStatus) => {
       if (state === 'active' || state === 'background' || state === 'inactive') {
         keepCallSocketAlive();
+        if (userRoleRef.current === 'receiver' && queueModeRef.current) {
+          const socket = socketRef.current;
+          if (socket?.connected) {
+            try {
+              socket.emit('call:queue:set', { active: true }, () => {});
+            } catch {
+              // best-effort
+            }
+          }
+        }
       }
       if (state === 'active') {
         refreshPushToken();

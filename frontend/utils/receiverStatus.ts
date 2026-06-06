@@ -28,14 +28,23 @@ export function getReceiverPresenceInfo(receiver: DiscoverReceiverSummary): Rece
     };
   }
 
-  // Callable only when logged in (socket session) and Go Online switch is on.
-  const loggedIn = Boolean(receiver.isOnline);
+  // Callable when logged in (socket) and Go Online switch is on.
   const acceptingCalls = Boolean(receiver.isAvailable);
-  if (!loggedIn || !acceptingCalls) {
-    const label = !loggedIn ? 'Offline' : 'Not available';
+  if (!acceptingCalls) {
     return {
       status: 'offline',
-      label,
+      label: 'Not available',
+      color: STATUS_GREY,
+      canCall: false,
+      canMessage: true,
+    };
+  }
+
+  const loggedIn = Boolean(receiver.isOnline);
+  if (!loggedIn) {
+    return {
+      status: 'offline',
+      label: 'Offline',
       color: STATUS_GREY,
       canCall: false,
       canMessage: true,

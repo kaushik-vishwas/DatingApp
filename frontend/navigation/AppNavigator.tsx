@@ -8,7 +8,6 @@ import { getForcedAppKind } from '../config/appKind';
 import type { PostBrandSplashRoute, RootStackParamList } from './RootStackParamList';
 import { navigationRef } from './navigationRef';
 import { appLinking } from './appLinking';
-import { captureIncomingCallNotifDebugSnapshot } from '../utils/incomingCallNotificationDebug';
 import { consumePendingNotificationTap } from '../utils/incomingCallNotifications';
 
 import ReceiverEducationScreen from '../screens/onboarding/ReceiverEducationScreen';
@@ -143,7 +142,6 @@ export default function AppNavigator(): React.JSX.Element {
       ref={navigationRef}
       linking={appLinking}
       onReady={() => {
-        void captureIncomingCallNotifDebugSnapshot('navigator_ready', {});
         consumePendingNotificationTap();
       }}
     >
