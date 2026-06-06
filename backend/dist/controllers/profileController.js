@@ -36,7 +36,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getCallerNotifications = exports.getReceiverCallerOnlineNotifications = exports.getCallerMessageEligibleReceivers = exports.getCallerCallHistory = exports.getReceiverEarningsBreakdown = exports.verifyReceiverBankUpdateOtp = exports.sendReceiverBankUpdateOtp = exports.deleteReceiverAccount = exports.reopenRejectedReceiverKyc = exports.completeReceiverAudioOnboarding = exports.updateReceiverExpoPushToken = exports.updateReceiverProfile = exports.notifyReceiverRecentUser = exports.getReceiverNotifyCandidates = exports.getReceiverWelcomeMessage = exports.getReceiverCallInsights = exports.verifyReceiverWithdrawalOtpAndCreate = exports.sendReceiverWithdrawalOtp = exports.getReceiverWithdrawalOverview = exports.getReceiverWalletSummary = exports.updateCallerProfile = exports.completeCallerProfile = exports.saveCallerUserAudio = exports.saveReceiverKycBankFinalize = exports.saveReceiverKycDocuments = exports.saveReceiverKycProfileInfo = exports.completeProfile = void 0;
+exports.getCallerNotifications = exports.getReceiverCallerOnlineNotifications = exports.getCallerMessageEligibleReceivers = exports.deleteCallerCallHistory = exports.getCallerCallHistory = exports.getReceiverEarningsBreakdown = exports.verifyReceiverBankUpdateOtp = exports.sendReceiverBankUpdateOtp = exports.deleteReceiverAccount = exports.reopenRejectedReceiverKyc = exports.completeReceiverAudioOnboarding = exports.updateReceiverExpoPushToken = exports.updateReceiverProfile = exports.notifyReceiverRecentUser = exports.getReceiverNotifyCandidates = exports.getCallerNotificationMessage = exports.getReceiverWelcomeMessage = exports.getReceiverCallInsights = exports.verifyReceiverWithdrawalOtpAndCreate = exports.sendReceiverWithdrawalOtp = exports.getReceiverWithdrawalOverview = exports.getReceiverWalletSummary = exports.updateCallerProfile = exports.completeCallerProfile = exports.saveCallerUserAudio = exports.saveReceiverKycBankFinalize = exports.saveReceiverKycDocuments = exports.saveReceiverKycProfileInfo = exports.completeProfile = void 0;
 const crypto_1 = __importDefault(require("crypto"));
 const mongoose_1 = __importDefault(require("mongoose"));
 const User_1 = __importDefault(require("../models/User"));
@@ -66,6 +66,7 @@ const callerMessageEligibility_1 = require("../utils/callerMessageEligibility");
 const callController_1 = require("./callController");
 const receiverEarningModel_1 = require("../services/receiverEarningModel");
 const receiverWelcome_1 = require("../services/receiverWelcome");
+const callerNotification_1 = require("../services/callerNotification");
 function callerCallNotificationSubtitle(durationSec) {
     const d = Math.max(0, Math.floor(Number(durationSec) || 0));
     if (d <= 0)
@@ -1625,6 +1626,25 @@ const getReceiverWelcomeMessage = async (req, res) => {
 };
 exports.getReceiverWelcomeMessage = getReceiverWelcomeMessage;
 /**
+ * GET /profile/caller-notification — admin announcement card on caller discover home.
+ */
+const getCallerNotificationMessage = async (req, res) => {
+    try {
+        if (req.accountKind !== 'user') {
+            res.status(403).json({ message: 'Only callers can view this notification' });
+            return;
+        }
+        const callerNotification = await (0, callerNotification_1.getCallerNotificationSettings)();
+        res.status(200).json({ callerNotification });
+    }
+    catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error('getCallerNotificationMessage error:', msg);
+        res.status(500).json({ message: msg || 'Server error' });
+    }
+};
+exports.getCallerNotificationMessage = getCallerNotificationMessage;
+/**
  * GET /profile/receiver-notify-candidates — latest 20 unique recent callers for manual ping.
  */
 const getReceiverNotifyCandidates = async (req, res) => {
@@ -2343,7 +2363,11 @@ const getCallerCallHistory = async (req, res) => {
             start.setDate(1);
             start.setHours(0, 0, 0, 0);
         }
-        const filter = { callerId: uid, status: 'completed' };
+        const filter = {
+            callerId: uid,
+            status: 'completed',
+            callerHiddenAt: null,
+        };
         if (range !== 'all')
             filter.startedAt = { $gte: start };
         const rows = await CallSession_1.default.find(filter)
@@ -2384,6 +2408,50 @@ const getCallerCallHistory = async (req, res) => {
     }
 };
 exports.getCallerCallHistory = getCallerCallHistory;
+/**
+ * POST /profile/caller-call-history/delete — hide selected rows from caller Recents.
+ */
+const deleteCallerCallHistory = async (req, res) => {
+    try {
+        if (req.accountKind !== 'user') {
+            res.status(403).json({ message: 'Only callers can delete call history' });
+            return;
+        }
+        const authUser = req.user;
+        if (!authUser?._id) {
+            res.status(401).json({ message: 'Not authorized' });
+            return;
+        }
+        const rawIds = req.body?.ids;
+        if (!Array.isArray(rawIds) || rawIds.length === 0) {
+            res.status(400).json({ message: 'ids required' });
+            return;
+        }
+        const uid = new mongoose_1.default.Types.ObjectId(String(authUser._id));
+        const objectIds = rawIds
+            .map((id) => String(id).trim())
+            .filter((id) => mongoose_1.default.Types.ObjectId.isValid(id))
+            .map((id) => new mongoose_1.default.Types.ObjectId(id));
+        if (objectIds.length === 0) {
+            res.status(400).json({ message: 'No valid ids' });
+            return;
+        }
+        const now = new Date();
+        const result = await CallSession_1.default.updateMany({
+            _id: { $in: objectIds },
+            callerId: uid,
+            status: 'completed',
+            callerHiddenAt: null,
+        }, { $set: { callerHiddenAt: now } });
+        res.status(200).json({ ok: true, deleted: result.modifiedCount });
+    }
+    catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error('deleteCallerCallHistory error:', msg);
+        res.status(500).json({ message: msg || 'Server error' });
+    }
+};
+exports.deleteCallerCallHistory = deleteCallerCallHistory;
 /**
  * GET /profile/caller-message-eligible-receivers — receiver ids the caller may message.
  */

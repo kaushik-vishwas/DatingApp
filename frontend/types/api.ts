@@ -345,6 +345,16 @@ export interface ReceiverWelcomeResponse {
   receiverWelcome: ReceiverWelcomeContent;
 }
 
+export type CallerNotificationContent = {
+  enabled: boolean;
+  title: string;
+  body: string;
+};
+
+export interface CallerNotificationResponse {
+  callerNotification: CallerNotificationContent;
+}
+
 export interface ReceiverWalletSummaryResponse {
   /** Withdrawable balance (e.g. chat message credits credited to wallet). */
   walletBalance: number;

@@ -16,6 +16,12 @@ export interface IReceiverWelcomeSettings {
   body: string;
 }
 
+export interface ICallerNotificationSettings {
+  enabled: boolean;
+  title: string;
+  body: string;
+}
+
 export interface IAdminSettings {
   notificationControls: {
     kycSubmissionsEmail: boolean;
@@ -25,6 +31,7 @@ export interface IAdminSettings {
   receiverEarningModel: ReceiverEarningModel;
   fixedPerMinuteWindows: IFixedPerMinuteWindow[];
   receiverWelcome: IReceiverWelcomeSettings;
+  callerNotification: ICallerNotificationSettings;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -61,6 +68,11 @@ const adminSettingsSchema = new Schema<IAdminSettings>(
     receiverWelcome: {
       enabled: { type: Boolean, default: true },
       title: { type: String, default: 'Welcome to Selecto', trim: true, maxlength: 120 },
+      body: { type: String, default: '', trim: true, maxlength: 3000 },
+    },
+    callerNotification: {
+      enabled: { type: Boolean, default: true },
+      title: { type: String, default: 'Announcement', trim: true, maxlength: 120 },
       body: { type: String, default: '', trim: true, maxlength: 3000 },
     },
   },

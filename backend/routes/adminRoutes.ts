@@ -24,6 +24,7 @@ import {
   updateAdminNotificationControls,
   updateAdminReceiverEarningModel,
   updateAdminReceiverWelcome,
+  updateAdminCallerNotification,
   updateAdminRole,
   listWithdrawals,
   resolveModerationReport,
@@ -50,6 +51,7 @@ router.get('/settings', adminProtect, getAdminSettings);
 router.patch('/settings/notifications', adminProtect, updateAdminNotificationControls);
 router.patch('/settings/earning-model', adminProtect, updateAdminReceiverEarningModel);
 router.patch('/settings/receiver-welcome', adminProtect, updateAdminReceiverWelcome);
+router.patch('/settings/caller-notification', adminProtect, updateAdminCallerNotification);
 router.patch('/settings/admins/:id/role', adminProtect, updateAdminRole);
 
 router.get('/users', adminProtect, listAppUsers);

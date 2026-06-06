@@ -18,6 +18,7 @@ import {
   publicEarningSchedulePayload,
 } from '../services/receiverEarningModel';
 import { normalizeReceiverWelcome } from '../services/receiverWelcome';
+import { normalizeCallerNotification } from '../services/callerNotification';
 import { toApiReceiver, toApiUser } from './authController';
 import { sendOtpEmail } from '../config/email';
 import { getConfiguredAdminEmail } from '../services/superAdminSync';
@@ -462,6 +463,7 @@ export const getAdminSettings = async (req: Request, res: Response): Promise<voi
     );
 
     const receiverWelcome = normalizeReceiverWelcome(effective.receiverWelcome);
+    const callerNotification = normalizeCallerNotification(effective.callerNotification);
 
     res.status(200).json({
       notificationControls: {
@@ -470,6 +472,7 @@ export const getAdminSettings = async (req: Request, res: Response): Promise<voi
         dailyRevenueSummaryEmail: Boolean(effective.notificationControls?.dailyRevenueSummaryEmail ?? true),
       },
       receiverWelcome,
+      callerNotification,
       receiverEarningModel: earningModel,
       fixedPerMinuteWindows,
       rolesCatalog: [
@@ -640,6 +643,42 @@ export const updateAdminReceiverWelcome = async (
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error('updateAdminReceiverWelcome error:', msg);
+    res.status(500).json({ message: msg || 'Server error' });
+  }
+};
+
+/**
+ * PATCH /admin/settings/caller-notification — home card copy for callers.
+ */
+export const updateAdminCallerNotification = async (
+  req: Request<{}, {}, { enabled?: boolean; title?: string; body?: string }>,
+  res: Response
+): Promise<void> => {
+  try {
+    const body = req.body ?? {};
+    if (typeof body.enabled !== 'boolean') {
+      res.status(400).json({ message: 'enabled boolean is required' });
+      return;
+    }
+    const callerNotification = normalizeCallerNotification({
+      enabled: body.enabled,
+      title: body.title,
+      body: body.body,
+    });
+
+    const settings = await AdminSettings.findOneAndUpdate(
+      {},
+      { $set: { callerNotification } },
+      { new: true, upsert: true, setDefaultsOnInsert: true }
+    );
+
+    res.status(200).json({
+      ok: true,
+      callerNotification: normalizeCallerNotification(settings.callerNotification),
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error('updateAdminCallerNotification error:', msg);
     res.status(500).json({ message: msg || 'Server error' });
   }
 };

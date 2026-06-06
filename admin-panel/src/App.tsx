@@ -13,6 +13,7 @@ import { ReportsPage } from './pages/ReportsPage';
 import { RatingsPage } from './pages/RatingsPage';
 import { WalletOffersPage } from './pages/WalletOffers';
 import { ReceiverWelcomePage } from './pages/ReceiverWelcomePage';
+import { CallerNotificationPage } from './pages/CallerNotificationPage';
 
 function RequireAuth() {
   const { token, bootstrapping } = useAdminAuth();
@@ -48,6 +49,7 @@ function AppRoutes() {
           <Route path="/withdrawals" element={<WithdrawalsPage />} />
           <Route path="/wallet-offers" element={<WalletOffersPage />} />
           <Route path="/receiver-welcome" element={<ReceiverWelcomePage />} />
+          <Route path="/caller-notification" element={<CallerNotificationPage />} />
           <Route path="/reports" element={<ReportsPage />} />
           <Route path="/ratings" element={<RatingsPage />} />
           <Route path="/settings" element={<SettingsPage />} />

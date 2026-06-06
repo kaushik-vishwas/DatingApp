@@ -5,6 +5,7 @@ import {
   Image,
   Keyboard,
   KeyboardAvoidingView,
+  Modal,
   Platform,
   ScrollView,
   StyleSheet,
@@ -22,6 +23,7 @@ import { useAuth } from '../../context/AuthContext';
 import type { RootStackParamList } from '../../navigation/RootStackParamList';
 import { authApi, getErrorMessage, saveJwt } from '../../services/api';
 import { normalizeIndianMobileDigits } from '../../utils/validation';
+import { PRIVACY_POLICY_CONTENT } from '../../constants/privacyPolicyContent';
 import SelectoLogo from '../../assets/SelectoLogo.png';
 
 
@@ -68,15 +70,16 @@ const countryCodes: CountryCode[] = [
 ];
 
 const bannerImages = [
-  { id: '1', image: BannerImage1, title: 'Welcome to Your New Circle' },
-  { id: '2', image: BannerImage2, title: 'Share, Chat, Connect' },
-  { id: '3', image: BannerImage3, title: 'Friendship Has No Boundaries' },
-  { id: '4', image: BannerImage4, title: 'Start Meaningful Conversations' },
+  { id: '1', image: BannerImage1, title: '' },
+  { id: '2', image: BannerImage2, title: '' },
+  { id: '3', image: BannerImage3, title: '' },
+  { id: '4', image: BannerImage4, title: '' },
 ];
 
 const { width } = Dimensions.get('window');
 const HORIZONTAL_PADDING = 20;
 const BANNER_WIDTH = width - (HORIZONTAL_PADDING * 2);
+const PURPLE = '#7F00FF';
 
 export default function MobileLoginScreen({ navigation }: Props): React.JSX.Element {
   const insets = useSafeAreaInsets();
@@ -90,6 +93,8 @@ export default function MobileLoginScreen({ navigation }: Props): React.JSX.Elem
   const [activeBannerIndex, setActiveBannerIndex] = useState(0);
   const [resendEnabled, setResendEnabled] = useState(false);
   const [resendTimer, setResendTimer] = useState(0);
+  const [privacyAccepted, setPrivacyAccepted] = useState(false);
+  const [showPrivacyModal, setShowPrivacyModal] = useState(false);
   const scrollRef = useRef<ScrollView | null>(null);
   const flatListRef = useRef<FlatList>(null);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
@@ -149,6 +154,10 @@ export default function MobileLoginScreen({ navigation }: Props): React.JSX.Elem
   }, []);
 
   const onSendOtp = async () => {
+    if (!privacyAccepted) {
+      Alert.alert('Privacy Policy', 'Please accept the Privacy Policy to continue.');
+      return;
+    }
     const digitsOnly = mobile.replace(/\D/g, '');
     // Restrict to exactly 10 digits
     if (digitsOnly.length !== 10) {
@@ -392,9 +401,12 @@ export default function MobileLoginScreen({ navigation }: Props): React.JSX.Elem
               )}
 
               <TouchableOpacity
-                style={[styles.buttonWrapper, loading && styles.buttonDisabled]}
+                style={[
+                  styles.buttonWrapper,
+                  (loading || (step === 'mobile' && !privacyAccepted)) && styles.buttonDisabled,
+                ]}
                 onPress={() => void (step === 'mobile' ? onSendOtp() : onVerifyOtp())}
-                disabled={loading}
+                disabled={loading || (step === 'mobile' && !privacyAccepted)}
                 activeOpacity={0.8}
               >
                 <LinearGradient
@@ -408,6 +420,26 @@ export default function MobileLoginScreen({ navigation }: Props): React.JSX.Elem
                   </Text>
                 </LinearGradient>
               </TouchableOpacity>
+
+              {step === 'mobile' ? (
+                <View style={styles.privacyRow}>
+                  <TouchableOpacity
+                    onPress={() => setPrivacyAccepted((v) => !v)}
+                    activeOpacity={0.85}
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                  >
+                    <View style={[styles.checkbox, privacyAccepted && styles.checkboxChecked]}>
+                      {privacyAccepted ? <Text style={styles.checkboxMark}>✓</Text> : null}
+                    </View>
+                  </TouchableOpacity>
+                  <Text style={styles.privacyText}>
+                    I agree to the{' '}
+                    <Text style={styles.privacyLink} onPress={() => setShowPrivacyModal(true)}>
+                      Privacy Policy
+                    </Text>
+                  </Text>
+                </View>
+              ) : null}
 
               {step === 'otp' ? (
                 <TouchableOpacity
@@ -424,6 +456,39 @@ export default function MobileLoginScreen({ navigation }: Props): React.JSX.Elem
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
+
+      <Modal
+        visible={showPrivacyModal}
+        animationType="slide"
+        transparent
+        onRequestClose={() => setShowPrivacyModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContainer}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Privacy Policy</Text>
+              <TouchableOpacity onPress={() => setShowPrivacyModal(false)}>
+                <Text style={styles.modalClose}>✕</Text>
+              </TouchableOpacity>
+            </View>
+            <ScrollView
+              showsVerticalScrollIndicator={false}
+              contentContainerStyle={styles.modalContent}
+            >
+              <Text style={styles.modalBody}>{PRIVACY_POLICY_CONTENT}</Text>
+            </ScrollView>
+            <TouchableOpacity
+              style={styles.modalButton}
+              onPress={() => {
+                setPrivacyAccepted(true);
+                setShowPrivacyModal(false);
+              }}
+            >
+              <Text style={styles.modalButtonText}>I Agree</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -465,7 +530,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 0,
   },
   bannerSlide: {
-    height: 130,
+    height: 215,
     borderRadius: 20,
     overflow: 'hidden',
     marginHorizontal: 0,
@@ -652,5 +717,100 @@ const styles = StyleSheet.create({
   },
   resendTextDisabled: {
     color: '#999',
+  },
+  privacyRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',  // ← Add this to center horizontally
+    width: '100%',
+    marginTop: 14,
+    paddingHorizontal: 2,
+  },
+  checkbox: {
+    width: 20,
+    height: 20,
+    borderRadius: 4,
+    borderWidth: 1.5,
+    borderColor: '#d0d0d0',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 10,
+    marginTop: 0,
+  },
+  checkboxChecked: {
+    backgroundColor: PURPLE,
+    borderColor: PURPLE,
+  },
+  checkboxMark: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '900',
+  },
+  privacyText: {
+    color: '#444',  // ← Remove flex: 1
+    fontSize: 13,
+    lineHeight: 20,
+    textAlignVertical: 'center',
+    includeFontPadding: false,
+  },
+
+  privacyLink: {
+    color: PURPLE,
+    fontWeight: '700',
+    textDecorationLine: 'underline',
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalContainer: {
+    backgroundColor: '#fff',
+    borderRadius: 20,
+    width: '90%',
+    maxHeight: '85%',
+    overflow: 'hidden',
+    marginVertical: 40,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e5e5e5',
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: '#333',
+  },
+  modalClose: {
+    fontSize: 22,
+    color: '#666',
+    padding: 4,
+  },
+  modalContent: {
+    padding: 20,
+    paddingBottom: 8,
+  },
+  modalBody: {
+    fontSize: 14,
+    color: '#444',
+    lineHeight: 22,
+  },
+  modalButton: {
+    margin: 16,
+    marginTop: 8,
+    backgroundColor: PURPLE,
+    borderRadius: 12,
+    paddingVertical: 14,
+    alignItems: 'center',
+  },
+  modalButtonText: {
+    color: '#fff',
+    fontSize: 15,
+    fontWeight: '800',
   },
 });

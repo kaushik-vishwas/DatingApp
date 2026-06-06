@@ -219,6 +219,12 @@ export type ReceiverWelcomeSettings = {
   body: string;
 };
 
+export type CallerNotificationSettings = {
+  enabled: boolean;
+  title: string;
+  body: string;
+};
+
 export type AdminSettingsResponse = {
   notificationControls: {
     kycSubmissionsEmail: boolean;
@@ -226,6 +232,7 @@ export type AdminSettingsResponse = {
     dailyRevenueSummaryEmail: boolean;
   };
   receiverWelcome: ReceiverWelcomeSettings;
+  callerNotification: CallerNotificationSettings;
   receiverEarningModel: ReceiverEarningModel;
   fixedPerMinuteWindows: FixedPerMinuteWindow[];
   rolesCatalog: Array<{ id: AdminRole; label: string; description: string }>;
@@ -272,6 +279,14 @@ export async function updateAdminSettingsNotifications(payload: {
 export async function updateAdminReceiverWelcome(payload: ReceiverWelcomeSettings) {
   const { data } = await api.patch<{ ok: boolean; receiverWelcome: ReceiverWelcomeSettings }>(
     '/admin/settings/receiver-welcome',
+    payload
+  );
+  return data;
+}
+
+export async function updateAdminCallerNotification(payload: CallerNotificationSettings) {
+  const { data } = await api.patch<{ ok: boolean; callerNotification: CallerNotificationSettings }>(
+    '/admin/settings/caller-notification',
     payload
   );
   return data;

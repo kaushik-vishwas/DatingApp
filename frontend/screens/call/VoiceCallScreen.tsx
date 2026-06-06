@@ -38,7 +38,6 @@ import { AvatarSoundWaveRings } from '../../components/call/AvatarVoiceWaves';
 import type { StreamMicControl } from '../../components/call/StreamCallAvatarExtras';
 import {
   getVoiceSessionStartPromise,
-  prefetchVoiceSessionStart,
 } from '../../utils/voiceCallSessionStart';
 
 type StreamSdkModule = {
@@ -248,7 +247,6 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
   const [incomingReq, setIncomingReq] = useState<IncomingCallRequest | null>(null);
   const incomingReqRef = useRef<IncomingCallRequest | null>(null);
   const [incomingResponding, setIncomingResponding] = useState(false);
-  const [goingOffline, setGoingOffline] = useState(false);
   const [sdk, setSdk] = useState<StreamSdkModule | null>(() => loadStreamSdkModule());
   const [client, setClient] = useState<{
     call: (type: string, id: string) => {
@@ -575,20 +573,6 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
     return true;
   };
 
-  /** Instant UI while server confirms both parties (re-aligned on server anchor). */
-  const applyOptimisticTalkTiming = useCallback((): void => {
-    if (talkActiveRef.current || endingRef.current) return;
-    const anchorMs = Date.now();
-    talkAnchorMsRef.current = anchorMs;
-    talkActiveRef.current = true;
-    setTalkActive(true);
-    setElapsedSec(0);
-    elapsedSecRef.current = 0;
-  }, []);
-
-  const applyOptimisticTalkTimingRef = useRef(applyOptimisticTalkTiming);
-  applyOptimisticTalkTimingRef.current = applyOptimisticTalkTiming;
-
   const formatHms = (totalSec: number): string => {
     const safe = Math.max(0, Math.floor(totalSec));
     const hh = String(Math.floor(safe / 3600)).padStart(2, '0');
@@ -683,7 +667,9 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
   const teardownFromRemotePeerEnd = useCallback(async (): Promise<void> => {
     if (endingRef.current) return;
     endingRef.current = true;
-    await leaveMediaRef.current();
+    talkActiveRef.current = false;
+    setTalkActive(false);
+    void leaveMediaRef.current();
     void ensureSessionEndedRef.current();
     if (receiverAvailabilitySessionRef.current && userAvailableRef.current) {
       resetReceiverToWaitingRef.current();
@@ -724,45 +710,6 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
   resetReceiverToWaitingRef.current = resetReceiverToWaiting;
 
   const allowLeaveCallScreenRef = useRef(false);
-
-  /** Turn Go Online off and return home; optionally end an in-progress call first. */
-  const applyReceiverGoOffline = async (opts?: { endCallIfLive?: boolean }): Promise<void> => {
-    if (goingOffline) return;
-    setGoingOffline(true);
-    try {
-      if (incomingReq) {
-        rejectIncomingCall(incomingReq);
-      }
-      const endCallIfLive = opts?.endCallIfLive !== false;
-      const hasLiveCall =
-        Boolean(callIdRef.current.trim()) &&
-        (readyRef.current || talkActiveRef.current || Boolean(getVoiceBootstrap(callParams)));
-      if (endCallIfLive && hasLiveCall && !endingRef.current) {
-        endingRef.current = true;
-        emitCallEnd();
-        await leaveMedia();
-        void ensureSessionEnded();
-      }
-      await setQueueMode(false).catch(() => {
-        // ignore signaling failures
-      });
-      await profileApi.updateReceiverProfile({ isAvailable: false });
-      await refreshUser();
-      allowLeaveCallScreenRef.current = true;
-      (navigation as { navigate: (name: string, params?: object) => void }).navigate(
-        'ReceiverMainTabs',
-        { screen: 'ReceiverHome' }
-      );
-    } catch (e) {
-      Alert.alert('Could not go offline', getErrorMessage(e));
-    } finally {
-      setGoingOffline(false);
-    }
-  };
-
-  const onReceiverGoOffline = (): void => {
-    void applyReceiverGoOffline({ endCallIfLive: true });
-  };
 
   useEffect(() => {
     const onHardwareBack = (): boolean => true;
@@ -890,6 +837,8 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
       if (role === 'caller') {
         if (endingRef.current) return;
         endingRef.current = true;
+        talkActiveRef.current = false;
+        setTalkActive(false);
         void finishCallerCallEndRef.current();
         return;
       }
@@ -1128,8 +1077,6 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
         return;
       }
       try {
-        prefetchVoiceSessionStart(boot.callId, boot.peerAccountId);
-
         const streamSdk = loadStreamSdkModule();
         if (!streamSdk) {
           throw new Error('Voice SDK is not available in this build');
@@ -1306,15 +1253,20 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
     try {
       const boot = getVoiceBootstrap(callParams);
       if (boot) {
-        prefetchVoiceSessionStart(boot.callId, boot.peerAccountId);
+        void getVoiceSessionStartPromise(boot.callId, boot.peerAccountId)
+          .then((data) => {
+            applyTalkTimingFromServer(data);
+            applySessionBillingFromServer(data);
+          })
+          .catch(() => {});
       }
-      const maxAttempts = 24;
+      const maxAttempts = 50;
       for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
         if (endingRef.current || talkActiveRef.current) return;
         const started = await syncTalkTimingOnce();
         if (started) return;
         if (attempt < maxAttempts - 1) {
-          const delayMs = attempt < 10 ? 0 : 40;
+          const delayMs = attempt < 15 ? 0 : attempt < 30 ? 20 : 40;
           if (delayMs > 0) {
             await new Promise((resolve) => setTimeout(resolve, delayMs));
           }
@@ -1346,7 +1298,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
 
   useEffect(() => {
     if (!ready || endingRef.current) return;
-    const pollMs = talkActive ? 5000 : 120;
+    const pollMs = talkActive ? 5000 : 80;
     const poll = setInterval(() => {
       if (endingRef.current) return;
       void syncTalkTimingOnce();
@@ -1369,7 +1321,8 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
 
   const hangup = async () => {
     if (receiverAvailabilitySession && receiverSessionPhase === 'waiting') {
-      onReceiverGoOffline();
+      allowLeaveCallScreenRef.current = true;
+      exitCallScreen();
       return;
     }
     if (receiverAvailabilitySession && receiverSessionPhase === 'incoming') {
@@ -1387,6 +1340,8 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
     }
     if (endingRef.current) return;
     endingRef.current = true;
+    talkActiveRef.current = false;
+    setTalkActive(false);
 
     emitCallEnd();
 
@@ -1397,15 +1352,6 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
 
     await leaveMedia();
     void ensureSessionEnded();
-
-    if (user?.role === 'receiver') {
-      const onActiveCall =
-        talkActive || ready || Boolean(getVoiceBootstrap(callParams as VoiceCallScreenParams));
-      if (onActiveCall) {
-        await applyReceiverGoOffline({ endCallIfLive: false });
-        return;
-      }
-    }
 
     if (receiverAvailabilitySession && Boolean(user?.isAvailable)) {
       resetReceiverToWaiting();
@@ -1527,13 +1473,11 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
       ? 'Calling…'
       : 'Connecting';
   const shellHangupLabel =
-    receiverAvailabilitySession && receiverSessionPhase === 'waiting'
-      ? 'Go offline'
-      : receiverAvailabilitySession && receiverSessionPhase === 'incoming'
-        ? 'Decline'
-        : user?.role === 'caller' && outgoingCallerPhase === 'ringing'
-          ? 'Cancel'
-          : 'Disconnect';
+    receiverAvailabilitySession && receiverSessionPhase === 'incoming'
+      ? 'Decline'
+      : user?.role === 'caller' && outgoingCallerPhase === 'ringing'
+        ? 'Cancel'
+        : 'Disconnect';
   const shellShowControls = receiverAvailabilitySession || user?.role === 'receiver';
   const shellShowIncomingActions =
     receiverAvailabilitySession && receiverSessionPhase === 'incoming' && Boolean(incomingReq);
@@ -1664,7 +1608,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
             <TouchableOpacity
               style={styles.hangup}
               onPress={() => void hangup()}
-              disabled={goingOffline || incomingResponding}
+              disabled={incomingResponding}
               activeOpacity={0.88}
             >
               <LinearGradient
@@ -1798,13 +1742,10 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
           {streamAvatarExtras ? (
             <streamAvatarExtras.StreamTalkTimingBridge
               onBothConnected={() => {
-                applyOptimisticTalkTimingRef.current();
                 const boot = getVoiceBootstrap(callParams);
                 if (boot) {
-                  prefetchVoiceSessionStart(boot.callId, boot.peerAccountId);
                   void ensureSessionStartedOnScreen(boot.callId, boot.peerAccountId);
                 }
-                void syncTalkTimingOnce();
                 beginTalkTimingLocalRef.current();
               }}
             />
@@ -1823,7 +1764,9 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
                   ? 'On hold · phone call in progress'
                   : peerCallHold
                     ? `${peerDisplayName} is on hold`
-                    : 'Call Active'}
+                    : talkActive
+                      ? 'Call Active'
+                      : 'Connecting…'}
               </Text>
             </View>
             <View style={styles.avatarRow}>
@@ -1958,10 +1901,10 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
                 style={styles.hangupGrad}
               >
                 <Text style={styles.hangupText}>
-                  {receiverAvailabilitySession && !talkActive
-                    ? 'Disconnect'
-                    : user?.role === 'receiver'
-                      ? 'Go Offline'
+                  {receiverAvailabilitySession && receiverSessionPhase === 'incoming'
+                    ? 'Decline'
+                    : user?.role === 'caller' && outgoingCallerPhase === 'ringing'
+                      ? 'Cancel'
                       : 'Disconnect'}
                 </Text>
               </LinearGradient>

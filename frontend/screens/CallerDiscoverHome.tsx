@@ -32,15 +32,23 @@ import DiscoverSearchModal from '../components/caller/DiscoverSearchModal';
 import { CALLER_LANGUAGE_OPTIONS } from '../constants/userOnboarding';
 import { useAuth } from '../context/AuthContext';
 import { useCallSignals } from '../context/CallSignalContext';
-import { discoverApi, getErrorMessage } from '../services/api';
-import type { DiscoverReceiverSummary } from '../types/api';
+import { discoverApi, getErrorMessage, profileApi } from '../services/api';
+import type { CallerNotificationContent, DiscoverReceiverSummary } from '../types/api';
 import { resolveProfileImageSource } from '../utils/avatarSource';
 import { getReceiverPresenceInfo, sortDiscoverReceivers } from '../utils/receiverStatus';
 import { withTimeout } from '../utils/withTimeout';
 import SelectoLogo from '../assets/SelectoLogo.png'
+import NoticeBg from '../assets/noticeBg.png'
 
 const PURPLE = '#7b2cff';
 const GREEN = '#22c55e';
+const NOTICE_GRADIENT_START = '#4ade80';
+const NOTICE_GRADIENT_END = '#3B82F6';
+const NOTICE_BTN_GRADIENT_START = '#7F00FF';
+const NOTICE_BTN_GRADIENT_END = '#A855F7';
+const NOTICE_BTN_BORDER = 'rgba(255, 255, 255, 0.45)';
+const NOTICE_BTN_TEXT = '#ffffff';
+const NOTICE_BTN_ICON = '#ffffff';
 /** Discover list only — shorter than generic screen timeout so home does not spin too long. */
 const DISCOVER_FETCH_TIMEOUT_MS = 12_000;
 const DISCOVER_POLL_MS = 5_000;
@@ -248,6 +256,7 @@ export default function CallerDiscoverHome(): React.JSX.Element {
   const [searchDraft, setSearchDraft] = useState('');
   const [appliedFilters, setAppliedFilters] = useState<DiscoverFiltersState>(DEFAULT_DISCOVER_FILTERS);
   const [modalDraft, setModalDraft] = useState<DiscoverFiltersState>(DEFAULT_DISCOVER_FILTERS);
+  const [callerNotification, setCallerNotification] = useState<CallerNotificationContent | null>(null);
   const discoverLoadGenRef = useRef(0);
   const hasDiscoverDataRef = useRef(false);
 
@@ -315,6 +324,15 @@ export default function CallerDiscoverHome(): React.JSX.Element {
     };
   }, [fetchDiscoverReceivers]);
 
+  const loadCallerNotification = useCallback(async (): Promise<void> => {
+    try {
+      const { data } = await profileApi.callerNotification();
+      setCallerNotification(data.callerNotification);
+    } catch {
+      // Optional card — ignore failures.
+    }
+  }, []);
+
   const refreshDiscoverSilent = useCallback((): void => {
     void withTimeout(fetchList(), DISCOVER_FETCH_TIMEOUT_MS)
       .then((rows) => {
@@ -329,7 +347,8 @@ export default function CallerDiscoverHome(): React.JSX.Element {
   useFocusEffect(
     useCallback(() => {
       refreshDiscoverSilent();
-    }, [refreshDiscoverSilent])
+      void loadCallerNotification();
+    }, [refreshDiscoverSilent, loadCallerNotification])
   );
   useEffect(() => {
     const sub = AppState.addEventListener('change', (state: AppStateStatus) => {
@@ -351,6 +370,7 @@ export default function CallerDiscoverHome(): React.JSX.Element {
     setRefreshing(true);
     setErr(null);
     void refreshUser();
+    void loadCallerNotification();
     try {
       const rows = await withTimeout(fetchList(), DISCOVER_FETCH_TIMEOUT_MS);
       setReceivers((prev) => applyDiscoverReceivers(prev, rows));
@@ -360,7 +380,12 @@ export default function CallerDiscoverHome(): React.JSX.Element {
     } finally {
       setRefreshing(false);
     }
-  }, [fetchList, refreshUser]);
+  }, [fetchList, refreshUser, loadCallerNotification]);
+
+  const showCallerNotification =
+    callerNotification != null &&
+    callerNotification.enabled !== false &&
+    Boolean(callerNotification.title?.trim() || callerNotification.body?.trim());
 
   const wallet = typeof user?.walletBalance === 'number' && Number.isFinite(user.walletBalance) ? user.walletBalance : 0;
   const currentUserProfileImageSource = useMemo(
@@ -465,6 +490,48 @@ export default function CallerDiscoverHome(): React.JSX.Element {
   const listHeader = useMemo(
     () => (
       <>
+        {showCallerNotification && callerNotification ? (
+          <LinearGradient
+            colors={[NOTICE_GRADIENT_START, NOTICE_GRADIENT_END]}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={styles.adminNoticeCard}
+          >
+            <Image source={NoticeBg} style={styles.adminNoticeBgImage} resizeMode="cover" />
+            <View style={styles.adminNoticeBgScrim} />
+            <View style={styles.adminNoticeRow}>
+              <View style={styles.adminNoticeLeft}>
+                <View style={styles.adminNoticeBtnWrap}>
+                  <LinearGradient
+                    colors={[NOTICE_BTN_GRADIENT_START, NOTICE_BTN_GRADIENT_END]}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 1 }}
+                    style={styles.adminNoticeBtn}
+                  >
+                    <TouchableOpacity
+                      onPress={onWalletPress}
+                      activeOpacity={0.88}
+                      style={styles.adminNoticeBtnHit}
+                    >
+                      <View style={styles.adminNoticeBtnContent}>
+                        <Ionicons name="wallet-outline" size={18} color={NOTICE_BTN_ICON} />
+                        <Text style={styles.adminNoticeBtnText} numberOfLines={2}>
+                          {callerNotification.title?.trim() || 'Announcement'}
+                        </Text>
+                      </View>
+                    </TouchableOpacity>
+                  </LinearGradient>
+                </View>
+              </View>
+              {callerNotification.body?.trim() ? (
+                <View style={styles.adminNoticeRight}>
+                  <Text style={styles.adminNoticeBody}>{callerNotification.body.trim()}</Text>
+                </View>
+              ) : null}
+            </View>
+          </LinearGradient>
+        ) : null}
+
         <TouchableOpacity
           activeOpacity={0.9}
           onPress={onCallRandom}
@@ -553,16 +620,19 @@ export default function CallerDiscoverHome(): React.JSX.Element {
       </>
     ),
     [
+      callerNotification,
       err,
       fetchDiscoverReceivers,
       hasActiveSearch,
       language,
       loading,
       onCallRandom,
+      onWalletPress,
       openFilterModal,
       openSearchModal,
       randomCallMatchingVisible,
       receivers.length,
+      showCallerNotification,
     ]
   );
 
@@ -677,7 +747,7 @@ const styles = StyleSheet.create({
     borderRadius: 40,
     borderWidth: 1,
     borderColor: PURPLE,
-    backgroundColor: '#FFF0FA',
+    backgroundColor: '#e5e5e5',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
@@ -919,9 +989,104 @@ const styles = StyleSheet.create({
   promoCard: {
     marginBottom: 6,
   },
+  adminNoticeCard: {
+    marginBottom: 10,
+    borderRadius: 16,
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    overflow: 'hidden',
+    minHeight: 60,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.12,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  adminNoticeBgImage: {
+    position: 'absolute',
+    right: 2,
+    bottom: -18,
+    width: 140,
+    height: 140,
+    opacity: 0.44,
+  },
+  adminNoticeBgScrim: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(30, 27, 75, 0.32)',
+  },
+  adminNoticeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    position: 'relative',
+    zIndex: 2,
+  },
+  adminNoticeLeft: {
+    flexGrow: 0,
+    flexShrink: 0,
+    width: '40%',
+    minWidth: 120,
+    justifyContent: 'center',
+    paddingRight: 4,
+  },
+  adminNoticeBtnWrap: {
+    width: '100%',
+    borderRadius: 20,
+    overflow: 'hidden',
+    shadowColor: '#4c1d95',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.35,
+    shadowRadius: 4,
+    elevation: 4,
+  },
+  adminNoticeBtn: {
+    width: '100%',
+    minHeight: 42,
+    borderWidth: 1,
+    borderColor: NOTICE_BTN_BORDER,
+    borderRadius: 20,
+    overflow: 'hidden',
+  },
+  adminNoticeBtnHit: {
+    width: '100%',
+    minHeight: 42,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    justifyContent: 'center',
+  },
+  adminNoticeBtnContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    width: '100%',
+  },
+  adminNoticeBtnText: {
+    flexShrink: 1,
+    color: NOTICE_BTN_TEXT,
+    fontWeight: '800',
+    fontSize: 14,
+    lineHeight: 18,
+    textShadowColor: 'rgba(0, 0, 0, 0.25)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 2,
+  },
+  adminNoticeRight: {
+    flex: 1,
+    justifyContent: 'center',
+    paddingLeft: 10,
+    borderLeftWidth: 1,
+    borderLeftColor: 'rgba(255,255,255,0.25)',
+  },
+  adminNoticeBody: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: 'rgba(255,255,255,0.95)',
+    lineHeight: 18,
+  },
   promoGradient: {
     borderRadius: 16,
-    padding: 12,
+    padding: 10,
     shadowColor: '#7F00FF',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
@@ -944,7 +1109,7 @@ const styles = StyleSheet.create({
   },
   promoTitle: {
     color: '#fff',
-    fontSize: 15,
+    fontSize: 14,
     fontWeight: '800',
     textAlign: 'right',
     marginBottom: 4,
@@ -960,13 +1125,13 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 8,  // Increased gap for better spacing
+    gap: 6,  // Increased gap for better spacing
   },
 
   promoBtn: {
     backgroundColor: 'rgba(255,255,255,0.95)',
     paddingHorizontal: 15,
-    paddingVertical: 9,
+    paddingVertical: 6,
     borderRadius: 20,
     paddingLeft: 28, 
     alignItems: 'center',

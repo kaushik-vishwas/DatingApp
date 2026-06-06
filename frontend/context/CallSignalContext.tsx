@@ -27,7 +27,6 @@ import {
   showIncomingCallNotification,
 } from '../utils/incomingCallNotifications';
 import { registerIncomingCallBootstrapPrefetch } from '../utils/incomingCallBootstrapPrefetch';
-import { prefetchVoiceSessionStart } from '../utils/voiceCallSessionStart';
 import { clearVoiceCallStreamWarmup, warmVoiceCallStreamClient } from '../utils/voiceCallStreamWarmup';
 
 let outgoingNavigateGeneration = 0;
@@ -258,7 +257,6 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
   const onIncomingBootstrapReady = useCallback(
     (boot: VoiceBootstrapResponse) => {
-      prefetchVoiceSessionStart(boot.callId, boot.peerAccountId);
       const name =
         user?.name?.trim() ||
         (user?.role === 'receiver' ? 'Receiver' : 'Caller');
@@ -612,7 +610,6 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         };
         outgoingSessionByCallIdRef.current.set(data.callId, session);
         pendingOutgoingByCallIdRef.current.set(data.callId, session);
-        prefetchVoiceSessionStart(data.callId, data.peerAccountId);
         const callerName = user?.name?.trim() || 'Caller';
         const callerImage =
           typeof user?.profileImage === 'string' ? user.profileImage : null;
@@ -647,7 +644,7 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
           const timeout = setTimeout(() => {
             pendingInviteOutcomeRef.current.delete(data.callId);
             resolve({ accepted: false, reason: 'timeout' });
-          }, 35_000);
+          }, 30_000);
           pendingInviteOutcomeRef.current.set(data.callId, { resolve, timeout });
         });
         if (!outcome.accepted) {
@@ -831,7 +828,6 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
       incomingBootstrapByCallIdRef.current.delete(req.callId);
       incomingBootstrapPromiseByCallIdRef.current.delete(req.callId);
-      prefetchVoiceSessionStart(bootstrapped.callId, bootstrapped.peerAccountId);
       return bootstrapped;
     },
     [ensureIncomingBootstrapPromise]
@@ -866,7 +862,6 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
       incomingBootstrapByCallIdRef.current.delete(req.callId);
       incomingBootstrapPromiseByCallIdRef.current.delete(req.callId);
-      prefetchVoiceSessionStart(bootstrapped.callId, bootstrapped.peerAccountId);
       openVoiceCall(bootstrapped, req.peerName, req.peerImage ?? null);
     },
     [ensureIncomingBootstrapPromise, openVoiceCall]
@@ -1271,7 +1266,6 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         pendingOutgoingByCallIdRef.current.delete(payload.callId);
 
         if (pending) {
-          prefetchVoiceSessionStart(pending.bootstrap.callId, pending.bootstrap.peerAccountId);
           openCallerJoiningVoiceCallRef.current(pending);
           return;
         }
@@ -1289,7 +1283,6 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
               bootstrap: data,
             };
             outgoingSessionByCallIdRef.current.set(payload.callId, session);
-            prefetchVoiceSessionStart(data.callId, data.peerAccountId);
             openCallerJoiningVoiceCallRef.current(session);
           } catch {
             Alert.alert('Call accepted', 'The user accepted, but joining failed. Please try again.');

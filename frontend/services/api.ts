@@ -37,6 +37,7 @@ import type {
   ReceiverWithdrawalOverviewResponse,
   ReceiverCallInsightsResponse,
   ReceiverWelcomeResponse,
+  CallerNotificationResponse,
   VoiceBootstrapResponse,
   RandomReceiverMatchResponse,
   SendWithdrawalOtpResponse,
@@ -248,6 +249,8 @@ export const profileApi = {
 
   receiverWelcome: () => api.get<ReceiverWelcomeResponse>('/profile/receiver-welcome'),
 
+  callerNotification: () => api.get<CallerNotificationResponse>('/profile/caller-notification'),
+
   updateReceiverProfile: (payload: UpdateReceiverProfilePayload) =>
     api.patch<CompleteProfileResponse>('/profile/receiver', payload),
 
@@ -264,6 +267,9 @@ export const profileApi = {
     api.get<CallerCallHistoryResponse>('/profile/caller-call-history', {
       params: { range },
     }),
+
+  deleteCallerCallHistory: (ids: string[]) =>
+    api.post<{ ok: boolean; deleted: number }>('/profile/caller-call-history/delete', { ids }),
 
   callerMessageEligibleReceivers: () =>
     api.get<CallerMessageEligibleReceiversResponse>(

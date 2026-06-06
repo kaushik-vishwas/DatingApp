@@ -130,16 +130,40 @@ export default function ReceiverHomeDashboard(): React.JSX.Element {
   const [summaryError, setSummaryError] = useState<string | null>(null);
   const [notificationUnread, setNotificationUnread] = useState(0);
   const scrollBottomInset = useReceiverTabBarBottomInset();
+  const { setQueueMode } = useCallSignals();
 
   const receiverId = user?.role === 'receiver' ? user._id : undefined;
+  const autoAvailabilityAppliedForRef = React.useRef<string | null>(null);
   const availabilityFromServer =
     user?.role === 'receiver' ? Boolean(user.isAvailable ?? false) : false;
-
-
 
   React.useEffect(() => {
     setAvailable(availabilityFromServer);
   }, [availabilityFromServer]);
+
+  React.useEffect(() => {
+    if (!receiverId || user?.role !== 'receiver') return;
+    if (user.isAvailable === true) {
+      autoAvailabilityAppliedForRef.current = receiverId;
+      return;
+    }
+    if (autoAvailabilityAppliedForRef.current === receiverId) return;
+    autoAvailabilityAppliedForRef.current = receiverId;
+    setAvailable(true);
+    void (async () => {
+      try {
+        await profileApi.updateReceiverProfile({ isAvailable: true });
+        try {
+          await setQueueMode(true);
+        } catch {
+          // Queue sync is best-effort if the call socket is still connecting.
+        }
+        void refreshUser();
+      } catch {
+        setAvailable(Boolean(user.isAvailable ?? false));
+      }
+    })();
+  }, [receiverId, user?.role, user?.isAvailable, refreshUser, setQueueMode]);
 
 
 
@@ -243,8 +267,6 @@ export default function ReceiverHomeDashboard(): React.JSX.Element {
     ]);
     setRefreshing(false);
   };
-
-  const { setQueueMode } = useCallSignals();
 
   useFocusEffect(
     useCallback(() => {
@@ -713,8 +735,8 @@ const styles = StyleSheet.create({
     paddingTop: 12,
     paddingBottom: 10,
     backgroundColor: '#fff',
-    borderBottomLeftRadius: 24,
-    borderBottomRightRadius: 24,
+    // borderBottomLeftRadius: 24,
+    // borderBottomRightRadius: 24,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.08,
@@ -763,7 +785,7 @@ const styles = StyleSheet.create({
     borderRadius: 40,
     borderWidth: 1,
     borderColor: PINK,
-    backgroundColor: '#f3e7ff',
+    backgroundColor: '#e5e5e5',
     maxWidth: 120,
   },
   earningsContainer: {
@@ -789,7 +811,7 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#f3e7ff',
+    backgroundColor: '#e5e5e5',
     borderWidth: 1,
     borderColor: PINK,
   },
@@ -836,7 +858,7 @@ const styles = StyleSheet.create({
     fontSize: 16,
   },
 
-  section: { marginTop: 8, paddingHorizontal: 16 },
+  section: { marginTop: 0, paddingHorizontal: 16 },
   sectionTitle: {
     fontSize: 14,
     fontWeight: '500',
@@ -856,7 +878,7 @@ const styles = StyleSheet.create({
   },
   publicCard: {
     backgroundColor: '#f3e7ff',
-    borderRadius: 12,
+    borderRadius: 5,
     paddingLeft: 12,
     paddingRight: 12,
     paddingTop: 8,
@@ -907,13 +929,19 @@ const styles = StyleSheet.create({
   publicRateBtnText: { color: '#fff', fontWeight: '700', fontSize: 11 },
   publicLanguagesRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', justifyContent: 'flex-end', gap: 4 },
   publicMiniLang: {
-    backgroundColor: '#f0f0f0',
-    paddingHorizontal: 6,
-    paddingVertical: 3,
-    borderRadius: 5,
+    backgroundColor: '#fefce8', 
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#9a5cff',  // Purple border
   },
-  publicMiniLangText: { fontSize: 9, fontWeight: '600', color: '#666', textTransform: 'uppercase' },
-  publicMoreLang: { fontSize: 9, color: '#999', fontWeight: '500' },
+publicMiniLangText: {
+    fontSize: 10, 
+    fontWeight: '700', 
+    color: '#7b2cff',  // Purple text
+    textTransform: 'uppercase'
+  },
   publicStatusPillRight: { paddingHorizontal: 13, paddingVertical: 5, borderRadius: 20 },
   publicStatusTextRight: { fontSize: 12, fontWeight: '700' },
 
@@ -923,7 +951,7 @@ const styles = StyleSheet.create({
     marginBottom: 0,
   },
   highlightedAvailabilityCard: {
-    borderRadius: 16,
+    borderRadius: 15,
     paddingHorizontal: 16,
     paddingVertical: 4,
     flexDirection: 'row',
@@ -953,7 +981,7 @@ const styles = StyleSheet.create({
   },
 
   welcomeCardContent: {
-    minHeight: 24,
+    minHeight: 80,
   },
   welcomeCardBody: {
     fontSize: 13,

@@ -15,6 +15,7 @@ router.post('/withdrawals/send-otp', auth_1.protect, profileController_1.sendRec
 router.post('/withdrawals/verify', auth_1.protect, profileController_1.verifyReceiverWithdrawalOtpAndCreate);
 router.get('/receiver-call-insights', auth_1.protect, profileController_1.getReceiverCallInsights);
 router.get('/receiver-welcome', auth_1.protect, profileController_1.getReceiverWelcomeMessage);
+router.get('/caller-notification', auth_1.protect, profileController_1.getCallerNotificationMessage);
 router.get('/receiver-notify-candidates', auth_1.protect, profileController_1.getReceiverNotifyCandidates);
 router.post('/receiver-notify-user', auth_1.protect, profileController_1.notifyReceiverRecentUser);
 router.patch('/receiver/kyc/profile-info', auth_1.protect, profileController_1.saveReceiverKycProfileInfo);
@@ -26,6 +27,7 @@ router.post('/receiver/complete-audio-onboarding', auth_1.protect, profileContro
 router.post('/receiver/reopen-kyc', auth_1.protect, profileController_1.reopenRejectedReceiverKyc);
 router.delete('/receiver', auth_1.protect, profileController_1.deleteReceiverAccount);
 router.get('/caller-call-history', auth_1.protect, profileController_1.getCallerCallHistory);
+router.post('/caller-call-history/delete', auth_1.protect, profileController_1.deleteCallerCallHistory);
 router.get('/caller-message-eligible-receivers', auth_1.protect, profileController_1.getCallerMessageEligibleReceivers);
 router.get('/caller-app-review', auth_1.protect, callerAppReviewController_1.getMyCallerAppReview);
 router.put('/caller-app-review', auth_1.protect, callerAppReviewController_1.upsertMyCallerAppReview);

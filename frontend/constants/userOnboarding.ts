@@ -87,6 +87,33 @@ const CALLER_MALE_AVATAR_SOURCES: ImageSourcePropType[] = [
   require('../assets/boyavt/boyavt11.png'),
   require('../assets/boyavt/boyavt12.png'),
   require('../assets/boyavt/boyavt13.png'),
+  require('../assets/boyavt/boyavt14.jpeg'),
+  require('../assets/boyavt/boyavt15.jpeg'),
+  require('../assets/boyavt/boyavt16.jpeg'),
+  require('../assets/boyavt/boyavt17.jpeg'),
+  require('../assets/boyavt/boyavt18.jpeg'),
+  require('../assets/boyavt/boyavt19.jpeg'),
+  require('../assets/boyavt/boyavt20.jpeg'),
+  require('../assets/boyavt/boyavt21.jpeg'),
+  require('../assets/boyavt/boyavt22.jpeg'),
+  require('../assets/boyavt/boyavt23.jpeg'),
+  require('../assets/boyavt/boyavt24.jpeg'),
+  require('../assets/boyavt/boyavt25.jpeg'),
+  require('../assets/boyavt/boyavt26.jpeg'),
+  require('../assets/boyavt/boyavt27.jpeg'),
+  require('../assets/boyavt/boyavt28.jpeg'),
+  require('../assets/boyavt/boyavt29.jpeg'),
+  require('../assets/boyavt/boyavt30.jpeg'),
+  require('../assets/boyavt/boyavt31.jpeg'),
+  require('../assets/boyavt/boyavt32.jpeg'),
+  require('../assets/boyavt/boyavt33.jpeg'),
+  require('../assets/boyavt/boyavt34.jpeg'),
+  require('../assets/boyavt/boyavt35.jpeg'),
+  require('../assets/boyavt/boyavt36.jpeg'),
+  require('../assets/boyavt/boyavt37.jpeg'),
+  require('../assets/boyavt/boyavt38.jpeg'),
+  require('../assets/boyavt/boyavt39.jpeg'),
+
 
 ];
 
@@ -107,6 +134,18 @@ const CALLER_FEMALE_AVATAR_SOURCES: ImageSourcePropType[] = [
   require('../assets/girlavt/girlavt14.png'),
   require('../assets/girlavt/girlavt15.png'),
   require('../assets/girlavt/girlavt16.png'),
+  require('../assets/girlavt/girlavt17.png'),
+  require('../assets/girlavt/girlavt18.png'),
+  require('../assets/girlavt/girlavt19.png'),
+  require('../assets/girlavt/girlavt20.png'),
+  require('../assets/girlavt/girlavt21.png'),
+  require('../assets/girlavt/girlavt22.png'),
+  require('../assets/girlavt/girlavt23.png'),
+  require('../assets/girlavt/girlavt24.png'),
+  require('../assets/girlavt/girlavt25.png'),
+  require('../assets/girlavt/girlavt26.png'),
+  require('../assets/girlavt/girlavt27.png'),
+
 ];
 
 /** Preset profile photos for onboarding / edit profile (bundled assets; stored as `preset:male:N` / `preset:female:N`). */

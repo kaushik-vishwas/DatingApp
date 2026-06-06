@@ -6,6 +6,7 @@ import {
   completeReceiverAudioOnboarding,
   deleteReceiverAccount,
   getCallerCallHistory,
+  deleteCallerCallHistory,
   getCallerMessageEligibleReceivers,
   getCallerNotifications,
   getReceiverCallerOnlineNotifications,
@@ -19,6 +20,7 @@ import {
   sendReceiverWithdrawalOtp,
   getReceiverCallInsights,
   getReceiverWelcomeMessage,
+  getCallerNotificationMessage,
   updateCallerProfile,
   verifyReceiverWithdrawalOtpAndCreate,
   getReceiverWalletSummary,
@@ -43,6 +45,7 @@ router.post('/withdrawals/send-otp', protect, sendReceiverWithdrawalOtp);
 router.post('/withdrawals/verify', protect, verifyReceiverWithdrawalOtpAndCreate);
 router.get('/receiver-call-insights', protect, getReceiverCallInsights);
 router.get('/receiver-welcome', protect, getReceiverWelcomeMessage);
+router.get('/caller-notification', protect, getCallerNotificationMessage);
 router.get('/receiver-notify-candidates', protect, getReceiverNotifyCandidates);
 router.post('/receiver-notify-user', protect, notifyReceiverRecentUser);
 router.patch('/receiver/kyc/profile-info', protect, saveReceiverKycProfileInfo);
@@ -54,6 +57,7 @@ router.post('/receiver/complete-audio-onboarding', protect, completeReceiverAudi
 router.post('/receiver/reopen-kyc', protect, reopenRejectedReceiverKyc);
 router.delete('/receiver', protect, deleteReceiverAccount);
 router.get('/caller-call-history', protect, getCallerCallHistory);
+router.post('/caller-call-history/delete', protect, deleteCallerCallHistory);
 router.get('/caller-message-eligible-receivers', protect, getCallerMessageEligibleReceivers);
 router.get('/caller-app-review', protect, getMyCallerAppReview);
 router.put('/caller-app-review', protect, upsertMyCallerAppReview);

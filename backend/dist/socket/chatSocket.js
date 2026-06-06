@@ -628,8 +628,14 @@ function attachChatSocket(httpServer) {
                         return;
                     }
                     if (!hasActiveSocketForAccount('r', targetId)) {
-                        ack?.({ ok: false, error: 'Receiver is offline right now.' });
-                        return;
+                        const recvPush = await Receiver_1.default.findById(targetId)
+                            .select('expoPushToken')
+                            .lean();
+                        const pushToken = recvPush?.expoPushToken?.trim();
+                        if (!pushToken) {
+                            ack?.({ ok: false, error: 'Receiver is offline right now.' });
+                            return;
+                        }
                     }
                     receiverForInviteId = targetId;
                     await (0, callQueue_1.releaseIfStaleReceiverBusy)(receiverForInviteId);
@@ -800,6 +806,53 @@ function attachChatSocket(httpServer) {
             }
             ack?.({ ok: true });
         });
+        socket.on('call:mute', (payload, ack) => {
+            const callId = typeof payload?.callId === 'string' ? payload.callId.trim() : '';
+            const muted = typeof payload?.muted === 'boolean' ? payload.muted : null;
+            if (!callId || muted === null) {
+                ack?.({ ok: false, error: 'callId and muted are required' });
+                return;
+            }
+            const fromType = socket.data.typ;
+            const fromId = String(socket.data.accountId);
+            void (async () => {
+                try {
+                    let session = await CallSession_1.default.findOne({ callId, status: 'ongoing' })
+                        .select('callerId receiverId')
+                        .lean();
+                    if (!session) {
+                        session = await CallSession_1.default.findOne({ callId })
+                            .select('callerId receiverId')
+                            .lean();
+                    }
+                    if (!session) {
+                        ack?.({ ok: false, error: 'Call not active' });
+                        return;
+                    }
+                    const callerId = String(session.callerId);
+                    const receiverId = String(session.receiverId);
+                    const isParticipant = (fromType === 'u' && fromId === callerId) || (fromType === 'r' && fromId === receiverId);
+                    if (!isParticipant) {
+                        ack?.({ ok: false, error: 'Forbidden' });
+                        return;
+                    }
+                    const peerType = fromType === 'u' ? 'r' : 'u';
+                    const peerId = fromType === 'u' ? receiverId : callerId;
+                    io.to(accountRoom(peerType, peerId)).emit('call:mute', {
+                        callId,
+                        muted,
+                        fromType,
+                        fromId,
+                    });
+                    ack?.({ ok: true });
+                }
+                catch (e) {
+                    const msg = e instanceof Error ? e.message : String(e);
+                    console.error('call:mute error:', msg);
+                    ack?.({ ok: false, error: 'Server error' });
+                }
+            })();
+        });
         socket.on('call:hold', (payload, ack) => {
             const callId = typeof payload?.callId === 'string' ? payload.callId.trim() : '';
             const onHold = typeof payload?.onHold === 'boolean' ? payload.onHold : null;
@@ -811,9 +864,14 @@ function attachChatSocket(httpServer) {
             const fromId = String(socket.data.accountId);
             void (async () => {
                 try {
-                    const session = await CallSession_1.default.findOne({ callId, status: 'ongoing' })
+                    let session = await CallSession_1.default.findOne({ callId, status: 'ongoing' })
                         .select('callerId receiverId')
                         .lean();
+                    if (!session) {
+                        session = await CallSession_1.default.findOne({ callId })
+                            .select('callerId receiverId')
+                            .lean();
+                    }
                     if (!session) {
                         ack?.({ ok: false, error: 'Call not active' });
                         return;

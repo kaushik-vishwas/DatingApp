@@ -14,21 +14,27 @@ async function sendReceiverIncomingCallPush(payload) {
     if (accessToken) {
         headers.Authorization = `Bearer ${accessToken}`;
     }
+    const peerImage = payload.fromImage?.trim() ?? '';
+    const url = `nestham://incoming-call/${encodeURIComponent(payload.callId)}` +
+        `?fromId=${encodeURIComponent(payload.fromId)}` +
+        `&fromType=u` +
+        `&peerName=${encodeURIComponent(payload.fromName)}` +
+        (peerImage ? `&peerImage=${encodeURIComponent(peerImage)}` : '');
+    // Data-only push: no top-level title/body/sound (those become an FCM "notification"
+    // payload and Android SystemUI shows a tray row before JS/native handlers run).
     const body = {
         to: token,
-        sound: 'default',
-        title: 'Incoming call',
-        body: `${payload.fromName} is calling you`,
         priority: 'high',
         channelId: 'incoming_calls',
+        _contentAvailable: true,
         data: {
             type: 'call_incoming',
             callId: payload.callId,
             fromId: payload.fromId,
             fromType: 'u',
             peerName: payload.fromName,
-            peerImage: payload.fromImage,
-            url: `nestham://incoming-call/${encodeURIComponent(payload.callId)}?fromId=${encodeURIComponent(payload.fromId)}&fromType=u&peerName=${encodeURIComponent(payload.fromName)}${payload.fromImage ? `&peerImage=${encodeURIComponent(payload.fromImage)}` : ''}`,
+            peerImage,
+            url,
         },
     };
     try {

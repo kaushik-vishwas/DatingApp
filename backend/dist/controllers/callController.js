@@ -433,31 +433,37 @@ const startVoiceSession = async (req, res) => {
         }
         const callerId = accountKind === 'user' ? meId : peerId;
         const receiverId = accountKind === 'receiver' ? meId : peerId;
-        const receiver = await Receiver_1.default.findById(receiverId).select('audioCallRate earningRatePerMinute');
-        if (!receiver) {
-            res.status(404).json({ message: 'Receiver not found' });
-            return;
-        }
+        const existing = await CallSession_1.default.findOne({ callId }).select('ratePerMinute receiverPayoutRatePerMinute');
         const ratePerMinute = Receiver_1.RECEIVER_AUDIO_CALL_RATE_INR_PER_MIN;
-        const earningSettings = await (0, receiverEarningModel_1.getReceiverEarningSettings)();
-        const receiverPayoutRatePerMinute = earningSettings.receiverEarningModel === 'fixed_per_minute'
-            ? (0, receiverEarningModel_1.resolveFixedRatePerMinuteAt)(new Date(), earningSettings.fixedPerMinuteWindows)
-            : typeof receiver.earningRatePerMinute === 'number' && Number.isFinite(receiver.earningRatePerMinute)
-                ? Math.max(0, receiver.earningRatePerMinute)
-                : 0;
-        await CallSession_1.default.findOneAndUpdate({ callId }, {
-            $setOnInsert: {
-                callId,
-                callerId: new mongoose_1.default.Types.ObjectId(callerId),
-                receiverId: new mongoose_1.default.Types.ObjectId(receiverId),
-                startedAt: new Date(),
-                status: 'ongoing',
-                ratePerMinute,
-                receiverPayoutRatePerMinute,
-            },
-        }, { upsert: true, setDefaultsOnInsert: true });
-        const session = await recordVoiceParticipantJoined(callId, accountKind);
-        const callerWalletBalanceInr = await readCallerWalletBalanceInr(callerId);
+        if (!existing) {
+            const receiver = await Receiver_1.default.findById(receiverId).select('earningRatePerMinute');
+            if (!receiver) {
+                res.status(404).json({ message: 'Receiver not found' });
+                return;
+            }
+            const earningSettings = await (0, receiverEarningModel_1.getReceiverEarningSettings)();
+            const receiverPayoutRatePerMinute = earningSettings.receiverEarningModel === 'fixed_per_minute'
+                ? (0, receiverEarningModel_1.resolveFixedRatePerMinuteAt)(new Date(), earningSettings.fixedPerMinuteWindows)
+                : typeof receiver.earningRatePerMinute === 'number' &&
+                    Number.isFinite(receiver.earningRatePerMinute)
+                    ? Math.max(0, receiver.earningRatePerMinute)
+                    : 0;
+            await CallSession_1.default.findOneAndUpdate({ callId }, {
+                $setOnInsert: {
+                    callId,
+                    callerId: new mongoose_1.default.Types.ObjectId(callerId),
+                    receiverId: new mongoose_1.default.Types.ObjectId(receiverId),
+                    startedAt: new Date(),
+                    status: 'ongoing',
+                    ratePerMinute,
+                    receiverPayoutRatePerMinute,
+                },
+            }, { upsert: true, setDefaultsOnInsert: true });
+        }
+        const [session, callerWalletBalanceInr] = await Promise.all([
+            recordVoiceParticipantJoined(callId, accountKind),
+            readCallerWalletBalanceInr(callerId),
+        ]);
         res.status(200).json({
             ok: true,
             ...callTalkApiFields(session),
@@ -546,6 +552,7 @@ const syncVoiceSession = async (req, res) => {
         const accountKind = req.accountKind;
         const meId = accountKind === 'user' ? String(req.user?._id ?? '') : String(req.receiver?._id ?? '');
         const callId = String(req.body.callId ?? '').trim();
+        const light = req.body.light === true;
         if (!accountKind || !meId) {
             res.status(401).json({ message: 'Not authorized' });
             return;
@@ -562,6 +569,21 @@ const syncVoiceSession = async (req, res) => {
         const isParticipant = String(current.callerId) === meId || String(current.receiverId) === meId;
         if (!isParticipant) {
             res.status(403).json({ message: 'Not allowed for this call' });
+            return;
+        }
+        if (light) {
+            const talkFields = callTalkApiFields(current);
+            const durationSec = callTalkDurationSec(current);
+            res.status(200).json({
+                ok: true,
+                durationSec,
+                settledAmountInr: roundInr(current.settledAmountInr || 0),
+                receiverEarnedInr: roundInr(current.receiverEarnedInr || 0),
+                canRate: durationSec >= exports.MISSED_OR_INCOMPLETE_MAX_SEC,
+                status: current.status,
+                callRatePerMinute: Math.max(0, Number(current.ratePerMinute) || 0),
+                ...talkFields,
+            });
             return;
         }
         const settled = await settleCallSession(callId, false);

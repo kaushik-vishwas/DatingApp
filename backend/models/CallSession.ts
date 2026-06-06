@@ -24,6 +24,8 @@ export interface ICallSession {
   /** Final earned amount for receiver side based on payout rate. */
   receiverEarnedInr: number;
   callerRating: number | null;
+  /** When set, hidden from the caller's Recents list (billing/eligibility unchanged). */
+  callerHiddenAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -47,6 +49,7 @@ const callSessionSchema = new Schema<ICallSession>(
     settledAmountInr: { type: Number, default: 0, min: 0 },
     receiverEarnedInr: { type: Number, default: 0, min: 0 },
     callerRating: { type: Number, default: null, min: 1, max: 5 },
+    callerHiddenAt: { type: Date, default: null },
   },
   { timestamps: true }
 );

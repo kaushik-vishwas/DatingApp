@@ -38,11 +38,16 @@ export function getVoiceSessionStartPromise(
   return promise;
 }
 
-/** Fire-and-forget: register this party as joined so talk timer can start when both sides report in. */
-export function prefetchVoiceSessionStart(callId: string, peerAccountId: string): void {
+/** Fire-and-forget after Stream join — registers this party once media session is live. */
+export function registerVoiceSessionAfterJoin(callId: string, peerAccountId: string): void {
   void getVoiceSessionStartPromise(callId, peerAccountId).catch(() => {
     // VoiceCallScreen retries via sync / Stream bridge.
   });
+}
+
+/** @deprecated Use registerVoiceSessionAfterJoin only after Stream join, never during ring. */
+export function prefetchVoiceSessionStart(callId: string, peerAccountId: string): void {
+  registerVoiceSessionAfterJoin(callId, peerAccountId);
 }
 
 export function clearVoiceSessionStartInflight(callId?: string): void {

@@ -31,6 +31,7 @@ import { CALLER_MESSAGE_MIN_DURATION_SEC } from '../utils/callerMessageEligibili
 import { MISSED_OR_INCOMPLETE_MAX_SEC } from './callController';
 import { getReceiverEarningSettings, publicEarningSchedulePayload } from '../services/receiverEarningModel';
 import { getReceiverWelcomeSettings } from '../services/receiverWelcome';
+import { getCallerNotificationSettings } from '../services/callerNotification';
 
 function callerCallNotificationSubtitle(durationSec: number): string {
   const d = Math.max(0, Math.floor(Number(durationSec) || 0));
@@ -1974,6 +1975,25 @@ export const getReceiverWelcomeMessage = async (req: Request, res: Response): Pr
 };
 
 /**
+ * GET /profile/caller-notification — admin announcement card on caller discover home.
+ */
+export const getCallerNotificationMessage = async (req: Request, res: Response): Promise<void> => {
+  try {
+    if (req.accountKind !== 'user') {
+      res.status(403).json({ message: 'Only callers can view this notification' });
+      return;
+    }
+
+    const callerNotification = await getCallerNotificationSettings();
+    res.status(200).json({ callerNotification });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error('getCallerNotificationMessage error:', msg);
+    res.status(500).json({ message: msg || 'Server error' });
+  }
+};
+
+/**
  * GET /profile/receiver-notify-candidates — latest 20 unique recent callers for manual ping.
  */
 export const getReceiverNotifyCandidates = async (req: Request, res: Response): Promise<void> => {
@@ -2772,7 +2792,11 @@ export const getCallerCallHistory = async (
       start.setHours(0, 0, 0, 0);
     }
 
-    const filter: Record<string, unknown> = { callerId: uid, status: 'completed' };
+    const filter: Record<string, unknown> = {
+      callerId: uid,
+      status: 'completed',
+      callerHiddenAt: null,
+    };
     if (range !== 'all') filter.startedAt = { $gte: start };
 
     const rows = await CallSession.find(filter)
@@ -2816,6 +2840,59 @@ export const getCallerCallHistory = async (
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error('getCallerCallHistory error:', msg);
+    res.status(500).json({ message: msg || 'Server error' });
+  }
+};
+
+/**
+ * POST /profile/caller-call-history/delete — hide selected rows from caller Recents.
+ */
+export const deleteCallerCallHistory = async (
+  req: Request<{}, {}, { ids?: unknown }>,
+  res: Response
+): Promise<void> => {
+  try {
+    if (req.accountKind !== 'user') {
+      res.status(403).json({ message: 'Only callers can delete call history' });
+      return;
+    }
+    const authUser = req.user as UserDocument | undefined;
+    if (!authUser?._id) {
+      res.status(401).json({ message: 'Not authorized' });
+      return;
+    }
+
+    const rawIds = req.body?.ids;
+    if (!Array.isArray(rawIds) || rawIds.length === 0) {
+      res.status(400).json({ message: 'ids required' });
+      return;
+    }
+
+    const uid = new mongoose.Types.ObjectId(String(authUser._id));
+    const objectIds = rawIds
+      .map((id) => String(id).trim())
+      .filter((id) => mongoose.Types.ObjectId.isValid(id))
+      .map((id) => new mongoose.Types.ObjectId(id));
+    if (objectIds.length === 0) {
+      res.status(400).json({ message: 'No valid ids' });
+      return;
+    }
+
+    const now = new Date();
+    const result = await CallSession.updateMany(
+      {
+        _id: { $in: objectIds },
+        callerId: uid,
+        status: 'completed',
+        callerHiddenAt: null,
+      },
+      { $set: { callerHiddenAt: now } }
+    );
+
+    res.status(200).json({ ok: true, deleted: result.modifiedCount });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error('deleteCallerCallHistory error:', msg);
     res.status(500).json({ message: msg || 'Server error' });
   }
 };

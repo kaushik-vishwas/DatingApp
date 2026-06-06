@@ -58,9 +58,9 @@ function toCard(
   const id = String(r._id);
   const socketLive = connectedReceiverIds.has(id);
   const switchOn = Boolean(o.isAvailable);
-  /** Go Online stays visible while backgrounded; socket may drop on Android. */
   const discoverAvailable = switchOn;
-  const discoverOnline = switchOn || socketLive;
+  /** Online on discover only when Go Online is on and the receiver app has an active socket. */
+  const discoverOnline = switchOn && socketLive;
   return {
     _id: id,
     name: o.name,

@@ -58,7 +58,7 @@ async function syncReceiverPresenceInDatabase(receiverId) {
 function isReceiverLoggedInForDiscover(receiverId) {
     return (0, socketRegistry_1.isReceiverSocketConnected)(receiverId);
 }
-/** Callable on discover: logged in (socket) and Go Online switch on in DB. */
+/** Callable on discover: Go Online switch on (socket optional while app is backgrounded). */
 function isReceiverDiscoverAvailable(receiverId, isAvailableFlag) {
-    return isAvailableFlag && (0, socketRegistry_1.isReceiverSocketConnected)(receiverId);
+    return isAvailableFlag;
 }

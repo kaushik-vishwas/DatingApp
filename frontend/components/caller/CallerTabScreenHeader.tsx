@@ -55,12 +55,12 @@ export default function CallerTabScreenHeader({
 }
 
 const styles = StyleSheet.create({
-  wrap: {
+wrap: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 8,
     paddingTop: 4,
-    paddingBottom: 10,
+    paddingBottom: 0,  // ← Change to 0
   },
   backBtn: {
     width: 40,

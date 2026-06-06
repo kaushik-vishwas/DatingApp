@@ -17,7 +17,6 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { TabView, SceneMap } from 'react-native-tab-view';
 
 import CallerTabScreenHeader from '../../components/caller/CallerTabScreenHeader';
-import ReceiverTabBody from '../../components/receiver/ReceiverTabBody';
 import { CALLER_MESSAGE_REQUIRES_CALL } from '../../constants/callerMessaging';
 import { useCallerMessageEligibility } from '../../context/CallerMessageEligibilityContext';
 import { useCallerAppNavigation } from '../../utils/callerAppNavigation';
@@ -144,13 +143,8 @@ export default function CallerAlertsTabScreen(): React.JSX.Element {
 
     return (
       <ScrollView
-        style={[
-          styles.listWrap,
-          { marginBottom: contentBottomPadding },
-        ]}
-        contentContainerStyle={{
-          paddingBottom: contentBottomPadding,
-        }}
+        style={styles.listWrap}
+        contentContainerStyle={{ paddingBottom: contentBottomPadding }}
         showsVerticalScrollIndicator={false}
       >
         {loading ? (
@@ -217,54 +211,54 @@ export default function CallerAlertsTabScreen(): React.JSX.Element {
     call: () => renderList('call'),
   });
 
-  return (
-    <SafeAreaView
-      style={styles.safe}
-      edges={['top', 'left', 'right']}
-    >
-      <CallerTabScreenHeader title="Alerts" subtitle="Notifications" backTarget="home" />
-      <ReceiverTabBody style={styles.tabBody}>
-      <TabView
-        navigationState={{ index, routes }}
-        renderScene={renderScene}
-        onIndexChange={setIndex}
-        initialLayout={initialLayout}
-        swipeEnabled={true}
-        renderTabBar={(props) => (
-          <View style={styles.filters}>
-            {props.navigationState.routes.map(
-              (route, i) => {
-                const active = index === i;
+// TO THIS:
+return (
+  <SafeAreaView
+    style={styles.safe}
+    edges={['top', 'left', 'right']}
+  >
+    <CallerTabScreenHeader title="Alerts" subtitle="Notifications" backTarget="home" />
+    <TabView
+      style={styles.tabView}
+      navigationState={{ index, routes }}
+      renderScene={renderScene}
+      onIndexChange={setIndex}
+      initialLayout={initialLayout}
+      swipeEnabled={true}
+      renderTabBar={(props) => (
+        <View style={styles.filters}>
+          {props.navigationState.routes.map(
+            (route, i) => {
+              const active = index === i;
 
-                return (
-                  <TouchableOpacity
-                    key={route.key}
+              return (
+                <TouchableOpacity
+                  key={route.key}
+                  style={[
+                    styles.filterBtn,
+                    active &&
+                      styles.filterBtnActive,
+                  ]}
+                  onPress={() => setIndex(i)}
+                >
+                  <Text
                     style={[
-                      styles.filterBtn,
+                      styles.filterText,
                       active &&
-                        styles.filterBtnActive,
+                        styles.filterTextActive,
                     ]}
-                    onPress={() => setIndex(i)}
                   >
-                    <Text
-                      style={[
-                        styles.filterText,
-                        active &&
-                          styles.filterTextActive,
-                      ]}
-                    >
-                      {route.title}
-                    </Text>
-                  </TouchableOpacity>
-                );
-              }
-            )}
-          </View>
-        )}
-      />
-      </ReceiverTabBody>
-    </SafeAreaView>
-  );
+                    {route.title}
+                  </Text>
+                </TouchableOpacity>
+              );
+            }
+          )}
+        </View>
+      )}
+    />
+  </SafeAreaView>
+);
 }
 
 const styles = StyleSheet.create({
@@ -273,7 +267,10 @@ const styles = StyleSheet.create({
     backgroundColor: '#f6f6f7',
   },
 
-  tabBody: { flex: 1 },
+  tabView: {
+    flex: 1,
+  },
+
   filters: {
     flexDirection: 'row',
     flexWrap: 'wrap',

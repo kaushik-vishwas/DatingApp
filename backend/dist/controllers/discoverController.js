@@ -69,6 +69,9 @@ function toCard(r, ratingByReceiverId, busyByReceiverId, connectedReceiverIds) {
     const id = String(r._id);
     const socketLive = connectedReceiverIds.has(id);
     const switchOn = Boolean(o.isAvailable);
+    const discoverAvailable = switchOn;
+    /** Online on discover only when Go Online is on and the receiver app has an active socket. */
+    const discoverOnline = switchOn && socketLive;
     return {
         _id: id,
         name: o.name,
@@ -80,8 +83,8 @@ function toCard(r, ratingByReceiverId, busyByReceiverId, connectedReceiverIds) {
         audioCallRate: Receiver_1.RECEIVER_AUDIO_CALL_RATE_INR_PER_MIN,
         updatedAt: iso(o.updatedAt),
         gender: o.gender === 'male' || o.gender === 'female' || o.gender === 'other' ? o.gender : null,
-        isAvailable: switchOn && socketLive,
-        isOnline: socketLive,
+        isAvailable: discoverAvailable,
+        isOnline: discoverOnline,
         isBusyOnCall: busyByReceiverId.has(id),
         ratingAvg: rating ? Math.round(rating.avg * 10) / 10 : 0,
         ratingCount: rating?.count ?? 0,
