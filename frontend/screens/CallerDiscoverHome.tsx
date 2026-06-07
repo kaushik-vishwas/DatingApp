@@ -746,7 +746,7 @@ const styles = StyleSheet.create({
   walletCapsule: {
     borderRadius: 40,
     borderWidth: 1,
-    borderColor: PURPLE,
+    borderColor: '#00a2ff',
     backgroundColor: '#e5e5e5',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },

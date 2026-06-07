@@ -784,7 +784,7 @@ const styles = StyleSheet.create({
   earningsCapsule: {
     borderRadius: 40,
     borderWidth: 1,
-    borderColor: PINK,
+    borderColor: '#00a2ff',
     backgroundColor: '#e5e5e5',
     maxWidth: 120,
   },
@@ -951,7 +951,7 @@ publicMiniLangText: {
     marginBottom: 0,
   },
   highlightedAvailabilityCard: {
-    borderRadius: 15,
+    borderRadius: 5,
     paddingHorizontal: 16,
     paddingVertical: 4,
     flexDirection: 'row',
@@ -981,7 +981,7 @@ publicMiniLangText: {
   },
 
   welcomeCardContent: {
-    minHeight: 80,
+    minHeight: 100,
   },
   welcomeCardBody: {
     fontSize: 13,
