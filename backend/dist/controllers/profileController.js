@@ -36,7 +36,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getCallerNotifications = exports.getReceiverCallerOnlineNotifications = exports.getCallerMessageEligibleReceivers = exports.deleteCallerCallHistory = exports.getCallerCallHistory = exports.getReceiverEarningsBreakdown = exports.verifyReceiverBankUpdateOtp = exports.sendReceiverBankUpdateOtp = exports.deleteReceiverAccount = exports.reopenRejectedReceiverKyc = exports.completeReceiverAudioOnboarding = exports.updateReceiverExpoPushToken = exports.updateReceiverProfile = exports.notifyReceiverRecentUser = exports.getReceiverNotifyCandidates = exports.getCallerNotificationMessage = exports.getReceiverWelcomeMessage = exports.getReceiverCallInsights = exports.verifyReceiverWithdrawalOtpAndCreate = exports.sendReceiverWithdrawalOtp = exports.getReceiverWithdrawalOverview = exports.getReceiverWalletSummary = exports.updateCallerProfile = exports.completeCallerProfile = exports.saveCallerUserAudio = exports.saveReceiverKycBankFinalize = exports.saveReceiverKycDocuments = exports.saveReceiverKycProfileInfo = exports.completeProfile = void 0;
+exports.getCallerNotifications = exports.getReceiverCallerOnlineNotifications = exports.getCallerMessageEligibleReceivers = exports.deleteReceiverCallHistory = exports.deleteCallerCallHistory = exports.getCallerCallHistory = exports.getReceiverEarningsBreakdown = exports.verifyReceiverBankUpdateOtp = exports.sendReceiverBankUpdateOtp = exports.deleteReceiverAccount = exports.reopenRejectedReceiverKyc = exports.completeReceiverAudioOnboarding = exports.updateReceiverExpoPushToken = exports.updateReceiverProfile = exports.notifyReceiverRecentUser = exports.getReceiverNotifyCandidates = exports.getCallerNotificationMessage = exports.getReceiverWelcomeMessage = exports.getReceiverCallInsights = exports.verifyReceiverWithdrawalOtpAndCreate = exports.sendReceiverWithdrawalOtp = exports.getReceiverWithdrawalOverview = exports.getReceiverWalletSummary = exports.updateCallerProfile = exports.completeCallerProfile = exports.saveCallerUserAudio = exports.saveReceiverKycBankFinalize = exports.saveReceiverKycDocuments = exports.saveReceiverKycProfileInfo = exports.completeProfile = void 0;
 const crypto_1 = __importDefault(require("crypto"));
 const mongoose_1 = __importDefault(require("mongoose"));
 const User_1 = __importDefault(require("../models/User"));
@@ -1366,6 +1366,7 @@ const getReceiverCallInsights = async (req, res) => {
         const completed = await CallSession_1.default.find({
             receiverId: rid,
             status: 'completed',
+            receiverHiddenAt: null,
         })
             .sort({ startedAt: -1 })
             .lean();
@@ -1436,10 +1437,12 @@ const getReceiverCallInsights = async (req, res) => {
                         missedCount: 1,
                         lastAt: row.startedAt,
                         lastDurationSec: dur,
+                        sessionIds: [String(row._id)],
                     });
                     continue;
                 }
                 existing.missedCount += 1;
+                existing.sessionIds.push(String(row._id));
                 if (row.startedAt >= existing.lastAt) {
                     existing.lastAt = row.startedAt;
                     existing.lastDurationSec = dur;
@@ -1455,10 +1458,12 @@ const getReceiverCallInsights = async (req, res) => {
                     incompleteCount: 1,
                     lastAt: row.startedAt,
                     lastDurationSec: dur,
+                    sessionIds: [String(row._id)],
                 });
                 continue;
             }
             existingIncomplete.incompleteCount += 1;
+            existingIncomplete.sessionIds.push(String(row._id));
             if (row.startedAt >= existingIncomplete.lastAt) {
                 existingIncomplete.lastAt = row.startedAt;
                 existingIncomplete.lastDurationSec = dur;
@@ -1473,6 +1478,7 @@ const getReceiverCallInsights = async (req, res) => {
             missedCount: row.missedCount,
             lastAt: row.lastAt.toISOString(),
             lastDurationSec: row.lastDurationSec,
+            sessionIds: row.sessionIds,
         }));
         const incompleteCallGroups = [...incompleteByCaller.values()]
             .sort((a, b) => b.lastAt.getTime() - a.lastAt.getTime())
@@ -1483,6 +1489,7 @@ const getReceiverCallInsights = async (req, res) => {
             incompleteCount: row.incompleteCount,
             lastAt: row.lastAt.toISOString(),
             lastDurationSec: row.lastDurationSec,
+            sessionIds: row.sessionIds,
         }));
         const byCaller = new Map();
         for (const row of completedValid) {
@@ -2452,6 +2459,47 @@ const deleteCallerCallHistory = async (req, res) => {
     }
 };
 exports.deleteCallerCallHistory = deleteCallerCallHistory;
+/**
+ * POST /profile/receiver-call-history/delete — hide selected rows from receiver History.
+ */
+const deleteReceiverCallHistory = async (req, res) => {
+    try {
+        if (req.accountKind !== 'receiver') {
+            res.status(403).json({ message: 'Only receivers can delete call history' });
+            return;
+        }
+        if ((0, accountAccess_1.blockReceiverUntilApproved)(req, res))
+            return;
+        const rawIds = req.body?.ids;
+        if (!Array.isArray(rawIds) || rawIds.length === 0) {
+            res.status(400).json({ message: 'ids required' });
+            return;
+        }
+        const rid = new mongoose_1.default.Types.ObjectId(String(req.receiver._id));
+        const objectIds = rawIds
+            .map((id) => String(id).trim())
+            .filter((id) => mongoose_1.default.Types.ObjectId.isValid(id))
+            .map((id) => new mongoose_1.default.Types.ObjectId(id));
+        if (objectIds.length === 0) {
+            res.status(400).json({ message: 'No valid ids' });
+            return;
+        }
+        const now = new Date();
+        const result = await CallSession_1.default.updateMany({
+            _id: { $in: objectIds },
+            receiverId: rid,
+            status: 'completed',
+            receiverHiddenAt: null,
+        }, { $set: { receiverHiddenAt: now } });
+        res.status(200).json({ ok: true, deleted: result.modifiedCount });
+    }
+    catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error('deleteReceiverCallHistory error:', msg);
+        res.status(500).json({ message: msg || 'Server error' });
+    }
+};
+exports.deleteReceiverCallHistory = deleteReceiverCallHistory;
 /**
  * GET /profile/caller-message-eligible-receivers — receiver ids the caller may message.
  */

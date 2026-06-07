@@ -240,6 +240,7 @@ export type ReceiverMissedCallGroupRow = {
   missedCount: number;
   lastAt: string;
   lastDurationSec: number;
+  sessionIds: string[];
 };
 
 /** One card per caller for connected calls under minimum duration. */
@@ -250,6 +251,7 @@ export type ReceiverIncompleteCallGroupRow = {
   incompleteCount: number;
   lastAt: string;
   lastDurationSec: number;
+  sessionIds: string[];
 };
 
 export type ReceiverCallerHistoryRow = {

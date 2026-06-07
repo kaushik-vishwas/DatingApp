@@ -28,6 +28,7 @@ router.post('/receiver/reopen-kyc', auth_1.protect, profileController_1.reopenRe
 router.delete('/receiver', auth_1.protect, profileController_1.deleteReceiverAccount);
 router.get('/caller-call-history', auth_1.protect, profileController_1.getCallerCallHistory);
 router.post('/caller-call-history/delete', auth_1.protect, profileController_1.deleteCallerCallHistory);
+router.post('/receiver-call-history/delete', auth_1.protect, profileController_1.deleteReceiverCallHistory);
 router.get('/caller-message-eligible-receivers', auth_1.protect, profileController_1.getCallerMessageEligibleReceivers);
 router.get('/caller-app-review', auth_1.protect, callerAppReviewController_1.getMyCallerAppReview);
 router.put('/caller-app-review', auth_1.protect, callerAppReviewController_1.upsertMyCallerAppReview);

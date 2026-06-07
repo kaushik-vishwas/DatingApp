@@ -1657,6 +1657,7 @@ export const getReceiverCallInsights = async (
     const completed = await CallSession.find({
       receiverId: rid,
       status: 'completed',
+      receiverHiddenAt: null,
     })
       .sort({ startedAt: -1 })
       .lean<
@@ -1741,6 +1742,7 @@ export const getReceiverCallInsights = async (
       missedCount: number;
       lastAt: Date;
       lastDurationSec: number;
+      sessionIds: string[];
     };
     type IncompleteAgg = {
       callerId: string;
@@ -1749,6 +1751,7 @@ export const getReceiverCallInsights = async (
       incompleteCount: number;
       lastAt: Date;
       lastDurationSec: number;
+      sessionIds: string[];
     };
     const missedByCaller = new Map<string, MissedAgg>();
     const incompleteByCaller = new Map<string, IncompleteAgg>();
@@ -1765,10 +1768,12 @@ export const getReceiverCallInsights = async (
             missedCount: 1,
             lastAt: row.startedAt,
             lastDurationSec: dur,
+            sessionIds: [String(row._id)],
           });
           continue;
         }
         existing.missedCount += 1;
+        existing.sessionIds.push(String(row._id));
         if (row.startedAt >= existing.lastAt) {
           existing.lastAt = row.startedAt;
           existing.lastDurationSec = dur;
@@ -1784,10 +1789,12 @@ export const getReceiverCallInsights = async (
           incompleteCount: 1,
           lastAt: row.startedAt,
           lastDurationSec: dur,
+          sessionIds: [String(row._id)],
         });
         continue;
       }
       existingIncomplete.incompleteCount += 1;
+      existingIncomplete.sessionIds.push(String(row._id));
       if (row.startedAt >= existingIncomplete.lastAt) {
         existingIncomplete.lastAt = row.startedAt;
         existingIncomplete.lastDurationSec = dur;
@@ -1802,6 +1809,7 @@ export const getReceiverCallInsights = async (
         missedCount: row.missedCount,
         lastAt: row.lastAt.toISOString(),
         lastDurationSec: row.lastDurationSec,
+        sessionIds: row.sessionIds,
       }));
     const incompleteCallGroups = [...incompleteByCaller.values()]
       .sort((a, b) => b.lastAt.getTime() - a.lastAt.getTime())
@@ -1812,6 +1820,7 @@ export const getReceiverCallInsights = async (
         incompleteCount: row.incompleteCount,
         lastAt: row.lastAt.toISOString(),
         lastDurationSec: row.lastDurationSec,
+        sessionIds: row.sessionIds,
       }));
 
     type CallerAgg = {
@@ -2893,6 +2902,55 @@ export const deleteCallerCallHistory = async (
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error('deleteCallerCallHistory error:', msg);
+    res.status(500).json({ message: msg || 'Server error' });
+  }
+};
+
+/**
+ * POST /profile/receiver-call-history/delete — hide selected rows from receiver History.
+ */
+export const deleteReceiverCallHistory = async (
+  req: Request<{}, {}, { ids?: unknown }>,
+  res: Response
+): Promise<void> => {
+  try {
+    if (req.accountKind !== 'receiver') {
+      res.status(403).json({ message: 'Only receivers can delete call history' });
+      return;
+    }
+    if (blockReceiverUntilApproved(req, res)) return;
+
+    const rawIds = req.body?.ids;
+    if (!Array.isArray(rawIds) || rawIds.length === 0) {
+      res.status(400).json({ message: 'ids required' });
+      return;
+    }
+
+    const rid = new mongoose.Types.ObjectId(String(req.receiver!._id));
+    const objectIds = rawIds
+      .map((id) => String(id).trim())
+      .filter((id) => mongoose.Types.ObjectId.isValid(id))
+      .map((id) => new mongoose.Types.ObjectId(id));
+    if (objectIds.length === 0) {
+      res.status(400).json({ message: 'No valid ids' });
+      return;
+    }
+
+    const now = new Date();
+    const result = await CallSession.updateMany(
+      {
+        _id: { $in: objectIds },
+        receiverId: rid,
+        status: 'completed',
+        receiverHiddenAt: null,
+      },
+      { $set: { receiverHiddenAt: now } }
+    );
+
+    res.status(200).json({ ok: true, deleted: result.modifiedCount });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error('deleteReceiverCallHistory error:', msg);
     res.status(500).json({ message: msg || 'Server error' });
   }
 };

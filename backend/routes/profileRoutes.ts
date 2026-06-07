@@ -7,6 +7,7 @@ import {
   deleteReceiverAccount,
   getCallerCallHistory,
   deleteCallerCallHistory,
+  deleteReceiverCallHistory,
   getCallerMessageEligibleReceivers,
   getCallerNotifications,
   getReceiverCallerOnlineNotifications,
@@ -58,6 +59,7 @@ router.post('/receiver/reopen-kyc', protect, reopenRejectedReceiverKyc);
 router.delete('/receiver', protect, deleteReceiverAccount);
 router.get('/caller-call-history', protect, getCallerCallHistory);
 router.post('/caller-call-history/delete', protect, deleteCallerCallHistory);
+router.post('/receiver-call-history/delete', protect, deleteReceiverCallHistory);
 router.get('/caller-message-eligible-receivers', protect, getCallerMessageEligibleReceivers);
 router.get('/caller-app-review', protect, getMyCallerAppReview);
 router.put('/caller-app-review', protect, upsertMyCallerAppReview);

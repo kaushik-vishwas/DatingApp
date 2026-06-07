@@ -51,6 +51,7 @@ const callSessionSchema = new mongoose_1.Schema({
     receiverEarnedInr: { type: Number, default: 0, min: 0 },
     callerRating: { type: Number, default: null, min: 1, max: 5 },
     callerHiddenAt: { type: Date, default: null },
+    receiverHiddenAt: { type: Date, default: null },
 }, { timestamps: true });
 callSessionSchema.index({ receiverId: 1, startedAt: -1 });
 callSessionSchema.index({ callerId: 1, startedAt: -1 });

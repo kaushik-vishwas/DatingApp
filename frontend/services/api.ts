@@ -271,6 +271,9 @@ export const profileApi = {
   deleteCallerCallHistory: (ids: string[]) =>
     api.post<{ ok: boolean; deleted: number }>('/profile/caller-call-history/delete', { ids }),
 
+  deleteReceiverCallHistory: (ids: string[]) =>
+    api.post<{ ok: boolean; deleted: number }>('/profile/receiver-call-history/delete', { ids }),
+
   callerMessageEligibleReceivers: () =>
     api.get<CallerMessageEligibleReceiversResponse>(
       '/profile/caller-message-eligible-receivers'

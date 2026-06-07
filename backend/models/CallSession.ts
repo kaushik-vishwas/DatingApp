@@ -26,6 +26,8 @@ export interface ICallSession {
   callerRating: number | null;
   /** When set, hidden from the caller's Recents list (billing/eligibility unchanged). */
   callerHiddenAt: Date | null;
+  /** When set, hidden from the receiver's History list (billing/eligibility unchanged). */
+  receiverHiddenAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -50,6 +52,7 @@ const callSessionSchema = new Schema<ICallSession>(
     receiverEarnedInr: { type: Number, default: 0, min: 0 },
     callerRating: { type: Number, default: null, min: 1, max: 5 },
     callerHiddenAt: { type: Date, default: null },
+    receiverHiddenAt: { type: Date, default: null },
   },
   { timestamps: true }
 );
