@@ -152,6 +152,10 @@ type CallSignalContextValue = {
   setRemoteCallEndedHandler: (handler: ((callId: string) => void) | null) => void;
   /** VoiceCall screen: re-check server session after signaling socket reconnect (background OEMs). */
   setActiveCallRecoveryHandler: (handler: (() => void) | null) => void;
+  /** VoiceCall screen: apply shared server talkStartedAt instantly when both parties connect. */
+  setTalkStartedHandler: (
+    handler: ((callId: string, talkStartedAt: string) => void) | null
+  ) => void;
   /** Notify peer instantly via the shared call-signaling socket (always-on while signed in). */
   emitCallEnd: (callId: string) => void;
   /** Tell peer this party is on hold (e.g. external phone call). */
@@ -247,6 +251,9 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   const incomingCallDismissHandlerRef = useRef<((callId: string) => void) | null>(null);
   const remoteCallEndedHandlerRef = useRef<((callId: string) => void) | null>(null);
   const activeCallRecoveryHandlerRef = useRef<(() => void) | null>(null);
+  const talkStartedHandlerRef = useRef<((callId: string, talkStartedAt: string) => void) | null>(
+    null
+  );
   const peerCallHoldHandlerRef = useRef<((callId: string, onHold: boolean) => void) | null>(null);
   const peerCallMuteHandlerRef = useRef<((callId: string, muted: boolean) => void) | null>(null);
   /** Re-emit on socket reconnect (Samsung cellular call can drop WebSocket briefly). */
@@ -254,6 +261,7 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   const pendingCallMuteEmitRef = useRef<{ callId: string; muted: boolean } | null>(null);
   const pendingCallEndEmitRef = useRef<string | null>(null);
   const queueModeRef = useRef<boolean>(false);
+  const userAvailableRef = useRef<boolean>(Boolean(user?.isAvailable));
   /** Receiver accepted — never re-apply `outgoingCallerPhase: 'ringing'` (race with delayed navigate). */
   const callerInviteAcceptedCallIdsRef = useRef<Set<string>>(new Set());
   /** Bootstrap session kept until call ends (survives pending map cleanup on accept). */
@@ -322,7 +330,9 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
   useEffect(() => {
     if (user?.role === 'receiver') {
-      queueModeRef.current = Boolean(user.isAvailable);
+      const available = Boolean(user.isAvailable);
+      queueModeRef.current = available;
+      userAvailableRef.current = available;
     }
   }, [user?.role, user?.isAvailable]);
 
@@ -892,6 +902,13 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     activeCallRecoveryHandlerRef.current = handler;
   }, []);
 
+  const setTalkStartedHandler = useCallback(
+    (handler: ((callId: string, talkStartedAt: string) => void) | null) => {
+      talkStartedHandlerRef.current = handler;
+    },
+    []
+  );
+
   const setPeerCallHoldHandler = useCallback(
     (handler: ((callId: string, onHold: boolean) => void) | null) => {
       peerCallHoldHandlerRef.current = handler;
@@ -1041,18 +1058,26 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     const sub = AppState.addEventListener('change', (state: AppStateStatus) => {
       if (state === 'active' || state === 'background' || state === 'inactive') {
         keepCallSocketAlive();
-        if (userRoleRef.current === 'receiver' && queueModeRef.current) {
-          const socket = socketRef.current;
-          if (socket?.connected) {
-            try {
-              socket.emit('call:queue:set', { active: true }, () => {});
-            } catch {
-              // best-effort
+        if (userRoleRef.current === 'receiver' && userAvailableRef.current) {
+          if (state === 'background' || state === 'inactive') {
+            void profileApi.receiverBackgroundPresence().catch(() => {});
+          }
+          if (queueModeRef.current) {
+            const socket = socketRef.current;
+            if (socket?.connected) {
+              try {
+                socket.emit('call:queue:set', { active: true }, () => {});
+              } catch {
+                // best-effort
+              }
             }
           }
         }
       }
       if (state === 'active') {
+        if (userRoleRef.current === 'receiver' && userAvailableRef.current) {
+          void profileApi.receiverForegroundPresence().catch(() => {});
+        }
         refreshPushToken();
         const pending = pendingIncomingCallRequestRef.current;
         if (
@@ -1327,6 +1352,14 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         })();
       });
 
+      socket.on('call:talk_started', (payload: { callId?: string; talkStartedAt?: string }) => {
+        const callId = typeof payload?.callId === 'string' ? payload.callId.trim() : '';
+        const talkStartedAt =
+          typeof payload?.talkStartedAt === 'string' ? payload.talkStartedAt.trim() : '';
+        if (!callId || !talkStartedAt) return;
+        talkStartedHandlerRef.current?.(callId, talkStartedAt);
+      });
+
       socket.on('call:hold', (payload: CallHoldPayload) => {
         if (payload.fromType === (userRoleRef.current === 'caller' ? 'u' : 'r')) return;
         peerCallHoldHandlerRef.current?.(payload.callId, Boolean(payload.onHold));
@@ -1405,6 +1438,7 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       setIncomingCallDismissHandler,
       setRemoteCallEndedHandler,
       setActiveCallRecoveryHandler,
+      setTalkStartedHandler,
       setPeerCallHoldHandler,
       setPeerCallMuteHandler,
       emitCallEnd,
@@ -1428,6 +1462,7 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       setIncomingCallDismissHandler,
       setRemoteCallEndedHandler,
       setActiveCallRecoveryHandler,
+      setTalkStartedHandler,
       setPeerCallHoldHandler,
       setPeerCallMuteHandler,
       emitCallEnd,

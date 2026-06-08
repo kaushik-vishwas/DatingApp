@@ -54,6 +54,28 @@ export function armReceiverDiscoverGrace(receiverId: string): void {
   );
 }
 
+/** Client-driven (OnePlus/Oppo minimize): arm grace before the socket disconnect reaches the server. */
+export async function touchReceiverBackgroundPresence(receiverId: string): Promise<void> {
+  const rid = normalizeReceiverId(receiverId);
+  const receiver = await Receiver.findById(rid).select('isAvailable').lean<{ isAvailable?: boolean } | null>();
+  if (!receiver?.isAvailable) {
+    clearReceiverDiscoverGrace(rid);
+    await syncReceiverPresenceInDatabase(rid);
+    return;
+  }
+  armReceiverDiscoverGrace(rid);
+  await syncReceiverPresenceInDatabase(rid);
+}
+
+/** App returned foreground with a live socket — drop grace so presence tracks the real connection. */
+export async function touchReceiverForegroundPresence(receiverId: string): Promise<void> {
+  const rid = normalizeReceiverId(receiverId);
+  if (isReceiverSocketConnected(rid)) {
+    clearReceiverDiscoverGrace(rid);
+  }
+  await syncReceiverPresenceInDatabase(rid);
+}
+
 /**
  * DB `isOnline` reflects Go Online (`isAvailable`) plus live socket or 5-minute background grace.
  * Callers discover uses `isReceiverDiscoverPresenceLive` for the online badge.

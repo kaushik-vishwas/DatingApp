@@ -20,7 +20,11 @@ import {
   resolveFixedRatePerMinuteAt,
 } from '../services/receiverEarningModel';
 import { pickRandomQueuedReceiverForCaller } from '../services/callQueue';
-import { emitCallEndedToParticipants, isReceiverSocketConnected } from '../socket/socketRegistry';
+import {
+  emitCallEndedToParticipants,
+  emitCallTalkStarted,
+  isReceiverSocketConnected,
+} from '../socket/socketRegistry';
 import {
   releaseReceiverReservation,
   syncReceiverQueueState,
@@ -117,6 +121,12 @@ async function recordVoiceParticipantJoined(
     if (!session) {
       throw new Error('Call session not found');
     }
+    emitCallTalkStarted(
+      callId,
+      String(session.callerId),
+      String(session.receiverId),
+      talkStartedAt.toISOString()
+    );
   }
 
   return session;

@@ -85,6 +85,23 @@ export function emitCallerOnlineToReceiver(
 }
 
 /** Notify both call participants that the voice session ended (REST fallback when socket `call:end` is missed). */
+/** Push shared talkStartedAt to both parties the moment both are connected (instant timer sync). */
+export function emitCallTalkStarted(
+  callId: string,
+  callerId: string,
+  receiverId: string,
+  talkStartedAt: string
+): void {
+  if (!ioInstance) return;
+  const payload = {
+    callId: String(callId).trim(),
+    talkStartedAt: String(talkStartedAt).trim(),
+  };
+  if (!payload.callId || !payload.talkStartedAt) return;
+  ioInstance.to(accountRoom('u', callerId)).emit('call:talk_started', payload);
+  ioInstance.to(accountRoom('r', receiverId)).emit('call:talk_started', payload);
+}
+
 export function emitCallEndedToParticipants(
   callId: string,
   callerId: string,

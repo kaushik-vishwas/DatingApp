@@ -257,6 +257,12 @@ export const profileApi = {
   updateReceiverExpoPushToken: (expoPushToken: string) =>
     api.patch<{ ok: boolean }>('/profile/receiver/push-token', { expoPushToken }),
 
+  receiverBackgroundPresence: () =>
+    api.post<{ ok: boolean }>('/profile/receiver/presence/background'),
+
+  receiverForegroundPresence: () =>
+    api.post<{ ok: boolean }>('/profile/receiver/presence/foreground'),
+
   completeReceiverAudioOnboarding: () =>
     api.post<CompleteProfileResponse>('/profile/receiver/complete-audio-onboarding'),
 

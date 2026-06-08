@@ -37,6 +37,7 @@ import { profileImageUrlForStreamOrNetwork, resolveProfileImageSource } from '..
 import { AvatarSoundWaveRings } from '../../components/call/AvatarVoiceWaves';
 import type { StreamMicControl } from '../../components/call/StreamCallAvatarExtras';
 import {
+  clearVoiceSessionStartInflight,
   getVoiceSessionStartPromise,
 } from '../../utils/voiceCallSessionStart';
 
@@ -224,6 +225,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
     setIncomingCallDismissHandler,
     setRemoteCallEndedHandler,
     setActiveCallRecoveryHandler,
+    setTalkStartedHandler,
     setPeerCallHoldHandler,
     setPeerCallMuteHandler,
     emitCallEnd: emitCallEndSignal,
@@ -574,6 +576,8 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
     updateElapsedFromAnchor();
     return true;
   };
+  const applyTalkTimingFromServerRef = useRef(applyTalkTimingFromServer);
+  applyTalkTimingFromServerRef.current = applyTalkTimingFromServer;
 
   const formatHms = (totalSec: number): string => {
     const safe = Math.max(0, Math.floor(totalSec));
@@ -885,11 +889,16 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
     setActiveCallRecoveryHandler(() => {
       void checkPeerEndedViaServerRef.current();
     });
+    setTalkStartedHandler((callId, talkStartedAt) => {
+      if (!matchesActiveCallIdRef.current(callId)) return;
+      applyTalkTimingFromServerRef.current({ talkStartedAt });
+    });
     return () => {
       setRemoteCallEndedHandler(null);
       setActiveCallRecoveryHandler(null);
+      setTalkStartedHandler(null);
     };
-  }, [user?.role, setRemoteCallEndedHandler, setActiveCallRecoveryHandler]);
+  }, [user?.role, setRemoteCallEndedHandler, setActiveCallRecoveryHandler, setTalkStartedHandler]);
 
   useEffect(() => {
     if (user?.role !== 'caller' && user?.role !== 'receiver') {
@@ -1336,12 +1345,43 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
     }
   }, [callParams, syncTalkTimingOnce]);
 
-  const beginTalkTimingLocal = useCallback((): void => {
-    void syncTalkTimingUntilBothJoined();
-  }, [syncTalkTimingUntilBothJoined]);
-
-  const beginTalkTimingLocalRef = useRef(beginTalkTimingLocal);
-  beginTalkTimingLocalRef.current = beginTalkTimingLocal;
+  const kickTalkTimerSync = useCallback(async (): Promise<void> => {
+    if (endingRef.current || talkActiveRef.current) return;
+    const boot = getVoiceBootstrap(callParams);
+    if (!boot) return;
+    clearVoiceSessionStartInflight(boot.callId);
+    try {
+      const [startData, syncRes] = await Promise.all([
+        getVoiceSessionStartPromise(boot.callId, boot.peerAccountId),
+        callApi.sessionSync(boot.callId, { light: true }),
+      ]);
+      applyTalkTimingFromServer(startData);
+      if (!talkActiveRef.current) {
+        applyTalkTimingFromServer(syncRes.data);
+      }
+      applySessionBillingFromServer(startData);
+      applySessionBillingFromServer(syncRes.data);
+      if (talkActiveRef.current) return;
+    } catch {
+      // Burst sync below.
+    }
+    for (let attempt = 0; attempt < 15 && !talkActiveRef.current && !endingRef.current; attempt += 1) {
+      try {
+        const { data } = await callApi.sessionSync(boot.callId, { light: true });
+        if (applyTalkTimingFromServer(data)) {
+          applySessionBillingFromServer(data);
+          return;
+        }
+      } catch {
+        // retry
+      }
+      if (attempt < 14) {
+        await new Promise((resolve) => setTimeout(resolve, attempt < 4 ? 0 : 30));
+      }
+    }
+  }, [callParams]);
+  const kickTalkTimerSyncRef = useRef(kickTalkTimerSync);
+  kickTalkTimerSyncRef.current = kickTalkTimerSync;
 
   useEffect(() => {
     if (!ready || !talkActive) return;
@@ -1357,7 +1397,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
 
   useEffect(() => {
     if (!ready || endingRef.current) return;
-    const pollMs = appInBackground ? (talkActive ? 1000 : 2000) : talkActive ? 3000 : 80;
+    const pollMs = appInBackground ? (talkActive ? 1000 : 2000) : talkActive ? 3000 : 50;
     const poll = setInterval(() => {
       if (endingRef.current) return;
       void syncTalkTimingOnce();
@@ -1811,11 +1851,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
           {streamAvatarExtras ? (
             <streamAvatarExtras.StreamTalkTimingBridge
               onBothConnected={() => {
-                const boot = getVoiceBootstrap(callParams);
-                if (boot) {
-                  void ensureSessionStartedOnScreen(boot.callId, boot.peerAccountId);
-                }
-                beginTalkTimingLocalRef.current();
+                void kickTalkTimerSyncRef.current();
               }}
             />
           ) : null}

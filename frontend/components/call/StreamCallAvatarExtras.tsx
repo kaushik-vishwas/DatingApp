@@ -211,18 +211,22 @@ export function StreamTalkTimingBridge({
   callingStateRef.current = callingState;
   participantsRef.current = participants;
 
-  useEffect(() => {
-    if (firedRef.current) return;
-    if (callingState !== CallingState.JOINED) return;
-    const hasRemote = participants.some((p) => !p.isLocalParticipant);
-    if (!hasRemote) return;
-
+  const fireOnce = (): void => {
     if (firedRef.current) return;
     if (callingStateRef.current !== CallingState.JOINED) return;
     const stillRemote = participantsRef.current.some((p) => !p.isLocalParticipant);
     if (!stillRemote) return;
     firedRef.current = true;
     onBothConnectedRef.current();
+  };
+
+  useEffect(() => {
+    if (firedRef.current) return;
+    if (callingState !== CallingState.JOINED) return;
+    fireOnce();
+    if (firedRef.current) return;
+    const intervalId = setInterval(fireOnce, 40);
+    return () => clearInterval(intervalId);
   }, [callingState, participants]);
 
   return null;

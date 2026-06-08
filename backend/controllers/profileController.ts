@@ -24,6 +24,8 @@ import { scheduleReceiverAvailabilityNotifications } from '../services/receiverA
 import {
   clearReceiverDiscoverGrace,
   syncReceiverPresenceInDatabase,
+  touchReceiverBackgroundPresence,
+  touchReceiverForegroundPresence,
 } from '../services/receiverPresence';
 import { isReceiverSocketConnected } from '../socket/socketRegistry';
 import { finalizeReceiverOnlineSession } from '../services/receiverScore';
@@ -2303,6 +2305,44 @@ export const updateReceiverProfile = async (
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error('updateReceiverProfile error:', msg);
+    res.status(500).json({ message: msg || 'Server error' });
+  }
+};
+
+/**
+ * POST /profile/receiver/presence/background — keep discover online while app is minimized (OnePlus/Oppo).
+ */
+export const receiverBackgroundPresence = async (req: Request, res: Response): Promise<void> => {
+  try {
+    if (req.accountKind !== 'receiver') {
+      res.status(403).json({ message: 'This endpoint is only for receiver accounts' });
+      return;
+    }
+    const receiverId = String(req.receiver!._id);
+    await touchReceiverBackgroundPresence(receiverId);
+    res.status(200).json({ ok: true });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error('receiverBackgroundPresence error:', msg);
+    res.status(500).json({ message: msg || 'Server error' });
+  }
+};
+
+/**
+ * POST /profile/receiver/presence/foreground — sync presence when app returns to foreground.
+ */
+export const receiverForegroundPresence = async (req: Request, res: Response): Promise<void> => {
+  try {
+    if (req.accountKind !== 'receiver') {
+      res.status(403).json({ message: 'This endpoint is only for receiver accounts' });
+      return;
+    }
+    const receiverId = String(req.receiver!._id);
+    await touchReceiverForegroundPresence(receiverId);
+    res.status(200).json({ ok: true });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error('receiverForegroundPresence error:', msg);
     res.status(500).json({ message: msg || 'Server error' });
   }
 };

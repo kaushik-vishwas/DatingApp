@@ -250,7 +250,6 @@ export function attachChatSocket(httpServer: HTTPServer): Server {
       })();
     }
     if (socketType === 'r') {
-      clearReceiverDiscoverGrace(socketAccountId);
       void (async () => {
         try {
           const prev = await Receiver.findById(socketAccountId)
@@ -274,22 +273,29 @@ export function attachChatSocket(httpServer: HTTPServer): Server {
       })();
     }
 
+    const markReceiverDiscoverGraceIfAvailable = async (receiverId: string): Promise<void> => {
+      const recv = await Receiver.findById(receiverId).select('isAvailable').lean<{
+        isAvailable?: boolean;
+      } | null>();
+      if (recv?.isAvailable) {
+        armReceiverDiscoverGrace(receiverId);
+      } else {
+        clearReceiverDiscoverGrace(receiverId);
+      }
+      await syncReceiverPresenceInDatabase(receiverId);
+    };
+
     socket.on('disconnect', () => {
       const leavingId = String(socket.data.accountId);
       const leavingType = socket.data.typ as AccountType;
+      if (leavingType === 'r') {
+        void markReceiverDiscoverGraceIfAvailable(leavingId);
+      }
       setTimeout(() => {
         void (async () => {
           if (hasActiveSocketForAccount(leavingType, leavingId)) return;
           if (leavingType === 'r') {
-            const recv = await Receiver.findById(leavingId).select('isAvailable').lean<{
-              isAvailable?: boolean;
-            } | null>();
-            if (recv?.isAvailable) {
-              armReceiverDiscoverGrace(leavingId);
-            } else {
-              clearReceiverDiscoverGrace(leavingId);
-            }
-            await syncReceiverPresenceInDatabase(leavingId);
+            await markReceiverDiscoverGraceIfAvailable(leavingId);
           }
           waitingCallQueueAccounts.delete(queueKey(leavingType, leavingId));
           if (leavingType === 'r') {
@@ -321,7 +327,7 @@ export function attachChatSocket(httpServer: HTTPServer): Server {
           const stillConnected = hasActiveSocketForAccount('r', leavingId);
           if (!stillConnected) {
             void (async () => {
-              await syncReceiverPresenceInDatabase(leavingId);
+              await markReceiverDiscoverGraceIfAvailable(leavingId);
               releaseReceiverReservation(leavingId);
             })();
           }

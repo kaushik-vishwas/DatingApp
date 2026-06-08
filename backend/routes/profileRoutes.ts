@@ -14,6 +14,8 @@ import {
   getReceiverWithdrawalOverview,
   getReceiverEarningsBreakdown,
   updateReceiverProfile,
+  receiverBackgroundPresence,
+  receiverForegroundPresence,
   updateReceiverExpoPushToken,
   sendReceiverBankUpdateOtp,
   verifyReceiverBankUpdateOtp,
@@ -53,6 +55,8 @@ router.patch('/receiver/kyc/profile-info', protect, saveReceiverKycProfileInfo);
 router.patch('/receiver/kyc/documents', protect, saveReceiverKycDocuments);
 router.patch('/receiver/kyc/bank', protect, saveReceiverKycBankFinalize);
 router.patch('/receiver', protect, updateReceiverProfile);
+router.post('/receiver/presence/background', protect, receiverBackgroundPresence);
+router.post('/receiver/presence/foreground', protect, receiverForegroundPresence);
 router.patch('/receiver/push-token', protect, updateReceiverExpoPushToken);
 router.post('/receiver/complete-audio-onboarding', protect, completeReceiverAudioOnboarding);
 router.post('/receiver/reopen-kyc', protect, reopenRejectedReceiverKyc);
