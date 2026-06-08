@@ -9,7 +9,7 @@ import ChatBlock from '../models/ChatBlock';
 import ReceiverRating from '../models/ReceiverRating';
 import { blockCallerUntilApproved } from '../utils/accountAccess';
 import { isReceiverBusy } from '../services/callQueue';
-import { getConnectedReceiverIds } from '../socket/socketRegistry';
+import { isReceiverDiscoverPresenceLive } from '../services/receiverPresence';
 
 function iso(d: Date): string {
   return d.toISOString();
@@ -50,17 +50,15 @@ export type DiscoverReceiverCard = {
 function toCard(
   r: ReceiverDocument,
   ratingByReceiverId: Map<string, { avg: number; count: number }>,
-  busyByReceiverId: Set<string>,
-  connectedReceiverIds: Set<string>
+  busyByReceiverId: Set<string>
 ): DiscoverReceiverCard {
   const o = r.toObject();
   const rating = ratingByReceiverId.get(String(r._id));
   const id = String(r._id);
-  const socketLive = connectedReceiverIds.has(id);
   const switchOn = Boolean(o.isAvailable);
   const discoverAvailable = switchOn;
-  /** Online on discover only when Go Online is on and the receiver app has an active socket. */
-  const discoverOnline = switchOn && socketLive;
+  /** Online when Go Online is on and socket is live, or within 5 min after minimize/background disconnect. */
+  const discoverOnline = switchOn && isReceiverDiscoverPresenceLive(id);
   return {
     _id: id,
     name: o.name,
@@ -153,11 +151,9 @@ export const listReceiversForCaller = async (req: Request, res: Response): Promi
     const busyByReceiverId = new Set(
       receivers.map((r) => String(r._id)).filter((id) => isReceiverBusy(id))
     );
-    const connectedReceiverIds = getConnectedReceiverIds();
-
     res.status(200).json({
       receivers: receivers.map((r) =>
-        toCard(r as ReceiverDocument, ratingByReceiverId, busyByReceiverId, connectedReceiverIds)
+        toCard(r as ReceiverDocument, ratingByReceiverId, busyByReceiverId)
       ),
     });
   } catch (err) {

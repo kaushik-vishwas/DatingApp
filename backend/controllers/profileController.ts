@@ -21,7 +21,10 @@ import { toApiReceiver, toApiUser } from './authController';
 import { blockReceiverUntilApproved } from '../utils/accountAccess';
 import { CHAT_TEXT_FEE_INR } from '../constants/chatPricing';
 import { scheduleReceiverAvailabilityNotifications } from '../services/receiverAvailabilityNotifier';
-import { syncReceiverPresenceInDatabase } from '../services/receiverPresence';
+import {
+  clearReceiverDiscoverGrace,
+  syncReceiverPresenceInDatabase,
+} from '../services/receiverPresence';
 import { isReceiverSocketConnected } from '../socket/socketRegistry';
 import { finalizeReceiverOnlineSession } from '../services/receiverScore';
 import { trackAndFinalizeRazorpayXPayout } from '../services/razorpayXPayoutService';
@@ -2255,6 +2258,7 @@ export const updateReceiverProfile = async (
     if (typeof req.body.isAvailable === 'boolean') {
       receiver.isAvailable = req.body.isAvailable;
       if (!req.body.isAvailable) {
+        clearReceiverDiscoverGrace(receiverId);
         const endedAt = new Date();
         const onlineSince = receiver.onlineSince;
         receiver.isOnline = false;

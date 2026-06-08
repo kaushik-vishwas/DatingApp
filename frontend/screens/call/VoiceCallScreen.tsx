@@ -84,6 +84,7 @@ type StreamCallAvatarExtrasModule = {
     talkActive?: boolean;
   }>;
   StreamTalkTimingBridge: React.ComponentType<{ onBothConnected: () => void }>;
+  StreamRemotePeerLeftBridge: React.ComponentType<{ onRemotePeerLeft: () => void }>;
   StreamMicControlBridge: React.ComponentType<{
     controlRef: React.MutableRefObject<StreamMicControl | null>;
     onMutedChange: (muted: boolean) => void;
@@ -222,6 +223,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
     setIncomingCallHandler,
     setIncomingCallDismissHandler,
     setRemoteCallEndedHandler,
+    setActiveCallRecoveryHandler,
     setPeerCallHoldHandler,
     setPeerCallMuteHandler,
     emitCallEnd: emitCallEndSignal,
@@ -663,6 +665,8 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
     },
     [callParams],
   );
+  const matchesActiveCallIdRef = useRef(matchesActiveCallId);
+  matchesActiveCallIdRef.current = matchesActiveCallId;
 
   const teardownFromRemotePeerEnd = useCallback(async (): Promise<void> => {
     if (endingRef.current) return;
@@ -684,7 +688,50 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
     const callId = callIdRef.current.trim();
     if (!callId) return;
     emitCallEndSignal(callId);
+    const voiceSocket = signalSocketRef.current;
+    if (voiceSocket?.connected) {
+      try {
+        voiceSocket.emit('call:end', { callId });
+      } catch {
+        // CallSignal socket is primary; duplicate improves delivery on flaky networks.
+      }
+    }
   };
+
+  const handlePeerCallEnded = useCallback((endedCallId: string): void => {
+    if (!matchesActiveCallIdRef.current(endedCallId)) return;
+    const role = userRoleRef.current;
+    if (role === 'caller') {
+      if (endingRef.current) return;
+      endingRef.current = true;
+      talkActiveRef.current = false;
+      setTalkActive(false);
+      void finishCallerCallEndRef.current();
+      return;
+    }
+    if (role === 'receiver') {
+      void teardownFromRemotePeerEndRef.current();
+    }
+  }, []);
+  const handlePeerCallEndedRef = useRef(handlePeerCallEnded);
+  handlePeerCallEndedRef.current = handlePeerCallEnded;
+  const syncTalkTimingOnceRef = useRef<() => Promise<boolean>>(async () => false);
+  const checkPeerEndedViaServer = useCallback(async (): Promise<void> => {
+    const callId = callIdRef.current.trim();
+    if (!callId || endingRef.current) return;
+    try {
+      const { data } = await callApi.sessionSync(callId, { light: true });
+      if (data?.ok && data.status === 'completed') {
+        handlePeerCallEndedRef.current(callId);
+        return;
+      }
+    } catch {
+      // Fall through to full sync.
+    }
+    void syncTalkTimingOnceRef.current();
+  }, []);
+  const checkPeerEndedViaServerRef = useRef(checkPeerEndedViaServer);
+  checkPeerEndedViaServerRef.current = checkPeerEndedViaServer;
 
   const resetReceiverToWaiting = () => {
     endingRef.current = false;
@@ -829,23 +876,20 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
   useEffect(() => {
     if (user?.role !== 'caller' && user?.role !== 'receiver') {
       setRemoteCallEndedHandler(null);
+      setActiveCallRecoveryHandler(null);
       return;
     }
-    const role = user.role;
     setRemoteCallEndedHandler((endedCallId) => {
-      if (!matchesActiveCallId(endedCallId)) return;
-      if (role === 'caller') {
-        if (endingRef.current) return;
-        endingRef.current = true;
-        talkActiveRef.current = false;
-        setTalkActive(false);
-        void finishCallerCallEndRef.current();
-        return;
-      }
-      void teardownFromRemotePeerEndRef.current();
+      handlePeerCallEndedRef.current(endedCallId);
     });
-    return () => setRemoteCallEndedHandler(null);
-  }, [user?.role, matchesActiveCallId, setRemoteCallEndedHandler]);
+    setActiveCallRecoveryHandler(() => {
+      void checkPeerEndedViaServerRef.current();
+    });
+    return () => {
+      setRemoteCallEndedHandler(null);
+      setActiveCallRecoveryHandler(null);
+    };
+  }, [user?.role, setRemoteCallEndedHandler, setActiveCallRecoveryHandler]);
 
   useEffect(() => {
     if (user?.role !== 'caller' && user?.role !== 'receiver') {
@@ -1169,7 +1213,8 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
       if (!token || cancelled) return;
       const socket = io(base, {
         auth: { token },
-        transports: Platform.OS === 'android' ? ['websocket'] : ['websocket', 'polling'],
+        // polling+websocket: Oppo/Vivo/Samsung often kill pure WebSocket in background.
+        transports: ['polling', 'websocket'],
         timeout: 20000,
         reconnection: true,
         reconnectionAttempts: 50,
@@ -1177,7 +1222,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
         reconnectionDelayMax: 10000,
       });
       signalSocketRef.current = socket;
-      const emitLocalCallState = (): void => {
+      const onVoiceSocketConnect = (): void => {
         const callId = callIdRef.current.trim();
         if (!callId) return;
         try {
@@ -1186,8 +1231,11 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
         } catch {
           // ignore
         }
+        if (!endingRef.current) {
+          void checkPeerEndedViaServerRef.current();
+        }
       };
-      socket.on('connect', emitLocalCallState);
+      socket.on('connect', onVoiceSocketConnect);
       socket.on('call:hold', (payload: { callId?: string; onHold?: boolean; fromType?: 'u' | 'r' }) => {
         const myType = userRoleRef.current === 'caller' ? 'u' : 'r';
         if (payload?.fromType === myType) return;
@@ -1202,8 +1250,14 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
         if (!id || id !== callIdRef.current.trim()) return;
         applyPeerMuteFromRemoteRef.current(Boolean(payload.muted));
       });
-      // Best-effort hold duplicate socket — must never end the voice call. Stream WebRTC and
-      // CallSignalContext own call lifecycle; hold still works via the main signaling socket.
+      socket.on('call:ended', (payload: { callId?: string; fromType?: 'u' | 'r' }) => {
+        const myType = userRoleRef.current === 'caller' ? 'u' : 'r';
+        if (payload?.fromType === myType) return;
+        const id = typeof payload?.callId === 'string' ? payload.callId.trim() : '';
+        if (!id) return;
+        handlePeerCallEndedRef.current(id);
+      });
+      // Duplicate socket for hold/mute/end — CallSignalContext is primary; this improves delivery on flaky devices.
     })();
 
     return () => {
@@ -1224,6 +1278,10 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
     try {
       const { data } = await callApi.sessionSync(callIdRef.current, { light });
       if (!data?.ok) return false;
+      if (data.status === 'completed' && !endingRef.current) {
+        handlePeerCallEndedRef.current(callIdRef.current);
+        return false;
+      }
       const started = applyTalkTimingFromServer(data);
       if (!light) {
         applySessionBillingFromServer(data);
@@ -1246,6 +1304,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
       return false;
     }
   }, [refreshReceiverEarningMeta, user?.role]);
+  syncTalkTimingOnceRef.current = syncTalkTimingOnce;
 
   const syncTalkTimingUntilBothJoined = useCallback(async (): Promise<void> => {
     if (talkActiveRef.current || syncTalkBurstInFlightRef.current) return;
@@ -1298,13 +1357,23 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
 
   useEffect(() => {
     if (!ready || endingRef.current) return;
-    const pollMs = talkActive ? 5000 : 80;
+    const pollMs = appInBackground ? (talkActive ? 1000 : 2000) : talkActive ? 3000 : 80;
     const poll = setInterval(() => {
       if (endingRef.current) return;
       void syncTalkTimingOnce();
     }, pollMs);
     return () => clearInterval(poll);
-  }, [ready, talkActive, syncTalkTimingOnce]);
+  }, [ready, talkActive, appInBackground, syncTalkTimingOnce]);
+
+  useEffect(() => {
+    if (!ready) return;
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state !== 'active' && state !== 'background' && state !== 'inactive') return;
+      if (!callIdRef.current || endingRef.current) return;
+      void checkPeerEndedViaServerRef.current();
+    });
+    return () => sub.remove();
+  }, [ready]);
 
   useEffect(() => {
     if (!ready) return;
@@ -1747,6 +1816,15 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
                   void ensureSessionStartedOnScreen(boot.callId, boot.peerAccountId);
                 }
                 beginTalkTimingLocalRef.current();
+              }}
+            />
+          ) : null}
+          {streamAvatarExtras ? (
+            <streamAvatarExtras.StreamRemotePeerLeftBridge
+              onRemotePeerLeft={() => {
+                const callId = callIdRef.current.trim();
+                if (!callId || endingRef.current) return;
+                handlePeerCallEndedRef.current(callId);
               }}
             />
           ) : null}

@@ -228,6 +228,77 @@ export function StreamTalkTimingBridge({
   return null;
 }
 
+const REMOTE_PEER_LEFT_DEBOUNCE_MS = 500;
+
+/**
+ * Fires when the remote participant leaves the Stream call (WebRTC path — works if socket `call:ended` is missed).
+ */
+export function StreamRemotePeerLeftBridge({
+  onRemotePeerLeft,
+}: {
+  onRemotePeerLeft: () => void;
+}): null {
+  const { useCallCallingState, useRemoteParticipants } = useCallStateHooks();
+  const callingState = useCallCallingState();
+  const remoteParticipants = useRemoteParticipants();
+  const hadRemoteRef = useRef(false);
+  const emptySinceRef = useRef<number | null>(null);
+  const onRemotePeerLeftRef = useRef(onRemotePeerLeft);
+  const callingStateRef = useRef(callingState);
+  const remoteParticipantsRef = useRef(remoteParticipants);
+  onRemotePeerLeftRef.current = onRemotePeerLeft;
+  callingStateRef.current = callingState;
+  remoteParticipantsRef.current = remoteParticipants;
+
+  useEffect(() => {
+    if (callingState === CallingState.LEFT) {
+      onRemotePeerLeftRef.current();
+      return;
+    }
+    if (callingState !== CallingState.JOINED) {
+      hadRemoteRef.current = false;
+      emptySinceRef.current = null;
+      return;
+    }
+
+    const evaluate = (): void => {
+      if (callingStateRef.current === CallingState.LEFT) {
+        onRemotePeerLeftRef.current();
+        return;
+      }
+      if (callingStateRef.current !== CallingState.JOINED) {
+        hadRemoteRef.current = false;
+        emptySinceRef.current = null;
+        return;
+      }
+
+      const hasRemote = remoteParticipantsRef.current.length > 0;
+      if (hasRemote) {
+        hadRemoteRef.current = true;
+        emptySinceRef.current = null;
+        return;
+      }
+      if (!hadRemoteRef.current) return;
+
+      const now = Date.now();
+      if (emptySinceRef.current === null) {
+        emptySinceRef.current = now;
+      }
+      if (now - emptySinceRef.current >= REMOTE_PEER_LEFT_DEBOUNCE_MS) {
+        hadRemoteRef.current = false;
+        emptySinceRef.current = null;
+        onRemotePeerLeftRef.current();
+      }
+    };
+
+    evaluate();
+    const intervalId = setInterval(evaluate, 250);
+    return () => clearInterval(intervalId);
+  }, [callingState, remoteParticipants]);
+
+  return null;
+}
+
 /** Peer hold/mute badges on the remote avatar. Hold uses socket; mute reads Stream publish state. */
 const REMOTE_MUTE_JOIN_GRACE_MS = 1500;
 const REMOTE_MUTE_ON_MS = 180;

@@ -29,7 +29,11 @@ import {
   tryReserveReceiver,
 } from '../services/callQueue';
 import { sendReceiverIncomingCallPush } from '../services/expoPush';
-import { syncReceiverPresenceInDatabase } from '../services/receiverPresence';
+import {
+  armReceiverDiscoverGrace,
+  clearReceiverDiscoverGrace,
+  syncReceiverPresenceInDatabase,
+} from '../services/receiverPresence';
 
 type CallInvitePayload = { callId?: unknown; targetId?: unknown };
 type CallResponsePayload = { callId?: unknown; accepted?: unknown };
@@ -246,6 +250,7 @@ export function attachChatSocket(httpServer: HTTPServer): Server {
       })();
     }
     if (socketType === 'r') {
+      clearReceiverDiscoverGrace(socketAccountId);
       void (async () => {
         try {
           const prev = await Receiver.findById(socketAccountId)
@@ -276,6 +281,14 @@ export function attachChatSocket(httpServer: HTTPServer): Server {
         void (async () => {
           if (hasActiveSocketForAccount(leavingType, leavingId)) return;
           if (leavingType === 'r') {
+            const recv = await Receiver.findById(leavingId).select('isAvailable').lean<{
+              isAvailable?: boolean;
+            } | null>();
+            if (recv?.isAvailable) {
+              armReceiverDiscoverGrace(leavingId);
+            } else {
+              clearReceiverDiscoverGrace(leavingId);
+            }
             await syncReceiverPresenceInDatabase(leavingId);
           }
           waitingCallQueueAccounts.delete(queueKey(leavingType, leavingId));

@@ -150,6 +150,8 @@ type CallSignalContextValue = {
   setIncomingCallDismissHandler: (handler: ((callId: string) => void) | null) => void;
   /** VoiceCall screen: tear down active Stream session when the peer ends the call. */
   setRemoteCallEndedHandler: (handler: ((callId: string) => void) | null) => void;
+  /** VoiceCall screen: re-check server session after signaling socket reconnect (background OEMs). */
+  setActiveCallRecoveryHandler: (handler: (() => void) | null) => void;
   /** Notify peer instantly via the shared call-signaling socket (always-on while signed in). */
   emitCallEnd: (callId: string) => void;
   /** Tell peer this party is on hold (e.g. external phone call). */
@@ -244,11 +246,13 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   const incomingCallHandlerRef = useRef<((req: IncomingCallRequest) => void) | null>(null);
   const incomingCallDismissHandlerRef = useRef<((callId: string) => void) | null>(null);
   const remoteCallEndedHandlerRef = useRef<((callId: string) => void) | null>(null);
+  const activeCallRecoveryHandlerRef = useRef<(() => void) | null>(null);
   const peerCallHoldHandlerRef = useRef<((callId: string, onHold: boolean) => void) | null>(null);
   const peerCallMuteHandlerRef = useRef<((callId: string, muted: boolean) => void) | null>(null);
   /** Re-emit on socket reconnect (Samsung cellular call can drop WebSocket briefly). */
   const pendingCallHoldEmitRef = useRef<{ callId: string; onHold: boolean } | null>(null);
   const pendingCallMuteEmitRef = useRef<{ callId: string; muted: boolean } | null>(null);
+  const pendingCallEndEmitRef = useRef<string | null>(null);
   const queueModeRef = useRef<boolean>(false);
   /** Receiver accepted — never re-apply `outgoingCallerPhase: 'ringing'` (race with delayed navigate). */
   const callerInviteAcceptedCallIdsRef = useRef<Set<string>>(new Set());
@@ -884,6 +888,10 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     remoteCallEndedHandlerRef.current = handler;
   }, []);
 
+  const setActiveCallRecoveryHandler = useCallback((handler: (() => void) | null) => {
+    activeCallRecoveryHandlerRef.current = handler;
+  }, []);
+
   const setPeerCallHoldHandler = useCallback(
     (handler: ((callId: string, onHold: boolean) => void) | null) => {
       peerCallHoldHandlerRef.current = handler;
@@ -947,6 +955,7 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   const emitCallEnd = useCallback((callId: string) => {
     const normalized = callId.trim();
     if (!normalized) return;
+    pendingCallEndEmitRef.current = normalized;
     if (pendingCallHoldEmitRef.current?.callId === normalized) {
       pendingCallHoldEmitRef.current = null;
     }
@@ -955,7 +964,11 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     }
     const emitOn = (socket: Socket): void => {
       try {
-        socket.emit('call:end', { callId: normalized });
+        socket.emit('call:end', { callId: normalized }, (ack?: { ok?: boolean }) => {
+          if (ack?.ok !== false && pendingCallEndEmitRef.current === normalized) {
+            pendingCallEndEmitRef.current = null;
+          }
+        });
       } catch {
         // ignore signaling failures
       }
@@ -968,7 +981,7 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     void ensureCallSocketReady(socketRef)
       .then(emitOn)
       .catch(() => {
-        // ignore — peer may still see end via session timeout / other path
+        // REST session/end still notifies peer when local hangup completes.
       });
   }, []);
 
@@ -998,6 +1011,21 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   });
 
   const signedInAccountId = user?._id ?? null;
+
+  useEffect(() => {
+    if (!isSignedIn) return;
+    const keepCallSocketAlive = (): void => {
+      const socket = socketRef.current;
+      if (socket && !socket.connected) socket.connect();
+    };
+    keepCallSocketAlive();
+    const sub = AppState.addEventListener('change', (state: AppStateStatus) => {
+      if (state === 'active' || state === 'background' || state === 'inactive') {
+        keepCallSocketAlive();
+      }
+    });
+    return () => sub.remove();
+  }, [isSignedIn, signedInAccountId]);
 
   useEffect(() => {
     if (!isSignedIn || user?.role !== 'receiver') return;
@@ -1125,6 +1153,7 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         }
       });
       socket.on('connect', () => {
+        activeCallRecoveryHandlerRef.current?.();
         socket.emit('call:queue:set', { active: queueModeRef.current }, () => {});
         const pendingHold = pendingCallHoldEmitRef.current;
         if (pendingHold) {
@@ -1138,6 +1167,14 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
           socket.emit('call:mute', {
             callId: pendingMute.callId,
             muted: pendingMute.muted,
+          });
+        }
+        const pendingEnd = pendingCallEndEmitRef.current;
+        if (pendingEnd) {
+          socket.emit('call:end', { callId: pendingEnd }, (ack?: { ok?: boolean }) => {
+            if (ack?.ok !== false && pendingCallEndEmitRef.current === pendingEnd) {
+              pendingCallEndEmitRef.current = null;
+            }
           });
         }
         if (userRoleRef.current === 'receiver') {
@@ -1310,8 +1347,8 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         acceptedIncomingCallIdsRef.current.delete(payload.callId);
         clearOutgoingCallSessionRef.current(payload.callId);
 
-        const onVoiceCallScreen = Boolean(remoteCallEndedHandlerRef.current);
         if (userRoleRef.current === 'receiver') {
+          const onVoiceCallScreen = Boolean(remoteCallEndedHandlerRef.current);
           const onIntegratedVoiceCall =
             Boolean(incomingCallDismissHandlerRef.current) ||
             Boolean(incomingCallHandlerRef.current);
@@ -1319,22 +1356,21 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
             !onIntegratedVoiceCall &&
             !onVoiceCallScreen &&
             activeIncomingCallUiCallIdRef.current === payload.callId;
-          if (onIntegratedVoiceCall || onVoiceCallScreen || legacyIncomingScreen) {
+          if (onIntegratedVoiceCall || legacyIncomingScreen) {
             clearReceiverIncomingCallUi(payload.callId);
-            remoteCallEndedHandlerRef.current?.(payload.callId);
-            if (legacyIncomingScreen) {
-              const goHome = (): boolean => {
-                const n = navigationRef.current;
-                if (!n?.isReady()) return false;
-                n.navigate('Home', { screen: 'ReceiverMainTabs', params: { screen: 'ReceiverHome' } });
-                return true;
-              };
-              if (!goHome()) scheduleNavigateWhenReady(goHome, outgoingNavigateGeneration);
-            }
           }
-        } else if (userRoleRef.current === 'caller' && onVoiceCallScreen) {
-          remoteCallEndedHandlerRef.current?.(payload.callId);
+          if (legacyIncomingScreen) {
+            const goHome = (): boolean => {
+              const n = navigationRef.current;
+              if (!n?.isReady()) return false;
+              n.navigate('Home', { screen: 'ReceiverMainTabs', params: { screen: 'ReceiverHome' } });
+              return true;
+            };
+            if (!goHome()) scheduleNavigateWhenReady(goHome, outgoingNavigateGeneration);
+          }
         }
+
+        remoteCallEndedHandlerRef.current?.(payload.callId);
 
         const waiter = pendingInviteOutcomeRef.current.get(payload.callId);
         if (waiter) {
@@ -1368,6 +1404,7 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       setIncomingCallHandler,
       setIncomingCallDismissHandler,
       setRemoteCallEndedHandler,
+      setActiveCallRecoveryHandler,
       setPeerCallHoldHandler,
       setPeerCallMuteHandler,
       emitCallEnd,
@@ -1390,6 +1427,7 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       setIncomingCallHandler,
       setIncomingCallDismissHandler,
       setRemoteCallEndedHandler,
+      setActiveCallRecoveryHandler,
       setPeerCallHoldHandler,
       setPeerCallMuteHandler,
       emitCallEnd,

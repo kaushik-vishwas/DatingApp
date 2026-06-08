@@ -84,6 +84,25 @@ export function emitCallerOnlineToReceiver(
   ioInstance.to(room).emit('caller:online', payload);
 }
 
+/** Notify both call participants that the voice session ended (REST fallback when socket `call:end` is missed). */
+export function emitCallEndedToParticipants(
+  callId: string,
+  callerId: string,
+  receiverId: string,
+  fromType: 'u' | 'r',
+  fromId: string
+): void {
+  if (!ioInstance) return;
+  const payload = {
+    callId: String(callId).trim(),
+    fromType,
+    fromId: String(fromId).trim(),
+  };
+  if (!payload.callId) return;
+  ioInstance.to(accountRoom('u', callerId)).emit('call:ended', payload);
+  ioInstance.to(accountRoom('r', receiverId)).emit('call:ended', payload);
+}
+
 export function emitReceiverWithdrawalUpdate(
   accountId: string,
   payload: {

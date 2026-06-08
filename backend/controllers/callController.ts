@@ -20,7 +20,7 @@ import {
   resolveFixedRatePerMinuteAt,
 } from '../services/receiverEarningModel';
 import { pickRandomQueuedReceiverForCaller } from '../services/callQueue';
-import { isReceiverSocketConnected } from '../socket/socketRegistry';
+import { emitCallEndedToParticipants, isReceiverSocketConnected } from '../socket/socketRegistry';
 import {
   releaseReceiverReservation,
   syncReceiverQueueState,
@@ -589,6 +589,14 @@ export const endVoiceSession = async (
 
     const settled = await settleCallSession(callId, true);
     if (settled.justCompleted) {
+      const fromType = accountKind === 'user' ? 'u' : 'r';
+      emitCallEndedToParticipants(
+        callId,
+        String(current.callerId),
+        String(current.receiverId),
+        fromType,
+        meId
+      );
       void recordReceiverCallScore({
         callId,
         receiverId: settled.receiverId,
