@@ -19,11 +19,21 @@ export type IncomingCallTapEnhanceResult = {
   usedDecoratedStyle?: boolean;
 };
 
+export type SamsungCallCompatProfile = {
+  isSamsung?: boolean;
+  oneUiVersion?: number;
+  isSamsungOneUi6OrNewer?: boolean;
+  sdkInt?: number;
+  manufacturer?: string;
+  model?: string;
+};
+
 export type IncomingCallAndroidModule = {
   applyFullScreenIntentAsync(
     identifier: string,
     debugEnabled: boolean
   ): Promise<IncomingCallTapEnhanceResult>;
+  getSamsungCallCompatProfile(): SamsungCallCompatProfile;
   startCellularCallHoldWatch(): boolean;
   stopCellularCallHoldWatch(): void;
 };

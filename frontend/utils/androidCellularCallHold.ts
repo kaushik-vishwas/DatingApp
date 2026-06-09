@@ -55,8 +55,14 @@ export function stopAndroidCellularCallHoldWatch(): void {
   }
 }
 
+export type CellularCallHoldEvent = {
+  active: boolean;
+  audioMode?: number;
+  source?: string;
+};
+
 export function subscribeAndroidCellularCallHold(
-  handler: (active: boolean, audioMode?: number) => void
+  handler: (event: CellularCallHoldEvent) => void
 ): () => void {
   const ev = getEmitter();
   if (!ev) {
@@ -64,8 +70,12 @@ export function subscribeAndroidCellularCallHold(
   }
   const sub: EventSubscription = ev.addListener(
     'onCellularCallStateChanged',
-    (payload: { active?: boolean; audioMode?: number }) => {
-      handler(Boolean(payload?.active), payload?.audioMode);
+    (payload: { active?: boolean; audioMode?: number; source?: string }) => {
+      handler({
+        active: Boolean(payload?.active),
+        audioMode: payload?.audioMode,
+        source: typeof payload?.source === 'string' ? payload.source : undefined,
+      });
     }
   );
   return () => sub.remove();

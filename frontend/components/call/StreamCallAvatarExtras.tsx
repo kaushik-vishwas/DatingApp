@@ -14,7 +14,9 @@ import {
   HOLD_REMOTE_LEFT_DEBOUNCE_MS,
   isCallHoldGuardActive,
   NORMAL_REMOTE_LEFT_DEBOUNCE_MS,
+  setGsmInterruptPending,
 } from '../../utils/callDiagnostics';
+import { isSamsungOneUi6OrNewer } from '../../utils/samsungCallCompat';
 
 const AUDIO_MODE_IN_CALL = 2;
 const AUDIO_MODE_IN_COMMUNICATION = 3;
@@ -187,10 +189,11 @@ export function StreamSystemHoldBridge({
       return;
     }
 
-    const unsubCellular = subscribeAndroidCellularCallHold((active, audioMode) => {
+    const unsubCellular = subscribeAndroidCellularCallHold(({ active, audioMode, source }) => {
       if (userChosenMuteRef.current) {
         if (holdActiveRef.current) applyHoldState(false);
-        callDiag.info('gsm_hold_skipped_user_muted', { active, audioMode });
+        setGsmInterruptPending(false);
+        callDiag.info('gsm_hold_skipped_user_muted', { active, audioMode, source });
         return;
       }
       if (callingStateRef.current !== CallingState.JOINED) return;
@@ -200,13 +203,17 @@ export function StreamSystemHoldBridge({
           : audioMode === AUDIO_MODE_IN_COMMUNICATION
             ? 'MODE_IN_COMMUNICATION'
             : `mode_${audioMode ?? 'unknown'}`;
+      const samsung = isSamsungOneUi6OrNewer();
       if (active) {
-        callDiag.gsmDetected({ audioMode, modeLabel });
-        callDiag.gsmAnswered({ audioMode, modeLabel });
-      } else {
-        callDiag.gsmEnded({ audioMode, modeLabel });
+        setGsmInterruptPending(true);
+        callDiag.gsmDetected({ audioMode, modeLabel, source, samsung });
+        callDiag.gsmAnswered({ audioMode, modeLabel, source, samsung });
+        applyHoldState(true);
+        return;
       }
-      applyHoldState(active);
+      setGsmInterruptPending(false);
+      callDiag.gsmEnded({ audioMode, modeLabel, source, samsung });
+      applyHoldState(false);
     });
     startAndroidCellularCallHoldWatch();
 
@@ -281,6 +288,7 @@ export function StreamRemotePeerLeftBridge({
   const hadRemoteRef = useRef(false);
   const emptySinceRef = useRef<number | null>(null);
   const localLeftSinceRef = useRef<number | null>(null);
+  const liveSnapshotCountRef = useRef<number | null>(null);
   const onRemotePeerLeftRef = useRef(onRemotePeerLeft);
   const callingStateRef = useRef(callingState);
   const remoteParticipantsRef = useRef(remoteParticipants);
@@ -299,12 +307,21 @@ export function StreamRemotePeerLeftBridge({
       return;
     }
     callDiag.participantLeft({ reason, ...extra });
-    callDiag.callEndReason(`stream_${reason}`, extra ?? {});
+    callDiag.callEndReason(`stream_${reason}`, {
+      endCategory: reason === 'remote_empty' ? 'stream_participant_lost' : 'stream_state_change',
+      ...extra,
+    });
     onRemotePeerLeftRef.current(reason);
   };
 
   useEffect(() => {
     const remoteCount = remoteParticipants.length;
+    callDiag.remoteParticipantCountChanged(
+      liveSnapshotCountRef.current,
+      remoteCount,
+      'stream_remote_participants_hook'
+    );
+    liveSnapshotCountRef.current = remoteCount;
     callDiag.updateLive({ remoteParticipantCount: remoteCount });
 
     if (callingState !== CallingState.JOINED) {

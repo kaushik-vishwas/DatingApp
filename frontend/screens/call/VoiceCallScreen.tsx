@@ -42,10 +42,20 @@ import {
 } from '../../utils/voiceCallSessionStart';
 import {
   callDiag,
+  categorizeEndSource,
   ensureCallDiagnosticsAppStateHook,
+  isCallHoldGuardActive,
+  logEndingRefChange,
+  setGsmInterruptPending,
   updateCallDiagnosticsLiveState,
   setCallDiagnosticsContext,
 } from '../../utils/callDiagnostics';
+import {
+  getSamsungCallCompatProfile,
+  isSamsungOneUi6OrNewer,
+  SAMSUNG_GSM_TEARDOWN_TIMEOUT_MS,
+  STUCK_CALL_END_RESET_MS,
+} from '../../utils/samsungCallCompat';
 
 type StreamSdkModule = {
   StreamVideo: React.ComponentType<{ client: unknown; children: React.ReactNode }>;
@@ -302,6 +312,13 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
   const signalSocketRef = useRef<Socket | null>(null);
   const readyRef = useRef(false);
   const endingRef = useRef(false);
+  const endingStartedAtRef = useRef(0);
+  const setEnding = useCallback((next: boolean, reason: string, details?: Record<string, unknown>) => {
+    endingRef.current = next;
+    logEndingRefChange(next, reason, details);
+  }, []);
+  const deferredEndDuringGsmRef = useRef<{ endedCallId: string; source: string } | null>(null);
+  const speakerOnRef = useRef(true);
   const endedSessionRef = useRef(false);
   const endedSessionResultRef = useRef<{ canRate: boolean; durationSec: number } | null>(null);
   const endSessionPromiseRef = useRef<Promise<{ canRate: boolean; durationSec: number } | null> | null>(null);
@@ -318,6 +335,9 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
 
   useEffect(() => {
     ensureCallDiagnosticsAppStateHook();
+    if (Platform.OS === 'android') {
+      callDiag.info('samsung_call_compat', getSamsungCallCompatProfile());
+    }
     const bootId = getVoiceBootstrap(callParams)?.callId ?? callIdRef.current;
     setCallDiagnosticsContext(bootId || null, user?.role ?? null);
     if (bootId) {
@@ -510,7 +530,11 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
       if (systemCallHoldRef.current === onHold) return;
       systemCallHoldRef.current = onHold;
       setSystemCallHold(onHold);
+      setGsmInterruptPending(onHold);
       emitPeerCallHold(onHold);
+      callDiag.info(onHold ? 'system_hold_applied' : 'system_hold_cleared', {
+        samsung: isSamsungOneUi6OrNewer(),
+      });
     },
     [emitPeerCallHold]
   );
@@ -561,6 +585,10 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
   useEffect(() => {
     mutedRef.current = muted;
   }, [muted]);
+
+  useEffect(() => {
+    speakerOnRef.current = speakerOn;
+  }, [speakerOn]);
 
   useEffect(() => {
     return () => {
@@ -685,12 +713,42 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
     return callerMeetsRatingThreshold(end?.durationSec);
   };
 
+  const leaveMediaWithTimeout = async (timeoutMs: number): Promise<void> => {
+    await Promise.race([
+      leaveMedia(),
+      new Promise<void>((resolve) => {
+        setTimeout(resolve, timeoutMs);
+      }),
+    ]);
+  };
+
   const finishCallerCallEnd = async (): Promise<void> => {
-    await leaveMedia();
+    const startedAt = Date.now();
+    const timeoutMs =
+      systemCallHoldRef.current || isSamsungOneUi6OrNewer()
+        ? SAMSUNG_GSM_TEARDOWN_TIMEOUT_MS
+        : 8_000;
+    await leaveMediaWithTimeout(timeoutMs);
+    const durationMs = Date.now() - startedAt;
+    if (durationMs >= timeoutMs - 100) {
+      callDiag.failure('leave_media_timeout', { timeoutMs, durationMs });
+    }
     if (await shouldShowCallerRating()) {
+      callDiag.hangupDisconnectComplete({
+        path: 'caller_rating_prompt',
+        durationMs,
+        endCategory: 'manual_hangup',
+      });
+      callDiag.finalizeCallOutcome('user_hangup', { path: 'caller_rating_prompt', durationMs });
       showRatingPrompt();
       return;
     }
+    callDiag.hangupDisconnectComplete({
+      path: 'caller_exit',
+      durationMs,
+      endCategory: 'manual_hangup',
+    });
+    callDiag.finalizeCallOutcome('user_hangup', { path: 'caller_exit', durationMs });
     exitCallScreen();
   };
   const finishCallerCallEndRef = useRef(finishCallerCallEnd);
@@ -711,7 +769,8 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
 
   const teardownFromRemotePeerEnd = useCallback(async (): Promise<void> => {
     if (endingRef.current) return;
-    endingRef.current = true;
+    setEnding(true, 'teardown_from_remote_peer_end', { role: userRoleRef.current });
+    endingStartedAtRef.current = Date.now();
     talkActiveRef.current = false;
     setTalkActive(false);
     void leaveMediaRef.current();
@@ -721,7 +780,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
       return;
     }
     exitCallScreenRef.current();
-  }, []);
+  }, [setEnding]);
   const teardownFromRemotePeerEndRef = useRef(teardownFromRemotePeerEnd);
   teardownFromRemotePeerEndRef.current = teardownFromRemotePeerEnd;
 
@@ -739,22 +798,72 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
     }
   };
 
+  const shouldDeferEndDuringGsm = useCallback((source: string): boolean => {
+    if (source === 'user_hangup') return false;
+    if (systemCallHoldRef.current) return true;
+    if (isCallHoldGuardActive() && source.startsWith('stream_')) return true;
+    if (
+      isSamsungOneUi6OrNewer() &&
+      isCallHoldGuardActive() &&
+      (source.startsWith('socket_') || source === 'session_sync_completed')
+    ) {
+      return true;
+    }
+    return false;
+  }, []);
+
   const handlePeerCallEnded = useCallback((endedCallId: string, source = 'unknown'): void => {
     if (!matchesActiveCallIdRef.current(endedCallId)) return;
-    callDiag.callEnded(source, { endedCallId, role: userRoleRef.current });
+    if (shouldDeferEndDuringGsm(source)) {
+      deferredEndDuringGsmRef.current = { endedCallId, source };
+      callDiag.callEndSuppressed(source, {
+        reason: 'deferred_during_gsm',
+        deferredDuringGsm: true,
+        systemCallHold: systemCallHoldRef.current,
+        endCategory: categorizeEndSource(source),
+      });
+      callDiag.stateMismatch(
+        'remote_ended_during_local_gsm',
+        'Remote/signal reported call end while this device was on GSM hold — end deferred',
+        { source, endedCallId, systemCallHold: systemCallHoldRef.current }
+      );
+      return;
+    }
+    callDiag.callEnded(source, {
+      endedCallId,
+      role: userRoleRef.current,
+      endCategory: categorizeEndSource(source),
+    });
     const role = userRoleRef.current;
     if (role === 'caller') {
       if (endingRef.current) return;
-      endingRef.current = true;
+      setEnding(true, 'handle_peer_call_ended_caller', { source, endedCallId });
+      endingStartedAtRef.current = Date.now();
       talkActiveRef.current = false;
       setTalkActive(false);
       void finishCallerCallEndRef.current();
       return;
     }
     if (role === 'receiver') {
+      if (
+        peerCallHoldRef.current &&
+        (source.startsWith('stream_') || source === 'session_sync_completed')
+      ) {
+        callDiag.callEndSuppressed(source, {
+          reason: 'peer_on_hold',
+          peerOnHold: true,
+          endCategory: categorizeEndSource(source),
+        });
+        callDiag.stateMismatch(
+          'stream_end_while_peer_on_hold',
+          'Stream/session reported end while peer is marked on hold — suppressed',
+          { source, endedCallId }
+        );
+        return;
+      }
       void teardownFromRemotePeerEndRef.current();
     }
-  }, []);
+  }, [shouldDeferEndDuringGsm, setEnding]);
   const handlePeerCallEndedRef = useRef(handlePeerCallEnded);
   handlePeerCallEndedRef.current = handlePeerCallEnded;
   const syncTalkTimingOnceRef = useRef<() => Promise<boolean>>(async () => false);
@@ -776,7 +885,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
   checkPeerEndedViaServerRef.current = checkPeerEndedViaServer;
 
   const resetReceiverToWaiting = () => {
-    endingRef.current = false;
+    setEnding(false, 'reset_receiver_to_waiting');
     endedSessionRef.current = false;
     endedSessionResultRef.current = null;
     callIdRef.current = '';
@@ -1473,31 +1582,154 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
     })();
   }, [remainingTalkSec, ready, showRemainingTalkCountdown, user?.role]);
 
+  const recoverAfterGsmHold = useCallback(async (): Promise<void> => {
+    setGsmInterruptPending(false, 'gsm_recovery');
+    const pendingEnd = deferredEndDuringGsmRef.current;
+    deferredEndDuringGsmRef.current = null;
+    callDiag.gsmRecoveryStart({
+      samsung: isSamsungOneUi6OrNewer(),
+      role: userRoleRef.current,
+      pendingEndSource: pendingEnd?.source ?? null,
+    });
+    let recoveryOk = true;
+    try {
+      await applyVoiceCallAudioMode(speakerOnRef.current);
+      callDiag.success('gsm_audio_mode_restored');
+    } catch (e) {
+      recoveryOk = false;
+      callDiag.error('gsm_audio_restore_failed', {
+        message: e instanceof Error ? e.message : String(e),
+      });
+    }
+    if (!userChosenMuteRef.current && !peerCallHoldRef.current && !systemCallHoldRef.current) {
+      try {
+        await streamMicControlRef.current?.setEnabled(true);
+        callDiag.success('gsm_mic_restored');
+      } catch (e) {
+        recoveryOk = false;
+        callDiag.error('gsm_mic_restore_failed', {
+          message: e instanceof Error ? e.message : String(e),
+        });
+      }
+    }
+    const callId = callIdRef.current.trim();
+    if (!callId) {
+      callDiag.gsmRecoveryEnd(recoveryOk, { reason: 'no_call_id' });
+      return;
+    }
+    try {
+      const { data } = await callApi.sessionSync(callId, { light: true });
+      if (data?.ok && data.status === 'completed' && !endingRef.current) {
+        const source = pendingEnd?.source ?? 'session_sync_completed';
+        const endedId = pendingEnd?.endedCallId ?? callId;
+        callDiag.gsmRecoveryEnd(false, {
+          sessionCompleted: true,
+          pendingSource: source,
+        });
+        handlePeerCallEndedRef.current(endedId, source);
+        return;
+      }
+      callDiag.gsmRecoveryEnd(recoveryOk, { sessionStatus: data?.status ?? 'unknown' });
+    } catch (e) {
+      recoveryOk = false;
+      callDiag.gsmRecoveryEnd(false, {
+        error: e instanceof Error ? e.message : String(e),
+      });
+    }
+  }, []);
+
   const hangup = async () => {
+    const hangupStartedAt = Date.now();
+    callDiag.hangupClick({
+      role: user?.role,
+      receiverSessionPhase,
+      outgoingCallerPhase,
+      endingRef: endingRef.current,
+      systemCallHold: systemCallHoldRef.current,
+      peerCallHold: peerCallHoldRef.current,
+      talkActive: talkActiveRef.current,
+    });
+
     if (receiverAvailabilitySession && receiverSessionPhase === 'waiting') {
       allowLeaveCallScreenRef.current = true;
+      callDiag.hangupDisconnectStart({ path: 'receiver_waiting_exit' });
       exitCallScreen();
+      callDiag.hangupDisconnectComplete({
+        path: 'receiver_waiting_exit',
+        durationMs: Date.now() - hangupStartedAt,
+      });
       return;
     }
     if (receiverAvailabilitySession && receiverSessionPhase === 'incoming') {
+      callDiag.hangupDisconnectStart({ path: 'receiver_decline_incoming' });
       onRejectIncomingOnSession();
+      callDiag.hangupDisconnectComplete({
+        path: 'receiver_decline_incoming',
+        durationMs: Date.now() - hangupStartedAt,
+      });
       return;
     }
 
     const outboundPhase = getOutgoingCallerPhase(route.params as VoiceCallScreenParams);
     if (user?.role === 'caller' && outboundPhase === 'ringing') {
-      if (endingRef.current) return;
-      endingRef.current = true;
+      if (endingRef.current) {
+        callDiag.hangupBlocked('ending_in_progress_ringing_cancel', {
+          stuckMs: Date.now() - endingStartedAtRef.current,
+        });
+        return;
+      }
+      setEnding(true, 'hangup_cancel_outbound_ringing');
+      endingStartedAtRef.current = Date.now();
+      callDiag.hangupDisconnectStart({ path: 'caller_cancel_ringing' });
       cancelOutgoingCallInvite();
       exitCallScreen();
+      callDiag.hangupDisconnectComplete({
+        path: 'caller_cancel_ringing',
+        durationMs: Date.now() - hangupStartedAt,
+        endCategory: 'manual_hangup',
+      });
       return;
     }
-    if (endingRef.current) return;
-    endingRef.current = true;
+
+    if (endingRef.current) {
+      const stuckMs = Date.now() - endingStartedAtRef.current;
+      const allowForceReset =
+        systemCallHoldRef.current || stuckMs >= STUCK_CALL_END_RESET_MS;
+      if (!allowForceReset) {
+        callDiag.hangupBlocked('ending_in_progress', {
+          stuckMs,
+          systemCallHold: systemCallHoldRef.current,
+        });
+        return;
+      }
+      setEnding(false, 'force_hangup_reset', { stuckMs, gsmHold: systemCallHoldRef.current });
+      deferredEndDuringGsmRef.current = null;
+      callDiag.info('force_hangup_reset', {
+        stuckMs,
+        gsmHold: systemCallHoldRef.current,
+      });
+    }
+
+    setEnding(true, 'hangup_user_disconnect');
+    endingStartedAtRef.current = Date.now();
     talkActiveRef.current = false;
     setTalkActive(false);
+    deferredEndDuringGsmRef.current = null;
+    setGsmInterruptPending(false, 'hangup');
 
-    callDiag.callEnded('user_hangup', { role: user?.role });
+    callDiag.hangupDisconnectStart({
+      path: user?.role === 'caller' ? 'caller_hangup' : 'receiver_hangup',
+      role: user?.role,
+    });
+    callDiag.callEnded(
+      'user_hangup',
+      {
+        role: user?.role,
+        endCategory: 'manual_hangup',
+        initiatedBy: 'local',
+      },
+      { finalize: false }
+    );
     emitCallEnd();
 
     if (user?.role === 'caller') {
@@ -1505,14 +1737,34 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
       return;
     }
 
-    await leaveMedia();
+    const disconnectStartedAt = Date.now();
+    await leaveMediaWithTimeout(
+      systemCallHoldRef.current ? SAMSUNG_GSM_TEARDOWN_TIMEOUT_MS : 8_000
+    );
     void ensureSessionEnded();
 
     if (receiverAvailabilitySession && Boolean(user?.isAvailable)) {
+      const resetMs = Date.now() - disconnectStartedAt;
+      callDiag.hangupDisconnectComplete({
+        path: 'receiver_reset_to_waiting',
+        durationMs: resetMs,
+        endCategory: 'manual_hangup',
+      });
+      callDiag.finalizeCallOutcome('user_hangup', {
+        path: 'receiver_reset_to_waiting',
+        durationMs: resetMs,
+      });
       resetReceiverToWaiting();
       return;
     }
 
+    const receiverExitMs = Date.now() - disconnectStartedAt;
+    callDiag.hangupDisconnectComplete({
+      path: 'receiver_exit',
+      durationMs: receiverExitMs,
+      endCategory: 'manual_hangup',
+    });
+    callDiag.finalizeCallOutcome('user_hangup', { path: 'receiver_exit', durationMs: receiverExitMs });
     exitCallScreen();
   };
 
@@ -1571,16 +1823,18 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
 
   const handleStreamSystemHold = useCallback(
     (onHold: boolean) => {
-      if (endingRef.current) return;
       if (onHold) {
-        applySystemCallHold(true);
+        if (!endingRef.current) {
+          applySystemCallHold(true);
+        }
         return;
       }
       if (!peerCallHoldRef.current) {
         applySystemCallHold(false);
       }
+      void recoverAfterGsmHold();
     },
-    [applySystemCallHold]
+    [applySystemCallHold, recoverAfterGsmHold]
   );
 
   const showStreamChrome = ready && Boolean(client) && Boolean(call) && Boolean(sdk);
@@ -1656,13 +1910,6 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
           style={StyleSheet.absoluteFillObject}
         />
         <View style={[styles.overlay, { paddingTop: Math.max(insets.top + 16, 36) }]}>
-          <TouchableOpacity
-            style={styles.bugReportBtn}
-            onPress={() => (navigation as { navigate: (n: string) => void }).navigate('CallDiagnostics')}
-            activeOpacity={0.85}
-          >
-            <Text style={styles.bugReportText}>Bug Report</Text>
-          </TouchableOpacity>
           <View style={styles.statusPill}>
             <Text style={styles.statusText}>{shellStatusLabel}</Text>
           </View>
@@ -1925,13 +2172,6 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
             />
           ) : null}
           <View style={[styles.overlay, { paddingTop: Math.max(insets.top + 16, 36) }]}>
-            <TouchableOpacity
-              style={styles.bugReportBtn}
-              onPress={() => (navigation as { navigate: (n: string) => void }).navigate('CallDiagnostics')}
-              activeOpacity={0.85}
-            >
-              <Text style={styles.bugReportText}>Bug Report</Text>
-            </TouchableOpacity>
             <View style={styles.statusPill}>
               <Text style={styles.statusText}>
                 {systemCallHold
@@ -2116,19 +2356,6 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(233, 213, 255, 0.45)',
   },
   statusText: { color: '#faf5ff', fontSize: 12, fontWeight: '800' },
-  bugReportBtn: {
-    position: 'absolute',
-    top: 8,
-    right: 12,
-    zIndex: 20,
-    backgroundColor: 'rgba(30, 11, 61, 0.88)',
-    borderRadius: 10,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderWidth: 1,
-    borderColor: 'rgba(167, 139, 250, 0.45)',
-  },
-  bugReportText: { color: '#e9d5ff', fontSize: 11, fontWeight: '800' },
   avatarRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',

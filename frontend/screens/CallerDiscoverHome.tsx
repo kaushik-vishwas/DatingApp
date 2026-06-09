@@ -38,6 +38,7 @@ import { resolveProfileImageSource } from '../utils/avatarSource';
 import { getReceiverPresenceInfo, sortDiscoverReceivers } from '../utils/receiverStatus';
 import { withTimeout } from '../utils/withTimeout';
 import SelectoLogo from '../assets/SelectoLogo.png'
+import { CallDiagnosticsTopBarButton } from '../components/call/CallDiagnosticsTopBarButton'
 import NoticeBg from '../assets/noticeBg.png'
 
 const PURPLE = '#7b2cff';
@@ -102,6 +103,7 @@ type DiscoverStickyTopProps = {
   userInitial: string;
   onWalletPress: () => void;
   onProfilePress: () => void;
+  onDiagnosticsPress: () => void;
 };
 
 const DiscoverStickyTop = React.memo(function DiscoverStickyTop({
@@ -110,12 +112,16 @@ const DiscoverStickyTop = React.memo(function DiscoverStickyTop({
   userInitial,
   onWalletPress,
   onProfilePress,
+  onDiagnosticsPress,
 }: DiscoverStickyTopProps): React.JSX.Element {
   return (
     <View style={styles.stickyTopCard}>
       <View style={styles.topSection}>
         <View style={styles.topBar}>
-          <Image source={SelectoLogo} style={styles.brandLogo} resizeMode="contain" />
+          <View style={styles.topBarLeft}>
+            <Image source={SelectoLogo} style={styles.brandLogo} resizeMode="contain" />
+            <CallDiagnosticsTopBarButton onPress={onDiagnosticsPress} />
+          </View>
           <View style={styles.topRight}>
             <TouchableOpacity style={styles.walletCapsule} onPress={onWalletPress} activeOpacity={0.85}>
               <View style={styles.walletContainer}>
@@ -445,6 +451,10 @@ export default function CallerDiscoverHome(): React.JSX.Element {
     navigation.navigate('CallerProfile');
   }, [navigation]);
 
+  const onDiagnosticsPress = useCallback(() => {
+    navigation.navigate('CallDiagnostics');
+  }, [navigation]);
+
   const openFilterModal = useCallback(() => {
     setModalDraft({ ...appliedFilters });
     setFilterModalVisible(true);
@@ -657,6 +667,7 @@ export default function CallerDiscoverHome(): React.JSX.Element {
             userInitial={user?.name?.charAt(0) ?? '?'}
             onWalletPress={onWalletPress}
             onProfilePress={onProfilePress}
+            onDiagnosticsPress={onDiagnosticsPress}
           />
 
           <FlatList
@@ -732,6 +743,12 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+  },
+  topBarLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    flexShrink: 1,
   },
   brandLogo: {
     width: 140,

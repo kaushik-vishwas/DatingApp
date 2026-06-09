@@ -36,6 +36,7 @@ import type {
 import { type ReceiverPresenceInfo } from '../utils/receiverStatus';
 import { resolveProfileImageSource } from '../utils/avatarSource';
 import SelectoLogo from '../assets/SelectoLogo.png';
+import { CallDiagnosticsTopBarButton } from '../components/call/CallDiagnosticsTopBarButton';
 import EarningsCardBg from '../assets/earnBg.png';
 import InstructionsCardBg from '../assets/instructionBg.png';
 import NoticeBg from '../assets/noticeBg.png'
@@ -370,11 +371,16 @@ export default function ReceiverHomeDashboard(): React.JSX.Element {
       >
         <View style={styles.topSection}>
           <View style={styles.topBar}>
-            <Image
-              source={SelectoLogo}
-              style={styles.brandLogo}
-              resizeMode="contain"
-            />
+            <View style={styles.topBarLeft}>
+              <Image
+                source={SelectoLogo}
+                style={styles.brandLogo}
+                resizeMode="contain"
+              />
+              <CallDiagnosticsTopBarButton
+                onPress={() => navigation.navigate('CallDiagnostics')}
+              />
+            </View>
             <View style={styles.topRight}>
               {showScoreInTopBar ? (
                 <TouchableOpacity
@@ -747,6 +753,12 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+  },
+  topBarLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    flexShrink: 1,
   },
   brandLogo: {
     width: 140,

@@ -30,12 +30,20 @@ class IncomingCallAndroidModule : Module() {
       result.toLogMap()
     }
 
+    Function("getSamsungCallCompatProfile") {
+      SamsungCallCompat.deviceProfile()
+    }
+
     Function("startCellularCallHoldWatch") {
       val context = appContext.reactContext ?: return@Function false
-      CellularCallHoldWatcher.start(context) { active, audioMode ->
+      CellularCallHoldWatcher.start(context) { active, audioMode, source ->
         sendEvent(
           "onCellularCallStateChanged",
-          mapOf("active" to active, "audioMode" to audioMode)
+          mapOf(
+            "active" to active,
+            "audioMode" to audioMode,
+            "source" to source
+          )
         )
       }
       true

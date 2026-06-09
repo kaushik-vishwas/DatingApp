@@ -17,42 +17,83 @@ import type { ReceiverStackParamList } from '../../navigation/ReceiverStackParam
 import {
   clearCallDiagnostics,
   formatCallDiagnosticsForExport,
-  getCallDiagnosticEntries,
   getCallDiagnosticsDeviceSummary,
-  getCallDiagnosticsSnapshot,
+  getCallOutcomeSummary,
+  getLastCallDiagnosticEntries,
+  getLastCallDiagnosticsSummary,
+  hydrateCallDiagnosticsFromStorage,
   subscribeCallDiagnostics,
+  type CallOutcomeSummary,
 } from '../../utils/callDiagnostics';
 
 type Props =
   | NativeStackScreenProps<CallerStackParamList, 'CallDiagnostics'>
   | NativeStackScreenProps<ReceiverStackParamList, 'CallDiagnostics'>;
 
+function outcomeLines(summary: CallOutcomeSummary): string[] {
+  return [
+    `Ended at: ${summary.endedAt}`,
+    `End category: ${summary.endCategory}`,
+    `End source: ${summary.endSource}`,
+    `Initiated end: ${summary.initiatedEndBy}`,
+    `Received end: ${summary.receivedEndBy}`,
+    `Why ended: ${summary.whyCallEnded}`,
+    `Last Stream state: ${summary.lastStreamState ?? '—'}`,
+    `Last participant count: ${summary.lastParticipantCount ?? '—'}`,
+    `Last system hold: ${summary.lastSystemCallHold}`,
+    `Last peer hold: ${summary.lastPeerCallHold}`,
+    `Last GSM pending: ${summary.lastGsmInterruptPending}`,
+    `Last success: ${summary.lastSuccessfulAction ?? '—'}`,
+    `Last failure: ${summary.lastFailedAction ?? '—'}`,
+    `First mismatch: ${summary.firstMismatchCause ?? 'none'}`,
+    `Mismatch count: ${summary.stateMismatches.length}`,
+  ];
+}
+
 export default function CallDiagnosticsScreen({ navigation }: Props): React.JSX.Element {
   const insets = useSafeAreaInsets();
   const [, bump] = useState(0);
   const refresh = useCallback(() => bump((n) => n + 1), []);
 
-  React.useEffect(() => subscribeCallDiagnostics(refresh), [refresh]);
+  React.useEffect(() => {
+    void hydrateCallDiagnosticsFromStorage().then(refresh);
+    return subscribeCallDiagnostics(refresh);
+  }, [refresh]);
 
-  const entries = getCallDiagnosticEntries();
-  const snapshot = getCallDiagnosticsSnapshot();
+  const lastSummary = getLastCallDiagnosticsSummary();
+  const outcome = getCallOutcomeSummary() ?? lastSummary.outcomeSummary;
+  const entries = getLastCallDiagnosticEntries();
+  const snapshot = lastSummary.snapshot;
   const device = getCallDiagnosticsDeviceSummary();
 
-  const snapshotLines = useMemo(
-    () => [
-      `Call ID: ${snapshot.callId ?? '—'}`,
+  const snapshotLines = useMemo(() => {
+    if (!snapshot) {
+      return ['No call session recorded yet.'];
+    }
+    return [
+      `Call ID: ${lastSummary.callId ?? '—'}`,
+      `Ended: ${lastSummary.endedAt ?? 'in progress / unknown'}`,
+      `End reason: ${lastSummary.endReason ?? '—'}`,
+      `End category: ${lastSummary.endCategory ?? '—'}`,
+      `Issues flagged: ${lastSummary.issueCount}`,
+      `Final 60s entries: ${lastSummary.finalWindowCount}`,
       `Role: ${snapshot.userRole ?? '—'}`,
       `Ready: ${snapshot.ready}`,
       `Talk active: ${snapshot.talkActive}`,
       `Ending: ${snapshot.ending}`,
       `System hold: ${snapshot.systemCallHold}`,
       `Peer hold: ${snapshot.peerCallHold}`,
+      `GSM pending: ${snapshot.gsmInterruptPending}`,
       `Hold guard: ${snapshot.holdGraceActive}`,
       `App background: ${snapshot.appInBackground}`,
       `Stream state: ${snapshot.streamCallingState ?? '—'}`,
       `Remote participants: ${snapshot.remoteParticipantCount ?? '—'}`,
-    ],
-    [snapshot]
+    ];
+  }, [lastSummary, snapshot]);
+
+  const mismatchEntries = useMemo(
+    () => entries.filter((e) => e.eventType === 'state_mismatch'),
+    [entries]
   );
 
   const onCopy = async (): Promise<void> => {
@@ -89,7 +130,7 @@ export default function CallDiagnosticsScreen({ navigation }: Props): React.JSX.
   };
 
   const onClear = (): void => {
-    Alert.alert('Clear logs?', 'This removes in-memory diagnostics for this session.', [
+    Alert.alert('Clear logs?', 'This removes persisted and in-memory diagnostics.', [
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Clear',
@@ -108,7 +149,7 @@ export default function CallDiagnosticsScreen({ navigation }: Props): React.JSX.
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
           <Text style={styles.backText}>← Back</Text>
         </TouchableOpacity>
-        <Text style={styles.title}>Call diagnostics</Text>
+        <Text style={styles.title}>Last call logs</Text>
         <View style={styles.backBtn} />
       </View>
 
@@ -122,7 +163,33 @@ export default function CallDiagnosticsScreen({ navigation }: Props): React.JSX.
           ))}
         </View>
 
-        <Text style={styles.sectionTitle}>Live call state</Text>
+        {outcome ? (
+          <>
+            <Text style={styles.sectionTitle}>Call outcome summary</Text>
+            <View style={[styles.card, styles.outcomeCard]}>
+              {outcomeLines(outcome).map((line) => (
+                <Text key={line} style={styles.line}>
+                  {line}
+                </Text>
+              ))}
+            </View>
+          </>
+        ) : null}
+
+        {mismatchEntries.length > 0 ? (
+          <>
+            <Text style={styles.sectionTitle}>State mismatches ({mismatchEntries.length})</Text>
+            {mismatchEntries.map((e) => (
+              <View key={e.id} style={[styles.logRow, styles.mismatchRow]}>
+                <Text style={styles.logTime}>{e.timestamp}</Text>
+                <Text style={styles.logType}>{String(e.details.kind ?? 'mismatch')}</Text>
+                <Text style={styles.logDetail}>{String(e.details.description ?? '')}</Text>
+              </View>
+            ))}
+          </>
+        ) : null}
+
+        <Text style={styles.sectionTitle}>Last call state</Text>
         <View style={styles.card}>
           {snapshotLines.map((line) => (
             <Text key={line} style={styles.line}>
@@ -145,13 +212,25 @@ export default function CallDiagnosticsScreen({ navigation }: Props): React.JSX.
 
         <Text style={styles.sectionTitle}>Event log ({entries.length})</Text>
         {entries.length === 0 ? (
-          <Text style={styles.empty}>No events captured yet.</Text>
+          <Text style={styles.empty}>
+            No last call logs yet. Finish a call and open this screen from the home top bar. Logs
+            persist across app restarts.
+          </Text>
         ) : (
           entries.map((e) => (
-            <View key={e.id} style={styles.logRow}>
+            <View
+              key={e.id}
+              style={[
+                styles.logRow,
+                e.eventType === 'state_mismatch' || e.eventType === 'call_end_suppressed'
+                  ? styles.mismatchRow
+                  : null,
+                e.eventType === 'hangup_blocked' ? styles.blockedRow : null,
+              ]}
+            >
               <Text style={styles.logTime}>{e.timestamp}</Text>
               <Text style={styles.logType}>{e.eventType}</Text>
-              <Text style={styles.logDetail} numberOfLines={4}>
+              <Text style={styles.logDetail} numberOfLines={8}>
                 {JSON.stringify(e.details)}
               </Text>
             </View>
@@ -191,6 +270,10 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(167,139,250,0.2)',
   },
+  outcomeCard: {
+    borderColor: 'rgba(250,204,21,0.45)',
+    backgroundColor: 'rgba(69,26,3,0.45)',
+  },
   line: { color: '#ede9fe', fontSize: 12, marginBottom: 4 },
   actions: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginVertical: 14 },
   actionBtn: {
@@ -209,6 +292,13 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(30,11,61,0.8)',
     borderWidth: 1,
     borderColor: 'rgba(124,58,237,0.25)',
+  },
+  mismatchRow: {
+    borderColor: 'rgba(248,113,113,0.55)',
+    backgroundColor: 'rgba(69,10,10,0.55)',
+  },
+  blockedRow: {
+    borderColor: 'rgba(251,191,36,0.55)',
   },
   logTime: { color: '#a78bfa', fontSize: 10 },
   logType: { color: '#faf5ff', fontWeight: '800', fontSize: 12, marginVertical: 2 },
