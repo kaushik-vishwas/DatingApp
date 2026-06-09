@@ -40,6 +40,12 @@ import {
   clearVoiceSessionStartInflight,
   getVoiceSessionStartPromise,
 } from '../../utils/voiceCallSessionStart';
+import {
+  callDiag,
+  ensureCallDiagnosticsAppStateHook,
+  updateCallDiagnosticsLiveState,
+  setCallDiagnosticsContext,
+} from '../../utils/callDiagnostics';
 
 type StreamSdkModule = {
   StreamVideo: React.ComponentType<{ client: unknown; children: React.ReactNode }>;
@@ -85,7 +91,9 @@ type StreamCallAvatarExtrasModule = {
     talkActive?: boolean;
   }>;
   StreamTalkTimingBridge: React.ComponentType<{ onBothConnected: () => void }>;
-  StreamRemotePeerLeftBridge: React.ComponentType<{ onRemotePeerLeft: () => void }>;
+  StreamRemotePeerLeftBridge: React.ComponentType<{
+    onRemotePeerLeft: (reason: 'local_left' | 'remote_empty') => void;
+  }>;
   StreamMicControlBridge: React.ComponentType<{
     controlRef: React.MutableRefObject<StreamMicControl | null>;
     onMutedChange: (muted: boolean) => void;
@@ -307,6 +315,29 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
     const id = getVoiceBootstrap(callParams)?.callId;
     if (id) callIdRef.current = id;
   }, [callParams]);
+
+  useEffect(() => {
+    ensureCallDiagnosticsAppStateHook();
+    const bootId = getVoiceBootstrap(callParams)?.callId ?? callIdRef.current;
+    setCallDiagnosticsContext(bootId || null, user?.role ?? null);
+    if (bootId) {
+      callDiag.callCreated(bootId, { phase: outgoingCallerPhase ?? 'active' });
+    }
+    if (outgoingCallerPhase === 'ringing') {
+      callDiag.callRinging({ role: user?.role });
+    }
+  }, [callParams, outgoingCallerPhase, user?.role]);
+
+  useEffect(() => {
+    updateCallDiagnosticsLiveState({
+      systemCallHold,
+      peerCallHold,
+      talkActive,
+      ready,
+      ending: endingRef.current,
+      appInBackground,
+    });
+  }, [systemCallHold, peerCallHold, talkActive, ready, appInBackground]);
   const streamJoinAttemptRef = useRef(0);
   const displayNameRef = useRef(user?.name ?? 'User');
   const displayImageRef = useRef(user?.profileImage);
@@ -415,10 +446,12 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
     peerCallHoldRef.current = onHold;
     setPeerCallHold(onHold);
     if (onHold) {
+      callDiag.holdStarted('remote_socket');
       peerHoldPausedMicRef.current = true;
       void streamMicControlRef.current?.setEnabled(false).catch(() => {});
       return;
     }
+    callDiag.holdEnded('remote_socket');
     if (peerHoldPausedMicRef.current) {
       peerHoldPausedMicRef.current = false;
       if (!systemCallHoldRef.current && !userChosenMuteRef.current) {
@@ -508,9 +541,13 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
       appInBackgroundRef.current = interrupted;
       setAppInBackground(interrupted);
       // Hold is only for external phone calls (mic stolen) — not generic background.
-      if (!interrupted && !endingRef.current && readyRef.current) {
-        void applyVoiceCallAudioMode(speakerOn).catch(() => {
-          // Best-effort audio route restore after interruption.
+      if (interrupted) {
+        callDiag.audioInterruption({ appState: nextState, ready: readyRef.current });
+      } else if (!endingRef.current && readyRef.current) {
+        void applyVoiceCallAudioMode(speakerOn).catch((e) => {
+          callDiag.error('audio_mode_restore_failed', {
+            message: e instanceof Error ? e.message : String(e),
+          });
         });
       }
     });
@@ -702,8 +739,9 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
     }
   };
 
-  const handlePeerCallEnded = useCallback((endedCallId: string): void => {
+  const handlePeerCallEnded = useCallback((endedCallId: string, source = 'unknown'): void => {
     if (!matchesActiveCallIdRef.current(endedCallId)) return;
+    callDiag.callEnded(source, { endedCallId, role: userRoleRef.current });
     const role = userRoleRef.current;
     if (role === 'caller') {
       if (endingRef.current) return;
@@ -726,7 +764,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
     try {
       const { data } = await callApi.sessionSync(callId, { light: true });
       if (data?.ok && data.status === 'completed') {
-        handlePeerCallEndedRef.current(callId);
+        handlePeerCallEndedRef.current(callId, 'session_sync_completed');
         return;
       }
     } catch {
@@ -884,13 +922,14 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
       return;
     }
     setRemoteCallEndedHandler((endedCallId) => {
-      handlePeerCallEndedRef.current(endedCallId);
+      handlePeerCallEndedRef.current(endedCallId, 'socket_call_ended_main');
     });
     setActiveCallRecoveryHandler(() => {
       void checkPeerEndedViaServerRef.current();
     });
     setTalkStartedHandler((callId, talkStartedAt) => {
       if (!matchesActiveCallIdRef.current(callId)) return;
+      callDiag.info('socket_talk_started', { callId, talkStartedAt });
       applyTalkTimingFromServerRef.current({ talkStartedAt });
     });
     return () => {
@@ -985,6 +1024,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
     setIncomingResponding(true);
     void (async () => {
       try {
+        callDiag.callAccepted({ callId: incomingReq.callId });
         const boot = await acceptIncomingCallStayOnScreen(incomingReq);
         setIncomingReq(null);
         setReceiverSessionPhase(null);
@@ -1232,6 +1272,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
       });
       signalSocketRef.current = socket;
       const onVoiceSocketConnect = (): void => {
+        callDiag.connectionRestored({ socket: 'voice_duplicate' });
         const callId = callIdRef.current.trim();
         if (!callId) return;
         try {
@@ -1245,6 +1286,9 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
         }
       };
       socket.on('connect', onVoiceSocketConnect);
+      socket.on('disconnect', () => {
+        callDiag.connectionLost({ socket: 'voice_duplicate' });
+      });
       socket.on('call:hold', (payload: { callId?: string; onHold?: boolean; fromType?: 'u' | 'r' }) => {
         const myType = userRoleRef.current === 'caller' ? 'u' : 'r';
         if (payload?.fromType === myType) return;
@@ -1264,7 +1308,8 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
         if (payload?.fromType === myType) return;
         const id = typeof payload?.callId === 'string' ? payload.callId.trim() : '';
         if (!id) return;
-        handlePeerCallEndedRef.current(id);
+        callDiag.info('voice_socket_call_ended', { callId: id, fromType: payload?.fromType });
+        handlePeerCallEndedRef.current(id, 'socket_call_ended');
       });
       // Duplicate socket for hold/mute/end — CallSignalContext is primary; this improves delivery on flaky devices.
     })();
@@ -1288,7 +1333,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
       const { data } = await callApi.sessionSync(callIdRef.current, { light });
       if (!data?.ok) return false;
       if (data.status === 'completed' && !endingRef.current) {
-        handlePeerCallEndedRef.current(callIdRef.current);
+        handlePeerCallEndedRef.current(callIdRef.current, 'session_sync_completed');
         return false;
       }
       const started = applyTalkTimingFromServer(data);
@@ -1452,6 +1497,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
     talkActiveRef.current = false;
     setTalkActive(false);
 
+    callDiag.callEnded('user_hangup', { role: user?.role });
     emitCallEnd();
 
     if (user?.role === 'caller') {
@@ -1610,6 +1656,13 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
           style={StyleSheet.absoluteFillObject}
         />
         <View style={[styles.overlay, { paddingTop: Math.max(insets.top + 16, 36) }]}>
+          <TouchableOpacity
+            style={styles.bugReportBtn}
+            onPress={() => (navigation as { navigate: (n: string) => void }).navigate('CallDiagnostics')}
+            activeOpacity={0.85}
+          >
+            <Text style={styles.bugReportText}>Bug Report</Text>
+          </TouchableOpacity>
           <View style={styles.statusPill}>
             <Text style={styles.statusText}>{shellStatusLabel}</Text>
           </View>
@@ -1857,10 +1910,10 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
           ) : null}
           {streamAvatarExtras ? (
             <streamAvatarExtras.StreamRemotePeerLeftBridge
-              onRemotePeerLeft={() => {
+              onRemotePeerLeft={(reason) => {
                 const callId = callIdRef.current.trim();
                 if (!callId || endingRef.current) return;
-                handlePeerCallEndedRef.current(callId);
+                handlePeerCallEndedRef.current(callId, `stream_${reason}`);
               }}
             />
           ) : null}
@@ -1872,6 +1925,13 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
             />
           ) : null}
           <View style={[styles.overlay, { paddingTop: Math.max(insets.top + 16, 36) }]}>
+            <TouchableOpacity
+              style={styles.bugReportBtn}
+              onPress={() => (navigation as { navigate: (n: string) => void }).navigate('CallDiagnostics')}
+              activeOpacity={0.85}
+            >
+              <Text style={styles.bugReportText}>Bug Report</Text>
+            </TouchableOpacity>
             <View style={styles.statusPill}>
               <Text style={styles.statusText}>
                 {systemCallHold
@@ -2056,6 +2116,19 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(233, 213, 255, 0.45)',
   },
   statusText: { color: '#faf5ff', fontSize: 12, fontWeight: '800' },
+  bugReportBtn: {
+    position: 'absolute',
+    top: 8,
+    right: 12,
+    zIndex: 20,
+    backgroundColor: 'rgba(30, 11, 61, 0.88)',
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderWidth: 1,
+    borderColor: 'rgba(167, 139, 250, 0.45)',
+  },
+  bugReportText: { color: '#e9d5ff', fontSize: 11, fontWeight: '800' },
   avatarRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',

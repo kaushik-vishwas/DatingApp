@@ -20,6 +20,7 @@ export type CallerStackParamList = {
     receiverImage?: string | null;
   };
   VoiceCall: VoiceCallScreenParams;
+  CallDiagnostics: undefined;
   ReceiverProfile: { receiver: DiscoverReceiverSummary };
   Wallet: undefined;
   WalletTransactions: undefined;

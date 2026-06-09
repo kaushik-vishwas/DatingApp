@@ -9,6 +9,15 @@ import {
   stopAndroidCellularCallHoldWatch,
   subscribeAndroidCellularCallHold,
 } from '../../utils/androidCellularCallHold';
+import {
+  callDiag,
+  HOLD_REMOTE_LEFT_DEBOUNCE_MS,
+  isCallHoldGuardActive,
+  NORMAL_REMOTE_LEFT_DEBOUNCE_MS,
+} from '../../utils/callDiagnostics';
+
+const AUDIO_MODE_IN_CALL = 2;
+const AUDIO_MODE_IN_COMMUNICATION = 3;
 
 const SPEAK_AUDIO_LEVEL_THRESHOLD = 0.035;
 
@@ -156,10 +165,16 @@ export function StreamSystemHoldBridge({
   const applyHoldState = (next: boolean): void => {
     if (holdActiveRef.current === next) return;
     holdActiveRef.current = next;
+    if (next) {
+      callDiag.holdStarted('local_system');
+    } else {
+      callDiag.holdEnded('local_system');
+    }
     onSystemHoldChangeRef.current(next);
   };
 
   useEffect(() => {
+    callDiag.streamStateChange(String(callingState));
     if (callingState !== CallingState.JOINED) {
       holdActiveRef.current = false;
       if (Platform.OS === 'android') {
@@ -172,12 +187,25 @@ export function StreamSystemHoldBridge({
       return;
     }
 
-    const unsubCellular = subscribeAndroidCellularCallHold((active) => {
+    const unsubCellular = subscribeAndroidCellularCallHold((active, audioMode) => {
       if (userChosenMuteRef.current) {
         if (holdActiveRef.current) applyHoldState(false);
+        callDiag.info('gsm_hold_skipped_user_muted', { active, audioMode });
         return;
       }
       if (callingStateRef.current !== CallingState.JOINED) return;
+      const modeLabel =
+        audioMode === AUDIO_MODE_IN_CALL
+          ? 'MODE_IN_CALL'
+          : audioMode === AUDIO_MODE_IN_COMMUNICATION
+            ? 'MODE_IN_COMMUNICATION'
+            : `mode_${audioMode ?? 'unknown'}`;
+      if (active) {
+        callDiag.gsmDetected({ audioMode, modeLabel });
+        callDiag.gsmAnswered({ audioMode, modeLabel });
+      } else {
+        callDiag.gsmEnded({ audioMode, modeLabel });
+      }
       applyHoldState(active);
     });
     startAndroidCellularCallHoldWatch();
@@ -217,6 +245,11 @@ export function StreamTalkTimingBridge({
     const stillRemote = participantsRef.current.some((p) => !p.isLocalParticipant);
     if (!stillRemote) return;
     firedRef.current = true;
+    callDiag.participantJoined({
+      participantCount: participantsRef.current.length,
+      remoteCount: participantsRef.current.filter((p) => !p.isLocalParticipant).length,
+    });
+    callDiag.callConnected({ source: 'stream_both_joined' });
     onBothConnectedRef.current();
   };
 
@@ -232,7 +265,7 @@ export function StreamTalkTimingBridge({
   return null;
 }
 
-const REMOTE_PEER_LEFT_DEBOUNCE_MS = 500;
+const LOCAL_LEFT_CONFIRM_MS = 2_500;
 
 /**
  * Fires when the remote participant leaves the Stream call (WebRTC path — works if socket `call:ended` is missed).
@@ -240,13 +273,14 @@ const REMOTE_PEER_LEFT_DEBOUNCE_MS = 500;
 export function StreamRemotePeerLeftBridge({
   onRemotePeerLeft,
 }: {
-  onRemotePeerLeft: () => void;
+  onRemotePeerLeft: (reason: 'local_left' | 'remote_empty') => void;
 }): null {
   const { useCallCallingState, useRemoteParticipants } = useCallStateHooks();
   const callingState = useCallCallingState();
   const remoteParticipants = useRemoteParticipants();
   const hadRemoteRef = useRef(false);
   const emptySinceRef = useRef<number | null>(null);
+  const localLeftSinceRef = useRef<number | null>(null);
   const onRemotePeerLeftRef = useRef(onRemotePeerLeft);
   const callingStateRef = useRef(callingState);
   const remoteParticipantsRef = useRef(remoteParticipants);
@@ -254,20 +288,56 @@ export function StreamRemotePeerLeftBridge({
   callingStateRef.current = callingState;
   remoteParticipantsRef.current = remoteParticipants;
 
-  useEffect(() => {
-    if (callingState === CallingState.LEFT) {
-      onRemotePeerLeftRef.current();
+  const tryEndCall = (reason: 'local_left' | 'remote_empty', extra?: Record<string, unknown>): void => {
+    if (isCallHoldGuardActive()) {
+      callDiag.callEndSuppressed(reason, {
+        holdGuard: true,
+        remoteCount: remoteParticipantsRef.current.length,
+        callingState: String(callingStateRef.current),
+        ...extra,
+      });
       return;
     }
+    callDiag.participantLeft({ reason, ...extra });
+    callDiag.callEndReason(`stream_${reason}`, extra ?? {});
+    onRemotePeerLeftRef.current(reason);
+  };
+
+  useEffect(() => {
+    const remoteCount = remoteParticipants.length;
+    callDiag.updateLive({ remoteParticipantCount: remoteCount });
+
     if (callingState !== CallingState.JOINED) {
-      hadRemoteRef.current = false;
-      emptySinceRef.current = null;
+      if (callingState === CallingState.LEFT) {
+        const now = Date.now();
+        if (localLeftSinceRef.current === null) {
+          localLeftSinceRef.current = now;
+          callDiag.streamStateChange('LEFT', { phase: 'local_left_pending' });
+        } else if (now - localLeftSinceRef.current >= LOCAL_LEFT_CONFIRM_MS) {
+          tryEndCall('local_left', { callingState: 'LEFT' });
+        }
+      } else {
+        localLeftSinceRef.current = null;
+      }
+      if (callingState !== CallingState.LEFT) {
+        hadRemoteRef.current = false;
+        emptySinceRef.current = null;
+      }
       return;
     }
 
+    localLeftSinceRef.current = null;
+
     const evaluate = (): void => {
       if (callingStateRef.current === CallingState.LEFT) {
-        onRemotePeerLeftRef.current();
+        const now = Date.now();
+        if (localLeftSinceRef.current === null) {
+          localLeftSinceRef.current = now;
+          return;
+        }
+        if (now - localLeftSinceRef.current >= LOCAL_LEFT_CONFIRM_MS) {
+          tryEndCall('local_left', { callingState: 'LEFT' });
+        }
         return;
       }
       if (callingStateRef.current !== CallingState.JOINED) {
@@ -278,6 +348,11 @@ export function StreamRemotePeerLeftBridge({
 
       const hasRemote = remoteParticipantsRef.current.length > 0;
       if (hasRemote) {
+        if (emptySinceRef.current !== null) {
+          callDiag.connectionRestored({
+            remoteCount: remoteParticipantsRef.current.length,
+          });
+        }
         hadRemoteRef.current = true;
         emptySinceRef.current = null;
         return;
@@ -287,11 +362,21 @@ export function StreamRemotePeerLeftBridge({
       const now = Date.now();
       if (emptySinceRef.current === null) {
         emptySinceRef.current = now;
+        callDiag.connectionLost({
+          remoteCount: 0,
+          holdGuard: isCallHoldGuardActive(),
+        });
       }
-      if (now - emptySinceRef.current >= REMOTE_PEER_LEFT_DEBOUNCE_MS) {
+      const debounceMs = isCallHoldGuardActive()
+        ? HOLD_REMOTE_LEFT_DEBOUNCE_MS
+        : NORMAL_REMOTE_LEFT_DEBOUNCE_MS;
+      if (now - emptySinceRef.current >= debounceMs) {
         hadRemoteRef.current = false;
         emptySinceRef.current = null;
-        onRemotePeerLeftRef.current();
+        tryEndCall('remote_empty', {
+          debounceMs,
+          holdGuard: isCallHoldGuardActive(),
+        });
       }
     };
 

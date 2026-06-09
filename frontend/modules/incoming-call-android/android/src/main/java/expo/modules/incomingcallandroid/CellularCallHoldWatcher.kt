@@ -14,7 +14,7 @@ object CellularCallHoldWatcher {
 
   private val mainHandler = Handler(Looper.getMainLooper())
   private var audioManager: AudioManager? = null
-  private var onChange: ((Boolean) -> Unit)? = null
+  private var onChange: ((Boolean, Int) -> Unit)? = null
   private var lastEmitted = false
   private var polling = false
 
@@ -27,7 +27,7 @@ object CellularCallHoldWatcher {
       }
     }
 
-  fun start(context: Context, onActiveChanged: (Boolean) -> Unit) {
+  fun start(context: Context, onActiveChanged: (Boolean, Int) -> Unit) {
     stop()
     onChange = onActiveChanged
     audioManager = context.applicationContext.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
@@ -54,9 +54,11 @@ object CellularCallHoldWatcher {
   }
 
   private fun evaluateAndEmit() {
+    val am = audioManager
+    val mode = am?.mode ?: AudioManager.MODE_INVALID
     val active = audioModeSuggestsCellularCall()
     if (active == lastEmitted) return
     lastEmitted = active
-    mainHandler.post { onChange?.invoke(active) }
+    mainHandler.post { onChange?.invoke(active, mode) }
   }
 }

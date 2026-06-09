@@ -32,10 +32,10 @@ class IncomingCallAndroidModule : Module() {
 
     Function("startCellularCallHoldWatch") {
       val context = appContext.reactContext ?: return@Function false
-      CellularCallHoldWatcher.start(context) { active ->
+      CellularCallHoldWatcher.start(context) { active, audioMode ->
         sendEvent(
           "onCellularCallStateChanged",
-          mapOf("active" to active)
+          mapOf("active" to active, "audioMode" to audioMode)
         )
       }
       true

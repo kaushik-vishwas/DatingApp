@@ -56,7 +56,7 @@ export function stopAndroidCellularCallHoldWatch(): void {
 }
 
 export function subscribeAndroidCellularCallHold(
-  handler: (active: boolean) => void
+  handler: (active: boolean, audioMode?: number) => void
 ): () => void {
   const ev = getEmitter();
   if (!ev) {
@@ -64,8 +64,8 @@ export function subscribeAndroidCellularCallHold(
   }
   const sub: EventSubscription = ev.addListener(
     'onCellularCallStateChanged',
-    (payload: { active?: boolean }) => {
-      handler(Boolean(payload?.active));
+    (payload: { active?: boolean; audioMode?: number }) => {
+      handler(Boolean(payload?.active), payload?.audioMode);
     }
   );
   return () => sub.remove();

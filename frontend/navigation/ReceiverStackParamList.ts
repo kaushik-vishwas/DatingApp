@@ -43,4 +43,5 @@ export type ReceiverStackParamList = {
   ReceiverChat: { userId: string; userName: string; userImage?: string | null };
   IncomingCall: IncomingCallParams;
   VoiceCall: VoiceCallScreenParams;
+  CallDiagnostics: undefined;
 };

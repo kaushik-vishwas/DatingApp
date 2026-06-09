@@ -1,5 +1,6 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, AppState, type AppStateStatus } from 'react-native';
+import { callDiag } from '../utils/callDiagnostics';
 import { CommonActions } from '@react-navigation/native';
 import { io, type Socket } from 'socket.io-client';
 import RandomCallMatchingOverlay from '../components/caller/RandomCallMatchingOverlay';
@@ -1178,6 +1179,7 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         }
       });
       socket.on('connect', () => {
+        callDiag.connectionRestored({ socket: 'main_call_signal' });
         activeCallRecoveryHandlerRef.current?.();
         socket.emit('call:queue:set', { active: queueModeRef.current }, () => {});
         const pendingHold = pendingCallHoldEmitRef.current;
@@ -1362,6 +1364,11 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
       socket.on('call:hold', (payload: CallHoldPayload) => {
         if (payload.fromType === (userRoleRef.current === 'caller' ? 'u' : 'r')) return;
+        callDiag.info('main_socket_hold', {
+          callId: payload.callId,
+          onHold: payload.onHold,
+          fromType: payload.fromType,
+        });
         peerCallHoldHandlerRef.current?.(payload.callId, Boolean(payload.onHold));
       });
 
@@ -1372,6 +1379,10 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
       socket.on('call:ended', (payload: CallEndedPayload) => {
         if (payload.fromType === (userRoleRef.current === 'caller' ? 'u' : 'r')) return;
+        callDiag.info('main_socket_call_ended', {
+          callId: payload.callId,
+          fromType: payload.fromType,
+        });
         clearIncomingCallNotificationDedupe(payload.callId);
         peerCallHoldHandlerRef.current?.(payload.callId, false);
         peerCallMuteHandlerRef.current?.(payload.callId, false);
