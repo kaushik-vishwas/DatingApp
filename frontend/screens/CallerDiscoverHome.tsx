@@ -38,7 +38,8 @@ import { resolveProfileImageSource } from '../utils/avatarSource';
 import { getReceiverPresenceInfo, sortDiscoverReceivers } from '../utils/receiverStatus';
 import { withTimeout } from '../utils/withTimeout';
 import SelectoLogo from '../assets/SelectoLogo.png'
-import { CallDiagnosticsTopBarButton } from '../components/call/CallDiagnosticsTopBarButton'
+import { CallDiagnosticsTopBarButton } from '../components/call/CallDiagnosticsTopBarButton';
+import { PresenceDiagnosticsTopBarButton } from '../components/call/PresenceDiagnosticsTopBarButton';
 import NoticeBg from '../assets/noticeBg.png'
 
 const PURPLE = '#7b2cff';
@@ -104,6 +105,7 @@ type DiscoverStickyTopProps = {
   onWalletPress: () => void;
   onProfilePress: () => void;
   onDiagnosticsPress: () => void;
+  onPresenceDiagnosticsPress: () => void;
 };
 
 const DiscoverStickyTop = React.memo(function DiscoverStickyTop({
@@ -113,14 +115,16 @@ const DiscoverStickyTop = React.memo(function DiscoverStickyTop({
   onWalletPress,
   onProfilePress,
   onDiagnosticsPress,
+  onPresenceDiagnosticsPress,
 }: DiscoverStickyTopProps): React.JSX.Element {
   return (
     <View style={styles.stickyTopCard}>
       <View style={styles.topSection}>
         <View style={styles.topBar}>
           <View style={styles.topBarLeft}>
-            <Image source={SelectoLogo} style={styles.brandLogo} resizeMode="contain" />
+            {/* <Image source={SelectoLogo} style={styles.brandLogo} resizeMode="contain" /> */}
             <CallDiagnosticsTopBarButton onPress={onDiagnosticsPress} />
+            <PresenceDiagnosticsTopBarButton onPress={onPresenceDiagnosticsPress} />
           </View>
           <View style={styles.topRight}>
             <TouchableOpacity style={styles.walletCapsule} onPress={onWalletPress} activeOpacity={0.85}>
@@ -455,6 +459,10 @@ export default function CallerDiscoverHome(): React.JSX.Element {
     navigation.navigate('CallDiagnostics');
   }, [navigation]);
 
+  const onPresenceDiagnosticsPress = useCallback(() => {
+    navigation.navigate('PresenceDiagnostics');
+  }, [navigation]);
+
   const openFilterModal = useCallback(() => {
     setModalDraft({ ...appliedFilters });
     setFilterModalVisible(true);
@@ -668,6 +676,7 @@ export default function CallerDiscoverHome(): React.JSX.Element {
             onWalletPress={onWalletPress}
             onProfilePress={onProfilePress}
             onDiagnosticsPress={onDiagnosticsPress}
+            onPresenceDiagnosticsPress={onPresenceDiagnosticsPress}
           />
 
           <FlatList

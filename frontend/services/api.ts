@@ -258,7 +258,9 @@ export const profileApi = {
     api.patch<{ ok: boolean }>('/profile/receiver/push-token', { expoPushToken }),
 
   receiverBackgroundPresence: () =>
-    api.post<{ ok: boolean }>('/profile/receiver/presence/background'),
+    api.post<{ ok: boolean; graceUntilMs?: number; reason?: string | null }>(
+      '/profile/receiver/presence/background'
+    ),
 
   receiverForegroundPresence: () =>
     api.post<{ ok: boolean }>('/profile/receiver/presence/foreground'),

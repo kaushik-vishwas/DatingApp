@@ -16,6 +16,7 @@ import ReceiverProfileScreen from '../screens/caller/ReceiverProfileScreen';
 import ChatConversationScreen from '../screens/chat/ChatConversationScreen';
 import VoiceCallScreen from '../screens/call/VoiceCallScreen';
 import CallDiagnosticsScreen from '../screens/call/CallDiagnosticsScreen';
+import PresenceDiagnosticsScreen from '../screens/call/PresenceDiagnosticsScreen';
 import WalletScreen from '../screens/caller/WalletScreen';
 import WalletTransactionsScreen from '../screens/caller/WalletTransactionsScreen';
 import WalletSuccessScreen from '../screens/caller/WalletSuccessScreen';
@@ -62,6 +63,11 @@ export default function CallerAppNavigator(): React.JSX.Element {
         name="CallDiagnostics"
         component={CallDiagnosticsScreen}
         options={{ title: 'Call diagnostics' }}
+      />
+      <Stack.Screen
+        name="PresenceDiagnostics"
+        component={PresenceDiagnosticsScreen}
+        options={{ title: 'Presence diagnostics' }}
       />
       <Stack.Screen name="ReceiverProfile" component={ReceiverProfileScreen} />
       <Stack.Screen name="Wallet" component={WalletScreen} />

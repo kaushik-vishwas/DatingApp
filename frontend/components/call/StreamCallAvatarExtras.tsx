@@ -17,6 +17,7 @@ import {
   setGsmInterruptPending,
 } from '../../utils/callDiagnostics';
 import { isSamsungOneUi6OrNewer } from '../../utils/samsungCallCompat';
+import { markGsmTimeline } from '../../utils/gsmDisconnectProbe';
 
 const AUDIO_MODE_IN_CALL = 2;
 const AUDIO_MODE_IN_COMMUNICATION = 3;
@@ -206,12 +207,15 @@ export function StreamSystemHoldBridge({
       const samsung = isSamsungOneUi6OrNewer();
       if (active) {
         setGsmInterruptPending(true);
+        markGsmTimeline('T0_gsm_arrived');
+        markGsmTimeline('T1_audio_focus_lost');
         callDiag.gsmDetected({ audioMode, modeLabel, source, samsung });
         callDiag.gsmAnswered({ audioMode, modeLabel, source, samsung });
         applyHoldState(true);
         return;
       }
       setGsmInterruptPending(false);
+      markGsmTimeline('T6_gsm_ended');
       callDiag.gsmEnded({ audioMode, modeLabel, source, samsung });
       applyHoldState(false);
     });

@@ -50,6 +50,8 @@ export interface IReceiver {
   isAvailable: boolean;
   /** Runtime presence from active socket session(s). */
   isOnline: boolean;
+  /** Discover grace window end — keeps receiver visible after minimize/socket drop. */
+  discoverGraceUntil: Date | null;
   /** Set when an admin applies a warning from a moderation report. */
   moderationWarningAt: Date | null;
   /** Last admin-provided reason when KYC is rejected. */
@@ -124,6 +126,7 @@ const receiverSchema = new Schema<IReceiver>(
     suspended: { type: Boolean, default: false },
     isAvailable: { type: Boolean, default: false },
     isOnline: { type: Boolean, default: false },
+    discoverGraceUntil: { type: Date, default: null },
     moderationWarningAt: { type: Date, default: null },
     rejectionReason: { type: String, default: null },
     pendingNameAsPerAadhaar: { type: String, default: null },

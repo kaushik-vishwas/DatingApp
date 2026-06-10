@@ -1,8 +1,16 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, AppState, type AppStateStatus } from 'react-native';
 import { callDiag } from '../utils/callDiagnostics';
+import { instrumentedEmitCallEnd } from '../utils/callEndInstrumentation';
 import { CommonActions } from '@react-navigation/native';
 import { io, type Socket } from 'socket.io-client';
+import { getCallSocketIoOptions } from '../utils/androidCallNetwork';
+import { registerCallKeepaliveSocket } from '../utils/callActiveKeepalive';
+import { attachSocketIoProbe, detachSocketIoProbe } from '../utils/gsmDisconnectProbe';
+import {
+  logPresenceDiagnostic,
+  logPresenceFailure,
+} from '../utils/receiverPresenceDiagnostics';
 import RandomCallMatchingOverlay from '../components/caller/RandomCallMatchingOverlay';
 import { useAuth } from './AuthContext';
 import { callApi, getErrorMessage, getJwt, getResolvedApiBaseUrl, profileApi } from '../services/api';
@@ -547,7 +555,7 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     ]);
     for (const callId of callIds) {
       if (socket?.connected) {
-        socket.emit('call:end', { callId });
+        instrumentedEmitCallEnd(socket, callId, 'cancel_outgoing_call_invite', 'main_call_socket');
       }
       clearOutgoingCallSession(callId);
     }
@@ -569,7 +577,7 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     const socket = socketRef.current;
     if (emitEnd && socket?.connected) {
       for (const callId of pendingOutgoingByCallIdRef.current.keys()) {
-        socket.emit('call:end', { callId });
+        instrumentedEmitCallEnd(socket, callId, 'clear_pending_invites', 'main_call_socket');
       }
     }
     callerInviteAcceptedCallIdsRef.current.clear();
@@ -665,7 +673,12 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         if (!outcome.accepted) {
           clearOutgoingCallSession(data.callId);
           if (socket.connected) {
-            socket.emit('call:end', { callId: data.callId });
+            instrumentedEmitCallEnd(
+              socket,
+              data.callId,
+              `invite_outcome_${outcome.reason ?? 'not_accepted'}`,
+              'main_call_socket'
+            );
           }
           if (options?.redirectToRandomOnMissed && !abort.signal.aborted) {
             dismissCallerVoiceCallScreen();
@@ -835,7 +848,12 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       } catch (e) {
         const s = socketRef.current;
         if (s?.connected) {
-          s.emit('call:end', { callId: req.callId });
+          instrumentedEmitCallEnd(
+            s,
+            req.callId,
+            'accept_stay_on_screen_bootstrap_failed',
+            'main_call_socket'
+          );
         }
         throw e;
       }
@@ -869,7 +887,12 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       } catch (e) {
         const s = socketRef.current;
         if (s?.connected) {
-          s.emit('call:end', { callId: req.callId });
+          instrumentedEmitCallEnd(
+            s,
+            req.callId,
+            'accept_incoming_bootstrap_failed',
+            'main_call_socket'
+          );
         }
         throw e;
       }
@@ -933,6 +956,12 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       pendingCallHoldEmitRef.current = { callId: normalized, onHold: false };
     }
     const emitOn = (socket: Socket): void => {
+      callDiag.socketEmit(
+        'call:hold',
+        { callId: normalized, onHold },
+        'main_call_socket',
+        onHold ? 'peer_hold_on' : 'peer_hold_off'
+      );
       try {
         socket.emit('call:hold', { callId: normalized, onHold });
       } catch {
@@ -954,6 +983,12 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     if (!normalized) return;
     pendingCallMuteEmitRef.current = { callId: normalized, muted };
     const emitOn = (socket: Socket): void => {
+      callDiag.socketEmit(
+        'call:mute',
+        { callId: normalized, muted },
+        'main_call_socket',
+        muted ? 'peer_mute_on' : 'peer_mute_off'
+      );
       try {
         socket.emit('call:mute', { callId: normalized, muted });
       } catch {
@@ -981,15 +1016,17 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       pendingCallMuteEmitRef.current = null;
     }
     const emitOn = (socket: Socket): void => {
-      try {
-        socket.emit('call:end', { callId: normalized }, (ack?: { ok?: boolean }) => {
+      instrumentedEmitCallEnd(
+        socket,
+        normalized,
+        'emit_call_end_public_api',
+        'main_call_socket',
+        (ack?: { ok?: boolean }) => {
           if (ack?.ok !== false && pendingCallEndEmitRef.current === normalized) {
             pendingCallEndEmitRef.current = null;
           }
-        });
-      } catch {
-        // ignore signaling failures
-      }
+        }
+      );
     };
     const socket = socketRef.current;
     if (socket?.connected) {
@@ -1047,21 +1084,84 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
   useEffect(() => {
     if (!isSignedIn || user?.role !== 'receiver') return;
+    let backgroundHeartbeat: ReturnType<typeof setInterval> | null = null;
+
     const keepCallSocketAlive = (): void => {
       const socket = socketRef.current;
       if (socket && !socket.connected) socket.connect();
     };
+
+    const touchReceiverBackgroundPresence = (trigger: string): void => {
+      if (!userAvailableRef.current) {
+        logPresenceDiagnostic('background_skipped_not_available', { trigger });
+        return;
+      }
+      logPresenceDiagnostic('background_presence_attempt', {
+        trigger,
+        socketConnected: Boolean(socketRef.current?.connected),
+      });
+      const socket = socketRef.current;
+      if (socket?.connected) {
+        try {
+          socket.emit('receiver:presence:background', {}, (ack?: { ok?: boolean; reason?: string; graceUntilMs?: number; error?: string }) => {
+            if (ack?.ok) {
+              logPresenceDiagnostic('socket_background_grace_armed', {
+                trigger,
+                graceUntilMs: ack.graceUntilMs,
+              });
+            } else {
+              logPresenceFailure('socket_background_grace_failed', ack?.reason ?? ack?.error ?? 'unknown', {
+                trigger,
+                ack,
+              });
+            }
+          });
+        } catch (e) {
+          logPresenceFailure('socket_background_emit_error', e instanceof Error ? e.message : String(e), {
+            trigger,
+          });
+        }
+      } else {
+        logPresenceFailure('socket_background_no_connection', 'call_socket_not_connected', { trigger });
+      }
+      void profileApi
+        .receiverBackgroundPresence()
+        .then(({ data }) => {
+          if (data.ok) {
+            logPresenceDiagnostic('http_background_grace_armed', {
+              trigger,
+              graceUntilMs: data.graceUntilMs,
+            });
+          } else {
+            logPresenceFailure('http_background_grace_rejected', data.reason ?? 'not_available', {
+              trigger,
+              data,
+            });
+          }
+        })
+        .catch((e) => {
+          logPresenceFailure('http_background_request_failed', getErrorMessage(e), { trigger });
+        });
+    };
+
     const refreshPushToken = (): void => {
       void registerReceiverExpoPushToken((token) => profileApi.updateReceiverExpoPushToken(token));
     };
+
     keepCallSocketAlive();
     refreshPushToken();
+
     const sub = AppState.addEventListener('change', (state: AppStateStatus) => {
       if (state === 'active' || state === 'background' || state === 'inactive') {
         keepCallSocketAlive();
         if (userRoleRef.current === 'receiver' && userAvailableRef.current) {
           if (state === 'background' || state === 'inactive') {
-            void profileApi.receiverBackgroundPresence().catch(() => {});
+            touchReceiverBackgroundPresence(`appstate_${state}`);
+            if (!backgroundHeartbeat) {
+              backgroundHeartbeat = setInterval(() => {
+                touchReceiverBackgroundPresence('background_heartbeat');
+              }, 45_000);
+            }
           }
           if (queueModeRef.current) {
             const socket = socketRef.current;
@@ -1076,8 +1176,17 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         }
       }
       if (state === 'active') {
+        if (backgroundHeartbeat) {
+          clearInterval(backgroundHeartbeat);
+          backgroundHeartbeat = null;
+        }
         if (userRoleRef.current === 'receiver' && userAvailableRef.current) {
-          void profileApi.receiverForegroundPresence().catch(() => {});
+          void profileApi
+            .receiverForegroundPresence()
+            .then(() => logPresenceDiagnostic('foreground_presence_synced'))
+            .catch((e) =>
+              logPresenceFailure('foreground_presence_failed', getErrorMessage(e))
+            );
         }
         refreshPushToken();
         const pending = pendingIncomingCallRequestRef.current;
@@ -1093,7 +1202,11 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         }
       }
     });
-    return () => sub.remove();
+
+    return () => {
+      sub.remove();
+      if (backgroundHeartbeat) clearInterval(backgroundHeartbeat);
+    };
   }, [isSignedIn, signedInAccountId, user?.role]);
 
   useEffect(() => {
@@ -1148,6 +1261,8 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   useEffect(() => {
     if (!isSignedIn || !user) {
       if (socketRef.current) {
+        registerCallKeepaliveSocket('main_call_signal', null);
+        detachSocketIoProbe('main_call_signal');
         socketRef.current.removeAllListeners();
         socketRef.current.disconnect();
         socketRef.current = null;
@@ -1165,21 +1280,31 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
       const socket = io(base, {
         auth: { token },
-        transports: ['polling', 'websocket'],
-        timeout: 20000,
-        reconnection: true,
-        reconnectionAttempts: 50,
-        reconnectionDelay: 1000,
-        reconnectionDelayMax: 10000,
+        ...getCallSocketIoOptions(),
       });
       socketRef.current = socket;
+      registerCallKeepaliveSocket('main_call_signal', socket);
+      attachSocketIoProbe(socket, 'main_call_signal');
       socket.on('connect_error', (err: Error) => {
         if (__DEV__) {
           console.warn('[CallSignal] socket connect_error:', err.message);
         }
       });
+      socket.on('disconnect', (reason) => {
+        if (userRoleRef.current === 'receiver') {
+          logPresenceDiagnostic('call_socket_disconnected', {
+            reason,
+            userAvailable: userAvailableRef.current,
+          });
+        }
+      });
       socket.on('connect', () => {
         callDiag.connectionRestored({ socket: 'main_call_signal' });
+        if (userRoleRef.current === 'receiver') {
+          logPresenceDiagnostic('call_socket_connected', {
+            userAvailable: userAvailableRef.current,
+          });
+        }
         activeCallRecoveryHandlerRef.current?.();
         socket.emit('call:queue:set', { active: queueModeRef.current }, () => {});
         const pendingHold = pendingCallHoldEmitRef.current;
@@ -1198,11 +1323,17 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         }
         const pendingEnd = pendingCallEndEmitRef.current;
         if (pendingEnd) {
-          socket.emit('call:end', { callId: pendingEnd }, (ack?: { ok?: boolean }) => {
-            if (ack?.ok !== false && pendingCallEndEmitRef.current === pendingEnd) {
-              pendingCallEndEmitRef.current = null;
+          instrumentedEmitCallEnd(
+            socket,
+            pendingEnd,
+            'socket_reconnect_replay_pending_end',
+            'main_call_socket_reconnect',
+            (ack?: { ok?: boolean }) => {
+              if (ack?.ok !== false && pendingCallEndEmitRef.current === pendingEnd) {
+                pendingCallEndEmitRef.current = null;
+              }
             }
-          });
+          );
         }
         if (userRoleRef.current === 'receiver') {
           void ensureIncomingRingtoneLoaded();
@@ -1364,11 +1495,15 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
       socket.on('call:hold', (payload: CallHoldPayload) => {
         if (payload.fromType === (userRoleRef.current === 'caller' ? 'u' : 'r')) return;
-        callDiag.info('main_socket_hold', {
-          callId: payload.callId,
-          onHold: payload.onHold,
-          fromType: payload.fromType,
-        });
+        callDiag.socketReceive(
+          'call:hold',
+          {
+            callId: payload.callId,
+            onHold: payload.onHold,
+            fromType: payload.fromType,
+          },
+          'main_call_socket'
+        );
         peerCallHoldHandlerRef.current?.(payload.callId, Boolean(payload.onHold));
       });
 
@@ -1379,9 +1514,21 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
       socket.on('call:ended', (payload: CallEndedPayload) => {
         if (payload.fromType === (userRoleRef.current === 'caller' ? 'u' : 'r')) return;
+        callDiag.socketReceive(
+          'call:ended',
+          {
+            callId: payload.callId,
+            fromType: payload.fromType,
+            fromId: payload.fromId,
+          },
+          'main_call_socket'
+        );
         callDiag.info('main_socket_call_ended', {
           callId: payload.callId,
           fromType: payload.fromType,
+          fromId: payload.fromId,
+          senderRole: payload.fromType === 'u' ? 'caller' : 'receiver',
+          receiverRole: userRoleRef.current,
         });
         clearIncomingCallNotificationDedupe(payload.callId);
         peerCallHoldHandlerRef.current?.(payload.callId, false);
@@ -1427,6 +1574,8 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
     return () => {
       cancelled = true;
+      registerCallKeepaliveSocket('main_call_signal', null);
+      detachSocketIoProbe('main_call_signal');
       const s = socketRef.current;
       if (s) {
         s.removeAllListeners();

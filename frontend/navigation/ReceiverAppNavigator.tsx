@@ -9,6 +9,7 @@ import ChatConversationScreen from '../screens/chat/ChatConversationScreen';
 import IncomingCallScreen from '../screens/call/IncomingCallScreen';
 import VoiceCallScreen from '../screens/call/VoiceCallScreen';
 import CallDiagnosticsScreen from '../screens/call/CallDiagnosticsScreen';
+import PresenceDiagnosticsScreen from '../screens/call/PresenceDiagnosticsScreen';
 import WithdrawEarningsScreen from '../screens/receiver/WithdrawEarningsScreen';
 import ReceiverCallHistoryScreen from '../screens/receiver/ReceiverCallHistoryScreen';
 import ReceiverSettingsScreen from '../screens/receiver/ReceiverSettingsScreen';
@@ -100,6 +101,11 @@ export default function ReceiverAppNavigator({
         name="CallDiagnostics"
         component={CallDiagnosticsScreen}
         options={{ title: 'Call diagnostics' }}
+      />
+      <Stack.Screen
+        name="PresenceDiagnostics"
+        component={PresenceDiagnosticsScreen}
+        options={{ title: 'Presence diagnostics' }}
       />
       <Stack.Screen
         name="IncomingCall"

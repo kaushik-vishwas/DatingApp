@@ -15,6 +15,8 @@ export type PersistedCallDiagnosticsBundle = {
   deviceSummary: Record<string, string>;
   entries: Array<Record<string, unknown>>;
   finalWindowEntries: Array<Record<string, unknown>>;
+  gsmDisconnectForensics?: Record<string, unknown> | null;
+  forensicExportPath?: string | null;
 };
 
 export async function persistCallDiagnosticsBundle(

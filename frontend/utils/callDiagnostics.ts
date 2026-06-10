@@ -11,6 +11,7 @@ import {
   persistCallDiagnosticsBundle,
   type PersistedCallDiagnosticsBundle,
 } from './callDiagnosticsPersistence';
+import { captureCallTrace, type CallTraceInfo } from './callDiagnosticsTrace';
 
 /** Max in-memory log entries (ring buffer). */
 const MAX_ENTRIES = 800;
@@ -73,6 +74,13 @@ export type CallDiagnosticEventType =
   | 'remote_participant_count_changed'
   | 'state_mismatch'
   | 'call_outcome_summary'
+  | 'call_end_emitted'
+  | 'session_sync_completed_emitted'
+  | 'session_sync_request'
+  | 'socket_emit'
+  | 'socket_receive'
+  | 'state_machine_dump'
+  | 'rest_call_end_emitted'
   | 'error'
   | 'info';
 
@@ -225,6 +233,29 @@ function notify(): void {
   });
 }
 
+export function getStateMachineDump(extra?: Record<string, unknown>): Record<string, unknown> {
+  const snap = getCallDiagnosticsSnapshot();
+  return {
+    timestamp: new Date().toISOString(),
+    callId: snap.callId,
+    role: snap.userRole,
+    ending: snap.ending,
+    ready: snap.ready,
+    talkActive: snap.talkActive,
+    systemCallHold: snap.systemCallHold,
+    peerCallHold: snap.peerCallHold,
+    gsmInterruptPending: snap.gsmInterruptPending,
+    holdGuardActive: isCallHoldGuardActive(),
+    streamCallingState: snap.streamCallingState,
+    remoteParticipantCount: snap.remoteParticipantCount,
+    appInBackground: snap.appInBackground,
+    lastSuccessfulAction,
+    lastFailedAction,
+    activeSuppressionCount: activeSuppressions.size,
+    ...extra,
+  };
+}
+
 function currentHoldContext(): Record<string, unknown> {
   return {
     systemCallHold: liveSnapshot.systemCallHold,
@@ -332,6 +363,20 @@ async function flushPersist(force = false): Promise<void> {
   const callEntries = callId ? entries.filter((e) => e.callId === callId || e.callId === null) : [...entries];
   if (callEntries.length === 0 && !force) return;
 
+  let gsmDisconnectForensics: Record<string, unknown> | null = null;
+  let forensicExportPath: string | null = null;
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const probe = require('./gsmDisconnectProbe') as {
+      getGsmDisconnectForensicBundle: () => Record<string, unknown> | null;
+      getLastForensicExportPath: () => string | null;
+    };
+    gsmDisconnectForensics = probe.getGsmDisconnectForensicBundle();
+    forensicExportPath = probe.getLastForensicExportPath();
+  } catch {
+    // ignore
+  }
+
   const bundle: PersistedCallDiagnosticsBundle = {
     version: 1,
     savedAt: new Date().toISOString(),
@@ -351,6 +396,8 @@ async function flushPersist(force = false): Promise<void> {
         ? finalWindowEntries
         : callEntries.filter((e) => e.timestampMs >= Date.now() - FINAL_WINDOW_MS)
     ) as unknown as Array<Record<string, unknown>>,
+    gsmDisconnectForensics,
+    forensicExportPath,
   };
   await persistCallDiagnosticsBundle(bundle);
 }
@@ -434,6 +481,14 @@ export async function hydrateCallDiagnosticsFromStorage(): Promise<void> {
     if (mismatches?.length) {
       stateMismatches.push(...mismatches);
     }
+    void import('./gsmDisconnectProbe')
+      .then((probe) =>
+        probe.hydrateGsmForensicsFromPersisted(
+          bundle.gsmDisconnectForensics ?? null,
+          bundle.forensicExportPath ?? null
+        )
+      )
+      .catch(() => {});
     notify();
   }
 }
@@ -527,6 +582,9 @@ function archiveLastCall(reason: string): void {
   lastCallSnapshotFrozen = getCallDiagnosticsSnapshot();
   push('call_outcome_summary', { summary: lastOutcomeSummary });
   stopPersistInterval();
+  void import('./gsmDisconnectProbe')
+    .then((probe) => probe.finalizeGsmDisconnectProbe(reason))
+    .catch(() => {});
   void flushPersist(true);
   notify();
 }
@@ -646,6 +704,13 @@ export function remoteParticipantCountChanged(
   });
   liveSnapshot.remoteParticipantCount = next;
 
+  if (next === 0) {
+    push('state_machine_dump', {
+      trigger: 'remote_participant_count_zero',
+      dump: getStateMachineDump({ previous, next, source }),
+    });
+  }
+
   if (
     next === 0 &&
     previous !== null &&
@@ -726,6 +791,19 @@ export function clearCallDiagnostics(): void {
 export function formatCallDiagnosticsForExport(): string {
   const lastSummary = getLastCallDiagnosticsSummary();
   const lastEntries = getLastCallDiagnosticEntries();
+  let gsmDisconnectForensics: Record<string, unknown> | null = null;
+  let forensicExportPath: string | null = null;
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const probe = require('./gsmDisconnectProbe') as {
+      getGsmDisconnectForensicBundle: () => Record<string, unknown> | null;
+      getLastForensicExportPath: () => string | null;
+    };
+    gsmDisconnectForensics = probe.getGsmDisconnectForensicBundle();
+    forensicExportPath = probe.getLastForensicExportPath();
+  } catch {
+    // probe module unavailable
+  }
   const header = {
     exportedAt: new Date().toISOString(),
     device: getCallDiagnosticsDeviceSummary(),
@@ -735,11 +813,22 @@ export function formatCallDiagnosticsForExport(): string {
     entryCount: lastEntries.length,
     finalWindowCount: finalWindowEntries.length,
     totalBufferedEntries: entries.length,
+    gsmDisconnectForensics,
+    forensicExportPath,
   };
+  const probeEntries = lastEntries.filter(
+    (e) =>
+      e.eventType === 'info' &&
+      typeof e.details.message === 'string' &&
+      String(e.details.message).startsWith('probe_')
+  );
   return JSON.stringify(
     {
       header,
       outcomeSummary: lastOutcomeSummary,
+      gsmDisconnectForensics,
+      forensicExportPath,
+      probeEntryCount: probeEntries.length,
       finalWindowEntries,
       entries: lastEntries,
     },
@@ -765,6 +854,10 @@ function trackSuppression(sourceEvent: string, reason: string, details?: Record<
     suppressionKey: key,
     suppressionAgeMs: Date.now() - record.startedAtMs,
     ...details,
+  });
+  push('state_machine_dump', {
+    trigger: 'call_end_suppressed',
+    dump: getStateMachineDump({ sourceEvent, reason, ...details }),
   });
 }
 
@@ -905,6 +998,139 @@ export const callDiag = {
   },
 
   remoteParticipantCountChanged,
+
+  stateMachineDump: (trigger: string, extra?: Record<string, unknown>) =>
+    push('state_machine_dump', {
+      trigger,
+      dump: getStateMachineDump(extra),
+    }),
+
+  callEndEmitted: (
+    reason: string,
+    details: {
+      callId: string;
+      channel: string;
+      trace?: CallTraceInfo;
+    } & Record<string, unknown>
+  ) => {
+    const trace = details.trace ?? captureCallTrace(2);
+    push('call_end_emitted', {
+      reason,
+      callId: details.callId,
+      channel: details.channel,
+      sourceFunction: trace.sourceFunction,
+      sourceFile: trace.sourceFile,
+      sourceLine: trace.sourceLine,
+      sourceColumn: trace.sourceColumn,
+      stack: trace.stack,
+      streamCallingState: liveSnapshot.streamCallingState,
+      remoteParticipantCount: liveSnapshot.remoteParticipantCount,
+      systemCallHold: liveSnapshot.systemCallHold,
+      peerCallHold: liveSnapshot.peerCallHold,
+      gsmInterruptPending,
+      ending: liveSnapshot.ending,
+      talkActive: liveSnapshot.talkActive,
+      ...details,
+    });
+  },
+
+  sessionSyncRequest: (callerSite: string, details?: Record<string, unknown>) =>
+    push('session_sync_request', { callerSite, ...details }),
+
+  sessionSyncCompletedEmitted: (
+    callerSite: string,
+    details: {
+      callId: string;
+      responseStatus: string;
+      trace?: CallTraceInfo;
+    } & Record<string, unknown>
+  ) => {
+    const trace = details.trace ?? captureCallTrace(2);
+    push('session_sync_completed_emitted', {
+      callerSite,
+      reason: callerSite,
+      callId: details.callId,
+      responseStatus: details.responseStatus,
+      sourceFunction: trace.sourceFunction,
+      sourceFile: trace.sourceFile,
+      sourceLine: trace.sourceLine,
+      sourceColumn: trace.sourceColumn,
+      stack: trace.stack,
+      dump: getStateMachineDump({ callerSite }),
+      ...details,
+    });
+    push('state_machine_dump', {
+      trigger: 'session_sync_completed_received',
+      dump: getStateMachineDump({ callerSite, callId: details.callId }),
+    });
+  },
+
+  restCallEndEmitted: (reason: string, details: Record<string, unknown>) => {
+    const trace = captureCallTrace(2);
+    push('rest_call_end_emitted', {
+      reason,
+      sourceFunction: trace.sourceFunction,
+      sourceFile: trace.sourceFile,
+      sourceLine: trace.sourceLine,
+      stack: trace.stack,
+      ...details,
+    });
+  },
+
+  socketEmit: (
+    eventName: string,
+    payload: Record<string, unknown>,
+    channel: string,
+    reason?: string
+  ) => {
+    const trace = captureCallTrace(2);
+    push('socket_emit', {
+      eventName,
+      channel,
+      reason: reason ?? null,
+      senderRole: activeUserRole,
+      timestamp: new Date().toISOString(),
+      sourceFunction: trace.sourceFunction,
+      sourceFile: trace.sourceFile,
+      sourceLine: trace.sourceLine,
+      stack: trace.stack,
+      payload,
+    });
+  },
+
+  socketReceive: (
+    eventName: string,
+    payload: Record<string, unknown>,
+    channel: string
+  ) => {
+    const trace = captureCallTrace(2);
+    const fromType = payload.fromType;
+    const senderRole =
+      fromType === 'u' ? 'caller' : fromType === 'r' ? 'receiver' : 'unknown';
+    push('socket_receive', {
+      eventName,
+      channel,
+      receiverRole: activeUserRole,
+      senderRole,
+      timestamp: new Date().toISOString(),
+      sourceFunction: trace.sourceFunction,
+      sourceFile: trace.sourceFile,
+      sourceLine: trace.sourceLine,
+      stack: trace.stack,
+      payload,
+    });
+    if (eventName === 'call:ended') {
+      push('state_machine_dump', {
+        trigger: 'socket_call_ended_received',
+        dump: getStateMachineDump({
+          channel,
+          callId: payload.callId,
+          fromType: payload.fromType,
+          fromId: payload.fromId,
+        }),
+      });
+    }
+  },
 
   stateMismatch: recordStateMismatch,
   success: recordSuccessfulAction,

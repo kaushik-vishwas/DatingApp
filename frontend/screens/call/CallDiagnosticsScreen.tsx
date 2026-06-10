@@ -25,6 +25,12 @@ import {
   subscribeCallDiagnostics,
   type CallOutcomeSummary,
 } from '../../utils/callDiagnostics';
+import {
+  getGsmDisconnectForensicBundle,
+  getLastForensicExportPath,
+  type GsmDisconnectForensicBundle,
+} from '../../utils/gsmDisconnectProbe';
+import { copySuccessMessage, copyTextToClipboard } from '../../utils/copyToClipboard';
 
 type Props =
   | NativeStackScreenProps<CallerStackParamList, 'CallDiagnostics'>
@@ -96,10 +102,85 @@ export default function CallDiagnosticsScreen({ navigation }: Props): React.JSX.
     [entries]
   );
 
+  const endEmitEntries = useMemo(
+    () =>
+      entries.filter(
+        (e) =>
+          e.eventType === 'call_end_emitted' ||
+          e.eventType === 'rest_call_end_emitted' ||
+          e.eventType === 'session_sync_completed_emitted'
+      ),
+    [entries]
+  );
+
+  const socketTraceEntries = useMemo(
+    () =>
+      entries.filter(
+        (e) =>
+          e.eventType === 'socket_emit' ||
+          e.eventType === 'socket_receive' ||
+          e.eventType === 'state_machine_dump'
+      ),
+    [entries]
+  );
+
+  const probeEntries = useMemo(
+    () =>
+      entries.filter(
+        (e) =>
+          e.eventType === 'info' &&
+          typeof e.details.message === 'string' &&
+          String(e.details.message).startsWith('probe_')
+      ),
+    [entries]
+  );
+
+  const forensics = getGsmDisconnectForensicBundle();
+  const forensicExportPath = getLastForensicExportPath();
+
+  const forensicLines = useMemo((): string[] => {
+    if (!forensics) {
+      return ['No GSM disconnect forensic bundle yet. Reproduce a GSM interrupt call on Android.'];
+    }
+    const f = forensics as GsmDisconnectForensicBundle;
+    const probes = f.rootCauseProbes;
+    return [
+      `Disconnect cause: ${f.disconnectCause ?? '—'} — ${f.disconnectCauseDetail ?? ''}`,
+      `Hypothesis: ${f.hypothesis}`,
+      `Forensic file: ${forensicExportPath ?? 'not saved'}`,
+      `Timeline T0 GSM: ${f.timeline.T0_gsm_arrived ?? '—'}`,
+      `Timeline T1 audio focus: ${f.timeline.T1_audio_focus_lost ?? '—'}`,
+      `Timeline T2 last ping: ${f.timeline.T2_last_ping_sent ?? '—'}`,
+      `Timeline T3 last pong: ${f.timeline.T3_last_pong_received ?? '—'}`,
+      `Timeline T4 timeout fire: ${f.timeline.T4_timeout_would_fire ?? '—'}`,
+      `Timeline T5 disconnect: ${f.timeline.T5_disconnect ?? '—'}`,
+      `Timeline T6 GSM end: ${f.timeline.T6_gsm_ended ?? '—'}`,
+      `Idle before timeout (T4-T3): ${f.timeline.idleBeforeTimeoutMs ?? '—'}ms`,
+      `Disconnect minus last pong: ${f.timeline.disconnectMinusLastPongMs ?? '—'}ms`,
+      `Socket pingTimeout: ${f.socketIoConfig.pingTimeoutMs}ms`,
+      `Socket reconnectionDelayMax: ${f.socketIoConfig.reconnectionDelayMaxMs}ms`,
+      `Stream disconnectionTimeout: ${f.streamSdkConfig.disconnectionTimeoutSec ?? '—'}s`,
+      `Stream SFU unhealthy timeout: ${f.streamSdkConfig.sfuUnhealthyTimeoutMs ?? '—'}ms`,
+      `Network before GSM: ${f.network.typeBeforeGsm ?? '—'} → last ${f.network.lastType ?? '—'}`,
+      `Socket reconnect during GSM: ${f.network.reconnectDuringGsmHold}`,
+      `Probe A (heartbeat suspended): ${probes.A_backgroundHeartbeatSuspended.likely ? 'LIKELY' : 'no'} — ${probes.A_backgroundHeartbeatSuspended.evidence}`,
+      `Probe B (TCP/WS timeout): ${probes.B_tcpKeepaliveBlocked.likely ? 'LIKELY' : 'no'} — ${probes.B_tcpKeepaliveBlocked.evidence}`,
+      `Probe C (audio focus → disconnect): ${probes.C_audioFocusMisinterpretedAsDisconnect.likely ? 'LIKELY' : 'no'}`,
+      `Probe D (short reconnect timeout): ${probes.D_shorterReconnectTimeoutOnDevice.likely ? 'LIKELY' : 'no'}`,
+      `Probe E (implicit LEFT state): ${probes.E_implicitLeftWithoutExplicitSignal.likely ? 'LIKELY' : 'no'}`,
+      `Ping/pong events: ${f.pingPongLog.length} | Telephony: ${f.telephonyLog.length} | Stream samples: ${f.streamStateSamples.length}`,
+    ];
+  }, [forensics, forensicExportPath]);
+
   const onCopy = async (): Promise<void> => {
     try {
       const text = formatCallDiagnosticsForExport();
-      await Share.share({ message: text, title: 'Call diagnostics' });
+      if (!text.trim()) {
+        Alert.alert('Nothing to copy', 'No call logs yet. Finish a call first.');
+        return;
+      }
+      const result = await copyTextToClipboard(text);
+      Alert.alert('Copied', copySuccessMessage(result));
     } catch (e) {
       Alert.alert('Copy failed', e instanceof Error ? e.message : String(e));
     }
@@ -163,6 +244,15 @@ export default function CallDiagnosticsScreen({ navigation }: Props): React.JSX.
           ))}
         </View>
 
+        <Text style={styles.sectionTitle}>GSM disconnect forensics</Text>
+        <View style={[styles.card, styles.forensicCard]}>
+          {forensicLines.map((line) => (
+            <Text key={line} style={styles.line}>
+              {line}
+            </Text>
+          ))}
+        </View>
+
         {outcome ? (
           <>
             <Text style={styles.sectionTitle}>Call outcome summary</Text>
@@ -173,6 +263,51 @@ export default function CallDiagnosticsScreen({ navigation }: Props): React.JSX.
                 </Text>
               ))}
             </View>
+          </>
+        ) : null}
+
+        {endEmitEntries.length > 0 ? (
+          <>
+            <Text style={styles.sectionTitle}>Who ended the call ({endEmitEntries.length})</Text>
+            {endEmitEntries.map((e) => (
+              <View key={e.id} style={[styles.logRow, styles.endEmitRow]}>
+                <Text style={styles.logTime}>{e.timestamp}</Text>
+                <Text style={styles.logType}>{e.eventType}</Text>
+                <Text style={styles.logDetail} numberOfLines={12}>
+                  {JSON.stringify(e.details, null, 0)}
+                </Text>
+              </View>
+            ))}
+          </>
+        ) : null}
+
+        {socketTraceEntries.length > 0 ? (
+          <>
+            <Text style={styles.sectionTitle}>Socket + state trace ({socketTraceEntries.length})</Text>
+            {socketTraceEntries.map((e) => (
+              <View key={e.id} style={styles.logRow}>
+                <Text style={styles.logTime}>{e.timestamp}</Text>
+                <Text style={styles.logType}>{e.eventType}</Text>
+                <Text style={styles.logDetail} numberOfLines={10}>
+                  {JSON.stringify(e.details, null, 0)}
+                </Text>
+              </View>
+            ))}
+          </>
+        ) : null}
+
+        {probeEntries.length > 0 ? (
+          <>
+            <Text style={styles.sectionTitle}>Transport probes ({probeEntries.length})</Text>
+            {probeEntries.slice(-40).map((e) => (
+              <View key={e.id} style={styles.logRow}>
+                <Text style={styles.logTime}>{e.timestamp}</Text>
+                <Text style={styles.logType}>{String(e.details.message ?? 'probe')}</Text>
+                <Text style={styles.logDetail} numberOfLines={8}>
+                  {JSON.stringify(e.details, null, 0)}
+                </Text>
+              </View>
+            ))}
           </>
         ) : null}
 
@@ -274,6 +409,10 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(250,204,21,0.45)',
     backgroundColor: 'rgba(69,26,3,0.45)',
   },
+  forensicCard: {
+    borderColor: 'rgba(34,211,238,0.45)',
+    backgroundColor: 'rgba(8,51,68,0.45)',
+  },
   line: { color: '#ede9fe', fontSize: 12, marginBottom: 4 },
   actions: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginVertical: 14 },
   actionBtn: {
@@ -299,6 +438,10 @@ const styles = StyleSheet.create({
   },
   blockedRow: {
     borderColor: 'rgba(251,191,36,0.55)',
+  },
+  endEmitRow: {
+    borderColor: 'rgba(56,189,248,0.55)',
+    backgroundColor: 'rgba(8,47,73,0.55)',
   },
   logTime: { color: '#a78bfa', fontSize: 10 },
   logType: { color: '#faf5ff', fontWeight: '800', fontSize: 12, marginVertical: 2 },

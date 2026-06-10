@@ -95,6 +95,8 @@ object CellularCallHoldWatcher {
       }
     }
 
+    TelephonyDiagnosticsWatcher.recordAudioModeFromWatcher(mode, source)
+
     val active = cellularMode || gsmPreemptive
     val resolvedSource =
       when {
@@ -111,6 +113,7 @@ object CellularCallHoldWatcher {
     if (!active) {
       gsmPreemptive = false
     }
+    TelephonyDiagnosticsWatcher.notifyAppGsmActive(active)
     mainHandler.post { onChange?.invoke(active, mode, source) }
   }
 

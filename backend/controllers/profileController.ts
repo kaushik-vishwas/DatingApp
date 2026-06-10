@@ -2319,8 +2319,12 @@ export const receiverBackgroundPresence = async (req: Request, res: Response): P
       return;
     }
     const receiverId = String(req.receiver!._id);
-    await touchReceiverBackgroundPresence(receiverId);
-    res.status(200).json({ ok: true });
+    const result = await touchReceiverBackgroundPresence(receiverId);
+    res.status(200).json({
+      ok: result.ok,
+      graceUntilMs: result.graceUntilMs,
+      reason: result.reason ?? null,
+    });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error('receiverBackgroundPresence error:', msg);

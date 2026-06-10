@@ -21,6 +21,7 @@ export type CallerStackParamList = {
   };
   VoiceCall: VoiceCallScreenParams;
   CallDiagnostics: undefined;
+  PresenceDiagnostics: undefined;
   ReceiverProfile: { receiver: DiscoverReceiverSummary };
   Wallet: undefined;
   WalletTransactions: undefined;

@@ -44,4 +44,5 @@ export type ReceiverStackParamList = {
   IncomingCall: IncomingCallParams;
   VoiceCall: VoiceCallScreenParams;
   CallDiagnostics: undefined;
+  PresenceDiagnostics: undefined;
 };

@@ -13,6 +13,8 @@ exports.emitReceiverRejected = emitReceiverRejected;
 exports.emitCallerApproved = emitCallerApproved;
 exports.emitCallerRejected = emitCallerRejected;
 exports.emitCallerOnlineToReceiver = emitCallerOnlineToReceiver;
+exports.emitCallTalkStarted = emitCallTalkStarted;
+exports.emitCallEndedToParticipants = emitCallEndedToParticipants;
 exports.emitReceiverWithdrawalUpdate = emitReceiverWithdrawalUpdate;
 const mongoose_1 = __importDefault(require("mongoose"));
 let ioInstance = null;
@@ -83,6 +85,41 @@ function emitCallerOnlineToReceiver(receiverId, payload) {
         return;
     const room = `account:r:${String(receiverId).trim()}`;
     ioInstance.to(room).emit('caller:online', payload);
+}
+/** Notify both call participants that the voice session ended (REST fallback when socket `call:end` is missed). */
+/** Push shared talkStartedAt to both parties the moment both are connected (instant timer sync). */
+function emitCallTalkStarted(callId, callerId, receiverId, talkStartedAt) {
+    if (!ioInstance)
+        return;
+    const payload = {
+        callId: String(callId).trim(),
+        talkStartedAt: String(talkStartedAt).trim(),
+    };
+    if (!payload.callId || !payload.talkStartedAt)
+        return;
+    ioInstance.to(accountRoom('u', callerId)).emit('call:talk_started', payload);
+    ioInstance.to(accountRoom('r', receiverId)).emit('call:talk_started', payload);
+}
+function emitCallEndedToParticipants(callId, callerId, receiverId, fromType, fromId) {
+    if (!ioInstance)
+        return;
+    const payload = {
+        callId: String(callId).trim(),
+        fromType,
+        fromId: String(fromId).trim(),
+    };
+    if (!payload.callId)
+        return;
+    console.info('[call:ended] server_emit', {
+        callId: payload.callId,
+        fromType,
+        fromId: payload.fromId,
+        callerId,
+        receiverId,
+        at: new Date().toISOString(),
+    });
+    ioInstance.to(accountRoom('u', callerId)).emit('call:ended', payload);
+    ioInstance.to(accountRoom('r', receiverId)).emit('call:ended', payload);
 }
 function emitReceiverWithdrawalUpdate(accountId, payload) {
     if (!ioInstance)

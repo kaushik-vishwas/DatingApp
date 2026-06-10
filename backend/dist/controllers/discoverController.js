@@ -44,7 +44,7 @@ const ChatBlock_1 = __importDefault(require("../models/ChatBlock"));
 const ReceiverRating_1 = __importDefault(require("../models/ReceiverRating"));
 const accountAccess_1 = require("../utils/accountAccess");
 const callQueue_1 = require("../services/callQueue");
-const socketRegistry_1 = require("../socket/socketRegistry");
+const receiverPresence_1 = require("../services/receiverPresence");
 function iso(d) {
     return d.toISOString();
 }
@@ -63,15 +63,14 @@ function parseIntQuery(val) {
     const n = parseInt(s, 10);
     return Number.isFinite(n) ? n : NaN;
 }
-function toCard(r, ratingByReceiverId, busyByReceiverId, connectedReceiverIds) {
+function toCard(r, ratingByReceiverId, busyByReceiverId) {
     const o = r.toObject();
     const rating = ratingByReceiverId.get(String(r._id));
     const id = String(r._id);
-    const socketLive = connectedReceiverIds.has(id);
     const switchOn = Boolean(o.isAvailable);
     const discoverAvailable = switchOn;
-    /** Online on discover only when Go Online is on and the receiver app has an active socket. */
-    const discoverOnline = switchOn && socketLive;
+    /** Online when Go Online is on and socket is live, or within 5 min after minimize/background disconnect. */
+    const discoverOnline = switchOn && (0, receiverPresence_1.isReceiverDiscoverPresenceLive)(id, o.discoverGraceUntil ?? null);
     return {
         _id: id,
         name: o.name,
@@ -120,7 +119,7 @@ const listReceiversForCaller = async (req, res) => {
             ? { _id: { $nin: blockedReceiverIds } }
             : {};
         const receivers = await Receiver_1.default.find({ ...filter, ...blockClause })
-            .select('name age state interests languages profileImage audioCallRate updatedAt gender isAvailable isOnline')
+            .select('name age state interests languages profileImage audioCallRate updatedAt gender isAvailable isOnline discoverGraceUntil')
             .sort({ updatedAt: -1 })
             .limit(limit)
             .exec();
@@ -147,9 +146,8 @@ const listReceiversForCaller = async (req, res) => {
             ]);
         const ratingByReceiverId = new Map(ratingRows.map((row) => [String(row.receiverId), { avg: row.avg, count: row.count }]));
         const busyByReceiverId = new Set(receivers.map((r) => String(r._id)).filter((id) => (0, callQueue_1.isReceiverBusy)(id)));
-        const connectedReceiverIds = (0, socketRegistry_1.getConnectedReceiverIds)();
         res.status(200).json({
-            receivers: receivers.map((r) => toCard(r, ratingByReceiverId, busyByReceiverId, connectedReceiverIds)),
+            receivers: receivers.map((r) => toCard(r, ratingByReceiverId, busyByReceiverId)),
         });
     }
     catch (err) {

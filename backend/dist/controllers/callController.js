@@ -107,6 +107,7 @@ async function recordVoiceParticipantJoined(callId, accountKind) {
         if (!session) {
             throw new Error('Call session not found');
         }
+        (0, socketRegistry_1.emitCallTalkStarted)(callId, String(session.callerId), String(session.receiverId), talkStartedAt.toISOString());
     }
     return session;
 }
@@ -503,6 +504,8 @@ const endVoiceSession = async (req, res) => {
         }
         const settled = await settleCallSession(callId, true);
         if (settled.justCompleted) {
+            const fromType = accountKind === 'user' ? 'u' : 'r';
+            (0, socketRegistry_1.emitCallEndedToParticipants)(callId, String(current.callerId), String(current.receiverId), fromType, meId);
             void (0, receiverScore_1.recordReceiverCallScore)({
                 callId,
                 receiverId: settled.receiverId,

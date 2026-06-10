@@ -73,6 +73,7 @@ const receiverSchema = new mongoose_1.Schema({
     suspended: { type: Boolean, default: false },
     isAvailable: { type: Boolean, default: false },
     isOnline: { type: Boolean, default: false },
+    discoverGraceUntil: { type: Date, default: null },
     moderationWarningAt: { type: Date, default: null },
     rejectionReason: { type: String, default: null },
     pendingNameAsPerAadhaar: { type: String, default: null },

@@ -30,15 +30,18 @@ import {
 } from '../services/callQueue';
 import { sendReceiverIncomingCallPush } from '../services/expoPush';
 import {
-  armReceiverDiscoverGrace,
+  armReceiverDiscoverGraceImmediate,
   clearReceiverDiscoverGrace,
+  isReceiverDiscoverPresenceLive,
   syncReceiverPresenceInDatabase,
+  touchReceiverBackgroundPresence,
 } from '../services/receiverPresence';
 
 type CallInvitePayload = { callId?: unknown; targetId?: unknown };
 type CallResponsePayload = { callId?: unknown; accepted?: unknown };
 type CallEndPayload = { callId?: unknown };
 type CallHoldPayload = { callId?: unknown; onHold?: unknown };
+type CallKeepalivePayload = { callId?: unknown; ts?: unknown };
 type CallMutePayload = { callId?: unknown; muted?: unknown };
 type CallQueuePayload = { active?: unknown };
 type ChatTypingPayload = { typing?: unknown };
@@ -278,17 +281,38 @@ export function attachChatSocket(httpServer: HTTPServer): Server {
         isAvailable?: boolean;
       } | null>();
       if (recv?.isAvailable) {
-        armReceiverDiscoverGrace(receiverId);
+        armReceiverDiscoverGraceImmediate(receiverId);
       } else {
         clearReceiverDiscoverGrace(receiverId);
       }
       await syncReceiverPresenceInDatabase(receiverId);
     };
 
+    socket.on('receiver:presence:background', (payload: unknown, ack?: (r: unknown) => void) => {
+      if ((socket.data.typ as AccountType) !== 'r') {
+        ack?.({ ok: false, error: 'Forbidden' });
+        return;
+      }
+      const receiverId = String(socket.data.accountId);
+      void touchReceiverBackgroundPresence(receiverId)
+        .then((result) => {
+          ack?.({
+            ok: result.ok,
+            graceUntilMs: result.graceUntilMs,
+            reason: result.reason ?? null,
+          });
+        })
+        .catch((e: unknown) => {
+          const msg = e instanceof Error ? e.message : String(e);
+          ack?.({ ok: false, error: msg });
+        });
+    });
+
     socket.on('disconnect', () => {
       const leavingId = String(socket.data.accountId);
       const leavingType = socket.data.typ as AccountType;
       if (leavingType === 'r') {
+        armReceiverDiscoverGraceImmediate(leavingId);
         void markReceiverDiscoverGraceIfAvailable(leavingId);
       }
       setTimeout(() => {
@@ -716,11 +740,15 @@ export function attachChatSocket(httpServer: HTTPServer): Server {
             return;
           }
           if (!hasActiveSocketForAccount('r', targetId)) {
-            const recvPush = await Receiver.findById(targetId)
-              .select('expoPushToken')
-              .lean<{ expoPushToken?: string | null } | null>();
-            const pushToken = recvPush?.expoPushToken?.trim();
-            if (!pushToken) {
+            const recvPresence = await Receiver.findById(targetId)
+              .select('expoPushToken discoverGraceUntil')
+              .lean<{ expoPushToken?: string | null; discoverGraceUntil?: Date | null } | null>();
+            const presenceLive = isReceiverDiscoverPresenceLive(
+              targetId,
+              recvPresence?.discoverGraceUntil ?? null
+            );
+            const pushToken = recvPresence?.expoPushToken?.trim();
+            if (!presenceLive && !pushToken) {
               ack?.({ ok: false, error: 'Receiver is offline right now.' });
               return;
             }
@@ -1018,6 +1046,90 @@ export function attachChatSocket(httpServer: HTTPServer): Server {
       })();
     });
 
+    socket.on('call:keepalive', (payload: CallKeepalivePayload, ack?: (r: unknown) => void) => {
+      const callId = typeof payload?.callId === 'string' ? payload.callId.trim() : '';
+      if (!callId) {
+        ack?.({ ok: false, error: 'callId is required' });
+        return;
+      }
+      const fromType = socket.data.typ as AccountType;
+      const fromId = String(socket.data.accountId);
+      void (async () => {
+        try {
+          const session = await CallSession.findOne({ callId })
+            .select('callerId receiverId status')
+            .lean<{ callerId: mongoose.Types.ObjectId; receiverId: mongoose.Types.ObjectId; status?: string } | null>();
+          if (!session || session.status !== 'ongoing') {
+            ack?.({ ok: false, error: 'Call not active' });
+            return;
+          }
+          const callerId = String(session.callerId);
+          const receiverId = String(session.receiverId);
+          const isParticipant =
+            (fromType === 'u' && fromId === callerId) || (fromType === 'r' && fromId === receiverId);
+          if (!isParticipant) {
+            ack?.({ ok: false, error: 'Forbidden' });
+            return;
+          }
+          const peerType: AccountType = fromType === 'u' ? 'r' : 'u';
+          const peerId = fromType === 'u' ? receiverId : callerId;
+          io.to(accountRoom(peerType, peerId)).emit('call:keepalive', {
+            callId,
+            fromType,
+            fromId,
+            ts: typeof payload?.ts === 'number' ? payload.ts : Date.now(),
+          });
+          ack?.({ ok: true });
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e);
+          console.error('call:keepalive error:', msg);
+          ack?.({ ok: false, error: 'Server error' });
+        }
+      })();
+    });
+
+    socket.on('call:keepalive:ack', (payload: CallKeepalivePayload, ack?: (r: unknown) => void) => {
+      const callId = typeof payload?.callId === 'string' ? payload.callId.trim() : '';
+      if (!callId) {
+        ack?.({ ok: false, error: 'callId is required' });
+        return;
+      }
+      const fromType = socket.data.typ as AccountType;
+      const fromId = String(socket.data.accountId);
+      void (async () => {
+        try {
+          const session = await CallSession.findOne({ callId })
+            .select('callerId receiverId status')
+            .lean<{ callerId: mongoose.Types.ObjectId; receiverId: mongoose.Types.ObjectId; status?: string } | null>();
+          if (!session || session.status !== 'ongoing') {
+            ack?.({ ok: false, error: 'Call not active' });
+            return;
+          }
+          const callerId = String(session.callerId);
+          const receiverId = String(session.receiverId);
+          const isParticipant =
+            (fromType === 'u' && fromId === callerId) || (fromType === 'r' && fromId === receiverId);
+          if (!isParticipant) {
+            ack?.({ ok: false, error: 'Forbidden' });
+            return;
+          }
+          const peerType: AccountType = fromType === 'u' ? 'r' : 'u';
+          const peerId = fromType === 'u' ? receiverId : callerId;
+          io.to(accountRoom(peerType, peerId)).emit('call:keepalive:ack', {
+            callId,
+            fromType,
+            fromId,
+            ts: typeof payload?.ts === 'number' ? payload.ts : Date.now(),
+          });
+          ack?.({ ok: true });
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e);
+          console.error('call:keepalive:ack error:', msg);
+          ack?.({ ok: false, error: 'Server error' });
+        }
+      })();
+    });
+
     socket.on('call:end', (payload: CallEndPayload, ack?: (r: unknown) => void) => {
       const callId = typeof payload?.callId === 'string' ? payload.callId.trim() : '';
       if (!callId) {
@@ -1026,6 +1138,12 @@ export function attachChatSocket(httpServer: HTTPServer): Server {
       }
       const endedByType = socket.data.typ as AccountType;
       const endedById = String(socket.data.accountId);
+      console.info('[call:end] received', {
+        callId,
+        endedByType,
+        endedById,
+        at: new Date().toISOString(),
+      });
       const invite = activeCallInvites.get(callId);
       if (invite) {
         if (invite.timeoutHandle) {

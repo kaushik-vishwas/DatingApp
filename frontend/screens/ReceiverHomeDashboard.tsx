@@ -37,6 +37,7 @@ import { type ReceiverPresenceInfo } from '../utils/receiverStatus';
 import { resolveProfileImageSource } from '../utils/avatarSource';
 import SelectoLogo from '../assets/SelectoLogo.png';
 import { CallDiagnosticsTopBarButton } from '../components/call/CallDiagnosticsTopBarButton';
+import { PresenceDiagnosticsTopBarButton } from '../components/call/PresenceDiagnosticsTopBarButton';
 import EarningsCardBg from '../assets/earnBg.png';
 import InstructionsCardBg from '../assets/instructionBg.png';
 import NoticeBg from '../assets/noticeBg.png'
@@ -372,13 +373,16 @@ export default function ReceiverHomeDashboard(): React.JSX.Element {
         <View style={styles.topSection}>
           <View style={styles.topBar}>
             <View style={styles.topBarLeft}>
-              <Image
+              {/* <Image
                 source={SelectoLogo}
                 style={styles.brandLogo}
                 resizeMode="contain"
-              />
+              /> */}
               <CallDiagnosticsTopBarButton
                 onPress={() => navigation.navigate('CallDiagnostics')}
+              />
+              <PresenceDiagnosticsTopBarButton
+                onPress={() => navigation.navigate('PresenceDiagnostics')}
               />
             </View>
             <View style={styles.topRight}>

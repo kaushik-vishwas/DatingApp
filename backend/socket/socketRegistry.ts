@@ -116,6 +116,14 @@ export function emitCallEndedToParticipants(
     fromId: String(fromId).trim(),
   };
   if (!payload.callId) return;
+  console.info('[call:ended] server_emit', {
+    callId: payload.callId,
+    fromType,
+    fromId: payload.fromId,
+    callerId,
+    receiverId,
+    at: new Date().toISOString(),
+  });
   ioInstance.to(accountRoom('u', callerId)).emit('call:ended', payload);
   ioInstance.to(accountRoom('r', receiverId)).emit('call:ended', payload);
 }

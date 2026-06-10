@@ -36,6 +36,15 @@ export type IncomingCallAndroidModule = {
   getSamsungCallCompatProfile(): SamsungCallCompatProfile;
   startCellularCallHoldWatch(): boolean;
   stopCellularCallHoldWatch(): void;
+  startCallWebSocketForegroundService(callLabel: string): boolean;
+  stopCallWebSocketForegroundService(): void;
+  requestIgnoreBatteryOptimizationsAsync(): Promise<{
+    requested?: boolean;
+    alreadyIgnored?: boolean;
+    unavailable?: boolean;
+  }>;
+  startTelephonyDiagnosticsWatch(): boolean;
+  stopTelephonyDiagnosticsWatch(): void;
 };
 
 export default requireNativeModule<IncomingCallAndroidModule>('IncomingCallAndroid');

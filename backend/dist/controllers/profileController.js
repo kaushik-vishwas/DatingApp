@@ -36,7 +36,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getCallerNotifications = exports.getReceiverCallerOnlineNotifications = exports.getCallerMessageEligibleReceivers = exports.deleteReceiverCallHistory = exports.deleteCallerCallHistory = exports.getCallerCallHistory = exports.getReceiverEarningsBreakdown = exports.verifyReceiverBankUpdateOtp = exports.sendReceiverBankUpdateOtp = exports.deleteReceiverAccount = exports.reopenRejectedReceiverKyc = exports.completeReceiverAudioOnboarding = exports.updateReceiverExpoPushToken = exports.updateReceiverProfile = exports.notifyReceiverRecentUser = exports.getReceiverNotifyCandidates = exports.getCallerNotificationMessage = exports.getReceiverWelcomeMessage = exports.getReceiverCallInsights = exports.verifyReceiverWithdrawalOtpAndCreate = exports.sendReceiverWithdrawalOtp = exports.getReceiverWithdrawalOverview = exports.getReceiverWalletSummary = exports.updateCallerProfile = exports.completeCallerProfile = exports.saveCallerUserAudio = exports.saveReceiverKycBankFinalize = exports.saveReceiverKycDocuments = exports.saveReceiverKycProfileInfo = exports.completeProfile = void 0;
+exports.getCallerNotifications = exports.getReceiverCallerOnlineNotifications = exports.getCallerMessageEligibleReceivers = exports.deleteReceiverCallHistory = exports.deleteCallerCallHistory = exports.getCallerCallHistory = exports.getReceiverEarningsBreakdown = exports.verifyReceiverBankUpdateOtp = exports.sendReceiverBankUpdateOtp = exports.deleteReceiverAccount = exports.reopenRejectedReceiverKyc = exports.completeReceiverAudioOnboarding = exports.updateReceiverExpoPushToken = exports.receiverForegroundPresence = exports.receiverBackgroundPresence = exports.updateReceiverProfile = exports.notifyReceiverRecentUser = exports.getReceiverNotifyCandidates = exports.getCallerNotificationMessage = exports.getReceiverWelcomeMessage = exports.getReceiverCallInsights = exports.verifyReceiverWithdrawalOtpAndCreate = exports.sendReceiverWithdrawalOtp = exports.getReceiverWithdrawalOverview = exports.getReceiverWalletSummary = exports.updateCallerProfile = exports.completeCallerProfile = exports.saveCallerUserAudio = exports.saveReceiverKycBankFinalize = exports.saveReceiverKycDocuments = exports.saveReceiverKycProfileInfo = exports.completeProfile = void 0;
 const crypto_1 = __importDefault(require("crypto"));
 const mongoose_1 = __importDefault(require("mongoose"));
 const User_1 = __importDefault(require("../models/User"));
@@ -1881,6 +1881,7 @@ const updateReceiverProfile = async (req, res) => {
         if (typeof req.body.isAvailable === 'boolean') {
             receiver.isAvailable = req.body.isAvailable;
             if (!req.body.isAvailable) {
+                (0, receiverPresence_1.clearReceiverDiscoverGrace)(receiverId);
                 const endedAt = new Date();
                 const onlineSince = receiver.onlineSince;
                 receiver.isOnline = false;
@@ -1924,6 +1925,50 @@ const updateReceiverProfile = async (req, res) => {
     }
 };
 exports.updateReceiverProfile = updateReceiverProfile;
+/**
+ * POST /profile/receiver/presence/background — keep discover online while app is minimized (OnePlus/Oppo).
+ */
+const receiverBackgroundPresence = async (req, res) => {
+    try {
+        if (req.accountKind !== 'receiver') {
+            res.status(403).json({ message: 'This endpoint is only for receiver accounts' });
+            return;
+        }
+        const receiverId = String(req.receiver._id);
+        const result = await (0, receiverPresence_1.touchReceiverBackgroundPresence)(receiverId);
+        res.status(200).json({
+            ok: result.ok,
+            graceUntilMs: result.graceUntilMs,
+            reason: result.reason ?? null,
+        });
+    }
+    catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error('receiverBackgroundPresence error:', msg);
+        res.status(500).json({ message: msg || 'Server error' });
+    }
+};
+exports.receiverBackgroundPresence = receiverBackgroundPresence;
+/**
+ * POST /profile/receiver/presence/foreground — sync presence when app returns to foreground.
+ */
+const receiverForegroundPresence = async (req, res) => {
+    try {
+        if (req.accountKind !== 'receiver') {
+            res.status(403).json({ message: 'This endpoint is only for receiver accounts' });
+            return;
+        }
+        const receiverId = String(req.receiver._id);
+        await (0, receiverPresence_1.touchReceiverForegroundPresence)(receiverId);
+        res.status(200).json({ ok: true });
+    }
+    catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error('receiverForegroundPresence error:', msg);
+        res.status(500).json({ message: msg || 'Server error' });
+    }
+};
+exports.receiverForegroundPresence = receiverForegroundPresence;
 /**
  * PATCH /profile/receiver/push-token — store Expo push token for incoming-call notifications.
  */
