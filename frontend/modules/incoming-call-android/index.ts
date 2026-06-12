@@ -45,6 +45,12 @@ export type IncomingCallAndroidModule = {
   }>;
   startTelephonyDiagnosticsWatch(): boolean;
   stopTelephonyDiagnosticsWatch(): void;
+  isBluetoothVoiceOutputAvailable(): boolean;
+  setVoiceCallAudioRoute(route: 'speaker' | 'earpiece' | 'bluetooth'): {
+    applied?: boolean;
+    route?: string;
+  };
+  releaseVoiceCallAudioRoute(): void;
 };
 
 export default requireNativeModule<IncomingCallAndroidModule>('IncomingCallAndroid');

@@ -1,5 +1,6 @@
 import mongoose from 'mongoose';
 import WithdrawalRequest, { type PayoutStatus } from '../models/WithdrawalRequest';
+import AdminWithdrawalRequest from '../models/AdminWithdrawalRequest';
 import Receiver from '../models/Receiver';
 import { emitReceiverWithdrawalUpdate } from '../socket/socketRegistry';
 import { razorpayContactEmailFromPhone } from '../utils/razorpayContact';
@@ -402,3 +403,162 @@ export async function trackAndFinalizeRazorpayXPayout(withdrawalId: string): Pro
   }
 }
 
+async function markAdminWithdrawalEarningsDebited(withdrawalId: string): Promise<void> {
+  await AdminWithdrawalRequest.findOneAndUpdate(
+    { _id: withdrawalId, earningsDebitedAt: null },
+    { earningsDebitedAt: new Date() }
+  );
+}
+
+/**
+ * RazorpayX payout for platform admin earnings (UPI only).
+ */
+export async function trackAndFinalizeAdminRazorpayXPayout(withdrawalId: string): Promise<void> {
+  const withdrawal = await AdminWithdrawalRequest.findById(withdrawalId).lean<{
+    _id: mongoose.Types.ObjectId;
+    adminId: mongoose.Types.ObjectId;
+    amount: number;
+    status: string;
+    payoutStatus: PayoutStatus;
+    payoutId: string | null;
+    payoutReferenceId: string | null;
+    upiId: string;
+    payeeName: string;
+    contactPhone: string;
+  }>();
+
+  if (!withdrawal) return;
+  if (withdrawal.payoutStatus !== 'processing') return;
+
+  const upiId = safeTrim(withdrawal.upiId).toLowerCase();
+  const payeeName = safeTrim(withdrawal.payeeName);
+  const contactPhone = safeTrim(withdrawal.contactPhone);
+  const hasUpi = /^[a-z0-9._-]{2,256}@[a-z]{3,}$/i.test(upiId);
+
+  if (!hasUpi || !contactPhone || !payeeName) {
+    await AdminWithdrawalRequest.findByIdAndUpdate(withdrawalId, {
+      payoutStatus: 'failed',
+      payoutError: 'Admin payout UPI/contact details missing',
+      status: 'rejected',
+    });
+    return;
+  }
+
+  const payoutAccountNumber = process.env.RAZORPAYX_ACCOUNT_NUMBER?.trim();
+  const purpose = process.env.RAZORPAYX_PAYOUT_PURPOSE?.trim() || 'payout';
+  const narration = safeTrim(process.env.RAZORPAYX_PAYOUT_NARRATION) || 'Selecto Admin Payout';
+
+  if (!payoutAccountNumber) {
+    await AdminWithdrawalRequest.findByIdAndUpdate(withdrawalId, {
+      payoutStatus: 'failed',
+      payoutError: 'RAZORPAYX_ACCOUNT_NUMBER is not set',
+      status: 'rejected',
+    });
+    return;
+  }
+
+  const amountPaise = roundInrToPaise(withdrawal.amount);
+  const referenceBase = withdrawal.payoutReferenceId || `awd_${String(withdrawal._id).slice(-10)}`;
+  const idempotencyKey = `awd-${referenceBase}`.slice(0, 80);
+  let payoutId: string | null = withdrawal.payoutId;
+
+  try {
+    if (!payoutId) {
+      const refId = referenceBase.slice(0, 40);
+      const contact = {
+        name: payeeName,
+        email: razorpayContactEmailFromPhone(contactPhone),
+        contact: contactPhone,
+        type: 'customer',
+        reference_id: `admin_${String(withdrawal.adminId).slice(-10)}`.slice(0, 40),
+      };
+      const fundAccount: RazorpayFundAccount = {
+        account_type: 'vpa',
+        vpa: { address: upiId },
+        contact,
+      };
+
+      const payout = await razorpayCreatePayout({
+        accountNumber: payoutAccountNumber,
+        amountPaise,
+        currency: 'INR',
+        mode: 'UPI',
+        purpose,
+        referenceId: refId,
+        narration: narration.slice(0, 30),
+        idempotencyKey,
+        fundAccount,
+      });
+
+      const createdPayoutId = safeTrim(payout.id) || null;
+      const payoutStatus = mapRazorpayPayoutStatusToPayoutStatus(payout.status);
+      const utr = payout.utr ?? null;
+      const payoutError = payoutStatus === 'failed' ? extractRazorpayErrorMessage(payout) : null;
+
+      await AdminWithdrawalRequest.findByIdAndUpdate(withdrawalId, {
+        payoutId: createdPayoutId,
+        payoutUtr: utr,
+        payoutStatus,
+        payoutError,
+        status: payoutStatus === 'success' ? 'approved' : payoutStatus === 'failed' ? 'rejected' : 'approved',
+      });
+
+      payoutId = createdPayoutId;
+
+      if (payoutStatus === 'failed') return;
+
+      if (payoutStatus === 'success') {
+        await markAdminWithdrawalEarningsDebited(withdrawalId);
+        return;
+      }
+    }
+
+    if (!payoutId) return;
+
+    const maxAttempts = Number(process.env.RAZORPAYX_PAYOUT_POLL_ATTEMPTS ?? 8);
+    const delayMs = Number(process.env.RAZORPAYX_PAYOUT_POLL_DELAY_MS ?? 5000);
+
+    for (let i = 0; i < maxAttempts; i += 1) {
+      const current = await AdminWithdrawalRequest.findById(withdrawalId).select('payoutStatus payoutId');
+      if (!current || current.payoutId !== payoutId || current.payoutStatus !== 'processing') return;
+
+      const payout = await razorpayFetchPayout(payoutId);
+      const payoutStatus = mapRazorpayPayoutStatusToPayoutStatus(payout.status);
+
+      if (payoutStatus === 'success') {
+        await markAdminWithdrawalEarningsDebited(withdrawalId);
+        await AdminWithdrawalRequest.findByIdAndUpdate(withdrawalId, {
+          payoutStatus: 'success',
+          payoutUtr: payout.utr ?? null,
+          payoutError: null,
+          status: 'approved',
+        });
+        return;
+      }
+
+      if (payoutStatus === 'failed') {
+        const err = extractRazorpayErrorMessage(payout);
+        await AdminWithdrawalRequest.findByIdAndUpdate(withdrawalId, {
+          payoutStatus: 'failed',
+          payoutError: err,
+          payoutUtr: payout.utr ?? null,
+          status: 'rejected',
+        });
+        return;
+      }
+
+      await sleep(delayMs);
+    }
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (!payoutId) {
+      await AdminWithdrawalRequest.findByIdAndUpdate(withdrawalId, {
+        status: 'rejected',
+        payoutStatus: 'failed',
+        payoutError: msg,
+      });
+      return;
+    }
+    await AdminWithdrawalRequest.findByIdAndUpdate(withdrawalId, { payoutError: msg });
+  }
+}

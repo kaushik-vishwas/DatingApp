@@ -122,9 +122,9 @@ const DiscoverStickyTop = React.memo(function DiscoverStickyTop({
       <View style={styles.topSection}>
         <View style={styles.topBar}>
           <View style={styles.topBarLeft}>
-            {/* <Image source={SelectoLogo} style={styles.brandLogo} resizeMode="contain" /> */}
-            <CallDiagnosticsTopBarButton onPress={onDiagnosticsPress} />
-            <PresenceDiagnosticsTopBarButton onPress={onPresenceDiagnosticsPress} />
+            <Image source={SelectoLogo} style={styles.brandLogo} resizeMode="contain" />
+            {/* <CallDiagnosticsTopBarButton onPress={onDiagnosticsPress} />
+            <PresenceDiagnosticsTopBarButton onPress={onPresenceDiagnosticsPress} /> */}
           </View>
           <View style={styles.topRight}>
             <TouchableOpacity style={styles.walletCapsule} onPress={onWalletPress} activeOpacity={0.85}>
@@ -1112,7 +1112,7 @@ const styles = StyleSheet.create({
   },
   promoGradient: {
     borderRadius: 16,
-    padding: 10,
+    padding: 8,
     shadowColor: '#7F00FF',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
@@ -1156,10 +1156,10 @@ const styles = StyleSheet.create({
 
   promoBtn: {
     backgroundColor: 'rgba(255,255,255,0.95)',
-    paddingHorizontal: 15,
-    paddingVertical: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 4,
     borderRadius: 20,
-    paddingLeft: 28, 
+    paddingLeft: 20, 
     alignItems: 'center',
     justifyContent: 'center',
     minWidth: 150,
@@ -1167,7 +1167,7 @@ const styles = StyleSheet.create({
   promoBtnText: {
     color: PURPLE,
     fontWeight: '900',
-    fontSize: 16,
+    fontSize: 14,
   },
 
   leftColumn: {

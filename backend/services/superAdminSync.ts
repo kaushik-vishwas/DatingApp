@@ -25,6 +25,9 @@ export async function syncSuperAdminFromEnv(): Promise<void> {
   const existing = await Admin.findOne({ email });
   if (existing) {
     existing.name = name;
+    if (!existing.role) {
+      existing.role = 'super_admin';
+    }
     await existing.save();
     console.log(`[admin] Super admin synced: ${email}`);
     return;

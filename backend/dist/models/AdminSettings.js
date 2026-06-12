@@ -66,6 +66,11 @@ const adminSettingsSchema = new mongoose_1.Schema({
         title: { type: String, default: 'Announcement', trim: true, maxlength: 120 },
         body: { type: String, default: '', trim: true, maxlength: 3000 },
     },
+    adminEarningsPayout: {
+        upiId: { type: String, default: '', trim: true, maxlength: 256 },
+        payeeName: { type: String, default: '', trim: true, maxlength: 120 },
+        contactPhone: { type: String, default: '', trim: true, maxlength: 20 },
+    },
 }, { timestamps: true });
 const AdminSettings = mongoose_1.default.model('AdminSettings', adminSettingsSchema);
 exports.default = AdminSettings;

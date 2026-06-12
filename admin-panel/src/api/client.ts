@@ -305,6 +305,8 @@ export async function updateAdminRole(adminId: string, role: AdminRole) {
 export type OverviewDashboardResponse = {
   cards: {
     totalRevenue: number;
+    adminEarnings: number;
+    receiverRevenue: number;
     totalCalls: number;
     activeReceivers: number;
     activeUsers: number;
@@ -587,5 +589,72 @@ export async function fetchWithdrawals(params?: {
 
 export async function resolveWithdrawal(withdrawalId: string, action: 'approve' | 'reject') {
   const { data } = await api.patch<{ ok: boolean }>(`/admin/withdrawals/${withdrawalId}`, { action });
+  return data;
+}
+
+/** ================= ADMIN EARNINGS ================= */
+
+export type AdminEarningsBreakdown = {
+  callEarnings: number;
+  messageEarnings: number;
+  totalEarnings: number;
+  calls: number;
+  messages: number;
+  callerCallGross: number;
+  callerMessageGross: number;
+  receiverCallPayout: number;
+  receiverMessagePayout: number;
+};
+
+export type AdminEarningsDashboardResponse = {
+  earnings: {
+    lifetime: AdminEarningsBreakdown;
+    today: AdminEarningsBreakdown;
+    thisWeek: AdminEarningsBreakdown;
+    withdrawableInr: number;
+    withdrawnInr: number;
+    reservedInr: number;
+  };
+  payout: {
+    upiId: string;
+    payeeName: string;
+    contactPhone: string;
+    configured: boolean;
+  };
+  withdrawals: Array<{
+    id: string;
+    amount: number;
+    status: string;
+    payoutStatus: string;
+    payoutUtr: string | null;
+    payoutError: string | null;
+    upiId: string;
+    createdAt: string;
+  }>;
+};
+
+export async function fetchAdminEarningsDashboard() {
+  const { data } = await api.get<AdminEarningsDashboardResponse>('/admin/earnings');
+  return data;
+}
+
+export async function updateAdminEarningsPayoutDetails(payload: {
+  upiId: string;
+  payeeName: string;
+  contactPhone: string;
+}) {
+  const { data } = await api.patch<{ message: string; payout: AdminEarningsDashboardResponse['payout'] }>(
+    '/admin/earnings/payout-details',
+    payload
+  );
+  return data;
+}
+
+export async function createAdminEarningsWithdrawal(amount: number) {
+  const { data } = await api.post<{
+    message: string;
+    withdrawal: { id: string; amount: number; payoutStatus: string; createdAt: string };
+    withdrawableInr: number;
+  }>('/admin/earnings/withdraw', { amount });
   return data;
 }

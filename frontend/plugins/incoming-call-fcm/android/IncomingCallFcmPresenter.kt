@@ -66,16 +66,25 @@ object IncomingCallFcmPresenter {
         .toString()
     )
 
-    val content =
+    IncomingCallNotificationChannels.ensureIncomingCallChannel(context)
+
+    val contentBuilder =
       NotificationContent.Builder()
         .setTitle("Incoming call")
         .setText("$peerName is calling you")
         .setBody(body)
         .setPriority(NotificationPriority.MAX)
-        .useDefaultSound()
         .setColor(Color.parseColor("#7c3aed"))
         .setAutoDismiss(true)
-        .build()
+
+    val ringUri = IncomingCallNotificationChannels.resolveRingtoneUri(context)
+    if (ringUri != null) {
+      contentBuilder.setSound(ringUri)
+    } else {
+      contentBuilder.useDefaultSound()
+    }
+
+    val content = contentBuilder.build()
 
     val identifier = ID_PREFIX + callId
     val request = NotificationRequest(identifier, content, null)

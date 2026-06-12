@@ -17,6 +17,8 @@ import {
   normalizeFixedPerMinuteWindows,
   publicEarningSchedulePayload,
 } from '../services/receiverEarningModel';
+import { getPlatformRevenueForRange } from '../services/adminEarningsService';
+import { CHAT_TEXT_CHARGE_INR } from '../constants/chatPricing';
 import { normalizeReceiverWelcome } from '../services/receiverWelcome';
 import { normalizeCallerNotification } from '../services/callerNotification';
 import { toApiReceiver, toApiUser } from './authController';
@@ -908,8 +910,9 @@ export const getOverviewDashboard = async (
     }
     const start = toRangeStart(range);
 
-    const [calls, chats, activeReceivers, activeUsers, pendingKycApprovals, pendingWithdrawals, flaggedReports] =
+    const [platformRevenue, calls, chats, activeReceivers, activeUsers, pendingKycApprovals, pendingWithdrawals, flaggedReports] =
       await Promise.all([
+        getPlatformRevenueForRange(start),
         CallSession.find({
           status: 'completed',
           ...(start ? { startedAt: { $gte: start } } : {}),
@@ -921,8 +924,8 @@ export const getOverviewDashboard = async (
           feeInr: { $gt: 0 },
           ...(start ? { createdAt: { $gte: start } } : {}),
         })
-          .select('createdAt feeInr')
-          .lean<{ createdAt: Date; feeInr: number }[]>(),
+          .select('createdAt')
+          .lean<{ createdAt: Date }[]>(),
         Receiver.countDocuments({ accountStatus: 'approved', suspended: { $ne: true } }),
         User.countDocuments({ accountStatus: 'approved', suspended: { $ne: true } }),
         Receiver.countDocuments({ accountStatus: 'pending_review' }),
@@ -930,24 +933,20 @@ export const getOverviewDashboard = async (
         UserReport.countDocuments({ status: 'pending' }),
       ]);
 
-    let totalRevenue = 0;
-    let totalCalls = 0;
+    const totalRevenue = platformRevenue.totalRevenue;
+    const totalCalls = calls.length;
     const trendByDay = new Map<string, number>();
 
     for (const c of calls) {
       const gross = roundInr(Number(c.settledAmountInr || 0));
-      totalRevenue += gross;
-      totalCalls += 1;
       const day = new Date(c.startedAt).toISOString().slice(0, 10);
       trendByDay.set(day, roundInr((trendByDay.get(day) || 0) + gross));
     }
     for (const m of chats) {
-      const gross = roundInr(Number(m.feeInr || 0));
-      totalRevenue += gross;
+      const gross = roundInr(CHAT_TEXT_CHARGE_INR);
       const day = new Date(m.createdAt).toISOString().slice(0, 10);
       trendByDay.set(day, roundInr((trendByDay.get(day) || 0) + gross));
     }
-    totalRevenue = roundInr(totalRevenue);
 
     // For chart, return last 7 buckets ending today.
     const trend: Array<{ label: string; amount: number }> = [];
@@ -963,6 +962,8 @@ export const getOverviewDashboard = async (
     res.status(200).json({
       cards: {
         totalRevenue,
+        adminEarnings: platformRevenue.adminEarnings,
+        receiverRevenue: platformRevenue.receiverRevenue,
         totalCalls,
         activeReceivers,
         activeUsers,

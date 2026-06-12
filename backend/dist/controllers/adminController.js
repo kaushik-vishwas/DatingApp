@@ -16,6 +16,8 @@ const CallSession_1 = __importDefault(require("../models/CallSession"));
 const ChatMessage_1 = __importDefault(require("../models/ChatMessage"));
 const AdminSettings_1 = __importDefault(require("../models/AdminSettings"));
 const receiverEarningModel_1 = require("../services/receiverEarningModel");
+const adminEarningsService_1 = require("../services/adminEarningsService");
+const chatPricing_1 = require("../constants/chatPricing");
 const receiverWelcome_1 = require("../services/receiverWelcome");
 const callerNotification_1 = require("../services/callerNotification");
 const authController_1 = require("./authController");
@@ -744,7 +746,8 @@ const getOverviewDashboard = async (req, res) => {
             return;
         }
         const start = toRangeStart(range);
-        const [calls, chats, activeReceivers, activeUsers, pendingKycApprovals, pendingWithdrawals, flaggedReports] = await Promise.all([
+        const [platformRevenue, calls, chats, activeReceivers, activeUsers, pendingKycApprovals, pendingWithdrawals, flaggedReports] = await Promise.all([
+            (0, adminEarningsService_1.getPlatformRevenueForRange)(start),
             CallSession_1.default.find({
                 status: 'completed',
                 ...(start ? { startedAt: { $gte: start } } : {}),
@@ -756,7 +759,7 @@ const getOverviewDashboard = async (req, res) => {
                 feeInr: { $gt: 0 },
                 ...(start ? { createdAt: { $gte: start } } : {}),
             })
-                .select('createdAt feeInr')
+                .select('createdAt')
                 .lean(),
             Receiver_1.default.countDocuments({ accountStatus: 'approved', suspended: { $ne: true } }),
             User_1.default.countDocuments({ accountStatus: 'approved', suspended: { $ne: true } }),
@@ -764,23 +767,19 @@ const getOverviewDashboard = async (req, res) => {
             WithdrawalRequest_1.default.countDocuments({ status: 'pending' }),
             UserReport_1.default.countDocuments({ status: 'pending' }),
         ]);
-        let totalRevenue = 0;
-        let totalCalls = 0;
+        const totalRevenue = platformRevenue.totalRevenue;
+        const totalCalls = calls.length;
         const trendByDay = new Map();
         for (const c of calls) {
             const gross = roundInr(Number(c.settledAmountInr || 0));
-            totalRevenue += gross;
-            totalCalls += 1;
             const day = new Date(c.startedAt).toISOString().slice(0, 10);
             trendByDay.set(day, roundInr((trendByDay.get(day) || 0) + gross));
         }
         for (const m of chats) {
-            const gross = roundInr(Number(m.feeInr || 0));
-            totalRevenue += gross;
+            const gross = roundInr(chatPricing_1.CHAT_TEXT_CHARGE_INR);
             const day = new Date(m.createdAt).toISOString().slice(0, 10);
             trendByDay.set(day, roundInr((trendByDay.get(day) || 0) + gross));
         }
-        totalRevenue = roundInr(totalRevenue);
         // For chart, return last 7 buckets ending today.
         const trend = [];
         const now = new Date();
@@ -794,6 +793,8 @@ const getOverviewDashboard = async (req, res) => {
         res.status(200).json({
             cards: {
                 totalRevenue,
+                adminEarnings: platformRevenue.adminEarnings,
+                receiverRevenue: platformRevenue.receiverRevenue,
                 totalCalls,
                 activeReceivers,
                 activeUsers,

@@ -373,17 +373,17 @@ export default function ReceiverHomeDashboard(): React.JSX.Element {
         <View style={styles.topSection}>
           <View style={styles.topBar}>
             <View style={styles.topBarLeft}>
-              {/* <Image
+              <Image
                 source={SelectoLogo}
                 style={styles.brandLogo}
                 resizeMode="contain"
-              /> */}
-              <CallDiagnosticsTopBarButton
+              />
+              {/* <CallDiagnosticsTopBarButton
                 onPress={() => navigation.navigate('CallDiagnostics')}
               />
               <PresenceDiagnosticsTopBarButton
                 onPress={() => navigation.navigate('PresenceDiagnostics')}
-              />
+              /> */}
             </View>
             <View style={styles.topRight}>
               {showScoreInTopBar ? (
@@ -582,7 +582,7 @@ export default function ReceiverHomeDashboard(): React.JSX.Element {
                     trackColor={{ false: '#e5e5e5', true: '#86efac' }}
                     thumbColor={available ? '#22c55e' : '#f59e0b'}
                     ios_backgroundColor="#e5e7eb"
-                    style={{ transform: [{ scaleX: 1.1 }, { scaleY: 1.1 }] }}
+                    style={{ transform: [{ scaleX: 1.2 }, { scaleY: 1.2 }] }}
                   />
                 </View>
               </LinearGradient>
@@ -968,8 +968,8 @@ publicMiniLangText: {
   },
   highlightedAvailabilityCard: {
     borderRadius: 5,
-    paddingHorizontal: 16,
-    paddingVertical: 4,
+    // paddingHorizontal: 10,
+    paddingVertical: 8,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',

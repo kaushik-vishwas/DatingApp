@@ -33,6 +33,11 @@ import { useCallerMessageEligibilityOptional } from '../../context/CallerMessage
 import { useAuth } from '../../context/AuthContext';
 import { callApi, getErrorMessage, getJwt, getResolvedApiBaseUrl, profileApi } from '../../services/api';
 import { startOutboundRingtoneLoop } from '../../utils/callSounds';
+import {
+  applyVoiceCallOutputRoute,
+  isBluetoothVoiceOutputAvailable,
+  releaseVoiceCallOutputRoute,
+} from '../../utils/voiceCallAudioRoute';
 import { profileImageUrlForStreamOrNetwork, resolveProfileImageSource } from '../../utils/avatarSource';
 import { AvatarSoundWaveRings } from '../../components/call/AvatarVoiceWaves';
 import type { StreamMicControl } from '../../components/call/StreamCallAvatarExtras';
@@ -157,19 +162,14 @@ type Props =
   | NativeStackScreenProps<CallerStackParamList, 'VoiceCall'>
   | NativeStackScreenProps<ReceiverStackParamList, 'VoiceCall'>;
 
-async function applyVoiceCallAudioMode(speaker: boolean): Promise<void> {
-  await Audio.setAudioModeAsync({
-    allowsRecordingIOS: true,
-    playsInSilentModeIOS: true,
-    staysActiveInBackground: true,
-    interruptionModeIOS: InterruptionModeIOS.DoNotMix,
-    interruptionModeAndroid: InterruptionModeAndroid.DoNotMix,
-    shouldDuckAndroid: false,
-    playThroughEarpieceAndroid: !speaker,
-  });
+async function applyVoiceCallAudioMode(speaker: boolean, bluetooth = false): Promise<void> {
+  await applyVoiceCallOutputRoute(
+    bluetooth ? 'bluetooth' : speaker ? 'speaker' : 'earpiece'
+  );
 }
 
 async function resetVoiceCallAudioMode(): Promise<void> {
+  releaseVoiceCallOutputRoute();
   try {
     await Audio.setAudioModeAsync({
       allowsRecordingIOS: false,
@@ -321,6 +321,8 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
   /** Only set when the user taps Mute/Unmute — not when Stream briefly reports mute during connect. */
   const userChosenMuteRef = useRef(false);
   const [speakerOn, setSpeakerOn] = useState(true);
+  const [bluetoothOn, setBluetoothOn] = useState(false);
+  const [bluetoothAvailable, setBluetoothAvailable] = useState(false);
   const [liveSettledAmountInr, setLiveSettledAmountInr] = useState(0);
   /** Caller wallet from server (both roles) — stays in sync as the call is billed. */
   const [sessionCallerWalletInr, setSessionCallerWalletInr] = useState<number | null>(null);
@@ -346,6 +348,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
   }, []);
   const deferredEndDuringGsmRef = useRef<{ endedCallId: string; source: string } | null>(null);
   const speakerOnRef = useRef(true);
+  const bluetoothOnRef = useRef(false);
   const endedSessionRef = useRef(false);
   const endedSessionResultRef = useRef<{ canRate: boolean; durationSec: number } | null>(null);
   const endSessionPromiseRef = useRef<Promise<{ canRate: boolean; durationSec: number } | null> | null>(null);
@@ -622,7 +625,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
       if (interrupted) {
         callDiag.audioInterruption({ appState: nextState, ready: readyRef.current });
       } else if (!endingRef.current && readyRef.current) {
-        void applyVoiceCallAudioMode(speakerOn).catch((e) => {
+        void applyVoiceCallAudioMode(speakerOn, bluetoothOn).catch((e) => {
           callDiag.error('audio_mode_restore_failed', {
             message: e instanceof Error ? e.message : String(e),
           });
@@ -630,7 +633,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
       }
     });
     return () => sub.remove();
-  }, [speakerOn]);
+  }, [speakerOn, bluetoothOn]);
 
   useEffect(() => {
     readyRef.current = ready;
@@ -643,6 +646,15 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
   useEffect(() => {
     speakerOnRef.current = speakerOn;
   }, [speakerOn]);
+
+  useEffect(() => {
+    bluetoothOnRef.current = bluetoothOn;
+  }, [bluetoothOn]);
+
+  useEffect(() => {
+    if (!ready) return;
+    void isBluetoothVoiceOutputAvailable().then(setBluetoothAvailable);
+  }, [ready]);
 
   useEffect(() => {
     return () => {
@@ -1693,7 +1705,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
     });
     let recoveryOk = true;
     try {
-      await applyVoiceCallAudioMode(speakerOnRef.current);
+      await applyVoiceCallAudioMode(speakerOnRef.current, bluetoothOnRef.current);
       callDiag.success('gsm_audio_mode_restored');
     } catch (e) {
       recoveryOk = false;
@@ -1871,10 +1883,33 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
   const toggleSpeaker = async () => {
     const next = !speakerOn;
     try {
-      await applyVoiceCallAudioMode(next);
+      await applyVoiceCallAudioMode(next, false);
+      setBluetoothOn(false);
       setSpeakerOn(next);
     } catch (e) {
       Alert.alert('Speaker', getErrorMessage(e));
+    }
+  };
+
+  const toggleBluetooth = async () => {
+    if (bluetoothOn) {
+      try {
+        await applyVoiceCallAudioMode(speakerOn, false);
+        setBluetoothOn(false);
+      } catch (e) {
+        Alert.alert('Bluetooth', getErrorMessage(e));
+      }
+      return;
+    }
+    if (!bluetoothAvailable) {
+      Alert.alert('Bluetooth', 'No Bluetooth audio device is connected.');
+      return;
+    }
+    try {
+      await applyVoiceCallAudioMode(speakerOn, true);
+      setBluetoothOn(true);
+    } catch (e) {
+      Alert.alert('Bluetooth', getErrorMessage(e));
     }
   };
 
@@ -2100,7 +2135,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
                 <Text style={styles.roundText}>{muted ? 'Unmute' : 'Mute'}</Text>
               </TouchableOpacity>
               <TouchableOpacity
-                style={[styles.roundBtn, speakerOn && styles.roundBtnActive]}
+                style={[styles.roundBtn, speakerOn && !bluetoothOn && styles.roundBtnActive]}
                 onPress={() => void toggleSpeaker()}
                 activeOpacity={0.85}
               >
@@ -2110,6 +2145,19 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
                   color="#faf5ff"
                 />
                 <Text style={styles.roundText}>{speakerOn ? 'Speaker' : 'Earpiece'}</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[
+                  styles.roundBtn,
+                  bluetoothOn && styles.roundBtnActive,
+                  !bluetoothAvailable && styles.roundBtnDisabled,
+                ]}
+                onPress={() => void toggleBluetooth()}
+                activeOpacity={0.85}
+                disabled={!bluetoothAvailable && !bluetoothOn}
+              >
+                <Ionicons name="bluetooth" size={26} color="#faf5ff" />
+                <Text style={styles.roundText}>Bluetooth</Text>
               </TouchableOpacity>
             </View>
           ) : null}
@@ -2395,7 +2443,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
                 <Text style={styles.roundText}>{muted ? 'Unmute' : 'Mute'}</Text>
               </TouchableOpacity>
               <TouchableOpacity
-                style={[styles.roundBtn, speakerOn && styles.roundBtnActive]}
+                style={[styles.roundBtn, speakerOn && !bluetoothOn && styles.roundBtnActive]}
                 onPress={() => void toggleSpeaker()}
                 activeOpacity={0.85}
               >
@@ -2405,6 +2453,19 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
                   color="#faf5ff"
                 />
                 <Text style={styles.roundText}>{speakerOn ? 'Speaker' : 'Earpiece'}</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[
+                  styles.roundBtn,
+                  bluetoothOn && styles.roundBtnActive,
+                  !bluetoothAvailable && styles.roundBtnDisabled,
+                ]}
+                onPress={() => void toggleBluetooth()}
+                activeOpacity={0.85}
+                disabled={!bluetoothAvailable && !bluetoothOn}
+              >
+                <Ionicons name="bluetooth" size={26} color="#faf5ff" />
+                <Text style={styles.roundText}>Bluetooth</Text>
               </TouchableOpacity>
             </View>
             <TouchableOpacity style={styles.hangup} onPress={() => void hangup()} activeOpacity={0.88}>
@@ -2524,9 +2585,9 @@ const styles = StyleSheet.create({
   earningTitle: { color: '#faf5ff', fontSize: 12, fontWeight: '700' },
   earningValue: { color: '#fff', fontSize: 34, fontWeight: '900' },
   earningSub: { color: 'rgba(245,243,255,0.85)', fontSize: 10, marginTop: 2, fontWeight: '700' },
-  controls: { flexDirection: 'row', gap: 18, marginTop: 44 },
+  controls: { flexDirection: 'row', gap: 12, marginTop: 44, justifyContent: 'center' },
   roundBtn: {
-    width: 78,
+    width: 72,
     minHeight: 78,
     borderRadius: 39,
     backgroundColor: 'rgba(91, 33, 182, 0.55)',
@@ -2539,6 +2600,9 @@ const styles = StyleSheet.create({
   roundBtnActive: {
     backgroundColor: 'rgba(124, 58, 237, 0.85)',
     borderColor: 'rgba(233, 213, 255, 0.65)',
+  },
+  roundBtnDisabled: {
+    opacity: 0.45,
   },
   roundText: { color: '#faf5ff', fontSize: 10, fontWeight: '800', marginTop: 4 },
   hangup: {

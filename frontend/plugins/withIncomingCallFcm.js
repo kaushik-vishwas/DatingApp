@@ -122,8 +122,19 @@ function withIncomingCallFcm(config) {
       fs.mkdirSync(targetDir, { recursive: true });
 
       const sourceDir = path.join(projectRoot, 'plugins', 'incoming-call-fcm', 'android');
-      for (const file of ['NesthamFirebaseMessagingService.kt', 'IncomingCallFcmPresenter.kt']) {
+      for (const file of [
+        'NesthamFirebaseMessagingService.kt',
+        'IncomingCallFcmPresenter.kt',
+        'IncomingCallNotificationChannels.kt',
+      ]) {
         fs.copyFileSync(path.join(sourceDir, file), path.join(targetDir, file));
+      }
+
+      const rawDir = path.join(projectRoot, 'android', 'app', 'src', 'main', 'res', 'raw');
+      fs.mkdirSync(rawDir, { recursive: true });
+      const ringSrc = path.join(projectRoot, 'assets', 'sounds', 'receiver_ringtone.mp3');
+      if (fs.existsSync(ringSrc)) {
+        fs.copyFileSync(ringSrc, path.join(rawDir, 'receiver_ringtone.mp3'));
       }
 
       const appBuildGradlePath = path.join(projectRoot, 'android', 'app', 'build.gradle');

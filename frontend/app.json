@@ -29,7 +29,8 @@
         "android.permission.FOREGROUND_SERVICE",
         "android.permission.FOREGROUND_SERVICE_DATA_SYNC",
         "android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS",
-        "android.permission.WAKE_LOCK"
+        "android.permission.WAKE_LOCK",
+        "android.permission.BLUETOOTH_CONNECT"
       ],
       "intentFilters": [
         {
@@ -69,7 +70,8 @@
       [
         "expo-notifications",
         {
-          "defaultChannel": "incoming_calls"
+          "defaultChannel": "incoming_calls",
+          "sounds": ["./assets/sounds/receiver_ringtone.mp3"]
         }
       ],
       "./plugins/withIncomingCallFcm.js"

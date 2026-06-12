@@ -4,8 +4,10 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.trackAndFinalizeRazorpayXPayout = trackAndFinalizeRazorpayXPayout;
+exports.trackAndFinalizeAdminRazorpayXPayout = trackAndFinalizeAdminRazorpayXPayout;
 const mongoose_1 = __importDefault(require("mongoose"));
 const WithdrawalRequest_1 = __importDefault(require("../models/WithdrawalRequest"));
+const AdminWithdrawalRequest_1 = __importDefault(require("../models/AdminWithdrawalRequest"));
 const Receiver_1 = __importDefault(require("../models/Receiver"));
 const socketRegistry_1 = require("../socket/socketRegistry");
 const razorpayContact_1 = require("../utils/razorpayContact");
@@ -322,5 +324,135 @@ async function trackAndFinalizeRazorpayXPayout(withdrawalId) {
         }
         // If we already created a payout but polling failed, keep it in processing and store error.
         await WithdrawalRequest_1.default.findByIdAndUpdate(withdrawalId, { payoutError: msg });
+    }
+}
+async function markAdminWithdrawalEarningsDebited(withdrawalId) {
+    await AdminWithdrawalRequest_1.default.findOneAndUpdate({ _id: withdrawalId, earningsDebitedAt: null }, { earningsDebitedAt: new Date() });
+}
+/**
+ * RazorpayX payout for platform admin earnings (UPI only).
+ */
+async function trackAndFinalizeAdminRazorpayXPayout(withdrawalId) {
+    const withdrawal = await AdminWithdrawalRequest_1.default.findById(withdrawalId).lean();
+    if (!withdrawal)
+        return;
+    if (withdrawal.payoutStatus !== 'processing')
+        return;
+    const upiId = safeTrim(withdrawal.upiId).toLowerCase();
+    const payeeName = safeTrim(withdrawal.payeeName);
+    const contactPhone = safeTrim(withdrawal.contactPhone);
+    const hasUpi = /^[a-z0-9._-]{2,256}@[a-z]{3,}$/i.test(upiId);
+    if (!hasUpi || !contactPhone || !payeeName) {
+        await AdminWithdrawalRequest_1.default.findByIdAndUpdate(withdrawalId, {
+            payoutStatus: 'failed',
+            payoutError: 'Admin payout UPI/contact details missing',
+            status: 'rejected',
+        });
+        return;
+    }
+    const payoutAccountNumber = process.env.RAZORPAYX_ACCOUNT_NUMBER?.trim();
+    const purpose = process.env.RAZORPAYX_PAYOUT_PURPOSE?.trim() || 'payout';
+    const narration = safeTrim(process.env.RAZORPAYX_PAYOUT_NARRATION) || 'Selecto Admin Payout';
+    if (!payoutAccountNumber) {
+        await AdminWithdrawalRequest_1.default.findByIdAndUpdate(withdrawalId, {
+            payoutStatus: 'failed',
+            payoutError: 'RAZORPAYX_ACCOUNT_NUMBER is not set',
+            status: 'rejected',
+        });
+        return;
+    }
+    const amountPaise = roundInrToPaise(withdrawal.amount);
+    const referenceBase = withdrawal.payoutReferenceId || `awd_${String(withdrawal._id).slice(-10)}`;
+    const idempotencyKey = `awd-${referenceBase}`.slice(0, 80);
+    let payoutId = withdrawal.payoutId;
+    try {
+        if (!payoutId) {
+            const refId = referenceBase.slice(0, 40);
+            const contact = {
+                name: payeeName,
+                email: (0, razorpayContact_1.razorpayContactEmailFromPhone)(contactPhone),
+                contact: contactPhone,
+                type: 'customer',
+                reference_id: `admin_${String(withdrawal.adminId).slice(-10)}`.slice(0, 40),
+            };
+            const fundAccount = {
+                account_type: 'vpa',
+                vpa: { address: upiId },
+                contact,
+            };
+            const payout = await razorpayCreatePayout({
+                accountNumber: payoutAccountNumber,
+                amountPaise,
+                currency: 'INR',
+                mode: 'UPI',
+                purpose,
+                referenceId: refId,
+                narration: narration.slice(0, 30),
+                idempotencyKey,
+                fundAccount,
+            });
+            const createdPayoutId = safeTrim(payout.id) || null;
+            const payoutStatus = mapRazorpayPayoutStatusToPayoutStatus(payout.status);
+            const utr = payout.utr ?? null;
+            const payoutError = payoutStatus === 'failed' ? extractRazorpayErrorMessage(payout) : null;
+            await AdminWithdrawalRequest_1.default.findByIdAndUpdate(withdrawalId, {
+                payoutId: createdPayoutId,
+                payoutUtr: utr,
+                payoutStatus,
+                payoutError,
+                status: payoutStatus === 'success' ? 'approved' : payoutStatus === 'failed' ? 'rejected' : 'approved',
+            });
+            payoutId = createdPayoutId;
+            if (payoutStatus === 'failed')
+                return;
+            if (payoutStatus === 'success') {
+                await markAdminWithdrawalEarningsDebited(withdrawalId);
+                return;
+            }
+        }
+        if (!payoutId)
+            return;
+        const maxAttempts = Number(process.env.RAZORPAYX_PAYOUT_POLL_ATTEMPTS ?? 8);
+        const delayMs = Number(process.env.RAZORPAYX_PAYOUT_POLL_DELAY_MS ?? 5000);
+        for (let i = 0; i < maxAttempts; i += 1) {
+            const current = await AdminWithdrawalRequest_1.default.findById(withdrawalId).select('payoutStatus payoutId');
+            if (!current || current.payoutId !== payoutId || current.payoutStatus !== 'processing')
+                return;
+            const payout = await razorpayFetchPayout(payoutId);
+            const payoutStatus = mapRazorpayPayoutStatusToPayoutStatus(payout.status);
+            if (payoutStatus === 'success') {
+                await markAdminWithdrawalEarningsDebited(withdrawalId);
+                await AdminWithdrawalRequest_1.default.findByIdAndUpdate(withdrawalId, {
+                    payoutStatus: 'success',
+                    payoutUtr: payout.utr ?? null,
+                    payoutError: null,
+                    status: 'approved',
+                });
+                return;
+            }
+            if (payoutStatus === 'failed') {
+                const err = extractRazorpayErrorMessage(payout);
+                await AdminWithdrawalRequest_1.default.findByIdAndUpdate(withdrawalId, {
+                    payoutStatus: 'failed',
+                    payoutError: err,
+                    payoutUtr: payout.utr ?? null,
+                    status: 'rejected',
+                });
+                return;
+            }
+            await sleep(delayMs);
+        }
+    }
+    catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        if (!payoutId) {
+            await AdminWithdrawalRequest_1.default.findByIdAndUpdate(withdrawalId, {
+                status: 'rejected',
+                payoutStatus: 'failed',
+                payoutError: msg,
+            });
+            return;
+        }
+        await AdminWithdrawalRequest_1.default.findByIdAndUpdate(withdrawalId, { payoutError: msg });
     }
 }

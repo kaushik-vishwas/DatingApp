@@ -38,6 +38,7 @@ import {
   updateAdminWalletOffer,
 } from '../controllers/walletOffersController';
 import { listCallerAppStoreReviews } from '../controllers/adminCallerAppReviewController';
+import adminEarningsRoutes from './adminEarningsRoutes';
 
 const router = Router();
 
@@ -72,6 +73,7 @@ router.patch('/reports/:id', adminProtect, resolveModerationReport);
 router.get('/caller-app-reviews', adminProtect, listCallerAppStoreReviews);
 router.get('/overview', adminProtect, getOverviewDashboard);
 router.get('/revenue', adminProtect, getRevenueDashboard);
+router.use('/earnings', adminEarningsRoutes);
 router.get('/withdrawals', adminProtect, listWithdrawals);
 router.patch('/withdrawals/:id', adminProtect, resolveWithdrawal);
 

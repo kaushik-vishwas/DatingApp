@@ -1,0 +1,10 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+const express_1 = require("express");
+const adminAuth_1 = require("../middleware/adminAuth");
+const adminEarningsController_1 = require("../controllers/adminEarningsController");
+const router = (0, express_1.Router)();
+router.get('/', adminAuth_1.adminProtect, adminEarningsController_1.getAdminEarningsDashboard);
+router.patch('/payout-details', adminAuth_1.adminProtect, adminEarningsController_1.updateAdminEarningsPayoutDetails);
+router.post('/withdraw', adminAuth_1.adminProtect, adminEarningsController_1.createAdminEarningsWithdrawal);
+exports.default = router;

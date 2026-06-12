@@ -22,6 +22,12 @@ export interface ICallerNotificationSettings {
   body: string;
 }
 
+export interface IAdminEarningsPayoutSettings {
+  upiId: string;
+  payeeName: string;
+  contactPhone: string;
+}
+
 export interface IAdminSettings {
   notificationControls: {
     kycSubmissionsEmail: boolean;
@@ -32,6 +38,7 @@ export interface IAdminSettings {
   fixedPerMinuteWindows: IFixedPerMinuteWindow[];
   receiverWelcome: IReceiverWelcomeSettings;
   callerNotification: ICallerNotificationSettings;
+  adminEarningsPayout: IAdminEarningsPayoutSettings;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -74,6 +81,11 @@ const adminSettingsSchema = new Schema<IAdminSettings>(
       enabled: { type: Boolean, default: true },
       title: { type: String, default: 'Announcement', trim: true, maxlength: 120 },
       body: { type: String, default: '', trim: true, maxlength: 3000 },
+    },
+    adminEarningsPayout: {
+      upiId: { type: String, default: '', trim: true, maxlength: 256 },
+      payeeName: { type: String, default: '', trim: true, maxlength: 120 },
+      contactPhone: { type: String, default: '', trim: true, maxlength: 20 },
     },
   },
   { timestamps: true }

@@ -27,6 +27,8 @@ export type IncomingCallNotificationPayload = {
 };
 
 const INCOMING_CALL_CHANNEL_ID = 'incoming_calls';
+/** Bundled via expo-notifications plugin → android res/raw (incoming-call ring). */
+const INCOMING_CALL_NOTIFICATION_SOUND = 'receiver_ringtone.mp3';
 /** expo-notifications: `categoryIdentifier` (iOS + Android action category). */
 const INCOMING_CALL_CATEGORY_ID = 'call';
 const INCOMING_CALL_NOTIFICATION_ID_PREFIX = 'incoming-';
@@ -589,12 +591,18 @@ export async function ensureIncomingCallNotificationSetup(): Promise<void> {
   });
 
   if (Platform.OS === 'android') {
+    // Recreate so ringtone asset updates apply on existing installs (channel sound is immutable).
+    try {
+      await Notifications.deleteNotificationChannelAsync(INCOMING_CALL_CHANNEL_ID);
+    } catch {
+      // ignore
+    }
     await Notifications.setNotificationChannelAsync(INCOMING_CALL_CHANNEL_ID, {
       name: 'Incoming calls',
       importance: Notifications.AndroidImportance.MAX,
       vibrationPattern: [0, 280, 200, 280],
       lightColor: '#7c3aed',
-      sound: 'default',
+      sound: INCOMING_CALL_NOTIFICATION_SOUND,
       enableLights: true,
       enableVibrate: true,
       lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
@@ -651,7 +659,10 @@ function buildIncomingCallNotificationContent(
     title: 'Incoming call',
     body: `${incoming.peerName} is calling you`,
     data: buildNotificationData(incoming),
-    sound: Platform.OS === 'ios' ? ('defaultCritical' as const) : 'default',
+    sound:
+      Platform.OS === 'ios'
+        ? ('defaultCritical' as const)
+        : INCOMING_CALL_NOTIFICATION_SOUND,
     categoryIdentifier: INCOMING_CALL_CATEGORY_ID,
     interruptionLevel: 'critical' as const,
     priority: Notifications.AndroidNotificationPriority.MAX,

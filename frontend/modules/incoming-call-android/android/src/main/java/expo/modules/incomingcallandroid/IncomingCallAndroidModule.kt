@@ -80,6 +80,22 @@ class IncomingCallAndroidModule : Module() {
     Function("stopTelephonyDiagnosticsWatch") {
       TelephonyDiagnosticsWatcher.stop()
     }
+
+    Function("isBluetoothVoiceOutputAvailable") {
+      val context = appContext.reactContext ?: return@Function false
+      VoiceCallAudioRoute.isBluetoothAvailable(context)
+    }
+
+    Function("setVoiceCallAudioRoute") { route: String ->
+      val context = appContext.reactContext
+        ?: return@Function mapOf("applied" to false, "route" to route)
+      VoiceCallAudioRoute.setRoute(context, route.trim().lowercase())
+    }
+
+    Function("releaseVoiceCallAudioRoute") {
+      val context = appContext.reactContext ?: return@Function Unit
+      VoiceCallAudioRoute.release(context)
+    }
   }
 
   private fun EnhanceTapResult.toLogMap(): Map<String, Any?> =
