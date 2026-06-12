@@ -40,6 +40,7 @@ import {
 } from '../../utils/voiceCallAudioRoute';
 import { profileImageUrlForStreamOrNetwork, resolveProfileImageSource } from '../../utils/avatarSource';
 import { AvatarSoundWaveRings } from '../../components/call/AvatarVoiceWaves';
+import InCallTalktimeRechargeModal from '../../components/call/InCallTalktimeRechargeModal';
 import type { StreamMicControl } from '../../components/call/StreamCallAvatarExtras';
 import {
   clearVoiceSessionStartInflight,
@@ -326,6 +327,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
   const [liveSettledAmountInr, setLiveSettledAmountInr] = useState(0);
   /** Caller wallet from server (both roles) — stays in sync as the call is billed. */
   const [sessionCallerWalletInr, setSessionCallerWalletInr] = useState<number | null>(null);
+  const [talktimeRechargeOpen, setTalktimeRechargeOpen] = useState(false);
   const [sessionCallRatePerMinute, setSessionCallRatePerMinute] = useState<number | null>(null);
   const [ratingOpen, setRatingOpen] = useState(false);
   const [selectedRating, setSelectedRating] = useState(0);
@@ -730,6 +732,18 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
       </View>
     )
   ) : null;
+
+  const addTalktimeButtonEl =
+    user?.role === 'caller' && talkActive && ready ? (
+      <TouchableOpacity
+        style={styles.addTalktimeBtn}
+        onPress={() => setTalktimeRechargeOpen(true)}
+        activeOpacity={0.88}
+      >
+        <Ionicons name="wallet-outline" size={16} color="#faf5ff" />
+        <Text style={styles.addTalktimeBtnText}>Add talktime</Text>
+      </TouchableOpacity>
+    ) : null;
 
   const ensureSessionEnded = async (): Promise<{ canRate: boolean; durationSec: number } | null> => {
     if (endedSessionRef.current) return endedSessionResultRef.current;
@@ -1569,6 +1583,15 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
   }, [refreshReceiverEarningMeta, user?.role]);
   syncTalkTimingOnceRef.current = syncTalkTimingOnce;
 
+  const handleInCallRechargeSuccess = useCallback(
+    (newWalletBalanceInr: number) => {
+      setSessionCallerWalletInr(Math.max(0, newWalletBalanceInr));
+      void refreshUser();
+      void syncTalkTimingOnceRef.current();
+    },
+    [refreshUser]
+  );
+
   const syncTalkTimingUntilBothJoined = useCallback(async (): Promise<void> => {
     if (talkActiveRef.current || syncTalkBurstInFlightRef.current) return;
     syncTalkBurstInFlightRef.current = true;
@@ -2104,6 +2127,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
             <Text style={styles.waitingHint}>Someone will join soon..s</Text>
           ) : null}
           {remainingTalkCountdownEl}
+          {addTalktimeButtonEl}
           {shellShowIncomingActions && incomingReq ? (
             <View style={styles.incomingActions}>
               <TouchableOpacity
@@ -2421,6 +2445,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
               </>
             )}
             {remainingTalkCountdownEl}
+            {addTalktimeButtonEl}
             {showLiveEarning ? (
               <LinearGradient
                 colors={['#5b21b6', '#7c3aed', '#a78bfa']}
@@ -2495,6 +2520,11 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
     <>
       {screenBody}
       {ratingModal}
+      <InCallTalktimeRechargeModal
+        visible={talktimeRechargeOpen}
+        onClose={() => setTalktimeRechargeOpen(false)}
+        onRechargeSuccess={handleInCallRechargeSuccess}
+      />
     </>
   );
 }
@@ -2673,6 +2703,19 @@ const styles = StyleSheet.create({
   },
   countdownTitle: { color: '#c4b5fd', fontSize: 11, fontWeight: '700' },
   countdownValue: { color: '#faf5ff', fontSize: 28, fontWeight: '900', marginTop: 2 },
+  addTalktimeBtn: {
+    marginTop: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: 'rgba(196, 181, 253, 0.55)',
+    backgroundColor: 'rgba(124, 58, 237, 0.35)',
+  },
+  addTalktimeBtnText: { color: '#faf5ff', fontSize: 13, fontWeight: '800' },
   remainingTalkCompact: {
     marginTop: 4,
     marginBottom: 0,
