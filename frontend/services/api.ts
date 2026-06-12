@@ -50,6 +50,7 @@ import type {
   ReceiverEarningsBreakdownResponse,
   ReceiverNotifyCandidatesResponse,
   ReceiverNotifyUserResponse,
+  ReferralProfileResponse,
 } from '../types/api';
 
 const JWT_KEY = 'jwt';
@@ -320,6 +321,8 @@ export const profileApi = {
 
   notifyReceiverUser: (userId: string) =>
     api.post<ReceiverNotifyUserResponse>('/profile/receiver-notify-user', { userId }),
+
+  referralProfile: () => api.get<ReferralProfileResponse>('/profile/referral'),
 };
 
 export const discoverApi = {

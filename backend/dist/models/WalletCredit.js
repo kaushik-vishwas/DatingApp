@@ -34,30 +34,14 @@ var __importStar = (this && this.__importStar) || (function () {
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
 const mongoose_1 = __importStar(require("mongoose"));
-const userSchema = new mongoose_1.Schema({
-    name: { type: String, required: true, trim: true },
-    phone: { type: String, required: true, trim: true, unique: true },
-    isVerified: { type: Boolean, default: false },
-    otp: { type: String, default: null },
-    otpExpiry: { type: Date, default: null },
-    accountStatus: {
-        type: String,
-        enum: ['pending_profile', 'pending_review', 'approved', 'rejected'],
-        default: 'pending_profile',
-    },
-    profileImage: { type: String, default: null },
-    languages: { type: [String], default: [] },
-    interests: { type: [String], default: [] },
-    gender: { type: String, enum: ['male', 'female', 'other'], default: null },
-    age: { type: Number, default: null },
-    state: { type: String, default: null, trim: true },
-    passwordHash: { type: String, default: null, select: false },
-    suspended: { type: Boolean, default: false },
-    walletBalance: { type: Number, default: 0 },
-    moderationWarningAt: { type: Date, default: null },
-    userAudio: { type: String, default: null },
-    authSessionVersion: { type: Number, default: 0, min: 0 },
-    referralCode: { type: String, default: null, trim: true, uppercase: true, sparse: true, unique: true },
+const walletCreditSchema = new mongoose_1.Schema({
+    userId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
+    source: { type: String, enum: ['referral_reward'], required: true, index: true },
+    amountInr: { type: Number, required: true, min: 0.01 },
+    referralId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Referral', default: null, index: true },
+    description: { type: String, required: true, trim: true, maxlength: 300 },
 }, { timestamps: true });
-const User = mongoose_1.default.model('User', userSchema);
-exports.default = User;
+walletCreditSchema.index({ userId: 1, createdAt: -1 });
+walletCreditSchema.index({ referralId: 1 }, { unique: true, sparse: true });
+const WalletCredit = mongoose_1.default.models.WalletCredit ?? mongoose_1.default.model('WalletCredit', walletCreditSchema);
+exports.default = WalletCredit;

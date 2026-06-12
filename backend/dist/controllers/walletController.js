@@ -36,12 +36,13 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.creditWallet = exports.verifyRazorpayWalletPayment = exports.createRazorpayWalletOrder = exports.listWalletTopups = void 0;
+exports.creditWallet = exports.verifyRazorpayWalletPayment = exports.createRazorpayWalletOrder = exports.listWalletTopups = exports.listWalletCredits = void 0;
 const crypto_1 = __importDefault(require("crypto"));
 const mongoose_1 = __importDefault(require("mongoose"));
 const razorpay_1 = __importDefault(require("razorpay"));
 const User_1 = __importDefault(require("../models/User"));
 const WalletTopup_1 = __importDefault(require("../models/WalletTopup"));
+const WalletCredit_1 = __importDefault(require("../models/WalletCredit"));
 const authController_1 = require("./authController");
 const accountAccess_1 = require("../utils/accountAccess");
 const GST_PERCENTAGE = 28;
@@ -74,6 +75,45 @@ function calculateWalletCredit(payAmount, bonusPercent) {
     const totalCredit = baseAmount * (1 + bonusPercent / 100);
     return Math.round(totalCredit * 100) / 100;
 }
+/**
+ * GET /wallet/credits — non-Razorpay wallet credits (referral rewards, etc.) for callers.
+ */
+const listWalletCredits = async (req, res) => {
+    try {
+        if (req.accountKind !== 'user') {
+            res.status(403).json({ message: 'Only app users can view wallet credits' });
+            return;
+        }
+        const authUser = req.user;
+        if (!authUser?._id) {
+            res.status(401).json({ message: 'Not authorized' });
+            return;
+        }
+        if ((0, accountAccess_1.blockCallerUntilApproved)(req, res))
+            return;
+        const rows = await WalletCredit_1.default.find({ userId: authUser._id })
+            .sort({ createdAt: -1 })
+            .limit(100)
+            .select('source amountInr description referralId createdAt')
+            .lean();
+        res.status(200).json({
+            credits: rows.map((r) => ({
+                id: String(r._id),
+                source: r.source,
+                amountInr: r.amountInr,
+                description: r.description,
+                referralId: r.referralId ? String(r.referralId) : null,
+                createdAt: r.createdAt.toISOString(),
+            })),
+        });
+    }
+    catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error('listWalletCredits error:', msg);
+        res.status(500).json({ message: msg || 'Server error' });
+    }
+};
+exports.listWalletCredits = listWalletCredits;
 /**
  * GET /wallet/topups — list successful wallet recharges for the signed-in caller.
  */

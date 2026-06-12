@@ -34,30 +34,21 @@ var __importStar = (this && this.__importStar) || (function () {
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
 const mongoose_1 = __importStar(require("mongoose"));
-const userSchema = new mongoose_1.Schema({
-    name: { type: String, required: true, trim: true },
-    phone: { type: String, required: true, trim: true, unique: true },
-    isVerified: { type: Boolean, default: false },
-    otp: { type: String, default: null },
-    otpExpiry: { type: Date, default: null },
-    accountStatus: {
-        type: String,
-        enum: ['pending_profile', 'pending_review', 'approved', 'rejected'],
-        default: 'pending_profile',
-    },
-    profileImage: { type: String, default: null },
-    languages: { type: [String], default: [] },
-    interests: { type: [String], default: [] },
-    gender: { type: String, enum: ['male', 'female', 'other'], default: null },
-    age: { type: Number, default: null },
-    state: { type: String, default: null, trim: true },
-    passwordHash: { type: String, default: null, select: false },
-    suspended: { type: Boolean, default: false },
-    walletBalance: { type: Number, default: 0 },
-    moderationWarningAt: { type: Date, default: null },
-    userAudio: { type: String, default: null },
-    authSessionVersion: { type: Number, default: 0, min: 0 },
-    referralCode: { type: String, default: null, trim: true, uppercase: true, sparse: true, unique: true },
+const referralSchema = new mongoose_1.Schema({
+    referralCode: { type: String, required: true, trim: true, uppercase: true, index: true },
+    referrerKind: { type: String, enum: ['user', 'receiver'], required: true },
+    referrerId: { type: mongoose_1.Schema.Types.ObjectId, required: true, index: true },
+    referredKind: { type: String, enum: ['user', 'receiver'], required: true },
+    referredId: { type: mongoose_1.Schema.Types.ObjectId, required: true },
+    referredPhone: { type: String, required: true, trim: true },
+    rewardInr: { type: Number, required: true, min: 0 },
+    status: { type: String, enum: ['rewarded', 'rejected'], required: true, index: true },
+    rejectReason: { type: String, default: null, trim: true, maxlength: 300 },
+    rewardedAt: { type: Date, default: null },
+    walletCreditKind: { type: String, enum: ['user', 'receiver'], default: null },
+    walletCreditId: { type: mongoose_1.Schema.Types.ObjectId, default: null },
 }, { timestamps: true });
-const User = mongoose_1.default.model('User', userSchema);
-exports.default = User;
+referralSchema.index({ referredKind: 1, referredId: 1 }, { unique: true });
+referralSchema.index({ referrerKind: 1, referrerId: 1, createdAt: -1 });
+const Referral = mongoose_1.default.model('Referral', referralSchema);
+exports.default = Referral;

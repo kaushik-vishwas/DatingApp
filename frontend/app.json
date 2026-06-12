@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "frontend",
+    "name": "Selecto",
     "slug": "frontend",
     "scheme": "nestham",
     "version": "1.0.0",
@@ -82,7 +82,15 @@
     "extra": {
       "apiBaseUrl": "https://backend.nesthamapp.com",
       "cloudinaryCloudName": "dfeeqvx3v",
-      "cloudinaryUploadPreset": "dating_app_upload"
+      "cloudinaryUploadPreset": "dating_app_upload",
+      "appShare": {
+        "displayName": "Selecto",
+        "distribution": "testing",
+        "androidInstallUrl": "",
+        "androidStoreUrl": "https://play.google.com/store/apps/details?id=com.kaushikvishwas.frontend",
+        "iosInstallUrl": "",
+        "referralLandingBaseUrl": "https://nesthamapp.com/invite"
+      }
     }
   }
 }

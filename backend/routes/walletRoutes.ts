@@ -2,6 +2,7 @@ import { Router } from 'express';
 import {
   createRazorpayWalletOrder,
   creditWallet,
+  listWalletCredits,
   listWalletTopups,
   verifyRazorpayWalletPayment,
 } from '../controllers/walletController';
@@ -11,6 +12,7 @@ import { protect } from '../middleware/auth';
 const router = Router();
 
 router.get('/topups', protect, listWalletTopups);
+router.get('/credits', protect, listWalletCredits);
 
 // Active wallet offers (recharge packs) for caller app.
 router.get('/offers', protect, listWalletOffers);

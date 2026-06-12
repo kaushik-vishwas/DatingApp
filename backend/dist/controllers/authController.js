@@ -49,6 +49,7 @@ const authSessionService_1 = require("../services/authSessionService");
 const socketRegistry_1 = require("../socket/socketRegistry");
 const apiTraceLog_1 = require("../utils/apiTraceLog");
 const phoneNormalize_1 = require("../utils/phoneNormalize");
+const referralService_1 = require("../services/referralService");
 const OTP_TTL_MS = 5 * 60 * 1000; // 5 minutes
 const pendingReceiverSignups = new Map();
 /** OTP for brand-new numbers before gender-based account creation. */
@@ -224,7 +225,7 @@ async function phoneTaken(phone) {
 const register = async (req, res) => {
     const t = (0, apiTraceLog_1.beginApiTrace)('POST /auth/register', req, res);
     try {
-        const { name, phone, role } = req.body;
+        const { name, phone, role, referralCode } = req.body;
         if (!phone || !String(phone).trim()) {
             t.warn('register_validation_missing_fields');
             t.json(400, {
@@ -251,6 +252,15 @@ const register = async (req, res) => {
                 phone: phoneDigits,
                 isVerified: false,
                 passwordHash: null,
+                referralCode: await (0, referralService_1.generateUniqueReferralCode)(),
+            });
+            void (0, referralService_1.applyReferralRewardOnSignup)({
+                referralCode,
+                referredKind: 'user',
+                referredId: String(user._id),
+                referredPhone: phoneDigits,
+            }).catch((e) => {
+                console.error('[referral] register caller hook error:', e instanceof Error ? e.message : String(e));
             });
             t.log('register_ok_caller');
             t.json(201, {
@@ -265,6 +275,15 @@ const register = async (req, res) => {
             isVerified: false,
             passwordHash: null,
             audioCallRate: Receiver_1.RECEIVER_AUDIO_CALL_RATE_INR_PER_MIN,
+            referralCode: await (0, referralService_1.generateUniqueReferralCode)(),
+        });
+        void (0, referralService_1.applyReferralRewardOnSignup)({
+            referralCode,
+            referredKind: 'receiver',
+            referredId: String(receiver._id),
+            referredPhone: phoneDigits,
+        }).catch((e) => {
+            console.error('[referral] register receiver hook error:', e instanceof Error ? e.message : String(e));
         });
         t.log('register_ok_receiver');
         t.json(201, {
@@ -916,6 +935,7 @@ const completeMobileSignup = async (req, res) => {
     try {
         const phoneDigits = typeof req.body.phone === 'string' ? String(req.body.phone).trim() : '';
         const gender = req.body.gender;
+        const referralCode = req.body.referralCode;
         if (!phoneDigits) {
             t.json(400, { message: 'phone is required', error: 'COMPLETE_MOBILE_SIGNUP_MISSING_PHONE' });
             return;
@@ -954,8 +974,18 @@ const completeMobileSignup = async (req, res) => {
                 isVerified: true,
                 passwordHash: null,
                 accountStatus: 'pending_profile',
+                referralCode: await (0, referralService_1.generateUniqueReferralCode)(),
             });
             verifiedMobilePhones.delete(canonicalPhone);
+            const referralResult = await (0, referralService_1.applyReferralRewardOnSignup)({
+                referralCode,
+                referredKind: 'user',
+                referredId: String(user._id),
+                referredPhone: canonicalPhone,
+            });
+            if (!referralResult.applied && referralCode) {
+                t.warn('referral_not_applied', { reason: referralResult.reason ?? 'unknown' });
+            }
             const sv = await (0, authSessionService_1.bumpUserAuthSession)(String(user._id));
             (0, socketRegistry_1.emitAuthSessionSuperseded)('u', String(user._id), sv);
             const token = (0, authToken_1.signAppAccessToken)(String(user._id), 'u', sv);
@@ -975,8 +1005,18 @@ const completeMobileSignup = async (req, res) => {
             passwordHash: null,
             audioCallRate: Receiver_1.RECEIVER_AUDIO_CALL_RATE_INR_PER_MIN,
             accountStatus: 'pending_profile',
+            referralCode: await (0, referralService_1.generateUniqueReferralCode)(),
         });
         verifiedMobilePhones.delete(canonicalPhone);
+        const referralResult = await (0, referralService_1.applyReferralRewardOnSignup)({
+            referralCode,
+            referredKind: 'receiver',
+            referredId: String(receiver._id),
+            referredPhone: canonicalPhone,
+        });
+        if (!referralResult.applied && referralCode) {
+            t.warn('referral_not_applied', { reason: referralResult.reason ?? 'unknown' });
+        }
         const sv = await (0, authSessionService_1.bumpReceiverAuthSession)(String(receiver._id));
         (0, socketRegistry_1.emitAuthSessionSuperseded)('r', String(receiver._id), sv);
         const token = (0, authToken_1.signAppAccessToken)(String(receiver._id), 'r', sv);

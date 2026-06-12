@@ -4,6 +4,7 @@ import mongoose from 'mongoose';
 import Razorpay from 'razorpay';
 import User, { type UserDocument } from '../models/User';
 import WalletTopup from '../models/WalletTopup';
+import WalletCredit from '../models/WalletCredit';
 import { toApiUser } from './authController';
 import { blockCallerUntilApproved } from '../utils/accountAccess';
 
@@ -47,6 +48,54 @@ function calculateWalletCredit(payAmount: number, bonusPercent: number): number 
   const totalCredit = baseAmount * (1 + bonusPercent / 100);
   return Math.round(totalCredit * 100) / 100;
 }
+
+/**
+ * GET /wallet/credits — non-Razorpay wallet credits (referral rewards, etc.) for callers.
+ */
+export const listWalletCredits = async (req: Request, res: Response): Promise<void> => {
+  try {
+    if (req.accountKind !== 'user') {
+      res.status(403).json({ message: 'Only app users can view wallet credits' });
+      return;
+    }
+    const authUser = req.user as UserDocument | undefined;
+    if (!authUser?._id) {
+      res.status(401).json({ message: 'Not authorized' });
+      return;
+    }
+    if (blockCallerUntilApproved(req, res)) return;
+
+    const rows = await WalletCredit.find({ userId: authUser._id })
+      .sort({ createdAt: -1 })
+      .limit(100)
+      .select('source amountInr description referralId createdAt')
+      .lean<
+        {
+          _id: mongoose.Types.ObjectId;
+          source: string;
+          amountInr: number;
+          description: string;
+          referralId: mongoose.Types.ObjectId | null;
+          createdAt: Date;
+        }[]
+      >();
+
+    res.status(200).json({
+      credits: rows.map((r) => ({
+        id: String(r._id),
+        source: r.source,
+        amountInr: r.amountInr,
+        description: r.description,
+        referralId: r.referralId ? String(r.referralId) : null,
+        createdAt: r.createdAt.toISOString(),
+      })),
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error('listWalletCredits error:', msg);
+    res.status(500).json({ message: msg || 'Server error' });
+  }
+};
 
 /**
  * GET /wallet/topups — list successful wallet recharges for the signed-in caller.

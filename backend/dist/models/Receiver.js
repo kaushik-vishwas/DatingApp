@@ -95,6 +95,7 @@ const receiverSchema = new mongoose_1.Schema({
     onlineSince: { type: Date, default: null },
     authSessionVersion: { type: Number, default: 0, min: 0 },
     expoPushToken: { type: String, default: null },
+    referralCode: { type: String, default: null, trim: true, uppercase: true, sparse: true, unique: true },
 }, { timestamps: true });
 const Receiver = mongoose_1.default.model('Receiver', receiverSchema);
 exports.default = Receiver;

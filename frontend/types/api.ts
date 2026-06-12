@@ -480,6 +480,20 @@ export interface CallerNotificationsResponse {
   notifications: CallerNotificationRow[];
 }
 
+export interface ReferralProfileResponse {
+  referralCode: string;
+  shareUrl: string;
+  role: 'caller' | 'receiver';
+  rewardMatrixInr: {
+    caller: number;
+    receiver: number;
+  };
+  stats: {
+    totalReferred: number;
+    totalRewardInr: number;
+  };
+}
+
 export type ReceiverEarningEntryType = 'call' | 'chat';
 
 export interface ReceiverEarningEntry {

@@ -1,29 +1,51 @@
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import Constants from 'expo-constants';
-import React, { useMemo } from 'react';
-import { Alert, Platform, Share, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { ActivityIndicator, Alert, Share, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import type { CallerStackParamList } from '../../navigation/CallerStackParamList';
+import { profileApi } from '../../services/api';
+import { buildAppShareMessage, getAppShareConfig } from '../../utils/appShareConfig';
 
 const PURPLE = '#7b2cff';
-const ANDROID_PACKAGE = 'com.kaushikvishwas.frontend';
 
 type Props = NativeStackScreenProps<CallerStackParamList, 'CallerShareApp'>;
 
 export default function CallerShareAppScreen({ navigation }: Props): React.JSX.Element {
-  const sharePayload = useMemo(() => {
-    const playUrl = `https://play.google.com/store/apps/details?id=${ANDROID_PACKAGE}`;
-    const name =
-      (typeof Constants.expoConfig?.name === 'string' && Constants.expoConfig.name) || 'Selecto';
-    const message =
-      Platform.OS === 'android'
-        ? `Try ${name} — voice calls and more.\n\n${playUrl}`
-        : `Try ${name} — voice calls and more.\n\nGet it on the App Store or Google Play.`;
-    return { title: `Share ${name}`, message };
+  const shareConfig = useMemo(() => getAppShareConfig(), []);
+  const [loadingReferral, setLoadingReferral] = useState(true);
+  const [referralCode, setReferralCode] = useState<string | null>(null);
+  const [shareUrl, setShareUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const { data } = await profileApi.referralProfile();
+        if (!cancelled) {
+          setReferralCode(data.referralCode);
+          setShareUrl(data.shareUrl);
+        }
+      } catch {
+        if (!cancelled) {
+          setReferralCode(null);
+          setShareUrl(null);
+        }
+      } finally {
+        if (!cancelled) setLoadingReferral(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
-  const onShare = async () => {
+  const sharePayload = useMemo(
+    () => buildAppShareMessage({ referralCode, shareUrl }),
+    [referralCode, shareUrl]
+  );
+
+  const onShare = useCallback(async () => {
     try {
       await Share.share({
         title: sharePayload.title,
@@ -32,7 +54,14 @@ export default function CallerShareAppScreen({ navigation }: Props): React.JSX.E
     } catch {
       Alert.alert('Share', 'Sharing is not available on this device.');
     }
-  };
+  }, [sharePayload.message, sharePayload.title]);
+
+  const testingHint =
+    shareConfig.distribution === 'testing' && !shareConfig.androidInstallUrl
+      ? ''
+      : shareConfig.distribution === 'testing' && shareConfig.androidInstallUrl
+        ? 'Beta testers can open the install link in your shared message.'
+        : null;
 
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'left', 'right']}>
@@ -48,11 +77,23 @@ export default function CallerShareAppScreen({ navigation }: Props): React.JSX.E
         <Text style={styles.emoji}>📤</Text>
         <Text style={styles.head}>Invite friends</Text>
         <Text style={styles.body}>
-          Share Selecto with someone who might enjoy voice calls and a friendly community. Use your
-          device share sheet to send by message, email, or social apps.
+          Share {shareConfig.displayName} with friends. They can use your invite link or code when
+          signing up so you earn referral rewards.
         </Text>
+
+        {loadingReferral ? (
+          <ActivityIndicator color={PURPLE} style={{ marginBottom: 16 }} />
+        ) : referralCode ? (
+          <View style={styles.codeBox}>
+            <Text style={styles.codeLabel}>Your invite code</Text>
+            <Text style={styles.codeValue}>{referralCode}</Text>
+          </View>
+        ) : null}
+
+        {testingHint ? <Text style={styles.hint}>{testingHint}</Text> : null}
+
         <TouchableOpacity style={styles.cta} onPress={() => void onShare()} activeOpacity={0.9}>
-          <Text style={styles.ctaTxt}>Share</Text>
+          <Text style={styles.ctaTxt}>Share invite</Text>
         </TouchableOpacity>
       </View>
     </SafeAreaView>
@@ -81,7 +122,24 @@ const styles = StyleSheet.create({
   },
   emoji: { fontSize: 40, textAlign: 'center', marginBottom: 12 },
   head: { fontSize: 18, fontWeight: '900', color: '#111', textAlign: 'center', marginBottom: 10 },
-  body: { fontSize: 14, color: '#666', lineHeight: 22, textAlign: 'center', marginBottom: 20 },
+  body: { fontSize: 14, color: '#666', lineHeight: 22, textAlign: 'center', marginBottom: 16 },
+  codeBox: {
+    backgroundColor: '#f3ecff',
+    borderRadius: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    marginBottom: 14,
+    alignItems: 'center',
+  },
+  codeLabel: { fontSize: 12, fontWeight: '700', color: '#7b2cff', marginBottom: 4 },
+  codeValue: { fontSize: 20, fontWeight: '900', color: '#111', letterSpacing: 2 },
+  hint: {
+    fontSize: 12,
+    color: '#888',
+    lineHeight: 18,
+    textAlign: 'center',
+    marginBottom: 14,
+  },
   cta: {
     backgroundColor: PURPLE,
     paddingVertical: 14,

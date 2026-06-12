@@ -11,6 +11,10 @@ import {
   normalizeIndianMobilePhone,
   phoneLookupVariants,
 } from '../utils/phoneNormalize';
+import {
+  applyReferralRewardOnSignup,
+  generateUniqueReferralCode,
+} from '../services/referralService';
 
 const OTP_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
@@ -72,6 +76,7 @@ type RegisterBody = {
   name?: string;
   phone: string;
   role?: LegacyRegisterRole;
+  referralCode?: string;
 };
 
 type LoginBody = { phone?: string; accountType: AccountTypeParam };
@@ -294,7 +299,7 @@ export const register = async (
 ): Promise<void> => {
   const t = beginApiTrace('POST /auth/register', req, res);
   try {
-    const { name, phone, role } = req.body;
+    const { name, phone, role, referralCode } = req.body;
 
     if (!phone || !String(phone).trim()) {
       t.warn('register_validation_missing_fields');
@@ -326,6 +331,15 @@ export const register = async (
         phone: phoneDigits,
         isVerified: false,
         passwordHash: null,
+        referralCode: await generateUniqueReferralCode(),
+      });
+      void applyReferralRewardOnSignup({
+        referralCode,
+        referredKind: 'user',
+        referredId: String(user._id),
+        referredPhone: phoneDigits,
+      }).catch((e: unknown) => {
+        console.error('[referral] register caller hook error:', e instanceof Error ? e.message : String(e));
       });
       t.log('register_ok_caller');
       t.json(201, {
@@ -341,6 +355,15 @@ export const register = async (
       isVerified: false,
       passwordHash: null,
       audioCallRate: RECEIVER_AUDIO_CALL_RATE_INR_PER_MIN,
+      referralCode: await generateUniqueReferralCode(),
+    });
+    void applyReferralRewardOnSignup({
+      referralCode,
+      referredKind: 'receiver',
+      referredId: String(receiver._id),
+      referredPhone: phoneDigits,
+    }).catch((e: unknown) => {
+      console.error('[referral] register receiver hook error:', e instanceof Error ? e.message : String(e));
     });
     t.log('register_ok_receiver');
     t.json(201, {
@@ -855,7 +878,7 @@ export const verifyOtp = async (
 type LookupPhoneBody = { phone: string };
 type MobilePhoneBody = { phone: string };
 type VerifyMobileOtpBody = { phone: string; otp: string };
-type CompleteMobileSignupBody = { phone: string; gender: 'male' | 'female' };
+type CompleteMobileSignupBody = { phone: string; gender: 'male' | 'female'; referralCode?: string };
 
 /**
  * POST /auth/lookup-phone — which table holds this mobile (if any).
@@ -1100,6 +1123,7 @@ export const completeMobileSignup = async (
   try {
     const phoneDigits = typeof req.body.phone === 'string' ? String(req.body.phone).trim() : '';
     const gender = req.body.gender;
+    const referralCode = req.body.referralCode;
 
     if (!phoneDigits) {
       t.json(400, { message: 'phone is required', error: 'COMPLETE_MOBILE_SIGNUP_MISSING_PHONE' });
@@ -1143,8 +1167,18 @@ export const completeMobileSignup = async (
         isVerified: true,
         passwordHash: null,
         accountStatus: 'pending_profile',
+        referralCode: await generateUniqueReferralCode(),
       });
       verifiedMobilePhones.delete(canonicalPhone);
+      const referralResult = await applyReferralRewardOnSignup({
+        referralCode,
+        referredKind: 'user',
+        referredId: String(user._id),
+        referredPhone: canonicalPhone,
+      });
+      if (!referralResult.applied && referralCode) {
+        t.warn('referral_not_applied', { reason: referralResult.reason ?? 'unknown' });
+      }
       const sv = await bumpUserAuthSession(String(user._id));
       emitAuthSessionSuperseded('u', String(user._id), sv);
       const token = signAppAccessToken(String(user._id), 'u', sv);
@@ -1165,8 +1199,18 @@ export const completeMobileSignup = async (
       passwordHash: null,
       audioCallRate: RECEIVER_AUDIO_CALL_RATE_INR_PER_MIN,
       accountStatus: 'pending_profile',
+      referralCode: await generateUniqueReferralCode(),
     });
     verifiedMobilePhones.delete(canonicalPhone);
+    const referralResult = await applyReferralRewardOnSignup({
+      referralCode,
+      referredKind: 'receiver',
+      referredId: String(receiver._id),
+      referredPhone: canonicalPhone,
+    });
+    if (!referralResult.applied && referralCode) {
+      t.warn('referral_not_applied', { reason: referralResult.reason ?? 'unknown' });
+    }
     const sv = await bumpReceiverAuthSession(String(receiver._id));
     emitAuthSessionSuperseded('r', String(receiver._id), sv);
     const token = signAppAccessToken(String(receiver._id), 'r', sv);

@@ -1,8 +1,21 @@
 import { Audio, InterruptionModeAndroid, InterruptionModeIOS } from 'expo-av';
 import { PermissionsAndroid, Platform } from 'react-native';
-import IncomingCallAndroid from '../modules/incoming-call-android';
+import type { IncomingCallAndroidModule } from '../modules/incoming-call-android';
 
 export type VoiceCallOutputRoute = 'speaker' | 'earpiece' | 'bluetooth';
+
+let nativeModule: IncomingCallAndroidModule | null | undefined;
+
+function getIncomingCallAndroidModule(): IncomingCallAndroidModule | null {
+  if (Platform.OS !== 'android') return null;
+  if (nativeModule !== undefined) return nativeModule;
+  try {
+    nativeModule = require('incoming-call-android').default as IncomingCallAndroidModule;
+  } catch {
+    nativeModule = null;
+  }
+  return nativeModule;
+}
 
 async function ensureBluetoothConnectPermission(): Promise<boolean> {
   if (Platform.OS !== 'android' || Platform.Version < 31) return true;
@@ -26,19 +39,29 @@ export async function applyVoiceCallOutputRoute(route: VoiceCallOutputRoute): Pr
 
   if (Platform.OS !== 'android') return;
 
+  const mod = getIncomingCallAndroidModule();
+  if (!mod) return;
+
   if (route === 'bluetooth') {
     const granted = await ensureBluetoothConnectPermission();
     if (!granted) {
       throw new Error('Bluetooth permission is required to route call audio');
     }
   }
-  IncomingCallAndroid.setVoiceCallAudioRoute(route);
+
+  try {
+    mod.setVoiceCallAudioRoute(route);
+  } catch {
+    // Native module unavailable until a dev build / release APK is installed.
+  }
 }
 
 export async function isBluetoothVoiceOutputAvailable(): Promise<boolean> {
   if (Platform.OS !== 'android') return false;
+  const mod = getIncomingCallAndroidModule();
+  if (!mod) return false;
   try {
-    return IncomingCallAndroid.isBluetoothVoiceOutputAvailable();
+    return mod.isBluetoothVoiceOutputAvailable();
   } catch {
     return false;
   }
@@ -46,9 +69,11 @@ export async function isBluetoothVoiceOutputAvailable(): Promise<boolean> {
 
 export function releaseVoiceCallOutputRoute(): void {
   if (Platform.OS !== 'android') return;
+  const mod = getIncomingCallAndroidModule();
+  if (!mod) return;
   try {
-    IncomingCallAndroid.releaseVoiceCallAudioRoute();
+    mod.releaseVoiceCallAudioRoute();
   } catch {
-    // Native module may be unavailable in dev clients without a rebuild.
+    // Native module may be unavailable in Expo Go or before rebuild.
   }
 }

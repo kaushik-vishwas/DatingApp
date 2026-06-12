@@ -1,4 +1,5 @@
 import { requireNativeModule } from 'expo-modules-core';
+import { Platform } from 'react-native';
 
 export type IncomingCallTapEnhanceResult = {
   applied?: boolean;
@@ -53,4 +54,41 @@ export type IncomingCallAndroidModule = {
   releaseVoiceCallAudioRoute(): void;
 };
 
-export default requireNativeModule<IncomingCallAndroidModule>('IncomingCallAndroid');
+let cachedModule: IncomingCallAndroidModule | null | undefined;
+
+/** Lazy native binding — safe when running in Expo Go or before Android rebuild. */
+export function getIncomingCallAndroidNativeModule(): IncomingCallAndroidModule | null {
+  if (Platform.OS !== 'android') return null;
+  if (cachedModule !== undefined) return cachedModule;
+  try {
+    cachedModule = requireNativeModule<IncomingCallAndroidModule>('IncomingCallAndroid');
+  } catch {
+    cachedModule = null;
+  }
+  return cachedModule;
+}
+
+function unavailableMethod(name: string): (...args: unknown[]) => unknown {
+  return (..._args: unknown[]) => {
+    if (name === 'isBluetoothVoiceOutputAvailable') return false;
+    if (name.startsWith('start')) return false;
+    if (name === 'stopCellularCallHoldWatch' || name === 'stopCallWebSocketForegroundService') return undefined;
+    if (name === 'releaseVoiceCallAudioRoute') return undefined;
+    if (name.endsWith('Async')) {
+      return Promise.resolve({ applied: false, unavailable: true });
+    }
+    return undefined;
+  };
+}
+
+const defaultExport = new Proxy({} as IncomingCallAndroidModule, {
+  get(_target, prop: string | symbol) {
+    if (typeof prop !== 'string') return undefined;
+    const mod = getIncomingCallAndroidNativeModule();
+    if (!mod) return unavailableMethod(prop);
+    const value = mod[prop as keyof IncomingCallAndroidModule];
+    return typeof value === 'function' ? (value as (...args: unknown[]) => unknown).bind(mod) : value;
+  },
+});
+
+export default defaultExport;

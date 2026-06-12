@@ -34,6 +34,7 @@ import {
   saveReceiverKycDocuments,
   saveReceiverKycProfileInfo,
 } from '../controllers/profileController';
+import { getMyReferralProfile, validateReferralCode } from '../controllers/referralController';
 import { protect } from '../middleware/auth';
 
 const router = Router();
@@ -76,5 +77,7 @@ router.get(
 router.post('/receiver/bank/send-otp', protect, sendReceiverBankUpdateOtp);
 router.post('/receiver/bank/verify', protect, verifyReceiverBankUpdateOtp);
 router.get('/receiver-earnings-breakdown', protect, getReceiverEarningsBreakdown);
+router.get('/referral', protect, getMyReferralProfile);
+router.get('/referral/validate/:code', validateReferralCode);
 
 export default router;

@@ -3,6 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
 const callerAppReviewController_1 = require("../controllers/callerAppReviewController");
 const profileController_1 = require("../controllers/profileController");
+const referralController_1 = require("../controllers/referralController");
 const auth_1 = require("../middleware/auth");
 const router = (0, express_1.Router)();
 router.post('/complete', auth_1.protect, profileController_1.completeProfile);
@@ -39,4 +40,6 @@ router.get('/receiver-caller-online-notifications', auth_1.protect, profileContr
 router.post('/receiver/bank/send-otp', auth_1.protect, profileController_1.sendReceiverBankUpdateOtp);
 router.post('/receiver/bank/verify', auth_1.protect, profileController_1.verifyReceiverBankUpdateOtp);
 router.get('/receiver-earnings-breakdown', auth_1.protect, profileController_1.getReceiverEarningsBreakdown);
+router.get('/referral', auth_1.protect, referralController_1.getMyReferralProfile);
+router.get('/referral/validate/:code', referralController_1.validateReferralCode);
 exports.default = router;

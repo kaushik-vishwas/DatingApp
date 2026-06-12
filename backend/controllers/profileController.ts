@@ -12,6 +12,8 @@ import CallSession from '../models/CallSession';
 import ChatBlock from '../models/ChatBlock';
 import UserReport from '../models/UserReport';
 import WalletTopup from '../models/WalletTopup';
+import WalletCredit from '../models/WalletCredit';
+import ReceiverWalletCredit from '../models/ReceiverWalletCredit';
 import CallerOnlineNotification from '../models/CallerOnlineNotification';
 import ReceiverAvailabilityNotification from '../models/ReceiverAvailabilityNotification';
 import ReceiverPriorityNotification from '../models/ReceiverPriorityNotification';
@@ -1323,7 +1325,16 @@ export const getReceiverWalletSummary = async (req: Request, res: Response): Pro
     recentCandidates.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
     const topRecent = recentCandidates.slice(0, 20);
 
-    const userIds = [...new Set(topRecent.map((r) => r.userId))];
+    const referralCredits = await ReceiverWalletCredit.find({
+      receiverId: rid,
+      source: 'referral_reward',
+    })
+      .sort({ createdAt: -1 })
+      .limit(10)
+      .select('amountInr description createdAt')
+      .lean<{ _id: mongoose.Types.ObjectId; amountInr: number; description: string; createdAt: Date }[]>();
+
+    const userIds = [...new Set(topRecent.map((r) => r.userId).filter(Boolean))];
     const callers =
       userIds.length > 0
         ? await User.find({ _id: { $in: userIds.map((id) => new mongoose.Types.ObjectId(id)) } })
@@ -1332,13 +1343,24 @@ export const getReceiverWalletSummary = async (req: Request, res: Response): Pro
         : [];
     const nameById = new Map(callers.map((u) => [String(u._id), String(u.name ?? 'Caller')]));
 
-    const recent = topRecent.map((r) => ({
-      id: r.id,
-      title: 'Chat message',
-      subtitle: `From ${nameById.get(r.userId) ?? 'Caller'}`,
-      amountInr: roundInr(r.amountInr),
-      createdAt: r.createdAt.toISOString(),
-    }));
+    const recent = [
+      ...topRecent.map((r) => ({
+        id: r.id,
+        title: 'Chat message',
+        subtitle: `From ${nameById.get(r.userId) ?? 'Caller'}`,
+        amountInr: roundInr(r.amountInr),
+        createdAt: r.createdAt.toISOString(),
+      })),
+      ...referralCredits.map((row) => ({
+        id: `referral-${String(row._id)}`,
+        title: 'Referral reward',
+        subtitle: row.description,
+        amountInr: roundInr(row.amountInr),
+        createdAt: row.createdAt.toISOString(),
+      })),
+    ]
+      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+      .slice(0, 20);
 
     const receiverWelcome = await getReceiverWelcomeSettings();
 
@@ -3119,12 +3141,25 @@ export const getCallerNotifications = async (req: Request, res: Response): Promi
     }
     const uid = new mongoose.Types.ObjectId(String(authUser._id));
 
-    const [topups, callRows, convoRows, availabilityRows] = await Promise.all([
+    const [topups, walletCredits, callRows, convoRows, availabilityRows] = await Promise.all([
       WalletTopup.find({ userId: uid })
         .sort({ createdAt: -1 })
         .limit(20)
         .select('payAmount creditAdded createdAt')
         .lean<{ _id: mongoose.Types.ObjectId; payAmount: number; creditAdded: number; createdAt: Date }[]>(),
+      WalletCredit.find({ userId: uid })
+        .sort({ createdAt: -1 })
+        .limit(20)
+        .select('source amountInr description createdAt')
+        .lean<
+          {
+            _id: mongoose.Types.ObjectId;
+            source: string;
+            amountInr: number;
+            description: string;
+            createdAt: Date;
+          }[]
+        >(),
       CallSession.find({ callerId: uid, status: 'completed' })
         .sort({ startedAt: -1 })
         .limit(20)
@@ -3180,6 +3215,13 @@ export const getCallerNotifications = async (req: Request, res: Response): Promi
         type: 'transaction' as const,
         title: 'Wallet Recharge Successful',
         subtitle: `₹${roundInr(row.payAmount)} credited ₹${roundInr(row.creditAdded)}`,
+        at: row.createdAt.toISOString(),
+      })),
+      ...walletCredits.map((row) => ({
+        id: `credit-${String(row._id)}`,
+        type: 'transaction' as const,
+        title: 'Referral Reward Credited',
+        subtitle: `+₹${roundInr(row.amountInr)} · ${row.description}`,
         at: row.createdAt.toISOString(),
       })),
       ...callRows.map((row) => ({

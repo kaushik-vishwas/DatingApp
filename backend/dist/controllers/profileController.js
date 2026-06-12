@@ -47,6 +47,8 @@ const CallSession_1 = __importDefault(require("../models/CallSession"));
 const ChatBlock_1 = __importDefault(require("../models/ChatBlock"));
 const UserReport_1 = __importDefault(require("../models/UserReport"));
 const WalletTopup_1 = __importDefault(require("../models/WalletTopup"));
+const WalletCredit_1 = __importDefault(require("../models/WalletCredit"));
+const ReceiverWalletCredit_1 = __importDefault(require("../models/ReceiverWalletCredit"));
 const CallerOnlineNotification_1 = __importDefault(require("../models/CallerOnlineNotification"));
 const ReceiverAvailabilityNotification_1 = __importDefault(require("../models/ReceiverAvailabilityNotification"));
 const ReceiverPriorityNotification_1 = __importDefault(require("../models/ReceiverPriorityNotification"));
@@ -1081,20 +1083,39 @@ const getReceiverWalletSummary = async (req, res) => {
         const totalEarningsThisWeek = roundInr(callEarningsThisWeek + chatEarningsThisWeek);
         recentCandidates.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
         const topRecent = recentCandidates.slice(0, 20);
-        const userIds = [...new Set(topRecent.map((r) => r.userId))];
+        const referralCredits = await ReceiverWalletCredit_1.default.find({
+            receiverId: rid,
+            source: 'referral_reward',
+        })
+            .sort({ createdAt: -1 })
+            .limit(10)
+            .select('amountInr description createdAt')
+            .lean();
+        const userIds = [...new Set(topRecent.map((r) => r.userId).filter(Boolean))];
         const callers = userIds.length > 0
             ? await User_1.default.find({ _id: { $in: userIds.map((id) => new mongoose_1.default.Types.ObjectId(id)) } })
                 .select('name')
                 .lean()
             : [];
         const nameById = new Map(callers.map((u) => [String(u._id), String(u.name ?? 'Caller')]));
-        const recent = topRecent.map((r) => ({
-            id: r.id,
-            title: 'Chat message',
-            subtitle: `From ${nameById.get(r.userId) ?? 'Caller'}`,
-            amountInr: roundInr(r.amountInr),
-            createdAt: r.createdAt.toISOString(),
-        }));
+        const recent = [
+            ...topRecent.map((r) => ({
+                id: r.id,
+                title: 'Chat message',
+                subtitle: `From ${nameById.get(r.userId) ?? 'Caller'}`,
+                amountInr: roundInr(r.amountInr),
+                createdAt: r.createdAt.toISOString(),
+            })),
+            ...referralCredits.map((row) => ({
+                id: `referral-${String(row._id)}`,
+                title: 'Referral reward',
+                subtitle: row.description,
+                amountInr: roundInr(row.amountInr),
+                createdAt: row.createdAt.toISOString(),
+            })),
+        ]
+            .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+            .slice(0, 20);
         const receiverWelcome = await (0, receiverWelcome_1.getReceiverWelcomeSettings)();
         res.status(200).json({
             walletBalance,
@@ -2643,11 +2664,16 @@ const getCallerNotifications = async (req, res) => {
             return;
         }
         const uid = new mongoose_1.default.Types.ObjectId(String(authUser._id));
-        const [topups, callRows, convoRows, availabilityRows] = await Promise.all([
+        const [topups, walletCredits, callRows, convoRows, availabilityRows] = await Promise.all([
             WalletTopup_1.default.find({ userId: uid })
                 .sort({ createdAt: -1 })
                 .limit(20)
                 .select('payAmount creditAdded createdAt')
+                .lean(),
+            WalletCredit_1.default.find({ userId: uid })
+                .sort({ createdAt: -1 })
+                .limit(20)
+                .select('source amountInr description createdAt')
                 .lean(),
             CallSession_1.default.find({ callerId: uid, status: 'completed' })
                 .sort({ startedAt: -1 })
@@ -2697,6 +2723,13 @@ const getCallerNotifications = async (req, res) => {
                 type: 'transaction',
                 title: 'Wallet Recharge Successful',
                 subtitle: `₹${roundInr(row.payAmount)} credited ₹${roundInr(row.creditAdded)}`,
+                at: row.createdAt.toISOString(),
+            })),
+            ...walletCredits.map((row) => ({
+                id: `credit-${String(row._id)}`,
+                type: 'transaction',
+                title: 'Referral Reward Credited',
+                subtitle: `+₹${roundInr(row.amountInr)} · ${row.description}`,
                 at: row.createdAt.toISOString(),
             })),
             ...callRows.map((row) => ({

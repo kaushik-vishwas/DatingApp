@@ -29,6 +29,8 @@ export interface IUser {
   userAudio: string | null;
   /** Incremented on each new login; JWT must match for single-device sessions. */
   authSessionVersion: number;
+  /** Unique share code for referral invites. */
+  referralCode: string | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -59,6 +61,7 @@ const userSchema = new Schema<IUser>(
     moderationWarningAt: { type: Date, default: null },
     userAudio: { type: String, default: null },
     authSessionVersion: { type: Number, default: 0, min: 0 },
+    referralCode: { type: String, default: null, trim: true, uppercase: true, sparse: true, unique: true },
   },
   { timestamps: true }
 );
