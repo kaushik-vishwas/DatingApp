@@ -19,6 +19,7 @@ const WalletCredit_1 = __importDefault(require("../models/WalletCredit"));
 const ReceiverWalletCredit_1 = __importDefault(require("../models/ReceiverWalletCredit"));
 const referralRewards_1 = require("../constants/referralRewards");
 const phoneNormalize_1 = require("../utils/phoneNormalize");
+const referralLanding_1 = require("../constants/referralLanding");
 const REFERRAL_CODE_LENGTH = 8;
 const REFERRAL_CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 function roundInr(n) {
@@ -271,6 +272,6 @@ async function getReferralStatsForAccount(kind, accountId) {
     };
 }
 function buildReferralShareUrl(referralCode) {
-    const base = String(process.env.REFERRAL_SHARE_BASE_URL ?? 'https://nesthamapp.com/invite').replace(/\/+$/, '');
+    const base = (0, referralLanding_1.getReferralLandingBaseUrl)();
     return `${base}/${encodeURIComponent(referralCode)}`;
 }

@@ -44,8 +44,7 @@ export function getAppShareConfig(): AppShareConfig {
     androidStoreUrl,
     iosInstallUrl: typeof extra.iosInstallUrl === 'string' ? extra.iosInstallUrl.trim() : '',
     referralLandingBaseUrl:
-      (typeof extra.referralLandingBaseUrl === 'string' && extra.referralLandingBaseUrl.trim()) ||
-      'https://nesthamapp.com/invite',
+      (typeof extra.referralLandingBaseUrl === 'string' && extra.referralLandingBaseUrl.trim()) || '',
   };
 }
 

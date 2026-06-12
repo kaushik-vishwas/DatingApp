@@ -88,8 +88,7 @@
         "distribution": "testing",
         "androidInstallUrl": "",
         "androidStoreUrl": "https://play.google.com/store/apps/details?id=com.kaushikvishwas.frontend",
-        "iosInstallUrl": "",
-        "referralLandingBaseUrl": "https://nesthamapp.com/invite"
+        "iosInstallUrl": ""
       }
     }
   }

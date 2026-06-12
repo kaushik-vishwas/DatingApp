@@ -10,6 +10,7 @@ import {
   type ReferralPartyRole,
 } from '../constants/referralRewards';
 import { phoneLookupVariants } from '../utils/phoneNormalize';
+import { getReferralLandingBaseUrl } from '../constants/referralLanding';
 
 const REFERRAL_CODE_LENGTH = 8;
 const REFERRAL_CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -315,6 +316,6 @@ export async function getReferralStatsForAccount(
 }
 
 export function buildReferralShareUrl(referralCode: string): string {
-  const base = String(process.env.REFERRAL_SHARE_BASE_URL ?? 'https://nesthamapp.com/invite').replace(/\/+$/, '');
+  const base = getReferralLandingBaseUrl();
   return `${base}/${encodeURIComponent(referralCode)}`;
 }

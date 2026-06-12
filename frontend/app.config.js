@@ -10,6 +10,10 @@ const PROD_API = 'https://backend.nesthamapp.com';
 require('dotenv').config({ path: path.join(__dirname, '.env') });
 
 const appJson = JSON.parse(fs.readFileSync(path.join(__dirname, 'app.json'), 'utf8'));
+const referralLandingJsonPath = path.join(__dirname, '..', 'config', 'referralLanding.json');
+const referralLandingConfig = fs.existsSync(referralLandingJsonPath)
+  ? JSON.parse(fs.readFileSync(referralLandingJsonPath, 'utf8'))
+  : {};
 
 const fromEnv = process.env.EXPO_PUBLIC_API_BASE_URL?.trim();
 const fromAppJson = appJson.expo?.extra?.apiBaseUrl?.trim();
@@ -33,6 +37,11 @@ const apiBaseUrl =
   PROD_API;
 const cloudinaryCloudName = cloudNameFromEnv || cloudNameFromAppJson || '';
 const cloudinaryUploadPreset = uploadPresetFromEnv || uploadPresetFromAppJson || '';
+const referralLandingBaseUrl =
+  process.env.EXPO_PUBLIC_REFERRAL_LANDING_BASE_URL?.trim() ||
+  referralLandingConfig.referralLandingBaseUrl?.trim() ||
+  appJson.expo?.extra?.appShare?.referralLandingBaseUrl?.trim() ||
+  '';
 const nameSuffix = appKind ? `-${appKind}` : '';
 const baseName = appJson.expo?.name || 'frontend';
 const baseSlug = appJson.expo?.slug || 'frontend';
@@ -95,6 +104,10 @@ module.exports = {
       cloudinaryCloudName,
       cloudinaryUploadPreset,
       appKind: appKind || undefined,
+      appShare: {
+        ...(appJson.expo.extra?.appShare || {}),
+        ...(referralLandingBaseUrl ? { referralLandingBaseUrl } : {}),
+      },
     },
   },
 };

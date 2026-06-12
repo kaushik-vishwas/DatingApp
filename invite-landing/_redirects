@@ -1,2 +1,2 @@
-/invite    /index.html   200
-/invite/*  /index.html   200
+/:code /index.html 200
+/invite/:code /index.html 200

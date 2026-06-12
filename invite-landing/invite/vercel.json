@@ -2,11 +2,11 @@
   "rewrites": [
     {
       "source": "/:code([A-Za-z0-9]{6,12})",
-      "destination": "/invite/index.html"
+      "destination": "/index.html"
     },
     {
       "source": "/invite/:code([A-Za-z0-9]{6,12})",
-      "destination": "/invite/index.html"
+      "destination": "/index.html"
     }
   ]
 }

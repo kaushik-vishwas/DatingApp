@@ -287,15 +287,25 @@
         document.getElementById('title').textContent = 'Join ' + appName;
         document.title = 'Join ' + appName;
 
+        function looksLikeReferralCode(value) {
+          return /^[A-Za-z0-9]{6,12}$/.test(value);
+        }
+
         function parseCodeFromPath() {
           var parts = window.location.pathname.replace(/\/+$/, '').split('/').filter(Boolean);
           var inviteIdx = parts.indexOf('invite');
           if (inviteIdx >= 0 && parts[inviteIdx + 1]) {
-            return decodeURIComponent(parts[inviteIdx + 1]).trim().toUpperCase();
+            var fromInvitePath = decodeURIComponent(parts[inviteIdx + 1]).trim().toUpperCase();
+            if (looksLikeReferralCode(fromInvitePath)) return fromInvitePath;
+          }
+          // https://invite-selecto.vercel.app/9WA99354
+          if (parts.length === 1) {
+            var fromRoot = decodeURIComponent(parts[0]).trim().toUpperCase();
+            if (looksLikeReferralCode(fromRoot)) return fromRoot;
           }
           var params = new URLSearchParams(window.location.search);
           var q = params.get('code') || params.get('ref');
-          return q ? q.trim().toUpperCase() : '';
+          return q && looksLikeReferralCode(q.trim().toUpperCase()) ? q.trim().toUpperCase() : '';
         }
 
         function showToast(msg) {
