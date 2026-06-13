@@ -1,5 +1,3 @@
-import { classifyVoiceGenderLocally } from './voiceGenderLocalClassifier';
-
 type VoiceGenderLabel = 'female' | 'male' | 'other' | 'unknown';
 
 export type ExpectedVoiceGender = 'female' | 'male' | 'other';
@@ -156,6 +154,7 @@ export async function verifyVoiceGender(
   }
 
   if (readVerificationProvider() === 'local') {
+    const { classifyVoiceGenderLocally } = await import('./voiceGenderLocalClassifier');
     return classifyVoiceGenderLocally(userAudioUrl, expectedGender);
   }
 
