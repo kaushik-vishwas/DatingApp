@@ -152,7 +152,11 @@ async function classifyVoiceGenderLocally(audioSource, expectedGender) {
         };
     }
     catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
+        let msg = err instanceof Error ? err.message : String(err);
+        if (/cannot find module '@huggingface\/transformers'/i.test(msg)) {
+            msg =
+                'Voice AI package missing on server. Run: cd backend && npm install && npm run build && pm2 restart dating-backend';
+        }
         console.log('[voice-gender-local]', JSON.stringify({ model: LOCAL_MODEL_ID, audioSource, expectedGender, error: msg }, null, 2));
         return {
             ok: false,
