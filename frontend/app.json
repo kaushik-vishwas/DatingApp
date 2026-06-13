@@ -82,7 +82,7 @@
     "extra": {
       "apiBaseUrl": "https://backend.nesthamapp.com",
       "cloudinaryCloudName": "dfeeqvx3v",
-      "cloudinaryUploadPreset": "dating_app_upload",
+      "cloudinaryUploadPreset": "dating_app_preset",
       "appShare": {
         "displayName": "Selecto",
         "distribution": "testing",

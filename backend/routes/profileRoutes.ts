@@ -20,6 +20,7 @@ import {
   sendReceiverBankUpdateOtp,
   verifyReceiverBankUpdateOtp,
   saveCallerUserAudio,
+  saveReceiverUserAudio,
   sendReceiverWithdrawalOtp,
   getReceiverCallInsights,
   getReceiverWelcomeMessage,
@@ -41,6 +42,7 @@ const router = Router();
 
 router.post('/complete', protect, completeProfile);
 router.patch('/caller-audio', protect, saveCallerUserAudio);
+router.patch('/receiver-audio', protect, saveReceiverUserAudio);
 router.post('/complete-caller', protect, completeCallerProfile);
 router.patch('/caller', protect, updateCallerProfile);
 router.get('/receiver-wallet-summary', protect, getReceiverWalletSummary);

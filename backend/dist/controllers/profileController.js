@@ -36,7 +36,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getCallerNotifications = exports.getReceiverCallerOnlineNotifications = exports.getCallerMessageEligibleReceivers = exports.deleteReceiverCallHistory = exports.deleteCallerCallHistory = exports.getCallerCallHistory = exports.getReceiverEarningsBreakdown = exports.verifyReceiverBankUpdateOtp = exports.sendReceiverBankUpdateOtp = exports.deleteReceiverAccount = exports.reopenRejectedReceiverKyc = exports.completeReceiverAudioOnboarding = exports.updateReceiverExpoPushToken = exports.receiverForegroundPresence = exports.receiverBackgroundPresence = exports.updateReceiverProfile = exports.notifyReceiverRecentUser = exports.getReceiverNotifyCandidates = exports.getCallerNotificationMessage = exports.getReceiverWelcomeMessage = exports.getReceiverCallInsights = exports.verifyReceiverWithdrawalOtpAndCreate = exports.sendReceiverWithdrawalOtp = exports.getReceiverWithdrawalOverview = exports.getReceiverWalletSummary = exports.updateCallerProfile = exports.completeCallerProfile = exports.saveCallerUserAudio = exports.saveReceiverKycBankFinalize = exports.saveReceiverKycDocuments = exports.saveReceiverKycProfileInfo = exports.completeProfile = void 0;
+exports.getCallerNotifications = exports.getReceiverCallerOnlineNotifications = exports.getCallerMessageEligibleReceivers = exports.deleteReceiverCallHistory = exports.deleteCallerCallHistory = exports.getCallerCallHistory = exports.getReceiverEarningsBreakdown = exports.verifyReceiverBankUpdateOtp = exports.sendReceiverBankUpdateOtp = exports.deleteReceiverAccount = exports.reopenRejectedReceiverKyc = exports.completeReceiverAudioOnboarding = exports.updateReceiverExpoPushToken = exports.receiverForegroundPresence = exports.receiverBackgroundPresence = exports.updateReceiverProfile = exports.notifyReceiverRecentUser = exports.getReceiverNotifyCandidates = exports.getCallerNotificationMessage = exports.getReceiverWelcomeMessage = exports.getReceiverCallInsights = exports.verifyReceiverWithdrawalOtpAndCreate = exports.sendReceiverWithdrawalOtp = exports.getReceiverWithdrawalOverview = exports.getReceiverWalletSummary = exports.updateCallerProfile = exports.completeCallerProfile = exports.saveReceiverUserAudio = exports.saveCallerUserAudio = exports.saveReceiverKycBankFinalize = exports.saveReceiverKycDocuments = exports.saveReceiverKycProfileInfo = exports.completeProfile = void 0;
 const crypto_1 = __importDefault(require("crypto"));
 const mongoose_1 = __importDefault(require("mongoose"));
 const User_1 = __importDefault(require("../models/User"));
@@ -60,6 +60,7 @@ const chatPricing_1 = require("../constants/chatPricing");
 const receiverAvailabilityNotifier_1 = require("../services/receiverAvailabilityNotifier");
 const receiverPresence_1 = require("../services/receiverPresence");
 const socketRegistry_1 = require("../socket/socketRegistry");
+const callerVoiceGenderVerifier_1 = require("../services/callerVoiceGenderVerifier");
 const receiverScore_1 = require("../services/receiverScore");
 const razorpayXPayoutService_1 = require("../services/razorpayXPayoutService");
 const socketRegistry_2 = require("../socket/socketRegistry");
@@ -689,6 +690,66 @@ const saveCallerUserAudio = async (req, res) => {
     }
 };
 exports.saveCallerUserAudio = saveCallerUserAudio;
+/**
+ * PATCH /profile/receiver-audio
+ * Saves `userAudio` after Cloudinary upload (receiver audio verification step).
+ */
+const saveReceiverUserAudio = async (req, res) => {
+    try {
+        if (req.accountKind !== 'receiver') {
+            res.status(403).json({
+                message: 'This endpoint is only for receiver accounts',
+                error: 'RECEIVER_AUDIO_ACCOUNT_KIND_REQUIRED',
+            });
+            return;
+        }
+        if ((0, accountAccess_1.blockReceiverUntilApproved)(req, res))
+            return;
+        const authReceiver = req.receiver;
+        if (!authReceiver?._id) {
+            res.status(401).json({ message: 'Not authorized', error: 'RECEIVER_AUDIO_UNAUTHORIZED' });
+            return;
+        }
+        const voiceUrl = parseCallerAudioHttpsUrl(req.body);
+        if (!voiceUrl) {
+            res.status(400).json({
+                message: 'userAudio must be a valid https URL',
+                error: 'RECEIVER_AUDIO_INVALID_URL',
+            });
+            return;
+        }
+        const receiver = await Receiver_1.default.findById(authReceiver._id);
+        if (!receiver) {
+            res.status(404).json({ message: 'Receiver not found', error: 'RECEIVER_AUDIO_NOT_FOUND' });
+            return;
+        }
+        receiver.userAudio = voiceUrl;
+        await receiver.save();
+        res.status(200).json({
+            message: 'Voice sample saved',
+            user: (0, authController_1.toApiReceiver)(receiver),
+        });
+    }
+    catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error('saveReceiverUserAudio error:', msg);
+        res.status(500).json({ message: msg || 'Server error', error: 'RECEIVER_AUDIO_SAVE_FAILED' });
+    }
+};
+exports.saveReceiverUserAudio = saveReceiverUserAudio;
+function buildVoiceVerificationPayload(expectedGender, result) {
+    return {
+        provider: result.model.startsWith('Xenova/') ? 'local' : 'huggingface',
+        approved: result.ok,
+        predictedGender: result.predictedGender,
+        confidence: result.confidence,
+        threshold: (0, callerVoiceGenderVerifier_1.voiceGenderThreshold)(expectedGender),
+        model: result.model,
+        profileGender: expectedGender,
+        ...(result.failureKind ? { failureKind: result.failureKind } : {}),
+        ...(result.reason ? { reason: result.reason } : {}),
+    };
+}
 /**
  * POST /profile/complete-caller
  * App user profile (`users` collection):
@@ -2017,8 +2078,7 @@ const updateReceiverExpoPushToken = async (req, res) => {
 exports.updateReceiverExpoPushToken = updateReceiverExpoPushToken;
 /**
  * POST /profile/receiver/complete-audio-onboarding
- * Called when the receiver finishes the audio verification step and continues to the dashboard.
- * Always persists `accountStatus: 'approved'` (does not depend on other profile fields or voice URL).
+ * Saves voice URL (from body if provided), runs gender verification, then approves.
  */
 const completeReceiverAudioOnboarding = async (req, res) => {
     try {
@@ -2034,8 +2094,57 @@ const completeReceiverAudioOnboarding = async (req, res) => {
             res.status(404).json({ message: 'Receiver not found' });
             return;
         }
+        const bodyVoiceUrl = parseCallerAudioHttpsUrl(req.body);
+        if (bodyVoiceUrl) {
+            receiver.userAudio = bodyVoiceUrl;
+        }
+        const voiceUrl = String(receiver.userAudio ?? '').trim();
+        if (!voiceUrl || !/^https?:\/\//i.test(voiceUrl)) {
+            res.status(400).json({
+                message: 'Record and upload your voice sample before continuing',
+                error: 'RECEIVER_AUDIO_MISSING',
+            });
+            return;
+        }
+        const profileGender = receiver.gender;
+        if (profileGender !== 'male' && profileGender !== 'female' && profileGender !== 'other') {
+            res.status(400).json({
+                message: 'Complete your profile gender before voice verification',
+                error: 'RECEIVER_GENDER_MISSING',
+            });
+            return;
+        }
+        const verification = await (0, callerVoiceGenderVerifier_1.verifyVoiceGender)(voiceUrl, profileGender);
+        const voiceVerification = buildVoiceVerificationPayload(profileGender, verification);
+        if (!verification.ok) {
+            const failMessage = verification.failureKind === 'gender_mismatch'
+                ? `Voice sounds like ${verification.predictedGender}, but your profile gender is ${profileGender}.`
+                : verification.failureKind === 'low_confidence'
+                    ? `Voice check was unclear (confidence ${(verification.confidence * 100).toFixed(0)}%). Please record again in a quiet place.`
+                    : verification.failureKind === 'misconfigured'
+                        ? 'Voice verification is not configured on the server yet.'
+                        : verification.failureKind === 'audio_fetch_failed'
+                            ? 'Could not download your voice sample for verification. Please record again.'
+                            : verification.reason?.includes('not supported')
+                                ? 'Voice AI service is unavailable (Hugging Face model not supported). Set VOICE_GENDER_VERIFICATION_MODE=disabled on server for testing, or switch inference provider.'
+                                : verification.reason ||
+                                    'Voice verification service error. Please try again later.';
+            console.log('[receiver-audio-onboarding]', JSON.stringify({
+                receiverId,
+                voiceUrl,
+                profileGender,
+                httpStatus: 422,
+                message: failMessage,
+                voiceVerification,
+            }, null, 2));
+            res.status(422).json({
+                message: failMessage,
+                error: 'RECEIVER_VOICE_VERIFICATION_FAILED',
+                voiceVerification,
+            });
+            return;
+        }
         const wasAvailable = Boolean(receiver.isAvailable);
-        const wasOnline = Boolean(receiver.isOnline);
         receiver.accountStatus = 'approved';
         await receiver.save();
         await (0, receiverPresence_1.syncReceiverPresenceInDatabase)(receiverId);
@@ -2048,9 +2157,18 @@ const completeReceiverAudioOnboarding = async (req, res) => {
                 console.error('receiver availability notify error:', msg);
             });
         }
+        console.log('[receiver-audio-onboarding]', JSON.stringify({
+            receiverId,
+            voiceUrl,
+            profileGender,
+            httpStatus: 200,
+            message: 'Voice verified successfully',
+            voiceVerification,
+        }, null, 2));
         res.status(200).json({
-            message: 'Account approved',
+            message: 'Voice verified successfully',
             user: (0, authController_1.toApiReceiver)(receiver),
+            voiceVerification,
         });
     }
     catch (err) {

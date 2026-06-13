@@ -10,16 +10,30 @@ import {
   View,
 } from 'react-native';
 
-import { inferMimeFromLocalRecording, uploadToCloudinary } from '../lib/cloudinary';
+import {
+  inferMimeFromLocalRecording,
+  uploadToCloudinary,
+  type CloudinaryUploadDebugEntry,
+} from '../lib/cloudinary';
 
 const PURPLE = '#7b2cff';
 
 type Props = {
   scriptText: string;
   onUploadComplete: (url: string) => void;
+  /** When true, parent renders the script (e.g. language tabs). */
+  hideScript?: boolean;
+  onUploadDebug?: (entry: CloudinaryUploadDebugEntry) => void;
+  onUploadError?: (message: string) => void;
 };
 
-export default function VoiceVerificationRecorder({ scriptText, onUploadComplete }: Props): React.JSX.Element {
+export default function VoiceVerificationRecorder({
+  scriptText,
+  onUploadComplete,
+  hideScript = false,
+  onUploadDebug,
+  onUploadError,
+}: Props): React.JSX.Element {
   const recordingRef = useRef<Audio.Recording | null>(null);
   const [isRecording, setIsRecording] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -93,21 +107,24 @@ export default function VoiceVerificationRecorder({ scriptText, onUploadComplete
         return;
       }
       const mimeType = inferMimeFromLocalRecording(uri);
-      setStatusLine('Uploading…');
+      setStatusLine('Uploading to Cloudinary…');
       const { secure_url } = await uploadToCloudinary(uri, {
         mimeType,
-        resourceType: 'video',
+        resourceType: 'auto',
         fileName: 'voice-verification.m4a',
+        onDebug: onUploadDebug,
       });
       onUploadComplete(secure_url);
       setStatusLine('Voice sample uploaded. You can continue.');
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Upload failed';
-      Alert.alert('Voice verification', msg);
+      onUploadError?.(msg);
+      setStatusLine(`Failed: ${msg}`);
+      Alert.alert('Voice upload failed', msg);
     } finally {
       setBusy(false);
     }
-  }, [onUploadComplete]);
+  }, [onUploadComplete, onUploadDebug, onUploadError]);
 
   const onMicPress = () => {
     if (busy) return;
@@ -120,9 +137,11 @@ export default function VoiceVerificationRecorder({ scriptText, onUploadComplete
 
   return (
     <View>
-      <View style={styles.scriptBox}>
-        <Text style={styles.scriptText}>{scriptText}</Text>
-      </View>
+      {!hideScript ? (
+        <View style={styles.scriptBox}>
+          <Text style={styles.scriptText}>{scriptText}</Text>
+        </View>
+      ) : null}
 
       <View style={styles.micSection}>
         {isRecording ? (

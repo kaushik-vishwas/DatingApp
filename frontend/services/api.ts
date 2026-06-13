@@ -8,6 +8,9 @@ import type {
   CompleteCallerResponse,
   SaveCallerUserAudioPayload,
   SaveCallerUserAudioResponse,
+  SaveReceiverUserAudioPayload,
+  SaveReceiverUserAudioResponse,
+  VoiceVerificationResult,
   CompleteProfilePayload,
   CompleteProfileResponse,
   UpdateReceiverProfilePayload,
@@ -225,6 +228,9 @@ export const profileApi = {
   saveCallerUserAudio: (payload: SaveCallerUserAudioPayload) =>
     api.patch<SaveCallerUserAudioResponse>('/profile/caller-audio', payload),
 
+  saveReceiverUserAudio: (payload: SaveReceiverUserAudioPayload) =>
+    api.patch<SaveReceiverUserAudioResponse>('/profile/receiver-audio', payload),
+
   completeCaller: (payload: CompleteCallerPayload) =>
     api.post<CompleteCallerResponse>('/profile/complete-caller', payload),
 
@@ -266,8 +272,8 @@ export const profileApi = {
   receiverForegroundPresence: () =>
     api.post<{ ok: boolean }>('/profile/receiver/presence/foreground'),
 
-  completeReceiverAudioOnboarding: () =>
-    api.post<CompleteProfileResponse>('/profile/receiver/complete-audio-onboarding'),
+  completeReceiverAudioOnboarding: (payload?: { userAudio?: string }) =>
+    api.post<CompleteProfileResponse>('/profile/receiver/complete-audio-onboarding', payload ?? {}),
 
   deleteReceiverAccount: (payload?: DeleteReceiverAccountPayload) =>
     api.delete<{ message: string }>('/profile/receiver', { data: payload ?? {} }),

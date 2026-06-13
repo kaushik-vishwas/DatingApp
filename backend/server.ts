@@ -133,6 +133,19 @@ console.log(
   'VOICE_GENDER_FEMALE_MIN_CONFIDENCE:',
   process.env.VOICE_GENDER_FEMALE_MIN_CONFIDENCE || '0.70 (default)'
 );
+console.log(
+  'VOICE_GENDER_VERIFICATION_MODE:',
+  process.env.VOICE_GENDER_VERIFICATION_MODE || 'required (default)'
+);
+console.log(
+  'VOICE_GENDER_PROVIDER:',
+  process.env.VOICE_GENDER_PROVIDER || 'local (default)'
+);
+console.log(
+  'VOICE_GENDER_LOCAL_MODEL_ID:',
+  process.env.VOICE_GENDER_LOCAL_MODEL_ID ||
+    'Xenova/wav2vec2-large-xlsr-53-gender-recognition-librispeech (default)'
+);
 
 // Normal imports
 import './config/bootstrapEnv';

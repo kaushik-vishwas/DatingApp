@@ -24,9 +24,10 @@ object VoiceCallAudioRoute {
           return true
         }
       }
+      return false
     }
     @Suppress("DEPRECATION")
-    return am.isBluetoothScoAvailableOnOff || am.isBluetoothA2dpOn
+    return am.isBluetoothA2dpOn
   }
 
   fun setRoute(context: Context, route: String): Map<String, Any?> {

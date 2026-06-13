@@ -113,6 +113,10 @@ console.log('HF_API_TOKEN:', process.env.HF_API_TOKEN && process.env.HF_API_TOKE
     : '❌ NOT SET');
 console.log('HF_VOICE_GENDER_MODEL_ID:', process.env.HF_VOICE_GENDER_MODEL_ID || 'audeering/wav2vec2-large-robust-24-ft-age-gender (default)');
 console.log('VOICE_GENDER_FEMALE_MIN_CONFIDENCE:', process.env.VOICE_GENDER_FEMALE_MIN_CONFIDENCE || '0.70 (default)');
+console.log('VOICE_GENDER_VERIFICATION_MODE:', process.env.VOICE_GENDER_VERIFICATION_MODE || 'required (default)');
+console.log('VOICE_GENDER_PROVIDER:', process.env.VOICE_GENDER_PROVIDER || 'local (default)');
+console.log('VOICE_GENDER_LOCAL_MODEL_ID:', process.env.VOICE_GENDER_LOCAL_MODEL_ID ||
+    'Xenova/wav2vec2-large-xlsr-53-gender-recognition-librispeech (default)');
 // Normal imports
 require("./config/bootstrapEnv");
 const http_1 = __importDefault(require("http"));

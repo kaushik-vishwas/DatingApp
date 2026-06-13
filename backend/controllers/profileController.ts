@@ -30,6 +30,11 @@ import {
   touchReceiverForegroundPresence,
 } from '../services/receiverPresence';
 import { isReceiverSocketConnected } from '../socket/socketRegistry';
+import {
+  verifyVoiceGender,
+  voiceGenderThreshold,
+  type ExpectedVoiceGender,
+} from '../services/callerVoiceGenderVerifier';
 import { finalizeReceiverOnlineSession } from '../services/receiverScore';
 import { trackAndFinalizeRazorpayXPayout } from '../services/razorpayXPayoutService';
 import { emitReceiverWithdrawalUpdate } from '../socket/socketRegistry';
@@ -111,13 +116,20 @@ type CompleteCallerBody = {
 };
 
 type CallerVoiceVerificationPayload = {
-  provider: 'huggingface';
+  provider: 'huggingface' | 'local';
   approved: boolean;
   predictedGender: 'female' | 'male' | 'other' | 'unknown';
   confidence: number;
   threshold: number;
   model: string;
   reason?: string;
+  failureKind?:
+    | 'gender_mismatch'
+    | 'low_confidence'
+    | 'service_unavailable'
+    | 'audio_fetch_failed'
+    | 'misconfigured';
+  profileGender?: 'female' | 'male' | 'other';
 };
 
 type CallerAudioPatchBody = { userAudio?: string; voiceVerificationAudioUrl?: string };
@@ -845,6 +857,76 @@ export const saveCallerUserAudio = async (
     t.json(500, { message: msg || 'Server error', error: 'CALLER_AUDIO_SAVE_FAILED' });
   }
 };
+
+/**
+ * PATCH /profile/receiver-audio
+ * Saves `userAudio` after Cloudinary upload (receiver audio verification step).
+ */
+export const saveReceiverUserAudio = async (
+  req: Request<{}, {}, CallerAudioPatchBody>,
+  res: Response
+): Promise<void> => {
+  try {
+    if (req.accountKind !== 'receiver') {
+      res.status(403).json({
+        message: 'This endpoint is only for receiver accounts',
+        error: 'RECEIVER_AUDIO_ACCOUNT_KIND_REQUIRED',
+      });
+      return;
+    }
+    if (blockReceiverUntilApproved(req, res)) return;
+
+    const authReceiver = req.receiver as ReceiverDocument | undefined;
+    if (!authReceiver?._id) {
+      res.status(401).json({ message: 'Not authorized', error: 'RECEIVER_AUDIO_UNAUTHORIZED' });
+      return;
+    }
+
+    const voiceUrl = parseCallerAudioHttpsUrl(req.body);
+    if (!voiceUrl) {
+      res.status(400).json({
+        message: 'userAudio must be a valid https URL',
+        error: 'RECEIVER_AUDIO_INVALID_URL',
+      });
+      return;
+    }
+
+    const receiver = await Receiver.findById(authReceiver._id);
+    if (!receiver) {
+      res.status(404).json({ message: 'Receiver not found', error: 'RECEIVER_AUDIO_NOT_FOUND' });
+      return;
+    }
+
+    receiver.userAudio = voiceUrl;
+    await receiver.save();
+
+    res.status(200).json({
+      message: 'Voice sample saved',
+      user: toApiReceiver(receiver),
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error('saveReceiverUserAudio error:', msg);
+    res.status(500).json({ message: msg || 'Server error', error: 'RECEIVER_AUDIO_SAVE_FAILED' });
+  }
+};
+
+function buildVoiceVerificationPayload(
+  expectedGender: ExpectedVoiceGender,
+  result: Awaited<ReturnType<typeof verifyVoiceGender>>
+): CallerVoiceVerificationPayload {
+  return {
+    provider: result.model.startsWith('Xenova/') ? 'local' : 'huggingface',
+    approved: result.ok,
+    predictedGender: result.predictedGender,
+    confidence: result.confidence,
+    threshold: voiceGenderThreshold(expectedGender),
+    model: result.model,
+    profileGender: expectedGender,
+    ...(result.failureKind ? { failureKind: result.failureKind } : {}),
+    ...(result.reason ? { reason: result.reason } : {}),
+  };
+}
 
 /**
  * POST /profile/complete-caller
@@ -2400,10 +2482,12 @@ export const updateReceiverExpoPushToken = async (req: Request, res: Response): 
 
 /**
  * POST /profile/receiver/complete-audio-onboarding
- * Called when the receiver finishes the audio verification step and continues to the dashboard.
- * Always persists `accountStatus: 'approved'` (does not depend on other profile fields or voice URL).
+ * Saves voice URL (from body if provided), runs gender verification, then approves.
  */
-export const completeReceiverAudioOnboarding = async (req: Request, res: Response): Promise<void> => {
+export const completeReceiverAudioOnboarding = async (
+  req: Request<{}, {}, CallerAudioPatchBody>,
+  res: Response
+): Promise<void> => {
   try {
     if (req.accountKind !== 'receiver') {
       res.status(403).json({ message: 'This endpoint is only for receiver accounts' });
@@ -2418,8 +2502,69 @@ export const completeReceiverAudioOnboarding = async (req: Request, res: Respons
       return;
     }
 
+    const bodyVoiceUrl = parseCallerAudioHttpsUrl(req.body);
+    if (bodyVoiceUrl) {
+      receiver.userAudio = bodyVoiceUrl;
+    }
+
+    const voiceUrl = String(receiver.userAudio ?? '').trim();
+    if (!voiceUrl || !/^https?:\/\//i.test(voiceUrl)) {
+      res.status(400).json({
+        message: 'Record and upload your voice sample before continuing',
+        error: 'RECEIVER_AUDIO_MISSING',
+      });
+      return;
+    }
+
+    const profileGender = receiver.gender;
+    if (profileGender !== 'male' && profileGender !== 'female' && profileGender !== 'other') {
+      res.status(400).json({
+        message: 'Complete your profile gender before voice verification',
+        error: 'RECEIVER_GENDER_MISSING',
+      });
+      return;
+    }
+
+    const verification = await verifyVoiceGender(voiceUrl, profileGender);
+    const voiceVerification = buildVoiceVerificationPayload(profileGender, verification);
+    if (!verification.ok) {
+      const failMessage =
+        verification.failureKind === 'gender_mismatch'
+          ? `Voice sounds like ${verification.predictedGender}, but your profile gender is ${profileGender}.`
+          : verification.failureKind === 'low_confidence'
+            ? `Voice check was unclear (confidence ${(verification.confidence * 100).toFixed(0)}%). Please record again in a quiet place.`
+            : verification.failureKind === 'misconfigured'
+              ? 'Voice verification is not configured on the server yet.'
+              : verification.failureKind === 'audio_fetch_failed'
+                ? 'Could not download your voice sample for verification. Please record again.'
+                : verification.reason?.includes('not supported')
+                  ? 'Voice AI service is unavailable (Hugging Face model not supported). Set VOICE_GENDER_VERIFICATION_MODE=disabled on server for testing, or switch inference provider.'
+                  : verification.reason ||
+                    'Voice verification service error. Please try again later.';
+      console.log(
+        '[receiver-audio-onboarding]',
+        JSON.stringify(
+          {
+            receiverId,
+            voiceUrl,
+            profileGender,
+            httpStatus: 422,
+            message: failMessage,
+            voiceVerification,
+          },
+          null,
+          2
+        )
+      );
+      res.status(422).json({
+        message: failMessage,
+        error: 'RECEIVER_VOICE_VERIFICATION_FAILED',
+        voiceVerification,
+      });
+      return;
+    }
+
     const wasAvailable = Boolean(receiver.isAvailable);
-    const wasOnline = Boolean(receiver.isOnline);
 
     receiver.accountStatus = 'approved';
     await receiver.save();
@@ -2436,9 +2581,25 @@ export const completeReceiverAudioOnboarding = async (req: Request, res: Respons
       });
     }
 
+    console.log(
+      '[receiver-audio-onboarding]',
+      JSON.stringify(
+        {
+          receiverId,
+          voiceUrl,
+          profileGender,
+          httpStatus: 200,
+          message: 'Voice verified successfully',
+          voiceVerification,
+        },
+        null,
+        2
+      )
+    );
     res.status(200).json({
-      message: 'Account approved',
+      message: 'Voice verified successfully',
       user: toApiReceiver(receiver),
+      voiceVerification,
     });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);

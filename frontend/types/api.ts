@@ -548,6 +548,33 @@ export interface CompleteProfilePayload {
 export interface CompleteProfileResponse {
   message: string;
   user: UserProfile;
+  voiceVerification?: VoiceVerificationResult;
+}
+
+export type VoiceVerificationResult = {
+  provider: 'huggingface' | 'local';
+  approved: boolean;
+  predictedGender: 'female' | 'male' | 'other' | 'unknown';
+  confidence: number;
+  threshold: number;
+  model: string;
+  reason?: string;
+  failureKind?:
+    | 'gender_mismatch'
+    | 'low_confidence'
+    | 'service_unavailable'
+    | 'audio_fetch_failed'
+    | 'misconfigured';
+  profileGender?: 'female' | 'male' | 'other';
+};
+
+export interface SaveReceiverUserAudioPayload {
+  userAudio: string;
+}
+
+export interface SaveReceiverUserAudioResponse {
+  message: string;
+  user: UserProfile;
 }
 
 export interface UpdateReceiverProfilePayload {
@@ -611,7 +638,7 @@ export interface CompleteCallerResponse {
   message: string;
   user: UserProfile;
   voiceVerification?: {
-    provider: 'huggingface';
+    provider: 'huggingface' | 'local';
     approved: boolean;
     predictedGender: 'female' | 'male' | 'other' | 'unknown';
     confidence: number;

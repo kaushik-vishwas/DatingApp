@@ -12,12 +12,17 @@
     "seed:admin": "tsx scripts/seedAdmin.ts",
     "migrate:split-users": "tsx scripts/migrateSplitUsersReceivers.ts",
     "migrate:caller-suspended": "tsx scripts/migrateCallerAccessSuspendedOnly.ts",
-    "migrate:drop-email-indexes": "tsx scripts/migrateDropEmailIndexes.ts"
+    "migrate:drop-email-indexes": "tsx scripts/migrateDropEmailIndexes.ts",
+    "test:voice-gender-api": "tsx scripts/testVoiceGenderApi.ts",
+    "test:local-voice-gender": "tsx scripts/testLocalVoiceGender.ts"
   },
   "engines": {
     "node": ">=18"
   },
   "dependencies": {
+    "@huggingface/inference": "^4.13.18",
+    "@huggingface/transformers": "^4.2.0",
+    "audio-decode": "^3.10.2",
     "bcryptjs": "^3.0.3",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",

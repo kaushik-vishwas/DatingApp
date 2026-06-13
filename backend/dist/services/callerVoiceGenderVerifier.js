@@ -1,12 +1,28 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.verifyVoiceGender = verifyVoiceGender;
 exports.verifyCallerFemaleVoice = verifyCallerFemaleVoice;
+exports.voiceGenderThreshold = voiceGenderThreshold;
+exports.getVoiceVerificationMode = getVoiceVerificationMode;
+const voiceGenderLocalClassifier_1 = require("./voiceGenderLocalClassifier");
 function asNumber(v) {
     const n = typeof v === 'number' ? v : Number(v);
     return Number.isFinite(n) ? n : null;
 }
 function asString(v) {
     return typeof v === 'string' ? v.trim() : '';
+}
+function readVerificationMode() {
+    const raw = asString(process.env.VOICE_GENDER_VERIFICATION_MODE).toLowerCase();
+    if (raw === 'disabled' || raw === 'off' || raw === 'skip')
+        return 'disabled';
+    return 'required';
+}
+function readVerificationProvider() {
+    const raw = asString(process.env.VOICE_GENDER_PROVIDER).toLowerCase();
+    if (raw === 'huggingface' || raw === 'hf')
+        return 'huggingface';
+    return 'local';
 }
 function normalizeLabel(raw) {
     const v = asString(raw).toLowerCase();
@@ -31,44 +47,123 @@ function pickTopFromScores(rows) {
     }
     return { label: topLabel, score: topScore };
 }
-async function verifyCallerFemaleVoice(userAudioUrl) {
+function minConfidenceForExpectedGender(expectedGender) {
+    if (expectedGender === 'female') {
+        return asNumber(process.env.VOICE_GENDER_FEMALE_MIN_CONFIDENCE) ?? 0.7;
+    }
+    if (expectedGender === 'male') {
+        return asNumber(process.env.VOICE_GENDER_MALE_MIN_CONFIDENCE) ?? 0.7;
+    }
+    return 0;
+}
+function classifyServiceFailure(reason) {
+    const lower = reason.toLowerCase();
+    if (lower.includes('hf_api_token') || lower.includes('not configured')) {
+        return 'misconfigured';
+    }
+    if (lower.includes('could not fetch audio')) {
+        return 'audio_fetch_failed';
+    }
+    return 'service_unavailable';
+}
+function buildFailureResult(partial) {
+    const reason = partial.reason ?? '';
+    const failureKind = partial.failureKind ??
+        (reason ? classifyServiceFailure(reason) : 'service_unavailable');
+    return { ok: false, ...partial, failureKind };
+}
+function logVoiceGenderTerminal(tag, payload) {
+    console.log(`[${tag}]`, JSON.stringify(payload, null, 2));
+}
+function parseResponseBody(text) {
+    const trimmed = text.trim();
+    if (!trimmed)
+        return null;
+    if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+        try {
+            return JSON.parse(trimmed);
+        }
+        catch {
+            return text;
+        }
+    }
+    return text;
+}
+function logHuggingFaceApiResponse(input) {
+    logVoiceGenderTerminal('voice-gender-hf', {
+        huggingFace: input,
+    });
+}
+async function verifyVoiceGender(userAudioUrl, expectedGender) {
+    if (expectedGender === 'other') {
+        return {
+            ok: true,
+            predictedGender: 'other',
+            confidence: 1,
+            model: 'skipped',
+        };
+    }
+    if (readVerificationMode() === 'disabled') {
+        logVoiceGenderTerminal('voice-gender-hf', {
+            skipped: true,
+            reason: 'VOICE_GENDER_VERIFICATION_MODE=disabled',
+            audioUrl: userAudioUrl,
+            expectedGender,
+        });
+        return {
+            ok: true,
+            predictedGender: expectedGender,
+            confidence: 1,
+            model: 'disabled',
+            reason: 'Verification skipped (VOICE_GENDER_VERIFICATION_MODE=disabled)',
+        };
+    }
+    if (readVerificationProvider() === 'local') {
+        return (0, voiceGenderLocalClassifier_1.classifyVoiceGenderLocally)(userAudioUrl, expectedGender);
+    }
     const modelId = asString(process.env.HF_VOICE_GENDER_MODEL_ID) || 'audeering/wav2vec2-large-robust-24-ft-age-gender';
     const hfToken = asString(process.env.HF_API_TOKEN);
     if (!hfToken) {
-        return {
-            ok: false,
+        return buildFailureResult({
             predictedGender: 'unknown',
             confidence: 0,
             model: modelId,
             reason: 'HF_API_TOKEN is not configured',
-        };
+            failureKind: 'misconfigured',
+        });
     }
     const timeoutMs = asNumber(process.env.VOICE_GENDER_TIMEOUT_MS) ?? 20000;
-    const minFemaleConfidence = asNumber(process.env.VOICE_GENDER_FEMALE_MIN_CONFIDENCE) ?? 0.7;
-    // Keep "org/model" slash intact; encoding it as %2F causes 404 on HF model routes.
+    const minConfidence = minConfidenceForExpectedGender(expectedGender);
     const endpoint = `https://router.huggingface.co/hf-inference/models/${modelId}`;
     const fetchImpl = globalThis.fetch;
     if (typeof fetchImpl !== 'function') {
-        return {
-            ok: false,
+        return buildFailureResult({
             predictedGender: 'unknown',
             confidence: 0,
             model: 'unavailable',
             reason: 'Global fetch is not available in this Node runtime',
-        };
+            failureKind: 'service_unavailable',
+        });
     }
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), Math.max(1000, timeoutMs));
     try {
         const audioFetch = await fetchImpl(userAudioUrl, { method: 'GET', signal: controller.signal });
         if (!audioFetch.ok) {
-            return {
-                ok: false,
+            logVoiceGenderTerminal('voice-gender-hf', {
+                audioFetch: {
+                    audioUrl: userAudioUrl,
+                    httpStatus: audioFetch.status,
+                    ok: false,
+                },
+            });
+            return buildFailureResult({
                 predictedGender: 'unknown',
                 confidence: 0,
                 model: modelId,
                 reason: `Could not fetch audio URL (HTTP ${audioFetch.status})`,
-            };
+                failureKind: 'audio_fetch_failed',
+            });
         }
         const audioBytes = await audioFetch.arrayBuffer();
         const rsp = await fetchImpl(endpoint, {
@@ -80,44 +175,55 @@ async function verifyCallerFemaleVoice(userAudioUrl) {
             body: audioBytes,
             signal: controller.signal,
         });
+        const responseText = await rsp.text();
+        const body = parseResponseBody(responseText);
+        logHuggingFaceApiResponse({
+            endpoint,
+            modelId,
+            audioUrl: userAudioUrl,
+            audioBytes: audioBytes.byteLength,
+            httpStatus: rsp.status,
+            ok: rsp.ok,
+            body,
+        });
         if (!rsp.ok) {
             let details = '';
-            try {
-                const errBody = (await rsp.json());
+            if (body && typeof body === 'object' && !Array.isArray(body)) {
+                const errBody = body;
                 details = asString(errBody.error) || asString(errBody.message);
             }
-            catch {
-                details = '';
+            else if (typeof body === 'string') {
+                details = body.trim();
             }
-            return {
-                ok: false,
+            const reason = details
+                ? `Hugging Face returned HTTP ${rsp.status}: ${details}`
+                : `Hugging Face returned HTTP ${rsp.status}`;
+            return buildFailureResult({
                 predictedGender: 'unknown',
                 confidence: 0,
                 model: modelId,
-                reason: details
-                    ? `Hugging Face returned HTTP ${rsp.status}: ${details}`
-                    : `Hugging Face returned HTTP ${rsp.status}`,
-            };
+                raw: body,
+                reason,
+                failureKind: 'service_unavailable',
+            });
         }
-        const body = (await rsp.json());
         const errorMsg = body && typeof body === 'object' && !Array.isArray(body)
             ? asString(body.error)
             : '';
         if (errorMsg) {
-            return {
-                ok: false,
+            return buildFailureResult({
                 predictedGender: 'unknown',
                 confidence: 0,
                 model: modelId,
                 raw: body,
                 reason: `Hugging Face error: ${errorMsg}`,
-            };
+                failureKind: 'service_unavailable',
+            });
         }
         let predictedGender = 'unknown';
         let confidence = 0;
         if (Array.isArray(body)) {
             const first = body[0];
-            // Some HF routes return [[{label,score}, ...]]
             if (Array.isArray(first)) {
                 const top = pickTopFromScores(first);
                 predictedGender = top.label;
@@ -130,7 +236,6 @@ async function verifyCallerFemaleVoice(userAudioUrl) {
             }
         }
         else if (body && typeof body === 'object') {
-            // Fallback for { labels:[], scores:[] } style payloads.
             const obj = body;
             const labels = Array.isArray(obj.labels) ? obj.labels : [];
             const scores = Array.isArray(obj.scores) ? obj.scores : [];
@@ -142,30 +247,72 @@ async function verifyCallerFemaleVoice(userAudioUrl) {
             predictedGender = top.label;
             confidence = top.score;
         }
-        const model = modelId;
-        const approved = predictedGender === 'female' && confidence >= minFemaleConfidence;
+        if (predictedGender === 'unknown') {
+            return buildFailureResult({
+                predictedGender,
+                confidence,
+                model: modelId,
+                raw: body,
+                reason: 'Could not read gender prediction from Hugging Face response',
+                failureKind: 'service_unavailable',
+            });
+        }
+        if (predictedGender !== expectedGender) {
+            return {
+                ok: false,
+                predictedGender,
+                confidence,
+                model: modelId,
+                raw: body,
+                failureKind: 'gender_mismatch',
+                reason: `Predicted=${predictedGender}, expected=${expectedGender}, confidence=${confidence.toFixed(3)}`,
+            };
+        }
+        if (confidence < minConfidence) {
+            return {
+                ok: false,
+                predictedGender,
+                confidence,
+                model: modelId,
+                raw: body,
+                failureKind: 'low_confidence',
+                reason: `Predicted=${predictedGender}, confidence=${confidence.toFixed(3)}, threshold=${minConfidence.toFixed(3)}`,
+            };
+        }
         return {
-            ok: approved,
+            ok: true,
             predictedGender,
             confidence,
-            model,
+            model: modelId,
             raw: body,
-            reason: approved
-                ? undefined
-                : `Predicted=${predictedGender}, confidence=${confidence.toFixed(3)}, threshold=${minFemaleConfidence.toFixed(3)}`,
         };
     }
     catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
-        return {
-            ok: false,
+        logVoiceGenderTerminal('voice-gender-hf', {
+            requestFailed: true,
+            audioUrl: userAudioUrl,
+            error: msg,
+        });
+        return buildFailureResult({
             predictedGender: 'unknown',
             confidence: 0,
             model: 'request-failed',
             reason: msg,
-        };
+            failureKind: 'service_unavailable',
+        });
     }
     finally {
         clearTimeout(timer);
     }
+}
+/** @deprecated Prefer verifyVoiceGender(url, 'female') */
+async function verifyCallerFemaleVoice(userAudioUrl) {
+    return verifyVoiceGender(userAudioUrl, 'female');
+}
+function voiceGenderThreshold(expectedGender) {
+    return minConfidenceForExpectedGender(expectedGender);
+}
+function getVoiceVerificationMode() {
+    return readVerificationMode();
 }
