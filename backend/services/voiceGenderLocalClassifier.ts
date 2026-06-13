@@ -2,7 +2,7 @@ import type { ExpectedVoiceGender, VoiceGenderVerificationResult } from './calle
 import { loadVoiceAudioSamples } from './voiceGenderAudioLoader';
 
 type VoiceGenderLabel = 'female' | 'male' | 'other' | 'unknown';
-type ClassificationRow = { label: string; score: number };
+type ClassificationRow = { label: string; score: number };  
 
 const LOCAL_MODEL_ID =
   process.env.VOICE_GENDER_LOCAL_MODEL_ID?.trim() ||
