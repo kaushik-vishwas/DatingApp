@@ -2,8 +2,8 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import React, { useMemo, useState } from 'react';
 import { Alert, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import Icon from 'react-native-vector-icons/Feather';
 import type { Gender } from '../../types/user';
+import OnboardingLogoutButton from '../../components/auth/OnboardingLogoutButton';
 import { useAuth } from '../../context/AuthContext';
 import { profileApi, getErrorMessage } from '../../services/api';
 import type { ReceiverStackParamList } from '../../navigation/ReceiverStackParamList';
@@ -47,16 +47,12 @@ function OptionRow({
 const PURPLE = '#7b2cff';
 
 export default function ReceiverSelectGenderScreen({ navigation }: Props): React.JSX.Element {
-  const { user, applyServerUser, signOut } = useAuth();
+  const { user, applyServerUser } = useAuth();
   const [selected, setSelected] = useState<Gender | null>(
     (user?.gender as Gender | null) ?? null
   );
 
   const canContinue = useMemo(() => Boolean(selected), [selected]);
-
-  const onLeave = () => {
-    void signOut();
-  };
 
   const onContinue = async (): Promise<void> => {
     if (!selected) {
@@ -74,11 +70,8 @@ export default function ReceiverSelectGenderScreen({ navigation }: Props): React
 
   return (
     <View style={styles.bg}>
+      <OnboardingLogoutButton style={{ paddingTop: 16, paddingRight: 20 }} />
       <View style={styles.card}>
-        <TouchableOpacity style={styles.backWrap} onPress={onLeave} activeOpacity={0.9}>
-          <Icon name="chevron-left" size={24} color="#1a1a1a" />
-        </TouchableOpacity>
-
         <Text style={styles.title}>Select Gender</Text>
         <Text style={styles.subtitle}>This helps us personalize your receiver profile</Text>
 

@@ -16,6 +16,7 @@ import Icon from 'react-native-vector-icons/Feather';
 import { LinearGradient } from 'expo-linear-gradient';
 
 import VoiceVerificationRecorder from '../../components/VoiceVerificationRecorder';
+import OnboardingLogoutButton from '../../components/auth/OnboardingLogoutButton';
 import VoiceUploadDebugPanel from '../../components/VoiceUploadDebugPanel';
 import type { ReceiverStackParamList } from '../../navigation/ReceiverStackParamList';
 import { getErrorMessage, profileApi } from '../../services/api';
@@ -118,6 +119,7 @@ export default function ReceiverAutoVerificationScreen(): React.JSX.Element {
 
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'left', 'right']}>
+      <OnboardingLogoutButton floating={false} style={styles.logoutBtn} />
       <View style={styles.container}>
         <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}>
           <Icon name="chevron-left" size={24} color="#111827" />
@@ -210,6 +212,7 @@ export default function ReceiverAutoVerificationScreen(): React.JSX.Element {
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: '#fff' },
+  logoutBtn: { alignSelf: 'flex-end', marginRight: 22, marginBottom: 4 },
   container: { flex: 1, paddingHorizontal: 22, paddingTop: 10 },
   backBtn: { width: 34, height: 34, justifyContent: 'center', alignItems: 'center' },
   line: {

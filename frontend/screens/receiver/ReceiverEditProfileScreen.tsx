@@ -35,6 +35,7 @@
     return list.filter((item) => options.includes(item)).slice(0, max);
   }
   import { UploadField } from '../../components/ui/UploadField';
+  import OnboardingLogoutButton from '../../components/auth/OnboardingLogoutButton';
   import { useAuth } from '../../context/AuthContext';
   import { inferResourceType, uploadToCloudinary } from '../../lib/cloudinary';
   import type { ReceiverStackParamList } from '../../navigation/ReceiverStackParamList';
@@ -109,7 +110,7 @@
     const navigation = useNavigation<Nav>();
     const route = useRoute<RouteProp<ReceiverStackParamList, 'ReceiverEditProfile'>>();
     const fromWithdrawKyc = Boolean(route.params?.fromWithdrawKyc);
-    const { user, refreshUser, signOut } = useAuth();
+    const { user, refreshUser } = useAuth();
     const [saving, setSaving] = useState(false);
 
     const [name, setName] = useState(user?.name ?? '');
@@ -142,6 +143,7 @@
     const [profileImageUri, setProfileImageUri] = useState<string | null>(user?.profileImage ?? null);
     const [avatarModal, setAvatarModal] = useState(false);
     const isWithdrawKycMode = fromWithdrawKyc;
+    const showOnboardingLogout = user?.accountStatus !== 'approved' && !isWithdrawKycMode;
 
     // Filter states based on search input
     const [stateSearch, setStateSearch] = useState('');
@@ -275,7 +277,11 @@
               <Text style={styles.headerTitle}>
                 {isWithdrawKycMode ? 'Verify Identity' : 'Complete Profile'}
               </Text>
-              <View style={styles.placeholder} />
+              {showOnboardingLogout ? (
+                <OnboardingLogoutButton floating={false} />
+              ) : (
+                <View style={styles.placeholder} />
+              )}
             </View>
 
             {/* Subtitle */}

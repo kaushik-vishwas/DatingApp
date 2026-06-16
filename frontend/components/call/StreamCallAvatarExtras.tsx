@@ -1,26 +1,15 @@
 import { Ionicons } from '@expo/vector-icons';
 import React, { useEffect, useRef, useState } from 'react';
-import { Platform, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
 import { useCallStateHooks } from '@stream-io/video-react-native-sdk';
 import { CallingState, hasAudio, type StreamVideoParticipant } from '@stream-io/video-client';
 import { AvatarSoundWaveRings } from './AvatarVoiceWaves';
-import {
-  startAndroidCellularCallHoldWatch,
-  stopAndroidCellularCallHoldWatch,
-  subscribeAndroidCellularCallHold,
-} from '../../utils/androidCellularCallHold';
 import {
   callDiag,
   HOLD_REMOTE_LEFT_DEBOUNCE_MS,
   isCallHoldGuardActive,
   NORMAL_REMOTE_LEFT_DEBOUNCE_MS,
-  setGsmInterruptPending,
 } from '../../utils/callDiagnostics';
-import { isSamsungOneUi6OrNewer } from '../../utils/samsungCallCompat';
-import { markGsmTimeline } from '../../utils/gsmDisconnectProbe';
-
-const AUDIO_MODE_IN_CALL = 2;
-const AUDIO_MODE_IN_COMMUNICATION = 3;
 
 const SPEAK_AUDIO_LEVEL_THRESHOLD = 0.035;
 
@@ -145,88 +134,15 @@ export function StreamMicControlBridge({
 }
 
 /**
- * Detects an active external cellular call (Android audio mode only).
- * Must render inside Stream `StreamCall`.
+ * @deprecated Cellular hold is handled by AndroidCellularHoldMonitor on VoiceCallScreen.
  */
 export function StreamSystemHoldBridge({
-  userChosenMuteRef,
-  onSystemHoldChange,
+  onSystemHoldChange: _onSystemHoldChange,
 }: {
   userChosenMuteRef: React.MutableRefObject<boolean>;
-  /** Unused; hold is driven only by external cellular calls, not app background. */
   appInBackground: boolean;
   onSystemHoldChange: (onHold: boolean) => void;
 }): null {
-  const { useCallCallingState } = useCallStateHooks();
-  const callingState = useCallCallingState();
-  const onSystemHoldChangeRef = useRef(onSystemHoldChange);
-  const callingStateRef = useRef(callingState);
-  const holdActiveRef = useRef(false);
-  onSystemHoldChangeRef.current = onSystemHoldChange;
-  callingStateRef.current = callingState;
-
-  const applyHoldState = (next: boolean): void => {
-    if (holdActiveRef.current === next) return;
-    holdActiveRef.current = next;
-    if (next) {
-      callDiag.holdStarted('local_system');
-    } else {
-      callDiag.holdEnded('local_system');
-    }
-    onSystemHoldChangeRef.current(next);
-  };
-
-  useEffect(() => {
-    callDiag.streamStateChange(String(callingState));
-    if (callingState !== CallingState.JOINED) {
-      holdActiveRef.current = false;
-      if (Platform.OS === 'android') {
-        stopAndroidCellularCallHoldWatch();
-      }
-      return;
-    }
-
-    if (Platform.OS !== 'android') {
-      return;
-    }
-
-    const unsubCellular = subscribeAndroidCellularCallHold(({ active, audioMode, source }) => {
-      if (userChosenMuteRef.current) {
-        if (holdActiveRef.current) applyHoldState(false);
-        setGsmInterruptPending(false);
-        callDiag.info('gsm_hold_skipped_user_muted', { active, audioMode, source });
-        return;
-      }
-      if (callingStateRef.current !== CallingState.JOINED) return;
-      const modeLabel =
-        audioMode === AUDIO_MODE_IN_CALL
-          ? 'MODE_IN_CALL'
-          : audioMode === AUDIO_MODE_IN_COMMUNICATION
-            ? 'MODE_IN_COMMUNICATION'
-            : `mode_${audioMode ?? 'unknown'}`;
-      const samsung = isSamsungOneUi6OrNewer();
-      if (active) {
-        setGsmInterruptPending(true);
-        markGsmTimeline('T0_gsm_arrived');
-        markGsmTimeline('T1_audio_focus_lost');
-        callDiag.gsmDetected({ audioMode, modeLabel, source, samsung });
-        callDiag.gsmAnswered({ audioMode, modeLabel, source, samsung });
-        applyHoldState(true);
-        return;
-      }
-      setGsmInterruptPending(false);
-      markGsmTimeline('T6_gsm_ended');
-      callDiag.gsmEnded({ audioMode, modeLabel, source, samsung });
-      applyHoldState(false);
-    });
-    startAndroidCellularCallHoldWatch();
-
-    return () => {
-      unsubCellular();
-      stopAndroidCellularCallHoldWatch();
-    };
-  }, [callingState, userChosenMuteRef]);
-
   return null;
 }
 
@@ -417,6 +333,7 @@ const REMOTE_MUTE_POLL_MS = 80;
 
 export function StreamParticipantMutedIndicator({
   peerOnHold = false,
+  talkActive = false,
 }: {
   peerOnHold?: boolean;
   peerMuted?: boolean;
@@ -494,7 +411,7 @@ export function StreamParticipantMutedIndicator({
   }, [callingState, remoteParticipant, peerOnHold]);
 
   const joined = callingState === CallingState.JOINED && Boolean(remoteParticipant);
-  const showHold = peerOnHold && joined;
+  const showHold = peerOnHold && (joined || talkActive);
   const showMuted = !showHold && remoteMuted && joined;
 
   if (!showHold && !showMuted) return null;

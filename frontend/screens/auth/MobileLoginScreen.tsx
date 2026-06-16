@@ -20,6 +20,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 
 import { useAuth } from '../../context/AuthContext';
+import OnboardingLogoutButton from '../../components/auth/OnboardingLogoutButton';
 import type { RootStackParamList } from '../../navigation/RootStackParamList';
 import { authApi, getErrorMessage, saveJwt } from '../../services/api';
 import { normalizeIndianMobileDigits } from '../../utils/validation';
@@ -266,8 +267,25 @@ export default function MobileLoginScreen({ navigation }: Props): React.JSX.Elem
     return `${secs}s`;
   };
 
+  const resetToMobileStep = useCallback((): void => {
+    setStep('mobile');
+    setOtp('');
+    setResendEnabled(false);
+    setResendTimer(0);
+    if (timerRef.current) {
+      clearTimeout(timerRef.current);
+    }
+  }, []);
+
   return (
     <View style={styles.bg}>
+      {step === 'otp' ? (
+        <OnboardingLogoutButton
+          style={{ paddingTop: Math.max(insets.top, 10) + 4, paddingRight: 20 }}
+          onPress={resetToMobileStep}
+          confirm={false}
+        />
+      ) : null}
       {/* Logo at Absolute Top */}
       <View style={[styles.absoluteLogoContainer, { paddingTop: Math.max(insets.top, 10) }]}>
         <Image source={SelectoLogo} style={styles.logo} resizeMode="contain" />
@@ -384,15 +402,7 @@ export default function MobileLoginScreen({ navigation }: Props): React.JSX.Elem
                     onFocus={scrollToFocusedInput}
                   />
                   <TouchableOpacity
-                    onPress={() => {
-                      setStep('mobile');
-                      setOtp('');
-                      setResendEnabled(false);
-                      setResendTimer(0);
-                      if (timerRef.current) {
-                        clearTimeout(timerRef.current);
-                      }
-                    }}
+                    onPress={resetToMobileStep}
                     style={styles.changeNumber}
                   >
                     <Text style={styles.changeNumberText}>Change number</Text>

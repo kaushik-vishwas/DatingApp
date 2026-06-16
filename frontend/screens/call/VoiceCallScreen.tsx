@@ -40,6 +40,8 @@ import {
 } from '../../utils/voiceCallAudioRoute';
 import { profileImageUrlForStreamOrNetwork, resolveProfileImageSource } from '../../utils/avatarSource';
 import { AvatarSoundWaveRings } from '../../components/call/AvatarVoiceWaves';
+import { useCallScreenCaptureProtection } from '../../utils/callScreenCaptureProtection';
+import { AndroidCellularHoldMonitor } from '../../components/call/AndroidCellularHoldMonitor';
 import InCallTalktimeRechargeModal from '../../components/call/InCallTalktimeRechargeModal';
 import type { StreamMicControl } from '../../components/call/StreamCallAvatarExtras';
 import {
@@ -452,6 +454,14 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
     useCallback(() => {
       void refreshReceiverEarningMeta();
     }, [refreshReceiverEarningMeta])
+  );
+
+  const [callScreenFocused, setCallScreenFocused] = useState(true);
+  useFocusEffect(
+    useCallback(() => {
+      setCallScreenFocused(true);
+      return () => setCallScreenFocused(false);
+    }, [])
   );
 
   const effectiveEarningModel = earningMeta?.model ?? getReceiverEarningModelFromParams(callParams);
@@ -2009,6 +2019,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
   );
 
   const showStreamChrome = ready && Boolean(client) && Boolean(call) && Boolean(sdk);
+  useCallScreenCaptureProtection(callScreenFocused && talkActive && showStreamChrome);
   const streamAvatarExtras = useMemo(
     () => (showStreamChrome ? loadStreamCallAvatarExtras() : null),
     [showStreamChrome]
@@ -2345,13 +2356,6 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
               }}
             />
           ) : null}
-          {streamAvatarExtras ? (
-            <streamAvatarExtras.StreamSystemHoldBridge
-              userChosenMuteRef={userChosenMuteRef}
-              appInBackground={appInBackground}
-              onSystemHoldChange={handleStreamSystemHold}
-            />
-          ) : null}
           <View style={[styles.overlay, { paddingTop: Math.max(insets.top + 16, 36) }]}>
             <View style={styles.statusPill}>
               <Text style={styles.statusText}>
@@ -2521,8 +2525,15 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
     );
   }
 
+  const cellularHoldMonitorEnabled =
+    Boolean(streamBootstrap) || ready || talkActive;
+
   return (
     <>
+      <AndroidCellularHoldMonitor
+        enabled={cellularHoldMonitorEnabled}
+        onSystemHoldChange={handleStreamSystemHold}
+      />
       {screenBody}
       {ratingModal}
       <InCallTalktimeRechargeModal

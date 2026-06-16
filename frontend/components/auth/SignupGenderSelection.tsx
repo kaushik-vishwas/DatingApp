@@ -12,6 +12,7 @@ import { Ionicons } from '@expo/vector-icons';
 
 import MALE_AVATAR from '../../assets/boy.jpg';
 import FEMALE_AVATAR from '../../assets/girl.jpg';
+import OnboardingLogoutButton from './OnboardingLogoutButton';
 
 export type SignupGender = 'male' | 'female';
 
@@ -68,6 +69,7 @@ type Props = {
   onContinue: () => void;
   continueDisabled: boolean;
   continueLabel: string;
+  onLogout?: () => void;
 };
 
 export default function SignupGenderSelection({
@@ -79,6 +81,7 @@ export default function SignupGenderSelection({
   onContinue,
   continueDisabled,
   continueLabel,
+  onLogout,
 }: Props): React.JSX.Element {
   return (
     <View
@@ -87,9 +90,18 @@ export default function SignupGenderSelection({
         { paddingTop, paddingBottom },
       ]}
     >
-      <TouchableOpacity style={styles.backBtn} onPress={onBack}>
-        <Ionicons name="chevron-back" size={28} color="#7b2cff" />
-      </TouchableOpacity>
+      <View style={styles.topRow}>
+        <TouchableOpacity style={styles.backBtn} onPress={onBack}>
+          <Ionicons name="chevron-back" size={28} color="#7b2cff" />
+        </TouchableOpacity>
+        {onLogout ? (
+          <OnboardingLogoutButton
+            floating={false}
+            onPress={onLogout}
+            confirmMessage="Go back and sign in with another account?"
+          />
+        ) : null}
+      </View>
 
       <Text style={styles.title}>Select Your Gender</Text>
       <Text style={styles.subtitle}>Gender cannot be changed later</Text>
@@ -142,6 +154,12 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
     paddingHorizontal: 22,
   },
+  topRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
   backBtn: {
     width: 44,
     height: 44,
@@ -149,7 +167,6 @@ const styles = StyleSheet.create({
     backgroundColor: '#f5f5f5',
     justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 8,
     ...Platform.select({
       ios: {
         shadowColor: '#000',

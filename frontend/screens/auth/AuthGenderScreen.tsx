@@ -53,6 +53,7 @@ export default function AuthGenderScreen({ navigation, route }: Props): React.JS
       onContinue={() => void onContinue()}
       continueDisabled={!canContinue || loading}
       continueLabel={loading ? 'Creating account…' : 'Continue'}
+      onLogout={() => navigation.navigate('MobileLogin')}
     />
   );
 }

@@ -2,6 +2,7 @@
 /**
  * Unified Expo app — no forced appKind; role chosen at login (RoleGate).
  * Loads `frontend/.env` at config time for EXPO_PUBLIC_API_BASE_URL.
+ * Call-screen capture protection: EXPO_PUBLIC_CALL_SCREEN_CAPTURE_PROTECTION (true/false).
  */
 const path = require('path');
 const fs = require('fs');
@@ -17,6 +18,8 @@ const referralLandingConfig = fs.existsSync(referralLandingJsonPath)
 
 const fromEnv = process.env.EXPO_PUBLIC_API_BASE_URL?.trim();
 const disablePackagerHost = process.env.EXPO_PUBLIC_API_DISABLE_PACKAGER_HOST === 'true';
+const callScreenCaptureProtection =
+  process.env.EXPO_PUBLIC_CALL_SCREEN_CAPTURE_PROTECTION?.trim().toLowerCase() !== 'false';
 const fromAppJson = appJson.expo?.extra?.apiBaseUrl?.trim();
 const cloudNameFromEnv = process.env.EXPO_PUBLIC_CLOUDINARY_CLOUD_NAME?.trim();
 const uploadPresetFromEnv = process.env.EXPO_PUBLIC_CLOUDINARY_UPLOAD_PRESET?.trim();
@@ -103,6 +106,7 @@ module.exports = {
       },
       apiBaseUrl,
       disablePackagerHost,
+      callScreenCaptureProtection,
       cloudinaryCloudName,
       cloudinaryUploadPreset,
       appKind: appKind || undefined,
