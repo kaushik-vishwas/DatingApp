@@ -56,6 +56,19 @@ function readVerificationProvider() {
         return 'huggingface';
     return 'local';
 }
+function shouldFallbackToLocalFromHf(reason) {
+    const lower = reason.toLowerCase();
+    if (lower.includes('not supported'))
+        return true;
+    if (lower.includes('returned http 404'))
+        return true;
+    if (lower.includes('returned http 503'))
+        return true;
+    const raw = asString(process.env.VOICE_GENDER_HF_FALLBACK_TO_LOCAL).toLowerCase();
+    if (raw === 'false' || raw === '0' || raw === 'off')
+        return false;
+    return process.env.NODE_ENV !== 'production';
+}
 function normalizeLabel(raw) {
     const v = asString(raw).toLowerCase();
     if (v.includes('female') || v === 'f')
@@ -231,7 +244,7 @@ async function verifyVoiceGender(userAudioUrl, expectedGender) {
             const reason = details
                 ? `Hugging Face returned HTTP ${rsp.status}: ${details}`
                 : `Hugging Face returned HTTP ${rsp.status}`;
-            return buildFailureResult({
+            const failed = buildFailureResult({
                 predictedGender: 'unknown',
                 confidence: 0,
                 model: modelId,
@@ -239,12 +252,23 @@ async function verifyVoiceGender(userAudioUrl, expectedGender) {
                 reason,
                 failureKind: 'service_unavailable',
             });
+            if (shouldFallbackToLocalFromHf(reason)) {
+                logVoiceGenderTerminal('voice-gender-hf', {
+                    fallbackToLocal: true,
+                    reason,
+                    audioUrl: userAudioUrl,
+                    expectedGender,
+                });
+                const { classifyVoiceGenderLocally } = await Promise.resolve().then(() => __importStar(require('./voiceGenderLocalClassifier')));
+                return classifyVoiceGenderLocally(userAudioUrl, expectedGender);
+            }
+            return failed;
         }
         const errorMsg = body && typeof body === 'object' && !Array.isArray(body)
             ? asString(body.error)
             : '';
         if (errorMsg) {
-            return buildFailureResult({
+            const failed = buildFailureResult({
                 predictedGender: 'unknown',
                 confidence: 0,
                 model: modelId,
@@ -252,6 +276,17 @@ async function verifyVoiceGender(userAudioUrl, expectedGender) {
                 reason: `Hugging Face error: ${errorMsg}`,
                 failureKind: 'service_unavailable',
             });
+            if (shouldFallbackToLocalFromHf(errorMsg)) {
+                logVoiceGenderTerminal('voice-gender-hf', {
+                    fallbackToLocal: true,
+                    reason: errorMsg,
+                    audioUrl: userAudioUrl,
+                    expectedGender,
+                });
+                const { classifyVoiceGenderLocally } = await Promise.resolve().then(() => __importStar(require('./voiceGenderLocalClassifier')));
+                return classifyVoiceGenderLocally(userAudioUrl, expectedGender);
+            }
+            return failed;
         }
         let predictedGender = 'unknown';
         let confidence = 0;

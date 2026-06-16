@@ -40,6 +40,16 @@ function readVerificationProvider(): 'local' | 'huggingface' {
   return 'local';
 }
 
+function shouldFallbackToLocalFromHf(reason: string): boolean {
+  const lower = reason.toLowerCase();
+  if (lower.includes('not supported')) return true;
+  if (lower.includes('returned http 404')) return true;
+  if (lower.includes('returned http 503')) return true;
+  const raw = asString(process.env.VOICE_GENDER_HF_FALLBACK_TO_LOCAL).toLowerCase();
+  if (raw === 'false' || raw === '0' || raw === 'off') return false;
+  return process.env.NODE_ENV !== 'production';
+}
+
 function normalizeLabel(raw: unknown): VoiceGenderLabel {
   const v = asString(raw).toLowerCase();
   if (v.includes('female') || v === 'f') return 'female';
@@ -254,7 +264,7 @@ export async function verifyVoiceGender(
       const reason = details
         ? `Hugging Face returned HTTP ${rsp.status}: ${details}`
         : `Hugging Face returned HTTP ${rsp.status}`;
-      return buildFailureResult({
+      const failed = buildFailureResult({
         predictedGender: 'unknown',
         confidence: 0,
         model: modelId,
@@ -262,6 +272,17 @@ export async function verifyVoiceGender(
         reason,
         failureKind: 'service_unavailable',
       });
+      if (shouldFallbackToLocalFromHf(reason)) {
+        logVoiceGenderTerminal('voice-gender-hf', {
+          fallbackToLocal: true,
+          reason,
+          audioUrl: userAudioUrl,
+          expectedGender,
+        });
+        const { classifyVoiceGenderLocally } = await import('./voiceGenderLocalClassifier');
+        return classifyVoiceGenderLocally(userAudioUrl, expectedGender);
+      }
+      return failed;
     }
 
     const errorMsg =
@@ -269,7 +290,7 @@ export async function verifyVoiceGender(
         ? asString((body as Record<string, unknown>).error)
         : '';
     if (errorMsg) {
-      return buildFailureResult({
+      const failed = buildFailureResult({
         predictedGender: 'unknown',
         confidence: 0,
         model: modelId,
@@ -277,6 +298,17 @@ export async function verifyVoiceGender(
         reason: `Hugging Face error: ${errorMsg}`,
         failureKind: 'service_unavailable',
       });
+      if (shouldFallbackToLocalFromHf(errorMsg)) {
+        logVoiceGenderTerminal('voice-gender-hf', {
+          fallbackToLocal: true,
+          reason: errorMsg,
+          audioUrl: userAudioUrl,
+          expectedGender,
+        });
+        const { classifyVoiceGenderLocally } = await import('./voiceGenderLocalClassifier');
+        return classifyVoiceGenderLocally(userAudioUrl, expectedGender);
+      }
+      return failed;
     }
 
     let predictedGender: VoiceGenderLabel = 'unknown';

@@ -750,6 +750,14 @@ function buildVoiceVerificationPayload(expectedGender, result) {
         ...(result.reason ? { reason: result.reason } : {}),
     };
 }
+function readReceiverVoiceVerificationMode() {
+    const raw = String(process.env.RECEIVER_VOICE_GENDER_VERIFICATION_MODE ?? '')
+        .trim()
+        .toLowerCase();
+    if (raw === 'required' || raw === 'on' || raw === 'enabled')
+        return 'required';
+    return 'disabled';
+}
 /**
  * POST /profile/complete-caller
  * App user profile (`users` collection):
@@ -2114,35 +2122,51 @@ const completeReceiverAudioOnboarding = async (req, res) => {
             });
             return;
         }
-        const verification = await (0, callerVoiceGenderVerifier_1.verifyVoiceGender)(voiceUrl, profileGender);
-        const voiceVerification = buildVoiceVerificationPayload(profileGender, verification);
-        if (!verification.ok) {
-            const failMessage = verification.failureKind === 'gender_mismatch'
-                ? `Voice sounds like ${verification.predictedGender}, but your profile gender is ${profileGender}.`
-                : verification.failureKind === 'low_confidence'
-                    ? `Voice check was unclear (confidence ${(verification.confidence * 100).toFixed(0)}%). Please record again in a quiet place.`
-                    : verification.failureKind === 'misconfigured'
-                        ? 'Voice verification is not configured on the server yet.'
-                        : verification.failureKind === 'audio_fetch_failed'
-                            ? 'Could not download your voice sample for verification. Please record again.'
-                            : verification.reason?.includes('not supported')
-                                ? 'Voice AI service is unavailable (Hugging Face model not supported). Set VOICE_GENDER_VERIFICATION_MODE=disabled on server for testing, or switch inference provider.'
-                                : verification.reason ||
-                                    'Voice verification service error. Please try again later.';
-            console.log('[receiver-audio-onboarding]', JSON.stringify({
-                receiverId,
-                voiceUrl,
+        const receiverVoiceVerificationMode = readReceiverVoiceVerificationMode();
+        let voiceVerification;
+        if (receiverVoiceVerificationMode === 'required') {
+            const verification = await (0, callerVoiceGenderVerifier_1.verifyVoiceGender)(voiceUrl, profileGender);
+            voiceVerification = buildVoiceVerificationPayload(profileGender, verification);
+            if (!verification.ok) {
+                const failMessage = verification.failureKind === 'gender_mismatch'
+                    ? `Voice sounds like ${verification.predictedGender}, but your profile gender is ${profileGender}.`
+                    : verification.failureKind === 'low_confidence'
+                        ? `Voice check was unclear (confidence ${(verification.confidence * 100).toFixed(0)}%). Please record again in a quiet place.`
+                        : verification.failureKind === 'misconfigured'
+                            ? 'Voice verification is not configured on the server yet.'
+                            : verification.failureKind === 'audio_fetch_failed'
+                                ? 'Could not download your voice sample for verification. Please record again.'
+                                : verification.reason?.includes('not supported')
+                                    ? 'Voice AI service is unavailable (Hugging Face model not supported). Set VOICE_GENDER_VERIFICATION_MODE=disabled on server for testing, or switch inference provider.'
+                                    : verification.reason ||
+                                        'Voice verification service error. Please try again later.';
+                console.log('[receiver-audio-onboarding]', JSON.stringify({
+                    receiverId,
+                    voiceUrl,
+                    profileGender,
+                    httpStatus: 422,
+                    message: failMessage,
+                    voiceVerification,
+                }, null, 2));
+                res.status(422).json({
+                    message: failMessage,
+                    error: 'RECEIVER_VOICE_VERIFICATION_FAILED',
+                    voiceVerification,
+                });
+                return;
+            }
+        }
+        else {
+            voiceVerification = {
+                provider: 'local',
+                approved: true,
+                predictedGender: profileGender,
+                confidence: 1,
+                threshold: 0,
+                model: 'disabled',
                 profileGender,
-                httpStatus: 422,
-                message: failMessage,
-                voiceVerification,
-            }, null, 2));
-            res.status(422).json({
-                message: failMessage,
-                error: 'RECEIVER_VOICE_VERIFICATION_FAILED',
-                voiceVerification,
-            });
-            return;
+                reason: 'Receiver voice-gender verification skipped (RECEIVER_VOICE_GENDER_VERIFICATION_MODE=disabled)',
+            };
         }
         const wasAvailable = Boolean(receiver.isAvailable);
         receiver.accountStatus = 'approved';
