@@ -11,13 +11,13 @@ function normalizeApiOrigin(raw: string): string {
   return u;
 }
 
-/** Local in dev (`npm run dev`); live URL only when built for production. */
+/** Local in dev (`npm run dev`); live URL when built for production or VITE_API_URL is set. */
 function getBaseURL(): string {
   if (import.meta.env.PROD) {
     return normalizeApiOrigin(PROD_API);
   }
-  // Use IPv4 loopback in dev. On some Windows setups `localhost` resolves to `::1`
-  // and can hit a different local process than the backend bound on 0.0.0.0:5000.
+  const fromEnv = import.meta.env.VITE_API_URL?.trim();
+  if (fromEnv) return normalizeApiOrigin(fromEnv);
   return normalizeApiOrigin('http://127.0.0.1:5000');
 }
 

@@ -77,6 +77,14 @@ function getConfiguredApiBase(): string | undefined {
   return typeof raw === 'string' && raw.trim() ? normalizeApiOrigin(raw) : undefined;
 }
 
+function shouldForceConfiguredApiBase(): boolean {
+  const c = Constants as any;
+  return (
+    c.expoConfig?.extra?.disablePackagerHost === true ||
+    process.env.EXPO_PUBLIC_API_DISABLE_PACKAGER_HOST === 'true'
+  );
+}
+
 /** Local backend for dev: LAN IP from Expo, emulator loopback, or machine localhost. */
 function getDevApiBase(): string | undefined {
   if (!__DEV__) return undefined;
@@ -114,6 +122,11 @@ function getDevApiBase(): string | undefined {
 const getBaseURL = (): string => {
   const configured = getConfiguredApiBase();
   if (!__DEV__) return configured || PROD_ORIGIN;
+
+  // Testing against live/staging: set EXPO_PUBLIC_API_DISABLE_PACKAGER_HOST=true in frontend/.env
+  if (shouldForceConfiguredApiBase() && configured) {
+    return configured;
+  }
 
   // In dev, honor explicit non-prod override first (e.g. custom staging/local URL in .env).
   if (configured && configured !== PROD_ORIGIN) {

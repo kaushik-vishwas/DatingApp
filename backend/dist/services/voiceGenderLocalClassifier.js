@@ -1,44 +1,25 @@
 "use strict";
-var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    var desc = Object.getOwnPropertyDescriptor(m, k);
-    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
-      desc = { enumerable: true, get: function() { return m[k]; } };
-    }
-    Object.defineProperty(o, k2, desc);
-}) : (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    o[k2] = m[k];
-}));
-var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
-    Object.defineProperty(o, "default", { enumerable: true, value: v });
-}) : function(o, v) {
-    o["default"] = v;
-});
-var __importStar = (this && this.__importStar) || (function () {
-    var ownKeys = function(o) {
-        ownKeys = Object.getOwnPropertyNames || function (o) {
-            var ar = [];
-            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
-            return ar;
-        };
-        return ownKeys(o);
-    };
-    return function (mod) {
-        if (mod && mod.__esModule) return mod;
-        var result = {};
-        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
-        __setModuleDefault(result, mod);
-        return result;
-    };
-})();
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.classifyVoiceGenderLocally = classifyVoiceGenderLocally;
-const voiceGenderAudioLoader_1 = require("./voiceGenderAudioLoader");
-const LOCAL_MODEL_ID = process.env.VOICE_GENDER_LOCAL_MODEL_ID?.trim() ||
-    'Xenova/wav2vec2-large-xlsr-53-gender-recognition-librispeech';
-let pipelinePromise = null;
+const child_process_1 = require("child_process");
+const path_1 = __importDefault(require("path"));
+const voiceGenderLocalCore_1 = require("./voiceGenderLocalCore");
 let classifyTail = Promise.resolve();
+let workerChild = null;
+function asString(v) {
+    return typeof v === 'string' ? v.trim() : '';
+}
+function shouldUseWorkerProcess() {
+    const raw = asString(process.env.VOICE_GENDER_USE_WORKER).toLowerCase();
+    if (raw === 'true' || raw === '1' || raw === 'on')
+        return true;
+    if (raw === 'false' || raw === '0' || raw === 'off')
+        return false;
+    return process.env.NODE_ENV === 'production';
+}
 async function withLocalClassifyLock(fn) {
     const prev = classifyTail;
     let release;
@@ -53,136 +34,91 @@ async function withLocalClassifyLock(fn) {
         release();
     }
 }
-function asNumber(v) {
-    const n = typeof v === 'number' ? v : Number(v);
-    return Number.isFinite(n) ? n : null;
+function workerScriptPath() {
+    return path_1.default.join(__dirname, 'voiceGenderWorkerProcess.js');
 }
-function normalizeLabel(raw) {
-    const v = typeof raw === 'string' ? raw.trim().toLowerCase() : '';
-    if (v.includes('female') || v === 'f')
-        return 'female';
-    if (v.includes('male') || v === 'm')
-        return 'male';
-    if (v.includes('other') || v.includes('non') || v.includes('child'))
-        return 'other';
-    return 'unknown';
-}
-function minConfidenceForExpectedGender(expectedGender) {
-    if (expectedGender === 'female') {
-        return asNumber(process.env.VOICE_GENDER_FEMALE_MIN_CONFIDENCE) ?? 0.7;
+function resetWorkerChild() {
+    if (workerChild && !workerChild.killed) {
+        workerChild.kill('SIGTERM');
     }
-    if (expectedGender === 'male') {
-        return asNumber(process.env.VOICE_GENDER_MALE_MIN_CONFIDENCE) ?? 0.7;
-    }
-    return 0;
+    workerChild = null;
 }
-function pickTopPrediction(rows) {
-    let topLabel = 'unknown';
-    let topScore = 0;
-    for (const row of rows) {
-        const label = normalizeLabel(row.label);
-        if (label !== 'female' && label !== 'male')
-            continue;
-        const score = Math.max(0, Math.min(1, asNumber(row.score) ?? 0));
-        if (score > topScore) {
-            topScore = score;
-            topLabel = label;
+function spawnWorkerChild() {
+    const child = (0, child_process_1.fork)(workerScriptPath(), [], {
+        env: process.env,
+        execArgv: ['--max-old-space-size=768'],
+        stdio: ['inherit', 'inherit', 'inherit', 'ipc'],
+    });
+    child.on('exit', () => {
+        if (workerChild === child) {
+            workerChild = null;
         }
-    }
-    return { predictedGender: topLabel, confidence: topScore };
+    });
+    workerChild = child;
+    return child;
 }
-async function getClassifier() {
-    if (!pipelinePromise) {
-        pipelinePromise = (async () => {
-            const { pipeline } = await Promise.resolve().then(() => __importStar(require('@huggingface/transformers')));
-            const pipe = await pipeline('audio-classification', LOCAL_MODEL_ID);
-            return pipe;
-        })();
-    }
-    return pipelinePromise;
+function classifyViaWorker(audioSource, expectedGender) {
+    const timeoutMs = Number(process.env.VOICE_GENDER_TIMEOUT_MS ?? 120000);
+    const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    return new Promise((resolve) => {
+        const child = workerChild && !workerChild.killed ? workerChild : spawnWorkerChild();
+        const finish = (result) => {
+            clearTimeout(timer);
+            child.off('message', onMessage);
+            child.off('exit', onExit);
+            resolve(result);
+        };
+        const onMessage = (msg) => {
+            if (!msg || msg.id !== id)
+                return;
+            if (msg.ok && msg.result) {
+                finish(msg.result);
+                return;
+            }
+            finish({
+                ok: false,
+                predictedGender: 'unknown',
+                confidence: 0,
+                model: 'voice-gender-worker',
+                failureKind: 'service_unavailable',
+                reason: msg.error || 'Voice verification worker failed',
+            });
+        };
+        const onExit = (code, signal) => {
+            resetWorkerChild();
+            const oom = signal === 'SIGKILL' || signal === 'SIGABRT';
+            finish({
+                ok: false,
+                predictedGender: 'unknown',
+                confidence: 0,
+                model: 'voice-gender-worker',
+                failureKind: 'service_unavailable',
+                reason: oom
+                    ? 'Voice verification ran out of memory on server. Add swap or upgrade EC2 RAM, then retry.'
+                    : `Voice verification worker exited (code=${code ?? 'null'}, signal=${signal ?? 'null'})`,
+            });
+        };
+        const timer = setTimeout(() => {
+            resetWorkerChild();
+            finish({
+                ok: false,
+                predictedGender: 'unknown',
+                confidence: 0,
+                model: 'voice-gender-worker',
+                failureKind: 'service_unavailable',
+                reason: 'Voice verification timed out on server',
+            });
+        }, Math.max(30_000, timeoutMs));
+        child.on('message', onMessage);
+        child.once('exit', onExit);
+        child.send({ id, audioSource, expectedGender });
+    });
 }
 async function classifyVoiceGenderLocally(audioSource, expectedGender) {
-    return withLocalClassifyLock(() => classifyVoiceGenderLocallyInner(audioSource, expectedGender));
-}
-async function classifyVoiceGenderLocallyInner(audioSource, expectedGender) {
-    if (expectedGender === 'other') {
-        return {
-            ok: true,
-            predictedGender: 'other',
-            confidence: 1,
-            model: LOCAL_MODEL_ID,
-        };
-    }
-    const minConfidence = minConfidenceForExpectedGender(expectedGender);
-    try {
-        const classifier = await getClassifier();
-        const samples = await (0, voiceGenderAudioLoader_1.loadVoiceAudioSamples)(audioSource);
-        const raw = (await classifier(samples, { topk: 5 }));
-        const { predictedGender, confidence } = pickTopPrediction(raw);
-        console.log('[voice-gender-local]', JSON.stringify({
-            model: LOCAL_MODEL_ID,
-            audioSource,
-            expectedGender,
-            raw,
-            predictedGender,
-            confidence,
-            threshold: minConfidence,
-        }, null, 2));
-        if (predictedGender === 'unknown') {
-            return {
-                ok: false,
-                predictedGender,
-                confidence,
-                model: LOCAL_MODEL_ID,
-                raw,
-                failureKind: 'service_unavailable',
-                reason: 'Could not read gender prediction from local model output',
-            };
+    return withLocalClassifyLock(async () => {
+        if (shouldUseWorkerProcess()) {
+            return classifyViaWorker(audioSource, expectedGender);
         }
-        if (predictedGender !== expectedGender) {
-            return {
-                ok: false,
-                predictedGender,
-                confidence,
-                model: LOCAL_MODEL_ID,
-                raw,
-                failureKind: 'gender_mismatch',
-                reason: `Predicted=${predictedGender}, expected=${expectedGender}, confidence=${confidence.toFixed(3)}`,
-            };
-        }
-        if (confidence < minConfidence) {
-            return {
-                ok: false,
-                predictedGender,
-                confidence,
-                model: LOCAL_MODEL_ID,
-                raw,
-                failureKind: 'low_confidence',
-                reason: `Predicted=${predictedGender}, confidence=${confidence.toFixed(3)}, threshold=${minConfidence.toFixed(3)}`,
-            };
-        }
-        return {
-            ok: true,
-            predictedGender,
-            confidence,
-            model: LOCAL_MODEL_ID,
-            raw,
-        };
-    }
-    catch (err) {
-        let msg = err instanceof Error ? err.message : String(err);
-        if (/cannot find module '@huggingface\/transformers'/i.test(msg)) {
-            msg =
-                'Voice AI package missing on server. Run: cd backend && npm install && npm run build && pm2 restart dating-backend';
-        }
-        console.log('[voice-gender-local]', JSON.stringify({ model: LOCAL_MODEL_ID, audioSource, expectedGender, error: msg }, null, 2));
-        return {
-            ok: false,
-            predictedGender: 'unknown',
-            confidence: 0,
-            model: LOCAL_MODEL_ID,
-            failureKind: 'service_unavailable',
-            reason: msg,
-        };
-    }
+        return (0, voiceGenderLocalCore_1.classifyVoiceGenderLocallyCore)(audioSource, expectedGender);
+    });
 }

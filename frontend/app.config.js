@@ -16,6 +16,7 @@ const referralLandingConfig = fs.existsSync(referralLandingJsonPath)
   : {};
 
 const fromEnv = process.env.EXPO_PUBLIC_API_BASE_URL?.trim();
+const disablePackagerHost = process.env.EXPO_PUBLIC_API_DISABLE_PACKAGER_HOST === 'true';
 const fromAppJson = appJson.expo?.extra?.apiBaseUrl?.trim();
 const cloudNameFromEnv = process.env.EXPO_PUBLIC_CLOUDINARY_CLOUD_NAME?.trim();
 const uploadPresetFromEnv = process.env.EXPO_PUBLIC_CLOUDINARY_UPLOAD_PRESET?.trim();
@@ -101,6 +102,7 @@ module.exports = {
         projectId: '50a75fe3-fe9e-42c4-83f9-8f4efb188a31',
       },
       apiBaseUrl,
+      disablePackagerHost,
       cloudinaryCloudName,
       cloudinaryUploadPreset,
       appKind: appKind || undefined,
