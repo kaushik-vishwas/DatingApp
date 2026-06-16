@@ -75,6 +75,11 @@ function wavBufferToSamples(buffer) {
     if (dataOffset < 0 || dataSize <= 0) {
         throw new Error('WAV data chunk not found');
     }
+    const availableDataBytes = Math.max(0, buffer.length - dataOffset);
+    dataSize = Math.min(dataSize, availableDataBytes);
+    if (dataSize <= 0) {
+        throw new Error('WAV data chunk is truncated');
+    }
     if (audioFormat !== 1 && audioFormat !== 3) {
         throw new Error(`Unsupported WAV format (${audioFormat})`);
     }
@@ -85,6 +90,8 @@ function wavBufferToSamples(buffer) {
             let sum = 0;
             for (let ch = 0; ch < numChannels; ch += 1) {
                 const sampleOffset = dataOffset + (i * numChannels + ch) * 4;
+                if (sampleOffset + 4 > buffer.length)
+                    break;
                 sum += buffer.readFloatLE(sampleOffset);
             }
             mono[i] = sum / numChannels;
@@ -95,6 +102,8 @@ function wavBufferToSamples(buffer) {
             let sum = 0;
             for (let ch = 0; ch < numChannels; ch += 1) {
                 const sampleOffset = dataOffset + (i * numChannels + ch) * 2;
+                if (sampleOffset + 2 > buffer.length)
+                    break;
                 sum += buffer.readInt16LE(sampleOffset) / 32768;
             }
             mono[i] = sum / numChannels;

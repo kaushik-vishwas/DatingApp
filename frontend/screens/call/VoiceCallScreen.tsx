@@ -609,7 +609,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
 
   // Re-broadcast hold while on a cellular call so the peer catches missed socket events.
   useEffect(() => {
-    if (!systemCallHold || ending) return;
+    if (!systemCallHold || endingRef.current) return;
     const announceHold = (): void => {
       if (!systemCallHoldRef.current || endingRef.current) return;
       emitPeerCallHold(true);
@@ -617,7 +617,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
     announceHold();
     const intervalId = setInterval(announceHold, 4000);
     return () => clearInterval(intervalId);
-  }, [systemCallHold, ending, emitPeerCallHold]);
+  }, [systemCallHold, emitPeerCallHold]);
 
   useEffect(() => {
     if (!receiverAvailabilitySession || !user?.isAvailable) return;
@@ -1935,19 +1935,18 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
       try {
         await applyVoiceCallAudioMode(speakerOn, false);
         setBluetoothOn(false);
+        void isBluetoothVoiceOutputAvailable().then(setBluetoothAvailable);
       } catch (e) {
         Alert.alert('Bluetooth', getErrorMessage(e));
       }
       return;
     }
-    if (!bluetoothAvailable) {
-      Alert.alert('Bluetooth', 'No Bluetooth audio device is connected.');
-      return;
-    }
     try {
       await applyVoiceCallAudioMode(speakerOn, true);
       setBluetoothOn(true);
+      setBluetoothAvailable(true);
     } catch (e) {
+      void isBluetoothVoiceOutputAvailable().then(setBluetoothAvailable);
       Alert.alert('Bluetooth', getErrorMessage(e));
     }
   };
@@ -2169,8 +2168,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
                 onPress={() => void toggleMute()}
                 activeOpacity={0.85}
               >
-                <Ionicons name={muted ? 'mic-off' : 'mic'} size={26} color="#faf5ff" />
-                <Text style={styles.roundText}>{muted ? 'Unmute' : 'Mute'}</Text>
+                <Ionicons name={muted ? 'mic-off' : 'mic'} size={32} color="#faf5ff" />
               </TouchableOpacity>
               <TouchableOpacity
                 style={[styles.roundBtn, speakerOn && !bluetoothOn && styles.roundBtnActive]}
@@ -2179,10 +2177,9 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
               >
                 <Ionicons
                   name={speakerOn ? 'volume-high' : 'phone-portrait-outline'}
-                  size={26}
+                  size={32}
                   color="#faf5ff"
                 />
-                <Text style={styles.roundText}>{speakerOn ? 'Speaker' : 'Earpiece'}</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={[
@@ -2192,10 +2189,8 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
                 ]}
                 onPress={() => void toggleBluetooth()}
                 activeOpacity={0.85}
-                disabled={!bluetoothAvailable && !bluetoothOn}
               >
-                <Ionicons name="bluetooth" size={26} color="#faf5ff" />
-                <Text style={styles.roundText}>Bluetooth</Text>
+                <Ionicons name="bluetooth" size={32} color="#faf5ff" />
               </TouchableOpacity>
             </View>
           ) : null}
@@ -2478,8 +2473,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
                 onPress={() => void toggleMute()}
                 activeOpacity={0.85}
               >
-                <Ionicons name={muted ? 'mic-off' : 'mic'} size={26} color="#faf5ff" />
-                <Text style={styles.roundText}>{muted ? 'Unmute' : 'Mute'}</Text>
+                <Ionicons name={muted ? 'mic-off' : 'mic'} size={32} color="#faf5ff" />
               </TouchableOpacity>
               <TouchableOpacity
                 style={[styles.roundBtn, speakerOn && !bluetoothOn && styles.roundBtnActive]}
@@ -2488,10 +2482,9 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
               >
                 <Ionicons
                   name={speakerOn ? 'volume-high' : 'phone-portrait-outline'}
-                  size={26}
+                  size={32}
                   color="#faf5ff"
                 />
-                <Text style={styles.roundText}>{speakerOn ? 'Speaker' : 'Earpiece'}</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={[
@@ -2501,10 +2494,8 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
                 ]}
                 onPress={() => void toggleBluetooth()}
                 activeOpacity={0.85}
-                disabled={!bluetoothAvailable && !bluetoothOn}
               >
-                <Ionicons name="bluetooth" size={26} color="#faf5ff" />
-                <Text style={styles.roundText}>Bluetooth</Text>
+                <Ionicons name="bluetooth" size={32} color="#faf5ff" />
               </TouchableOpacity>
             </View>
             <TouchableOpacity style={styles.hangup} onPress={() => void hangup()} activeOpacity={0.88}>
@@ -2631,13 +2622,12 @@ const styles = StyleSheet.create({
   earningSub: { color: 'rgba(245,243,255,0.85)', fontSize: 10, marginTop: 2, fontWeight: '700' },
   controls: { flexDirection: 'row', gap: 12, marginTop: 44, justifyContent: 'center' },
   roundBtn: {
-    width: 72,
-    minHeight: 78,
-    borderRadius: 39,
+    width: 76,
+    height: 76,
+    borderRadius: 38,
     backgroundColor: 'rgba(91, 33, 182, 0.55)',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 8,
     borderWidth: 1,
     borderColor: 'rgba(196, 181, 253, 0.35)',
   },
