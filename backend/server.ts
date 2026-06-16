@@ -146,6 +146,18 @@ console.log(
   process.env.VOICE_GENDER_LOCAL_MODEL_ID ||
     'Xenova/wav2vec2-large-xlsr-53-gender-recognition-librispeech (default)'
 );
+console.log(
+  'VOICE_GENDER_USE_WORKER:',
+  process.env.VOICE_GENDER_USE_WORKER || 'true (default)'
+);
+console.log(
+  'VOICE_GENDER_MAX_AUDIO_SEC:',
+  process.env.VOICE_GENDER_MAX_AUDIO_SEC || '12 (default)'
+);
+console.log(
+  'VOICE_GENDER_TIMEOUT_MS:',
+  process.env.VOICE_GENDER_TIMEOUT_MS || '120000 (default)'
+);
 
 // Normal imports
 import './config/bootstrapEnv';
@@ -245,6 +257,25 @@ const start = async (): Promise<void> => {
 
     await dropLegacyEmailIndexes();
     await syncSuperAdminFromEnv();
+
+    try {
+      const {
+        shouldUseVoiceGenderWorker,
+        voiceGenderWorkerScriptPath,
+        warmVoiceGenderWorkerInBackground,
+      } = await import('./services/voiceGenderLocalClassifier');
+      const workerScript = voiceGenderWorkerScriptPath();
+      console.log(
+        'VOICE_GENDER_WORKER_SCRIPT:',
+        workerScript,
+        shouldUseVoiceGenderWorker() ? 'enabled' : 'disabled'
+      );
+      void warmVoiceGenderWorkerInBackground().catch((err) => {
+        console.warn('[voice-gender-worker] warmup failed:', err);
+      });
+    } catch (err) {
+      console.warn('[voice-gender] worker bootstrap check failed:', err);
+    }
 
     void verifyEmailConfig().then((r) => {
       if (!r.ok && process.env.OTP_BYPASS?.toLowerCase() !== 'true') {

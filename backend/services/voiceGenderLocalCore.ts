@@ -73,6 +73,10 @@ async function getClassifier(): Promise<
   return pipelinePromise;
 }
 
+export async function warmVoiceGenderModel(): Promise<void> {
+  await getClassifier();
+}
+
 export async function classifyVoiceGenderLocallyCore(
   audioSource: string,
   expectedGender: ExpectedVoiceGender

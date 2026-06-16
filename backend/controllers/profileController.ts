@@ -2538,7 +2538,20 @@ export const completeReceiverAudioOnboarding = async (
     const receiverVoiceVerificationMode = readReceiverVoiceVerificationMode();
     let voiceVerification: CallerVoiceVerificationPayload;
     if (receiverVoiceVerificationMode === 'required') {
+      console.log('[receiver-audio-onboarding] voice verification starting', {
+        receiverId,
+        profileGender,
+        voiceUrl,
+      });
       const verification = await verifyVoiceGender(voiceUrl, profileGender);
+      console.log('[receiver-audio-onboarding] voice verification finished', {
+        receiverId,
+        ok: verification.ok,
+        predictedGender: verification.predictedGender,
+        confidence: verification.confidence,
+        model: verification.model,
+        failureKind: verification.failureKind,
+      });
       voiceVerification = buildVoiceVerificationPayload(profileGender, verification);
       if (!verification.ok) {
         const failMessage =

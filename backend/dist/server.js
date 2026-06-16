@@ -14,6 +14,39 @@
 // import chatRoutes from './routes/chatRoutes';
 // import callRoutes from './routes/callRoutes';
 // import { attachChatSocket } from './socket/chatSocket';
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
@@ -117,6 +150,9 @@ console.log('VOICE_GENDER_VERIFICATION_MODE:', process.env.VOICE_GENDER_VERIFICA
 console.log('VOICE_GENDER_PROVIDER:', process.env.VOICE_GENDER_PROVIDER || 'local (default)');
 console.log('VOICE_GENDER_LOCAL_MODEL_ID:', process.env.VOICE_GENDER_LOCAL_MODEL_ID ||
     'Xenova/wav2vec2-large-xlsr-53-gender-recognition-librispeech (default)');
+console.log('VOICE_GENDER_USE_WORKER:', process.env.VOICE_GENDER_USE_WORKER || 'true (default)');
+console.log('VOICE_GENDER_MAX_AUDIO_SEC:', process.env.VOICE_GENDER_MAX_AUDIO_SEC || '12 (default)');
+console.log('VOICE_GENDER_TIMEOUT_MS:', process.env.VOICE_GENDER_TIMEOUT_MS || '120000 (default)');
 // Normal imports
 require("./config/bootstrapEnv");
 const http_1 = __importDefault(require("http"));
@@ -198,6 +234,17 @@ const start = async () => {
         console.log('✅ MongoDB connected successfully');
         await (0, dropLegacyEmailIndexes_1.dropLegacyEmailIndexes)();
         await (0, superAdminSync_1.syncSuperAdminFromEnv)();
+        try {
+            const { shouldUseVoiceGenderWorker, voiceGenderWorkerScriptPath, warmVoiceGenderWorkerInBackground, } = await Promise.resolve().then(() => __importStar(require('./services/voiceGenderLocalClassifier')));
+            const workerScript = voiceGenderWorkerScriptPath();
+            console.log('VOICE_GENDER_WORKER_SCRIPT:', workerScript, shouldUseVoiceGenderWorker() ? 'enabled' : 'disabled');
+            void warmVoiceGenderWorkerInBackground().catch((err) => {
+                console.warn('[voice-gender-worker] warmup failed:', err);
+            });
+        }
+        catch (err) {
+            console.warn('[voice-gender] worker bootstrap check failed:', err);
+        }
         void (0, email_1.verifyEmailConfig)().then((r) => {
             if (!r.ok && process.env.OTP_BYPASS?.toLowerCase() !== 'true') {
                 console.warn('[email] OTP mail may fail until SMTP is fixed:', r.error);

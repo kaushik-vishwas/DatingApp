@@ -2127,7 +2127,20 @@ const completeReceiverAudioOnboarding = async (req, res) => {
         const receiverVoiceVerificationMode = readReceiverVoiceVerificationMode();
         let voiceVerification;
         if (receiverVoiceVerificationMode === 'required') {
+            console.log('[receiver-audio-onboarding] voice verification starting', {
+                receiverId,
+                profileGender,
+                voiceUrl,
+            });
             const verification = await (0, callerVoiceGenderVerifier_1.verifyVoiceGender)(voiceUrl, profileGender);
+            console.log('[receiver-audio-onboarding] voice verification finished', {
+                receiverId,
+                ok: verification.ok,
+                predictedGender: verification.predictedGender,
+                confidence: verification.confidence,
+                model: verification.model,
+                failureKind: verification.failureKind,
+            });
             voiceVerification = buildVoiceVerificationPayload(profileGender, verification);
             if (!verification.ok) {
                 const failMessage = verification.failureKind === 'gender_mismatch'

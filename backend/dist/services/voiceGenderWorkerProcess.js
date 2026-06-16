@@ -5,6 +5,26 @@ const voiceGenderLocalCore_1 = require("./voiceGenderLocalCore");
 process.on('message', (msg) => {
     void (async () => {
         try {
+            if (msg.warmup) {
+                await (0, voiceGenderLocalCore_1.warmVoiceGenderModel)();
+                const out = {
+                    id: msg.id,
+                    ok: true,
+                    result: {
+                        ok: true,
+                        predictedGender: 'unknown',
+                        confidence: 0,
+                        model: 'warmup',
+                    },
+                };
+                process.send?.(out);
+                return;
+            }
+            if (!msg.audioSource || !msg.expectedGender) {
+                const out = { id: msg.id, ok: false, error: 'Missing audioSource or expectedGender' };
+                process.send?.(out);
+                return;
+            }
             const result = await (0, voiceGenderLocalCore_1.classifyVoiceGenderLocallyCore)(msg.audioSource, msg.expectedGender);
             const out = { id: msg.id, ok: true, result };
             process.send?.(out);

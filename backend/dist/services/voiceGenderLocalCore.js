@@ -33,6 +33,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.warmVoiceGenderModel = warmVoiceGenderModel;
 exports.classifyVoiceGenderLocallyCore = classifyVoiceGenderLocallyCore;
 const voiceGenderAudioLoader_1 = require("./voiceGenderAudioLoader");
 const LOCAL_MODEL_ID = process.env.VOICE_GENDER_LOCAL_MODEL_ID?.trim() ||
@@ -88,6 +89,9 @@ async function getClassifier() {
         })();
     }
     return pipelinePromise;
+}
+async function warmVoiceGenderModel() {
+    await getClassifier();
 }
 async function classifyVoiceGenderLocallyCore(audioSource, expectedGender) {
     if (expectedGender === 'other') {
