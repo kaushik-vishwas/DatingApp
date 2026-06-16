@@ -12,6 +12,22 @@ let pipelinePromise: Promise<
   (input: Float32Array, options?: Record<string, unknown>) => Promise<ClassificationRow[]>
 > | null = null;
 
+let classifyTail: Promise<void> = Promise.resolve();
+
+async function withLocalClassifyLock<T>(fn: () => Promise<T>): Promise<T> {
+  const prev = classifyTail;
+  let release!: () => void;
+  classifyTail = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await prev;
+  try {
+    return await fn();
+  } finally {
+    release();
+  }
+}
+
 function asNumber(v: unknown): number | null {
   const n = typeof v === 'number' ? v : Number(v);
   return Number.isFinite(n) ? n : null;
@@ -71,6 +87,13 @@ async function getClassifier(): Promise<
 }
 
 export async function classifyVoiceGenderLocally(
+  audioSource: string,
+  expectedGender: ExpectedVoiceGender
+): Promise<VoiceGenderVerificationResult> {
+  return withLocalClassifyLock(() => classifyVoiceGenderLocallyInner(audioSource, expectedGender));
+}
+
+async function classifyVoiceGenderLocallyInner(
   audioSource: string,
   expectedGender: ExpectedVoiceGender
 ): Promise<VoiceGenderVerificationResult> {

@@ -114,12 +114,20 @@ function wavBufferToSamples(buffer) {
     }
     return resampleTo16k(mono, sampleRate);
 }
+function trimVoiceSamples(samples) {
+    const maxSec = Number(process.env.VOICE_GENDER_MAX_AUDIO_SEC ?? 20);
+    const safeMaxSec = Number.isFinite(maxSec) && maxSec > 0 ? maxSec : 20;
+    const maxSamples = Math.floor(16000 * safeMaxSec);
+    if (samples.length <= maxSamples)
+        return samples;
+    return samples.subarray(0, maxSamples);
+}
 /** Decode voice audio from Cloudinary HTTPS URL or local .wav path into 16kHz mono Float32Array. */
 async function loadVoiceAudioSamples(source) {
     const fetchSource = isHttpUrl(source) ? cloudinaryWavUrl(source) : source;
     const bytes = await loadAudioBytes(fetchSource);
     try {
-        return wavBufferToSamples(bytes);
+        return trimVoiceSamples(wavBufferToSamples(bytes));
     }
     catch (err) {
         const msg = err instanceof Error ? err.message : String(err);

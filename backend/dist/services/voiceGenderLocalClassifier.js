@@ -38,6 +38,21 @@ const voiceGenderAudioLoader_1 = require("./voiceGenderAudioLoader");
 const LOCAL_MODEL_ID = process.env.VOICE_GENDER_LOCAL_MODEL_ID?.trim() ||
     'Xenova/wav2vec2-large-xlsr-53-gender-recognition-librispeech';
 let pipelinePromise = null;
+let classifyTail = Promise.resolve();
+async function withLocalClassifyLock(fn) {
+    const prev = classifyTail;
+    let release;
+    classifyTail = new Promise((resolve) => {
+        release = resolve;
+    });
+    await prev;
+    try {
+        return await fn();
+    }
+    finally {
+        release();
+    }
+}
 function asNumber(v) {
     const n = typeof v === 'number' ? v : Number(v);
     return Number.isFinite(n) ? n : null;
@@ -87,6 +102,9 @@ async function getClassifier() {
     return pipelinePromise;
 }
 async function classifyVoiceGenderLocally(audioSource, expectedGender) {
+    return withLocalClassifyLock(() => classifyVoiceGenderLocallyInner(audioSource, expectedGender));
+}
+async function classifyVoiceGenderLocallyInner(audioSource, expectedGender) {
     if (expectedGender === 'other') {
         return {
             ok: true,

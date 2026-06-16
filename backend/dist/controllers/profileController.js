@@ -754,9 +754,11 @@ function readReceiverVoiceVerificationMode() {
     const raw = String(process.env.RECEIVER_VOICE_GENDER_VERIFICATION_MODE ?? '')
         .trim()
         .toLowerCase();
+    if (raw === 'disabled' || raw === 'off' || raw === 'skip')
+        return 'disabled';
     if (raw === 'required' || raw === 'on' || raw === 'enabled')
         return 'required';
-    return 'disabled';
+    return (0, callerVoiceGenderVerifier_1.getVoiceVerificationMode)();
 }
 /**
  * POST /profile/complete-caller
@@ -2136,10 +2138,8 @@ const completeReceiverAudioOnboarding = async (req, res) => {
                             ? 'Voice verification is not configured on the server yet.'
                             : verification.failureKind === 'audio_fetch_failed'
                                 ? 'Could not download your voice sample for verification. Please record again.'
-                                : verification.reason?.includes('not supported')
-                                    ? 'Voice AI service is unavailable (Hugging Face model not supported). Set VOICE_GENDER_VERIFICATION_MODE=disabled on server for testing, or switch inference provider.'
-                                    : verification.reason ||
-                                        'Voice verification service error. Please try again later.';
+                                : verification.reason ||
+                                    'Voice verification service error. Please try again later.';
                 console.log('[receiver-audio-onboarding]', JSON.stringify({
                     receiverId,
                     voiceUrl,

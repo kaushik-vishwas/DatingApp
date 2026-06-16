@@ -114,12 +114,20 @@ function wavBufferToSamples(buffer: Buffer): Float32Array {
   return resampleTo16k(mono, sampleRate);
 }
 
+function trimVoiceSamples(samples: Float32Array): Float32Array {
+  const maxSec = Number(process.env.VOICE_GENDER_MAX_AUDIO_SEC ?? 20);
+  const safeMaxSec = Number.isFinite(maxSec) && maxSec > 0 ? maxSec : 20;
+  const maxSamples = Math.floor(16000 * safeMaxSec);
+  if (samples.length <= maxSamples) return samples;
+  return samples.subarray(0, maxSamples);
+}
+
 /** Decode voice audio from Cloudinary HTTPS URL or local .wav path into 16kHz mono Float32Array. */
 export async function loadVoiceAudioSamples(source: string): Promise<Float32Array> {
   const fetchSource = isHttpUrl(source) ? cloudinaryWavUrl(source) : source;
   const bytes = await loadAudioBytes(fetchSource);
   try {
-    return wavBufferToSamples(bytes);
+    return trimVoiceSamples(wavBufferToSamples(bytes));
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     throw new Error(`Could not decode voice audio as WAV: ${msg}`);
