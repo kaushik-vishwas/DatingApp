@@ -41,7 +41,7 @@ type CallInvitePayload = { callId?: unknown; targetId?: unknown };
 type CallResponsePayload = { callId?: unknown; accepted?: unknown };
 type CallEndPayload = { callId?: unknown };
 type CallHoldPayload = { callId?: unknown; onHold?: unknown };
-type CallKeepalivePayload = { callId?: unknown; ts?: unknown };
+type CallKeepalivePayload = { callId?: unknown; ts?: unknown; onHold?: unknown };
 type CallMutePayload = { callId?: unknown; muted?: unknown };
 type CallQueuePayload = { active?: unknown };
 type ChatTypingPayload = { typing?: unknown };
@@ -1079,6 +1079,14 @@ export function attachChatSocket(httpServer: HTTPServer): Server {
             fromId,
             ts: typeof payload?.ts === 'number' ? payload.ts : Date.now(),
           });
+          if (payload?.onHold === true) {
+            io.to(accountRoom(peerType, peerId)).emit('call:hold', {
+              callId,
+              onHold: true,
+              fromType,
+              fromId,
+            });
+          }
           ack?.({ ok: true });
         } catch (e) {
           const msg = e instanceof Error ? e.message : String(e);

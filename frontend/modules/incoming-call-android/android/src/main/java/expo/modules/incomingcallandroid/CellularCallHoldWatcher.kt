@@ -77,22 +77,16 @@ object CellularCallHoldWatcher {
     lastMode = mode
     val cellularMode = audioModeSuggestsCellularCall(mode)
 
-    if (SamsungCallCompat.isSamsungOneUi6OrNewer()) {
-      if (cellularMode) {
-        gsmPreemptive = true
-      } else if (
-        previousMode == AudioManager.MODE_IN_COMMUNICATION &&
-        mode == AudioManager.MODE_RINGTONE
-      ) {
-        // Incoming GSM ring while VoIP is active — hold before MODE_IN_CALL on One UI 6.
-        gsmPreemptive = true
-      } else if (
-        gsmPreemptive &&
-        !cellularMode &&
-        mode == AudioManager.MODE_IN_COMMUNICATION
-      ) {
-        gsmPreemptive = false
-      }
+    if (
+      previousMode == AudioManager.MODE_IN_COMMUNICATION &&
+      mode == AudioManager.MODE_RINGTONE
+    ) {
+      // Incoming GSM ring while VoIP is active — hold before MODE_IN_CALL on some OEMs.
+      gsmPreemptive = true
+    } else if (cellularMode) {
+      gsmPreemptive = true
+    } else if (gsmPreemptive && !cellularMode && mode == AudioManager.MODE_IN_COMMUNICATION) {
+      gsmPreemptive = false
     }
 
     TelephonyDiagnosticsWatcher.recordAudioModeFromWatcher(mode, source)
@@ -101,7 +95,7 @@ object CellularCallHoldWatcher {
     val resolvedSource =
       when {
         cellularMode -> "audio_mode"
-        gsmPreemptive -> "samsung_preemptive"
+        gsmPreemptive -> "preemptive_ring"
         else -> source
       }
     emitIfChanged(active, mode, resolvedSource)

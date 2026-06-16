@@ -15,6 +15,11 @@ let registrations: KeepaliveRegistration[] = [];
 let intervalRef: ReturnType<typeof setInterval> | null = null;
 let callActive = false;
 let activeCallId = '';
+let holdStateReader: (() => boolean) | null = null;
+
+export function registerCallHoldKeepaliveReader(reader: (() => boolean) | null): void {
+  holdStateReader = reader;
+}
 
 function ensureListeners(socket: Socket): void {
   const flagged = socket as Socket & { [LISTENER_FLAG]?: boolean };
@@ -43,10 +48,15 @@ function ensureListeners(socket: Socket): void {
 
 function emitKeepaliveTick(): void {
   if (!callActive || !activeCallId) return;
+  const onHold = holdStateReader?.() === true;
   for (const reg of registrations) {
     if (!reg.socket.connected) continue;
     try {
-      reg.socket.emit('call:keepalive', { callId: activeCallId, ts: Date.now() });
+      reg.socket.emit('call:keepalive', {
+        callId: activeCallId,
+        ts: Date.now(),
+        ...(onHold ? { onHold: true } : {}),
+      });
       recordAppKeepaliveSent();
     } catch {
       // ignore

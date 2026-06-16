@@ -950,11 +950,7 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   const emitCallHold = useCallback((callId: string, onHold: boolean) => {
     const normalized = callId.trim();
     if (!normalized) return;
-    if (onHold) {
-      pendingCallHoldEmitRef.current = { callId: normalized, onHold: true };
-    } else {
-      pendingCallHoldEmitRef.current = { callId: normalized, onHold: false };
-    }
+    pendingCallHoldEmitRef.current = { callId: normalized, onHold };
     const emitOn = (socket: Socket): void => {
       callDiag.socketEmit(
         'call:hold',
@@ -963,7 +959,23 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         onHold ? 'peer_hold_on' : 'peer_hold_off'
       );
       try {
-        socket.emit('call:hold', { callId: normalized, onHold });
+        socket.emit(
+          'call:hold',
+          { callId: normalized, onHold },
+          (ack?: { ok?: boolean; error?: string }) => {
+            if (ack?.ok === false) {
+              callDiag.info('call_hold_ack_failed', {
+                callId: normalized,
+                onHold,
+                error: ack.error ?? 'unknown',
+              });
+              return;
+            }
+            if (!onHold && pendingCallHoldEmitRef.current?.callId === normalized) {
+              pendingCallHoldEmitRef.current = null;
+            }
+          }
+        );
       } catch {
         // ignore signaling failures
       }

@@ -966,6 +966,14 @@ function attachChatSocket(httpServer) {
                         fromId,
                         ts: typeof payload?.ts === 'number' ? payload.ts : Date.now(),
                     });
+                    if (payload?.onHold === true) {
+                        io.to(accountRoom(peerType, peerId)).emit('call:hold', {
+                            callId,
+                            onHold: true,
+                            fromType,
+                            fromId,
+                        });
+                    }
                     ack?.({ ok: true });
                 }
                 catch (e) {

@@ -73,6 +73,7 @@ import {
 import {
   registerCallKeepaliveSocket,
   setCallKeepaliveActive,
+  registerCallHoldKeepaliveReader,
   teardownCallKeepalive,
 } from '../../utils/callActiveKeepalive';
 import {
@@ -393,16 +394,19 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
 
   useEffect(() => {
     if (Platform.OS !== 'android' || !ready) {
+      registerCallHoldKeepaliveReader(null);
       setCallKeepaliveActive('', false);
       stopGsmDisconnectProbe();
       return;
     }
+    registerCallHoldKeepaliveReader(() => systemCallHoldRef.current);
     const callId = callIdRef.current.trim();
     if (callId) {
       startGsmDisconnectProbe(callId);
     }
     setCallKeepaliveActive(callId, callId.length > 0);
     return () => {
+      registerCallHoldKeepaliveReader(null);
       setCallKeepaliveActive('', false);
       stopGsmDisconnectProbe();
     };
@@ -602,6 +606,18 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
   useEffect(() => {
     systemCallHoldRef.current = systemCallHold;
   }, [systemCallHold]);
+
+  // Re-broadcast hold while on a cellular call so the peer catches missed socket events.
+  useEffect(() => {
+    if (!systemCallHold || ending) return;
+    const announceHold = (): void => {
+      if (!systemCallHoldRef.current || endingRef.current) return;
+      emitPeerCallHold(true);
+    };
+    announceHold();
+    const intervalId = setInterval(announceHold, 4000);
+    return () => clearInterval(intervalId);
+  }, [systemCallHold, ending, emitPeerCallHold]);
 
   useEffect(() => {
     if (!receiverAvailabilitySession || !user?.isAvailable) return;
@@ -1987,9 +2003,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
         }
         return;
       }
-      if (!peerCallHoldRef.current) {
-        applySystemCallHold(false);
-      }
+      applySystemCallHold(false);
       void recoverAfterGsmHold();
     },
     [applySystemCallHold, recoverAfterGsmHold]
