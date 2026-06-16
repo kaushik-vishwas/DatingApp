@@ -1,4 +1,11 @@
+import { HfInference } from '@huggingface/inference';
+import { cloudinaryWavUrl } from './voiceGenderAudioLoader';
+
 type VoiceGenderLabel = 'female' | 'male' | 'other' | 'unknown';
+
+/** Supported on HF Inference router (audeering model is not). */
+const HF_SUPPORTED_VOICE_GENDER_MODEL =
+  'alefiury/wav2vec2-large-xlsr-53-gender-recognition-librispeech';
 
 export type ExpectedVoiceGender = 'female' | 'male' | 'other';
 
@@ -41,13 +48,117 @@ function readVerificationProvider(): 'local' | 'huggingface' {
 }
 
 function shouldFallbackToLocalFromHf(reason: string): boolean {
+  const raw = asString(process.env.VOICE_GENDER_HF_FALLBACK_TO_LOCAL).toLowerCase();
+  if (raw === 'true' || raw === '1' || raw === 'on') return true;
+  if (raw === 'false' || raw === '0' || raw === 'off') return false;
   const lower = reason.toLowerCase();
   if (lower.includes('not supported')) return true;
   if (lower.includes('returned http 404')) return true;
   if (lower.includes('returned http 503')) return true;
-  const raw = asString(process.env.VOICE_GENDER_HF_FALLBACK_TO_LOCAL).toLowerCase();
-  if (raw === 'false' || raw === '0' || raw === 'off') return false;
   return process.env.NODE_ENV !== 'production';
+}
+
+function hfVoiceGenderModelCandidates(): string[] {
+  const configured =
+    asString(process.env.HF_VOICE_GENDER_MODEL_ID) || HF_SUPPORTED_VOICE_GENDER_MODEL;
+  const out: string[] = [];
+  for (const id of [configured, HF_SUPPORTED_VOICE_GENDER_MODEL]) {
+    if (id && !out.includes(id)) out.push(id);
+  }
+  return out;
+}
+
+function isHfModelUnsupported(reason: string): boolean {
+  const lower = reason.toLowerCase();
+  return lower.includes('not supported') || lower.includes('model not found');
+}
+
+type HfClassificationRow = { label: string; score: number };
+
+async function runHfAudioClassification(
+  modelId: string,
+  audioBytes: ArrayBuffer,
+  token: string
+): Promise<{ ok: true; rows: HfClassificationRow[] } | { ok: false; reason: string }> {
+  const hf = new HfInference(token);
+  try {
+    const raw = await hf.audioClassification({
+      model: modelId,
+      data: audioBytes,
+      provider: 'hf-inference',
+    });
+    const rows: HfClassificationRow[] = [];
+    if (Array.isArray(raw)) {
+      for (const row of raw) {
+        if (!row || typeof row !== 'object') continue;
+        const label = asString((row as { label?: unknown }).label);
+        const score = asNumber((row as { score?: unknown }).score) ?? 0;
+        if (label) rows.push({ label, score });
+      }
+    }
+    if (rows.length === 0) {
+      return { ok: false, reason: 'Empty Hugging Face audio-classification response' };
+    }
+    return { ok: true, rows };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { ok: false, reason: msg };
+  }
+}
+
+function evaluateGenderPrediction(
+  rows: HfClassificationRow[],
+  modelId: string,
+  expectedGender: ExpectedVoiceGender,
+  minConfidence: number,
+  raw: unknown
+): VoiceGenderVerificationResult {
+  const top = pickTopFromScores(rows as Array<Record<string, unknown>>);
+  const predictedGender = top.label;
+  const confidence = top.score;
+
+  if (predictedGender === 'unknown') {
+    return buildFailureResult({
+      predictedGender,
+      confidence,
+      model: modelId,
+      raw,
+      reason: 'Could not read gender prediction from Hugging Face response',
+      failureKind: 'service_unavailable',
+    });
+  }
+
+  if (predictedGender !== expectedGender) {
+    return {
+      ok: false,
+      predictedGender,
+      confidence,
+      model: modelId,
+      raw,
+      failureKind: 'gender_mismatch',
+      reason: `Predicted=${predictedGender}, expected=${expectedGender}, confidence=${confidence.toFixed(3)}`,
+    };
+  }
+
+  if (confidence < minConfidence) {
+    return {
+      ok: false,
+      predictedGender,
+      confidence,
+      model: modelId,
+      raw,
+      failureKind: 'low_confidence',
+      reason: `Predicted=${predictedGender}, confidence=${confidence.toFixed(3)}, threshold=${minConfidence.toFixed(3)}`,
+    };
+  }
+
+  return {
+    ok: true,
+    predictedGender,
+    confidence,
+    model: modelId,
+    raw,
+  };
 }
 
 function normalizeLabel(raw: unknown): VoiceGenderLabel {
@@ -107,33 +218,6 @@ function logVoiceGenderTerminal(tag: string, payload: Record<string, unknown>): 
   console.log(`[${tag}]`, JSON.stringify(payload, null, 2));
 }
 
-function parseResponseBody(text: string): unknown {
-  const trimmed = text.trim();
-  if (!trimmed) return null;
-  if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
-    try {
-      return JSON.parse(trimmed) as unknown;
-    } catch {
-      return text;
-    }
-  }
-  return text;
-}
-
-function logHuggingFaceApiResponse(input: {
-  endpoint: string;
-  modelId: string;
-  audioUrl: string;
-  audioBytes: number;
-  httpStatus: number;
-  ok: boolean;
-  body: unknown;
-}): void {
-  logVoiceGenderTerminal('voice-gender-hf', {
-    huggingFace: input,
-  });
-}
-
 export async function verifyVoiceGender(
   userAudioUrl: string,
   expectedGender: ExpectedVoiceGender
@@ -168,14 +252,12 @@ export async function verifyVoiceGender(
     return classifyVoiceGenderLocally(userAudioUrl, expectedGender);
   }
 
-  const modelId =
-    asString(process.env.HF_VOICE_GENDER_MODEL_ID) || 'audeering/wav2vec2-large-robust-24-ft-age-gender';
   const hfToken = asString(process.env.HF_API_TOKEN);
   if (!hfToken) {
     return buildFailureResult({
       predictedGender: 'unknown',
       confidence: 0,
-      model: modelId,
+      model: HF_SUPPORTED_VOICE_GENDER_MODEL,
       reason: 'HF_API_TOKEN is not configured',
       failureKind: 'misconfigured',
     });
@@ -183,14 +265,14 @@ export async function verifyVoiceGender(
 
   const timeoutMs = asNumber(process.env.VOICE_GENDER_TIMEOUT_MS) ?? 20000;
   const minConfidence = minConfidenceForExpectedGender(expectedGender);
-  const endpoint = `https://router.huggingface.co/hf-inference/models/${modelId}`;
+  const modelCandidates = hfVoiceGenderModelCandidates();
 
   const fetchImpl = (globalThis as { fetch?: unknown }).fetch;
   if (typeof fetchImpl !== 'function') {
     return buildFailureResult({
       predictedGender: 'unknown',
       confidence: 0,
-      model: 'unavailable',
+      model: modelCandidates[0] ?? HF_SUPPORTED_VOICE_GENDER_MODEL,
       reason: 'Global fetch is not available in this Node runtime',
       failureKind: 'service_unavailable',
     });
@@ -200,17 +282,18 @@ export async function verifyVoiceGender(
   const timer = setTimeout(() => controller.abort(), Math.max(1000, timeoutMs));
 
   try {
+    const audioFetchUrl = cloudinaryWavUrl(userAudioUrl);
     const audioFetch = await (
       fetchImpl as (input: string, init?: Record<string, unknown>) => Promise<{
         ok: boolean;
         status: number;
         arrayBuffer: () => Promise<ArrayBuffer>;
       }>
-    )(userAudioUrl, { method: 'GET', signal: controller.signal });
+    )(audioFetchUrl, { method: 'GET', signal: controller.signal });
     if (!audioFetch.ok) {
       logVoiceGenderTerminal('voice-gender-hf', {
         audioFetch: {
-          audioUrl: userAudioUrl,
+          audioUrl: audioFetchUrl,
           httpStatus: audioFetch.status,
           ok: false,
         },
@@ -218,167 +301,63 @@ export async function verifyVoiceGender(
       return buildFailureResult({
         predictedGender: 'unknown',
         confidence: 0,
-        model: modelId,
+        model: modelCandidates[0] ?? HF_SUPPORTED_VOICE_GENDER_MODEL,
         reason: `Could not fetch audio URL (HTTP ${audioFetch.status})`,
         failureKind: 'audio_fetch_failed',
       });
     }
     const audioBytes = await audioFetch.arrayBuffer();
 
-    const rsp = await (
-      fetchImpl as (input: string, init?: Record<string, unknown>) => Promise<{
-        ok: boolean;
-        status: number;
-        text: () => Promise<string>;
-      }>
-    )(endpoint, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${hfToken}`,
-        'Content-Type': 'application/octet-stream',
-      },
-      body: audioBytes,
-      signal: controller.signal,
-    });
-
-    const responseText = await rsp.text();
-    const body = parseResponseBody(responseText);
-    logHuggingFaceApiResponse({
-      endpoint,
-      modelId,
-      audioUrl: userAudioUrl,
-      audioBytes: audioBytes.byteLength,
-      httpStatus: rsp.status,
-      ok: rsp.ok,
-      body,
-    });
-
-    if (!rsp.ok) {
-      let details = '';
-      if (body && typeof body === 'object' && !Array.isArray(body)) {
-        const errBody = body as Record<string, unknown>;
-        details = asString(errBody.error) || asString(errBody.message);
-      } else if (typeof body === 'string') {
-        details = body.trim();
-      }
-      const reason = details
-        ? `Hugging Face returned HTTP ${rsp.status}: ${details}`
-        : `Hugging Face returned HTTP ${rsp.status}`;
-      const failed = buildFailureResult({
-        predictedGender: 'unknown',
-        confidence: 0,
-        model: modelId,
-        raw: body,
-        reason,
-        failureKind: 'service_unavailable',
-      });
-      if (shouldFallbackToLocalFromHf(reason)) {
-        logVoiceGenderTerminal('voice-gender-hf', {
-          fallbackToLocal: true,
-          reason,
+    let lastReason = 'Hugging Face voice verification failed';
+    for (const modelId of modelCandidates) {
+      const hfResult = await runHfAudioClassification(modelId, audioBytes, hfToken);
+      logVoiceGenderTerminal('voice-gender-hf', {
+        huggingFace: {
+          provider: 'hf-inference',
+          modelId,
           audioUrl: userAudioUrl,
-          expectedGender,
-        });
-        const { classifyVoiceGenderLocally } = await import('./voiceGenderLocalClassifier');
-        return classifyVoiceGenderLocally(userAudioUrl, expectedGender);
-      }
-      return failed;
-    }
-
-    const errorMsg =
-      body && typeof body === 'object' && !Array.isArray(body)
-        ? asString((body as Record<string, unknown>).error)
-        : '';
-    if (errorMsg) {
-      const failed = buildFailureResult({
-        predictedGender: 'unknown',
-        confidence: 0,
-        model: modelId,
-        raw: body,
-        reason: `Hugging Face error: ${errorMsg}`,
-        failureKind: 'service_unavailable',
+          audioFetchUrl,
+          audioBytes: audioBytes.byteLength,
+          ok: hfResult.ok,
+          ...(hfResult.ok ? { body: hfResult.rows } : { error: hfResult.reason }),
+        },
       });
-      if (shouldFallbackToLocalFromHf(errorMsg)) {
-        logVoiceGenderTerminal('voice-gender-hf', {
-          fallbackToLocal: true,
-          reason: errorMsg,
-          audioUrl: userAudioUrl,
+
+      if (hfResult.ok) {
+        return evaluateGenderPrediction(
+          hfResult.rows,
+          modelId,
           expectedGender,
-        });
-        const { classifyVoiceGenderLocally } = await import('./voiceGenderLocalClassifier');
-        return classifyVoiceGenderLocally(userAudioUrl, expectedGender);
+          minConfidence,
+          hfResult.rows
+        );
       }
-      return failed;
+
+      lastReason = hfResult.reason;
+      if (!isHfModelUnsupported(hfResult.reason)) {
+        break;
+      }
     }
 
-    let predictedGender: VoiceGenderLabel = 'unknown';
-    let confidence = 0;
-    if (Array.isArray(body)) {
-      const first = body[0];
-      if (Array.isArray(first)) {
-        const top = pickTopFromScores(first as Array<Record<string, unknown>>);
-        predictedGender = top.label;
-        confidence = top.score;
-      } else {
-        const top = pickTopFromScores(body as Array<Record<string, unknown>>);
-        predictedGender = top.label;
-        confidence = top.score;
-      }
-    } else if (body && typeof body === 'object') {
-      const obj = body as Record<string, unknown>;
-      const labels = Array.isArray(obj.labels) ? obj.labels : [];
-      const scores = Array.isArray(obj.scores) ? obj.scores : [];
-      const rows: Array<Record<string, unknown>> = [];
-      for (let i = 0; i < Math.min(labels.length, scores.length); i += 1) {
-        rows.push({ label: labels[i], score: scores[i] });
-      }
-      const top = pickTopFromScores(rows);
-      predictedGender = top.label;
-      confidence = top.score;
-    }
-
-    if (predictedGender === 'unknown') {
-      return buildFailureResult({
-        predictedGender,
-        confidence,
-        model: modelId,
-        raw: body,
-        reason: 'Could not read gender prediction from Hugging Face response',
-        failureKind: 'service_unavailable',
+    if (shouldFallbackToLocalFromHf(lastReason)) {
+      logVoiceGenderTerminal('voice-gender-hf', {
+        fallbackToLocal: true,
+        reason: lastReason,
+        audioUrl: userAudioUrl,
+        expectedGender,
+        triedModels: modelCandidates,
       });
+      const { classifyVoiceGenderLocally } = await import('./voiceGenderLocalClassifier');
+      return classifyVoiceGenderLocally(userAudioUrl, expectedGender);
     }
 
-    if (predictedGender !== expectedGender) {
-      return {
-        ok: false,
-        predictedGender,
-        confidence,
-        model: modelId,
-        raw: body,
-        failureKind: 'gender_mismatch',
-        reason: `Predicted=${predictedGender}, expected=${expectedGender}, confidence=${confidence.toFixed(3)}`,
-      };
-    }
-
-    if (confidence < minConfidence) {
-      return {
-        ok: false,
-        predictedGender,
-        confidence,
-        model: modelId,
-        raw: body,
-        failureKind: 'low_confidence',
-        reason: `Predicted=${predictedGender}, confidence=${confidence.toFixed(3)}, threshold=${minConfidence.toFixed(3)}`,
-      };
-    }
-
-    return {
-      ok: true,
-      predictedGender,
-      confidence,
-      model: modelId,
-      raw: body,
-    };
+    return buildFailureResult({
+      predictedGender: 'unknown',
+      confidence: 0,
+      model: modelCandidates[modelCandidates.length - 1] ?? HF_SUPPORTED_VOICE_GENDER_MODEL,
+      reason: lastReason,
+      failureKind: 'service_unavailable',
+    });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     logVoiceGenderTerminal('voice-gender-hf', {
@@ -386,6 +365,10 @@ export async function verifyVoiceGender(
       audioUrl: userAudioUrl,
       error: msg,
     });
+    if (shouldFallbackToLocalFromHf(msg)) {
+      const { classifyVoiceGenderLocally } = await import('./voiceGenderLocalClassifier');
+      return classifyVoiceGenderLocally(userAudioUrl, expectedGender);
+    }
     return buildFailureResult({
       predictedGender: 'unknown',
       confidence: 0,
