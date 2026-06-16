@@ -44,6 +44,7 @@ const child_process_1 = require("child_process");
 const fs_1 = __importDefault(require("fs"));
 const path_1 = __importDefault(require("path"));
 let classifyTail = Promise.resolve();
+let workerChild = null;
 function asString(v) {
     return typeof v === 'string' ? v.trim() : '';
 }
@@ -56,6 +57,10 @@ function shouldUseVoiceGenderWorker() {
 }
 function voiceGenderWorkerScriptPath() {
     return path_1.default.join(__dirname, 'voiceGenderWorkerProcess.js');
+}
+function workerHeapMb() {
+    const n = Number(process.env.VOICE_GENDER_WORKER_HEAP_MB ?? 512);
+    return Number.isFinite(n) && n >= 256 ? Math.floor(n) : 512;
 }
 async function withLocalClassifyLock(fn) {
     const prev = classifyTail;
@@ -71,54 +76,63 @@ async function withLocalClassifyLock(fn) {
         release();
     }
 }
-function classifyViaWorker(audioSource, expectedGender) {
+function resetWorkerChild() {
+    if (workerChild && !workerChild.killed) {
+        workerChild.kill('SIGTERM');
+    }
+    workerChild = null;
+}
+function getOrSpawnWorker() {
+    if (workerChild && !workerChild.killed) {
+        return workerChild;
+    }
     const workerScript = voiceGenderWorkerScriptPath();
+    if (!fs_1.default.existsSync(workerScript)) {
+        return null;
+    }
+    const child = (0, child_process_1.fork)(workerScript, [], {
+        env: process.env,
+        execArgv: [`--max-old-space-size=${workerHeapMb()}`],
+        stdio: ['inherit', 'inherit', 'inherit', 'ipc'],
+    });
+    child.on('exit', () => {
+        if (workerChild === child) {
+            workerChild = null;
+        }
+    });
+    workerChild = child;
+    console.log('[voice-gender-worker] spawned', { pid: child.pid, script: workerScript });
+    return child;
+}
+function classifyViaWorker(audioSource, expectedGender) {
     const timeoutMs = Math.max(120_000, Number(process.env.VOICE_GENDER_TIMEOUT_MS ?? 120000) || 120_000);
     const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
     return new Promise((resolve) => {
         let settled = false;
-        let child = null;
+        const child = getOrSpawnWorker();
         const finish = (result) => {
             if (settled)
                 return;
             settled = true;
             clearTimeout(timer);
-            if (child && !child.killed) {
-                child.kill('SIGTERM');
+            if (child) {
+                child.off('message', onMessage);
+                child.off('exit', onExit);
+                child.off('error', onError);
             }
             resolve(result);
         };
-        if (!fs_1.default.existsSync(workerScript)) {
+        if (!child) {
             finish({
                 ok: false,
                 predictedGender: 'unknown',
                 confidence: 0,
                 model: 'voice-gender-worker',
                 failureKind: 'misconfigured',
-                reason: `Voice worker not deployed (${workerScript}). Run npm run build on server.`,
+                reason: `Voice worker not deployed (${voiceGenderWorkerScriptPath()}). Run npm run build on server.`,
             });
             return;
         }
-        try {
-            child = (0, child_process_1.fork)(workerScript, [], {
-                env: process.env,
-                execArgv: ['--max-old-space-size=768'],
-                stdio: ['inherit', 'inherit', 'inherit', 'ipc'],
-            });
-        }
-        catch (err) {
-            const msg = err instanceof Error ? err.message : String(err);
-            finish({
-                ok: false,
-                predictedGender: 'unknown',
-                confidence: 0,
-                model: 'voice-gender-worker',
-                failureKind: 'service_unavailable',
-                reason: `Could not start voice worker: ${msg}`,
-            });
-            return;
-        }
-        console.log('[voice-gender-worker] spawned', { pid: child.pid, script: workerScript });
         const onMessage = (msg) => {
             if (!msg || msg.id !== id)
                 return;
@@ -138,6 +152,7 @@ function classifyViaWorker(audioSource, expectedGender) {
         const onExit = (code, signal) => {
             if (settled)
                 return;
+            resetWorkerChild();
             const oom = signal === 'SIGKILL' || signal === 'SIGABRT';
             finish({
                 ok: false,
@@ -146,8 +161,20 @@ function classifyViaWorker(audioSource, expectedGender) {
                 model: 'voice-gender-worker',
                 failureKind: 'service_unavailable',
                 reason: oom
-                    ? 'Voice verification ran out of memory on server. Add 2G swap on EC2, then retry.'
+                    ? 'Voice verification ran out of memory on server. Add 2G swap on EC2 (sudo swapon), then retry.'
                     : `Voice verification worker exited (code=${code ?? 'null'}, signal=${signal ?? 'null'})`,
+            });
+        };
+        const onError = (err) => {
+            console.error('[voice-gender-worker] error', err);
+            resetWorkerChild();
+            finish({
+                ok: false,
+                predictedGender: 'unknown',
+                confidence: 0,
+                model: 'voice-gender-worker',
+                failureKind: 'service_unavailable',
+                reason: err.message,
             });
         };
         const timer = setTimeout(() => {
@@ -162,69 +189,62 @@ function classifyViaWorker(audioSource, expectedGender) {
         }, timeoutMs);
         child.on('message', onMessage);
         child.once('exit', onExit);
-        child.on('error', (err) => {
-            console.error('[voice-gender-worker] error', err);
-            finish({
-                ok: false,
-                predictedGender: 'unknown',
-                confidence: 0,
-                model: 'voice-gender-worker',
-                failureKind: 'service_unavailable',
-                reason: err.message,
-            });
-        });
+        child.on('error', onError);
         child.send({ id, audioSource, expectedGender });
+    });
+}
+function runWorkerJob(payload, timeoutMs) {
+    return new Promise((resolve) => {
+        let settled = false;
+        const child = getOrSpawnWorker();
+        const finish = (out) => {
+            if (settled)
+                return;
+            settled = true;
+            clearTimeout(timer);
+            if (child) {
+                child.off('message', onMessage);
+                child.off('exit', onExit);
+            }
+            resolve(out);
+        };
+        if (!child) {
+            finish({ ok: false, error: 'Voice worker not deployed' });
+            return;
+        }
+        const onMessage = (msg) => {
+            if (!msg || msg.id !== payload.id)
+                return;
+            if (msg.ok && msg.result) {
+                finish({ ok: true, result: msg.result });
+                return;
+            }
+            finish({ ok: false, error: msg.error || 'Voice worker failed' });
+        };
+        const onExit = () => {
+            if (settled)
+                return;
+            resetWorkerChild();
+            finish({ ok: false, error: 'Voice worker exited during warmup' });
+        };
+        const timer = setTimeout(() => {
+            finish({ ok: false, error: 'Voice worker warmup timed out' });
+        }, timeoutMs);
+        child.on('message', onMessage);
+        child.once('exit', onExit);
+        child.send(payload);
     });
 }
 async function warmVoiceGenderWorkerInBackground() {
     if (!shouldUseVoiceGenderWorker())
         return;
-    const workerScript = voiceGenderWorkerScriptPath();
-    if (!fs_1.default.existsSync(workerScript)) {
-        console.warn('[voice-gender-worker] warmup skipped — script missing:', workerScript);
+    const id = `warmup-${Date.now()}`;
+    const out = await runWorkerJob({ id, warmup: true }, 180_000);
+    if (out.ok) {
+        console.log('[voice-gender-worker] warmup complete');
         return;
     }
-    await new Promise((resolve) => {
-        const id = `warmup-${Date.now()}`;
-        let settled = false;
-        const finish = () => {
-            if (settled)
-                return;
-            settled = true;
-            if (child && !child.killed)
-                child.kill('SIGTERM');
-            resolve();
-        };
-        let child = null;
-        try {
-            child = (0, child_process_1.fork)(workerScript, [], {
-                env: process.env,
-                execArgv: ['--max-old-space-size=768'],
-                stdio: ['inherit', 'inherit', 'inherit', 'ipc'],
-            });
-        }
-        catch (err) {
-            console.warn('[voice-gender-worker] warmup spawn failed:', err);
-            finish();
-            return;
-        }
-        const timer = setTimeout(() => {
-            console.warn('[voice-gender-worker] warmup timed out');
-            finish();
-        }, 180_000);
-        child.on('message', (msg) => {
-            if (!msg || msg.id !== id || !msg.ok)
-                return;
-            clearTimeout(timer);
-            console.log('[voice-gender-worker] warmup complete', { pid: child?.pid });
-            finish();
-        });
-        child.once('exit', () => {
-            clearTimeout(timer);
-            finish();
-        });
-        child.send({ id, warmup: true });
-    });
+    console.warn('[voice-gender-worker] warmup failed:', out.error);
 }
 async function classifyVoiceGenderLocally(audioSource, expectedGender) {
     return withLocalClassifyLock(async () => {

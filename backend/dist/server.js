@@ -150,7 +150,8 @@ console.log('VOICE_GENDER_VERIFICATION_MODE:', process.env.VOICE_GENDER_VERIFICA
 console.log('VOICE_GENDER_PROVIDER:', process.env.VOICE_GENDER_PROVIDER || 'local (default)');
 console.log('VOICE_GENDER_LOCAL_MODEL_ID:', process.env.VOICE_GENDER_LOCAL_MODEL_ID ||
     'Xenova/wav2vec2-large-xlsr-53-gender-recognition-librispeech (default)');
-console.log('VOICE_GENDER_USE_WORKER:', process.env.VOICE_GENDER_USE_WORKER || 'true (default)');
+console.log('VOICE_GENDER_LOCAL_DTYPE:', process.env.VOICE_GENDER_LOCAL_DTYPE || 'q4 (default)');
+console.log('VOICE_GENDER_WORKER_HEAP_MB:', process.env.VOICE_GENDER_WORKER_HEAP_MB || '512 (default)');
 console.log('VOICE_GENDER_MAX_AUDIO_SEC:', process.env.VOICE_GENDER_MAX_AUDIO_SEC || '12 (default)');
 console.log('VOICE_GENDER_TIMEOUT_MS:', process.env.VOICE_GENDER_TIMEOUT_MS || '120000 (default)');
 // Normal imports

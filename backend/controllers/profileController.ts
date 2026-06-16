@@ -917,7 +917,12 @@ function buildVoiceVerificationPayload(
   result: Awaited<ReturnType<typeof verifyVoiceGender>>
 ): CallerVoiceVerificationPayload {
   return {
-    provider: result.model.startsWith('Xenova/') ? 'local' : 'huggingface',
+    provider:
+      result.model.startsWith('Xenova/') ||
+      result.model === 'voice-gender-worker' ||
+      result.model === 'warmup'
+        ? 'local'
+        : 'huggingface',
     approved: result.ok,
     predictedGender: result.predictedGender,
     confidence: result.confidence,

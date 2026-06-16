@@ -147,8 +147,12 @@ console.log(
     'Xenova/wav2vec2-large-xlsr-53-gender-recognition-librispeech (default)'
 );
 console.log(
-  'VOICE_GENDER_USE_WORKER:',
-  process.env.VOICE_GENDER_USE_WORKER || 'true (default)'
+  'VOICE_GENDER_LOCAL_DTYPE:',
+  process.env.VOICE_GENDER_LOCAL_DTYPE || 'q4 (default)'
+);
+console.log(
+  'VOICE_GENDER_WORKER_HEAP_MB:',
+  process.env.VOICE_GENDER_WORKER_HEAP_MB || '512 (default)'
 );
 console.log(
   'VOICE_GENDER_MAX_AUDIO_SEC:',

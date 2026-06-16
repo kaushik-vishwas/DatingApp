@@ -38,6 +38,14 @@ exports.classifyVoiceGenderLocallyCore = classifyVoiceGenderLocallyCore;
 const voiceGenderAudioLoader_1 = require("./voiceGenderAudioLoader");
 const LOCAL_MODEL_ID = process.env.VOICE_GENDER_LOCAL_MODEL_ID?.trim() ||
     'Xenova/wav2vec2-large-xlsr-53-gender-recognition-librispeech';
+function localModelDtype() {
+    const raw = (process.env.VOICE_GENDER_LOCAL_DTYPE ?? 'q4').trim().toLowerCase();
+    if (raw === 'q8')
+        return 'q8';
+    if (raw === 'fp32' || raw === 'float32')
+        return 'fp32';
+    return 'q4';
+}
 let pipelinePromise = null;
 function asNumber(v) {
     const n = typeof v === 'number' ? v : Number(v);
@@ -84,7 +92,12 @@ async function getClassifier() {
             if (env?.backends?.onnx?.wasm) {
                 env.backends.onnx.wasm.numThreads = 1;
             }
-            const pipe = await pipeline('audio-classification', LOCAL_MODEL_ID);
+            const dtype = localModelDtype();
+            console.log('[voice-gender-local] loading model', { model: LOCAL_MODEL_ID, dtype });
+            const pipe = await pipeline('audio-classification', LOCAL_MODEL_ID, {
+                dtype,
+                device: 'cpu',
+            });
             return pipe;
         })();
     }
