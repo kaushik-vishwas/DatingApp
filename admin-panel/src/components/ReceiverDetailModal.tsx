@@ -13,7 +13,7 @@ type Props = {
 export function ReceiverDetailModal({ receiver, onClose, onEdit }: Props) {
   if (!receiver) return null;
 
-  const profileUrl = resolveAdminProfileImageUrl(receiver.profileImage);
+  const profileUrl = resolveAdminProfileImageUrl(receiver.profileImage, receiver.updatedAt);
   const docs = [
     { label: 'Profile', url: profileUrl },
     { label: 'Aadhaar front', url: receiver.aadhaarFront },
@@ -47,7 +47,12 @@ export function ReceiverDetailModal({ receiver, onClose, onEdit }: Props) {
           </button>
         </div>
 
-        <ProfileImagePreview profileImage={receiver.profileImage} alt={receiver.name} className="mt-4" />
+        <ProfileImagePreview
+          profileImage={receiver.profileImage}
+          alt={receiver.name}
+          className="mt-4"
+          cacheKey={receiver.updatedAt}
+        />
 
         <dl className="mt-4 space-y-2 text-sm">
           <div className="flex justify-between gap-4">

@@ -3,7 +3,7 @@ import { Edit2, Eye, RefreshCw, Star } from 'lucide-react';
 import { fetchAllReceivers, type ReceiverRecord } from '../api/client';
 import { ReceiverDetailModal } from '../components/ReceiverDetailModal';
 import { ReceiverEditModal } from '../components/ReceiverEditModal';
-import { formatINR, pseudoMetrics, receiverCode } from '../utils/receiverDisplay';
+import { formatINR, receiverIsLiveAvailable, receiverRatingDisplay, receiverCode } from '../utils/receiverDisplay';
 
 type Tab = 'all' | 'approved' | 'pending';
 
@@ -68,17 +68,18 @@ export function ReceiversPage() {
     const total = sorted.length;
     const pendingKyc = sorted.filter((r) => r.accountStatus === 'pending_review').length;
     let online = 0;
-    let ratingSum = 0;
-    let ratingN = 0;
+    let ratingWeightedSum = 0;
+    let ratingWeightedN = 0;
     for (const r of sorted) {
-      const m = pseudoMetrics(r._id);
-      if (m.online) online += 1;
-      if (r.accountStatus === 'approved') {
-        ratingSum += m.rating;
-        ratingN += 1;
+      if (receiverIsLiveAvailable(r)) online += 1;
+      if (r.accountStatus === 'approved' && typeof r.ratingAvg === 'number' && (r.ratingCount ?? 0) > 0) {
+        const count = r.ratingCount ?? 0;
+        ratingWeightedSum += r.ratingAvg * count;
+        ratingWeightedN += count;
       }
     }
-    const avgRating = ratingN > 0 ? Math.round((ratingSum / ratingN) * 10) / 10 : null;
+    const avgRating =
+      ratingWeightedN > 0 ? Math.round((ratingWeightedSum / ratingWeightedN) * 10) / 10 : null;
     return { total, online, pendingKyc, avgRating };
   }, [sorted]);
 
@@ -124,7 +125,7 @@ export function ReceiversPage() {
         <div className="rounded-2xl border border-neutral-200 bg-white p-5 shadow-sm">
           <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">Online Now</p>
           <p className="mt-2 text-3xl font-bold text-emerald-600">{stats.online}</p>
-          <p className="mt-1 text-xs text-neutral-400">Simulated (no live presence yet)</p>
+          <p className="mt-1 text-xs text-neutral-400">Availability on &amp; logged in</p>
         </div>
         <div className="rounded-2xl border border-neutral-200 bg-white p-5 shadow-sm">
           <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">Pending KYC</p>
@@ -136,7 +137,7 @@ export function ReceiversPage() {
             <p className="text-3xl font-bold text-neutral-900">{stats.avgRating ?? '—'}</p>
             {stats.avgRating != null ? <Star className="h-7 w-7 fill-amber-400 text-amber-400" /> : null}
           </div>
-          <p className="mt-1 text-xs text-neutral-400">Simulated for approved</p>
+          <p className="mt-1 text-xs text-neutral-400">From caller ratings</p>
         </div>
       </div>
 
@@ -196,8 +197,13 @@ export function ReceiversPage() {
               <tbody>
                 {filtered.map((r) => {
                   const idx = idIndex.get(r._id) ?? 0;
-                  const m = pseudoMetrics(r._id);
                   const kyc = kycLabel(r.accountStatus);
+                  const live = receiverIsLiveAvailable(r);
+                  const ratingLabel = receiverRatingDisplay(r);
+                  const callsToday = r.callsToday ?? 0;
+                  const totalCalls = r.totalCalls ?? 0;
+                  const earningsToday = r.earningsToday ?? 0;
+                  const totalEarnings = r.totalEarnings ?? 0;
                   return (
                     <tr key={r._id} className="border-b border-neutral-100 last:border-0">
                       <td className="px-4 py-3 font-mono text-xs font-medium text-neutral-800">
@@ -205,19 +211,27 @@ export function ReceiversPage() {
                       </td>
                       <td className="px-4 py-3">
                         <p className="font-medium text-neutral-900">{r.name}</p>
-                        <p className="text-xs text-neutral-500">{m.callsToday} calls today</p>
+                        <p className="text-xs text-neutral-500">
+                          {callsToday} calls today · {totalCalls} total
+                        </p>
                       </td>
                       <td className="px-4 py-3">
                         <span className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-semibold ${kyc.className}`}>
                           {kyc.label}
                         </span>
                       </td>
-                      <td className="px-4 py-3 text-neutral-700">{formatINR(m.earningsToday)}</td>
-                      <td className="px-4 py-3 text-neutral-700">{formatINR(m.totalEarnings)}</td>
+                      <td className="px-4 py-3 text-neutral-700">{formatINR(earningsToday)}</td>
+                      <td className="px-4 py-3 text-neutral-700">{formatINR(totalEarnings)}</td>
                       <td className="px-4 py-3">
-                        {r.accountStatus === 'approved' ? (
+                        {ratingLabel != null ? (
                           <span className="inline-flex items-center gap-1 font-medium text-neutral-800">
-                            {m.rating} <Star className="h-3.5 w-3.5 fill-amber-400 text-amber-400" />
+                            {ratingLabel}{' '}
+                            {(r.ratingCount ?? 0) > 0 ? (
+                              <span className="text-xs font-normal text-neutral-500">
+                                ({r.ratingCount})
+                              </span>
+                            ) : null}
+                            <Star className="h-3.5 w-3.5 fill-amber-400 text-amber-400" />
                           </span>
                         ) : (
                           <span className="text-neutral-400">N/A</span>
@@ -226,9 +240,9 @@ export function ReceiversPage() {
                       <td className="px-4 py-3">
                         <span className="inline-flex items-center gap-2">
                           <span
-                            className={`h-2 w-2 rounded-full ${m.online ? 'bg-emerald-500' : 'bg-neutral-300'}`}
+                            className={`h-2 w-2 rounded-full ${live ? 'bg-emerald-500' : 'bg-neutral-300'}`}
                           />
-                          <span className="text-neutral-700">{m.online ? 'Online' : 'Offline'}</span>
+                          <span className="text-neutral-700">{live ? 'Online' : 'Offline'}</span>
                         </span>
                       </td>
                       <td className="px-4 py-3">

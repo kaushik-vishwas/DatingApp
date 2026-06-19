@@ -2,12 +2,14 @@ import React from 'react';
 import {
   Alert,
   StyleSheet,
-  Text,
   TouchableOpacity,
   type StyleProp,
   type ViewStyle,
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../context/AuthContext';
+
+const ICON_SIZE = 20;
 
 type Props = {
   onPress?: () => void;
@@ -47,8 +49,10 @@ export default function OnboardingLogoutButton({
       onPress={handlePress}
       hitSlop={12}
       activeOpacity={0.7}
+      accessibilityRole="button"
+      accessibilityLabel="Logout"
     >
-      <Text style={styles.text}>Logout</Text>
+      <Ionicons name="log-out-outline" size={ICON_SIZE} color="#dc2626" />
     </TouchableOpacity>
   );
 }
@@ -66,10 +70,5 @@ const styles = StyleSheet.create({
     alignSelf: 'flex-end',
     paddingVertical: 4,
     paddingHorizontal: 2,
-  },
-  text: {
-    color: '#dc2626',
-    fontSize: 14,
-    fontWeight: '700',
   },
 });

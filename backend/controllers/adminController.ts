@@ -8,6 +8,7 @@ import User, { type UserDocument } from '../models/User';
 import UserReport, { type ReportResolution } from '../models/UserReport';
 import WithdrawalRequest from '../models/WithdrawalRequest';
 import CallSession from '../models/CallSession';
+import ReceiverRating from '../models/ReceiverRating';
 import ChatMessage from '../models/ChatMessage';
 import AdminSettings, { type IFixedPerMinuteWindow, type ReceiverEarningModel } from '../models/AdminSettings';
 import {
@@ -743,6 +744,10 @@ function roundInr(n: number): number {
   return Math.round(n * 100) / 100;
 }
 
+function roundRating(n: number): number {
+  return Math.round(n * 10) / 10;
+}
+
 function toRangeStart(range: string): Date | null {
   const now = new Date();
   const start = new Date(now);
@@ -1377,7 +1382,104 @@ export const listAllReceivers = async (_req: Request, res: Response): Promise<vo
       .select('-otp -otpExpiry')
       .sort({ createdAt: 1 });
 
-    const list = receivers.map((r) => toApiReceiver(r as ReceiverDocument));
+    const receiverIds = receivers.map((r) => r._id);
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+
+    const [ratingRows, callStatRows] = await Promise.all([
+      receiverIds.length === 0
+        ? Promise.resolve([] as { _id: mongoose.Types.ObjectId; avg: number; count: number }[])
+        : ReceiverRating.aggregate<{ _id: mongoose.Types.ObjectId; avg: number; count: number }>([
+            { $match: { receiverId: { $in: receiverIds } } },
+            {
+              $group: {
+                _id: '$receiverId',
+                avg: { $avg: '$rating' },
+                count: { $sum: 1 },
+              },
+            },
+          ]),
+      receiverIds.length === 0
+        ? Promise.resolve(
+            [] as {
+              _id: mongoose.Types.ObjectId;
+              totalCalls: number;
+              totalEarnings: number;
+              callsToday: number;
+              earningsToday: number;
+            }[]
+          )
+        : CallSession.aggregate<{
+            _id: mongoose.Types.ObjectId;
+            totalCalls: number;
+            totalEarnings: number;
+            callsToday: number;
+            earningsToday: number;
+          }>([
+            {
+              $match: {
+                receiverId: { $in: receiverIds },
+                status: 'completed',
+                talkStartedAt: { $ne: null },
+              },
+            },
+            {
+              $group: {
+                _id: '$receiverId',
+                totalCalls: { $sum: 1 },
+                totalEarnings: { $sum: { $ifNull: ['$receiverEarnedInr', 0] } },
+                callsToday: {
+                  $sum: { $cond: [{ $gte: ['$startedAt', todayStart] }, 1, 0] },
+                },
+                earningsToday: {
+                  $sum: {
+                    $cond: [{ $gte: ['$startedAt', todayStart] }, { $ifNull: ['$receiverEarnedInr', 0] }, 0],
+                  },
+                },
+              },
+            },
+          ]),
+    ]);
+
+    const ratingByReceiverId = new Map(
+      ratingRows.map((row) => [
+        String(row._id),
+        {
+          avg: Number.isFinite(row.avg) ? roundRating(row.avg) : 0,
+          count: row.count ?? 0,
+        },
+      ])
+    );
+    const callStatsByReceiverId = new Map(
+      callStatRows.map((row) => [
+        String(row._id),
+        {
+          totalCalls: row.totalCalls ?? 0,
+          totalEarnings: roundInr(row.totalEarnings ?? 0),
+          callsToday: row.callsToday ?? 0,
+          earningsToday: roundInr(row.earningsToday ?? 0),
+        },
+      ])
+    );
+
+    const list = receivers.map((r) => {
+      const base = toApiReceiver(r as ReceiverDocument);
+      const id = String(r._id);
+      const rating = ratingByReceiverId.get(id);
+      const calls = callStatsByReceiverId.get(id);
+      const isAvailable = Boolean(base.isAvailable);
+      const isOnline = Boolean(base.isOnline);
+      return {
+        ...base,
+        ratingAvg: rating && rating.count > 0 ? rating.avg : null,
+        ratingCount: rating?.count ?? 0,
+        totalCalls: calls?.totalCalls ?? 0,
+        callsToday: calls?.callsToday ?? 0,
+        earningsToday: calls?.earningsToday ?? 0,
+        totalEarnings: calls?.totalEarnings ?? 0,
+        isLiveAvailable: isAvailable && isOnline,
+      };
+    });
 
     res.status(200).json({ receivers: list });
   } catch (err) {

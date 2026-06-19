@@ -312,7 +312,7 @@ export function KycApprovalsPage() {
                   );
                   const panFallbackFromDocuments =
                     documentUrls.find((url) => !knownDocumentUrls.has(url)) ?? null;
-                  const profileDocUrl = resolveAdminProfileImageUrl(r.profileImage);
+                  const profileDocUrl = resolveAdminProfileImageUrl(r.profileImage, r.updatedAt);
                   const docs = [
                     profileDocUrl ? { label: 'Profile', url: profileDocUrl, Icon: ImageIcon } : null,
                     r.aadhaarFront ? { label: 'Aadhaar front', url: r.aadhaarFront, Icon: FileText } : null,

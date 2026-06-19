@@ -104,17 +104,15 @@ export function AppUsersPage() {
         p += 1;
       } while (collected.length < lastTotal && p <= 60);
 
-      const header = ['User ID', 'Name', 'Email', 'Phone', 'Wallet (INR)', 'Voice URL', 'Access', 'Profile status', 'Joined'];
+      const header = ['User ID', 'Name', 'Phone', 'Wallet (INR)', 'Access', 'Profile status', 'Joined'];
       const rows: string[][] = [header];
       collected.forEach((u, i) => {
         const access = u.suspended ? 'Suspended' : 'Active';
         rows.push([
           `U${String(i + 1).padStart(4, '0')}`,
           u.name,
-          u.email ?? '',
           formatPhoneIN(u.phone),
           String(u.walletBalance),
-          u.userAudio ?? '',
           access,
           u.accountStatus,
           formatJoinedDate(u.createdAt),
@@ -268,15 +266,13 @@ export function AppUsersPage() {
           <p className="p-12 text-center text-sm text-neutral-500">No users in this view.</p>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[1180px] text-left text-sm">
+            <table className="w-full min-w-[900px] text-left text-sm">
               <thead>
                 <tr className="border-b border-neutral-100 bg-neutral-50/80">
                   <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-neutral-500">User ID</th>
                   <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-neutral-500">Name</th>
-                  <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-neutral-500">Email</th>
                   <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-neutral-500">Phone</th>
                   <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-neutral-500">Wallet</th>
-                  <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-neutral-500">Audio</th>
                   <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-neutral-500">Status</th>
                   <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-neutral-500">Actions</th>
                 </tr>
@@ -315,24 +311,9 @@ export function AppUsersPage() {
                         <p className="font-semibold text-neutral-900">{u.name}</p>
                         <p className="text-xs text-neutral-500">Joined {formatJoinedDate(u.createdAt)}</p>
                       </td>
-                      <td className="px-4 py-3 text-neutral-700">{u.email ?? '—'}</td>
                       <td className="px-4 py-3 text-neutral-700">{formatPhoneIN(u.phone)}</td>
                       <td className="px-4 py-3 font-medium text-neutral-900">
                         ₹{u.walletBalance.toLocaleString('en-IN')}
-                      </td>
-                      <td className="px-4 py-3 align-middle" onClick={(e) => e.stopPropagation()}>
-                        {u.userAudio ? (
-                          <audio
-                            className="h-9 w-full max-w-[240px] min-w-[180px]"
-                            controls
-                            preload="metadata"
-                            src={u.userAudio}
-                          >
-                            <track kind="captions" />
-                          </audio>
-                        ) : (
-                          <span className="text-neutral-400">—</span>
-                        )}
                       </td>
                       <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
                         <span

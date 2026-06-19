@@ -407,10 +407,14 @@ export default function ReceiverHomeDashboard(): React.JSX.Element {
                 activeOpacity={0.85}
               >
                 <View style={styles.earningsContainer}>
-                  <Text style={styles.earningsIco}>💰</Text>
                   <Text style={styles.earningsText} numberOfLines={1}>
                     {formatInr(totalEarningsLifetime)}
                   </Text>
+                  <View style={styles.plusIconWrapper}>
+                    <View style={styles.plusCircle}>
+                      <Ionicons name="add" size={15} color="#fff" />
+                    </View>
+                  </View>
                 </View>
               </TouchableOpacity>
 
@@ -582,7 +586,7 @@ export default function ReceiverHomeDashboard(): React.JSX.Element {
                     trackColor={{ false: '#e5e5e5', true: '#86efac' }}
                     thumbColor={available ? '#22c55e' : '#f59e0b'}
                     ios_backgroundColor="#e5e7eb"
-                    style={{ transform: [{ scaleX: 1.2 }, { scaleY: 1.2 }] }}
+                    style={{ transform: [{ scaleX: 1.6 }, { scaleY: 1.6 }] }}
                   />
                 </View>
               </LinearGradient>
@@ -807,7 +811,7 @@ const styles = StyleSheet.create({
   earningsContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 12,
+    paddingHorizontal: 8,
     paddingVertical: 6,
     gap: 4,
   },
@@ -829,7 +833,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     backgroundColor: '#e5e5e5',
     borderWidth: 1,
-    borderColor: PINK,
+    borderColor: '#00a2ff', 
   },
   bellIcon: {
     fontSize: 18,
@@ -852,8 +856,8 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 20,
-    borderWidth: 1.8,
-    borderColor: PINK,
+    borderWidth: 1.5,
+    borderColor: '#00a2ff',  
     overflow: 'hidden',
   },
   avatarContainer: {
@@ -945,16 +949,16 @@ const styles = StyleSheet.create({
   publicRateBtnText: { color: '#fff', fontWeight: '700', fontSize: 11 },
   publicLanguagesRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', justifyContent: 'flex-end', gap: 4 },
   publicMiniLang: {
-    backgroundColor: '#fefce8', 
+    backgroundColor: '#fefce8',
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 8,
     borderWidth: 1,
     borderColor: '#9a5cff',  // Purple border
   },
-publicMiniLangText: {
-    fontSize: 10, 
-    fontWeight: '700', 
+  publicMiniLangText: {
+    fontSize: 10,
+    fontWeight: '700',
     color: '#7b2cff',  // Purple text
     textTransform: 'uppercase'
   },
@@ -1161,6 +1165,24 @@ publicMiniLangText: {
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  plusIconWrapper: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: 0,
+  },
+  plusCircle: {
+    width: 25,
+    height: 25,
+    borderRadius: 14,
+    backgroundColor: '#00a2ff', // Bluish color
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#00a2ff',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
     shadowRadius: 4,
     elevation: 3,
   },

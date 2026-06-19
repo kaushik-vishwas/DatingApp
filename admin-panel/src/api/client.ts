@@ -70,6 +70,15 @@ export type ReceiverRecord = {
   walletBalance?: number;
   suspended?: boolean;
   isAvailable?: boolean;
+  isOnline?: boolean;
+  /** Logged in with availability switch on (isAvailable && isOnline). */
+  isLiveAvailable?: boolean;
+  ratingAvg?: number | null;
+  ratingCount?: number;
+  totalCalls?: number;
+  callsToday?: number;
+  earningsToday?: number;
+  totalEarnings?: number;
   gender?: string | null;
   age?: number | null;
   state?: string | null;

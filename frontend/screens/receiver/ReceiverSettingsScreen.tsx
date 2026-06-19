@@ -69,7 +69,7 @@ export default function ReceiverSettingsScreen(): React.JSX.Element {
             <View style={styles.iconCircle}>
               <Icon name="share-2" size={18} color="#7B2CFF" />
             </View>
-            <Text style={styles.label}>Share app</Text>
+            <Text style={styles.label}>Refer & Earn</Text>
           </View>
           <Icon name="chevron-right" size={18} color="#9ca3af" />
         </TouchableOpacity>

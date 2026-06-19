@@ -69,7 +69,7 @@ export default function CallerShareAppScreen({ navigation }: Props): React.JSX.E
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
           <Text style={styles.back}>←</Text>
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Share app</Text>
+        <Text style={styles.headerTitle}>Refer & Earn</Text>
         <View style={{ width: 40 }} />
       </View>
 

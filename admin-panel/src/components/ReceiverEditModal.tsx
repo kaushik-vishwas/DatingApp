@@ -223,7 +223,12 @@ export function ReceiverEditModal({ receiver, onClose, onSaved }: Props) {
           </div>
           <div>
             <label className="mb-1 block text-sm font-semibold text-neutral-700">Profile image</label>
-            <ProfileImagePreview profileImage={form.profileImage} alt={form.name} className="mb-2" />
+            <ProfileImagePreview
+              profileImage={form.profileImage}
+              alt={form.name}
+              className="mb-2"
+              cacheKey={receiver.updatedAt}
+            />
             <input
               value={form.profileImage}
               onChange={(e) => setForm((f) => ({ ...f, profileImage: e.target.value }))}

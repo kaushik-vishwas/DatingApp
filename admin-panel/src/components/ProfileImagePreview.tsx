@@ -7,11 +7,13 @@ type Props = {
   profileImage: string | null | undefined;
   alt?: string;
   className?: string;
+  /** Bust CDN/browser cache when profile was updated (e.g. receiver `updatedAt`). */
+  cacheKey?: string | null;
 };
 
 /** Shows preset or HTTPS profile photos in admin UI; raw preset ids are not used as link targets. */
-export function ProfileImagePreview({ profileImage, alt = 'Profile', className }: Props) {
-  const displayUrl = resolveAdminProfileImageUrl(profileImage);
+export function ProfileImagePreview({ profileImage, alt = 'Profile', className, cacheKey }: Props) {
+  const displayUrl = resolveAdminProfileImageUrl(profileImage, cacheKey);
   if (!displayUrl) return null;
 
   const stored = profileImage?.trim() ?? '';

@@ -361,6 +361,11 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
   const talkActiveRef = useRef(false);
   /** Server `talkStartedAt` — single source of truth so both sides show the same elapsed time. */
   const talkAnchorMsRef = useRef<number | null>(null);
+  /** Talk-time budget (sec) snapshotted at connect — avoids wallet sync jitter on the countdown. */
+  const remainingTalkBudgetSecRef = useRef<number | null>(null);
+  const sessionCallerWalletInrRef = useRef<number | null>(null);
+  const sessionCallRatePerMinuteRef = useRef<number | null>(null);
+  const callerWalletInrRef = useRef(0);
   const syncTalkBurstInFlightRef = useRef(false);
   const callIdRef = useRef(getVoiceBootstrap(callParams)?.callId ?? '');
   useEffect(() => {
@@ -498,7 +503,12 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
     callChargeRatePerMinute > 0
       ? Math.floor((walletForRemainingTalkSec / callChargeRatePerMinute) * 60)
       : 0;
-  const remainingTalkSec = Math.max(0, initialRemainingTalkSec - elapsedSec);
+  const liveTalkElapsedSec =
+    talkActive && talkAnchorMsRef.current != null
+      ? Math.max(0, Math.floor((Date.now() - talkAnchorMsRef.current) / 1000))
+      : elapsedSec;
+  const remainingTalkBudgetSec = remainingTalkBudgetSecRef.current ?? initialRemainingTalkSec;
+  const remainingTalkSec = Math.max(0, remainingTalkBudgetSec - liveTalkElapsedSec);
   const hasRemainingTalkWallet =
     sessionCallerWalletInr !== null || (user?.role === 'caller' && callerWalletInr > 0);
   const showRemainingTalkCountdown =
@@ -523,6 +533,18 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
   useEffect(() => {
     elapsedSecRef.current = elapsedSec;
   }, [elapsedSec]);
+
+  useEffect(() => {
+    sessionCallerWalletInrRef.current = sessionCallerWalletInr;
+  }, [sessionCallerWalletInr]);
+
+  useEffect(() => {
+    sessionCallRatePerMinuteRef.current = sessionCallRatePerMinute;
+  }, [sessionCallRatePerMinute]);
+
+  useEffect(() => {
+    callerWalletInrRef.current = callerWalletInr;
+  }, [callerWalletInr]);
 
   useEffect(() => {
     talkActiveRef.current = talkActive;
@@ -696,14 +718,32 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
     callerWalletBalanceInr?: number;
     callRatePerMinute?: number;
   }): void => {
+    if (talkActiveRef.current) return;
     if (
       typeof payload.callerWalletBalanceInr === 'number' &&
       Number.isFinite(payload.callerWalletBalanceInr)
     ) {
-      setSessionCallerWalletInr(Math.max(0, payload.callerWalletBalanceInr));
+      const nextWallet = Math.max(0, payload.callerWalletBalanceInr);
+      setSessionCallerWalletInr(nextWallet);
+      sessionCallerWalletInrRef.current = nextWallet;
     }
     if (typeof payload.callRatePerMinute === 'number' && Number.isFinite(payload.callRatePerMinute)) {
-      setSessionCallRatePerMinute(Math.max(0, payload.callRatePerMinute));
+      const nextRate = Math.max(0, payload.callRatePerMinute);
+      setSessionCallRatePerMinute(nextRate);
+      sessionCallRatePerMinuteRef.current = nextRate;
+    }
+    snapRemainingTalkBudgetRef.current();
+  };
+
+  const snapRemainingTalkBudgetRef = useRef<() => void>(() => {});
+  snapRemainingTalkBudgetRef.current = () => {
+    const wallet =
+      sessionCallerWalletInrRef.current ??
+      (userRoleRef.current === 'caller' ? callerWalletInrRef.current : 0);
+    const rate =
+      sessionCallRatePerMinuteRef.current ?? getReceiverChargeRatePerMinute(callParams);
+    if (rate > 0 && wallet >= 0) {
+      remainingTalkBudgetSecRef.current = Math.floor((wallet / rate) * 60);
     }
   };
 
@@ -729,9 +769,13 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
     if (!Number.isFinite(anchorMs)) {
       return false;
     }
+    const wasTalkActive = talkActiveRef.current;
     talkAnchorMsRef.current = anchorMs;
     talkActiveRef.current = true;
     setTalkActive(true);
+    if (!wasTalkActive) {
+      snapRemainingTalkBudgetRef.current();
+    }
     updateElapsedFromAnchor();
     return true;
   };
@@ -1001,6 +1045,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
     setTalkActive(false);
     talkActiveRef.current = false;
     talkAnchorMsRef.current = null;
+    remainingTalkBudgetSecRef.current = null;
     setElapsedSec(0);
     elapsedSecRef.current = 0;
     setIncomingReq(null);
@@ -1572,7 +1617,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
 
   const syncTalkTimingOnce = useCallback(async (): Promise<boolean> => {
     if (!callIdRef.current || endingRef.current) return false;
-    const light = !talkActiveRef.current;
+    const light = talkActiveRef.current;
     try {
       const sync = await instrumentedSessionSync(
         callIdRef.current,
@@ -1586,7 +1631,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
         return false;
       }
       const started = applyTalkTimingFromServer(data);
-      if (!light) {
+      if (!talkActiveRef.current) {
         applySessionBillingFromServer(data);
         if (
           typeof data.receiverEarnedInr === 'number' &&
@@ -1611,11 +1656,23 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
 
   const handleInCallRechargeSuccess = useCallback(
     (newWalletBalanceInr: number) => {
-      setSessionCallerWalletInr(Math.max(0, newWalletBalanceInr));
+      const nextWallet = Math.max(0, newWalletBalanceInr);
+      setSessionCallerWalletInr(nextWallet);
+      sessionCallerWalletInrRef.current = nextWallet;
+      const rate =
+        sessionCallRatePerMinuteRef.current ?? getReceiverChargeRatePerMinute(callParams);
+      if (rate > 0) {
+        const anchorMs = talkAnchorMsRef.current;
+        const elapsed =
+          anchorMs != null && Number.isFinite(anchorMs)
+            ? Math.max(0, Math.floor((Date.now() - anchorMs) / 1000))
+            : elapsedSecRef.current;
+        remainingTalkBudgetSecRef.current = Math.floor((nextWallet / rate) * 60) + elapsed;
+      }
       void refreshUser();
       void syncTalkTimingOnceRef.current();
     },
-    [refreshUser]
+    [callParams, refreshUser]
   );
 
   const syncTalkTimingUntilBothJoined = useCallback(async (): Promise<void> => {
@@ -1700,9 +1757,27 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
 
   useEffect(() => {
     if (!ready || !talkActive) return;
+    let cancelled = false;
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+
+    const scheduleNextTick = (): void => {
+      if (cancelled) return;
+      updateElapsedFromAnchor();
+      const anchorMs = talkAnchorMsRef.current;
+      const delayMs =
+        anchorMs != null && Number.isFinite(anchorMs)
+          ? Math.max(25, 1000 - ((Date.now() - anchorMs) % 1000))
+          : 1000;
+      timeoutId = setTimeout(scheduleNextTick, delayMs);
+    };
+
     updateElapsedFromAnchor();
-    const timer = setInterval(updateElapsedFromAnchor, 1000);
-    return () => clearInterval(timer);
+    scheduleNextTick();
+
+    return () => {
+      cancelled = true;
+      if (timeoutId !== undefined) clearTimeout(timeoutId);
+    };
   }, [ready, talkActive, updateElapsedFromAnchor]);
 
   useEffect(() => {

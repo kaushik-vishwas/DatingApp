@@ -23,6 +23,27 @@ export function formatINR(n: number): string {
   return `₹${n.toLocaleString('en-IN')}`;
 }
 
+export function receiverIsLiveAvailable(r: {
+  isLiveAvailable?: boolean;
+  isAvailable?: boolean;
+  isOnline?: boolean;
+}): boolean {
+  if (typeof r.isLiveAvailable === 'boolean') return r.isLiveAvailable;
+  return Boolean(r.isAvailable && r.isOnline);
+}
+
+export function receiverRatingDisplay(r: {
+  accountStatus: string;
+  ratingAvg?: number | null;
+  ratingCount?: number;
+}): string | null {
+  if (r.accountStatus !== 'approved') return null;
+  if (typeof r.ratingAvg === 'number' && Number.isFinite(r.ratingAvg)) {
+    return String(r.ratingAvg);
+  }
+  return null;
+}
+
 export function receiverCode(index: number): string {
   return `R${String(index + 1).padStart(3, '0')}`;
 }

@@ -162,7 +162,7 @@ export default function CallerProfileTabScreen({ navigation }: Props): React.JSX
             activeOpacity={0.88}
           >
             <Feather name="share-2" size={26} color="#666" style={styles.actionCardIco} />
-            <Text style={styles.actionCardTitle}>Share app</Text>
+            <Text style={styles.actionCardTitle}>Refer & Earn</Text>
             <Text style={styles.actionCardSub}>Invite friends</Text>
           </TouchableOpacity>
           <TouchableOpacity
