@@ -1,5 +1,5 @@
 import {
-  isPresetProfileImage,
+  // isPresetProfileImage,
   resolveAdminProfileImageUrl,
 } from '../utils/resolveProfileImageUrl';
 
@@ -16,7 +16,7 @@ export function ProfileImagePreview({ profileImage, alt = 'Profile', className, 
   const displayUrl = resolveAdminProfileImageUrl(profileImage, cacheKey);
   if (!displayUrl) return null;
 
-  const stored = profileImage?.trim() ?? '';
+  // const stored = profileImage?.trim() ?? '';
 
   return (
     <div className={className ?? 'mt-3'}>
