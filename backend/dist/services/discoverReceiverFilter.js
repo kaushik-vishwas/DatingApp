@@ -6,7 +6,8 @@ const callerProfileAllowlist_1 = require("../constants/callerProfileAllowlist");
  * Example (combined filters = AND):
  * `GET /discover/receivers?gender=Female&minAge=22&maxAge=35&langs=Hindi,English&limit=50`
  * Response: `{ "receivers": [ { "_id": "...", "name": "...", "age": 28, "gender": "female", ... } ] }`
- * Omit `gender`, `minAge`/`maxAge` to skip those filters (only `accountStatus: approved` is always applied).
+ * Omit `gender`, `minAge`/`maxAge` to skip those filters.
+ * Always excludes suspended/rejected; includes approved and in-progress profiles so offline receivers stay visible on discover.
  */
 function escapeRegex(s) {
     return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -19,7 +20,13 @@ const SLIDER_AGE_MAX = 50;
  * then `age` must exist and lie in range (no matches for null/missing age).
  */
 function buildDiscoverReceiverFilter(input) {
-    const parts = [{ accountStatus: 'approved' }];
+    const parts = [
+        {
+            suspended: { $ne: true },
+            accountStatus: { $in: ['approved', 'pending_profile'] },
+            isVerified: true,
+        },
+    ];
     const langsList = input.langsRaw
         .split(/[,|]/)
         .map((s) => s.trim())

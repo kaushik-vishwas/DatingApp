@@ -407,14 +407,15 @@ export default function ReceiverHomeDashboard(): React.JSX.Element {
                 activeOpacity={0.85}
               >
                 <View style={styles.earningsContainer}>
+                  <Text style={styles.earningsIco}>💰</Text>
                   <Text style={styles.earningsText} numberOfLines={1}>
                     {formatInr(totalEarningsLifetime)}
                   </Text>
-                  <View style={styles.plusIconWrapper}>
-                    <View style={styles.plusCircle}>
-                      <Ionicons name="add" size={15} color="#fff" />
-                    </View>
-                  </View>
+                  {/* <View style={styles.plusIconWrapper}>
+    <View style={styles.plusCircle}>
+      <Ionicons name="add" size={15} color="#fff" />
+    </View>
+  </View> */}
                 </View>
               </TouchableOpacity>
 
@@ -746,8 +747,8 @@ const styles = StyleSheet.create({
   topSection: {
     marginBottom: 0,
     paddingHorizontal: 16,
-    paddingTop: 12,
-    paddingBottom: 10,
+    paddingTop: 10,
+    paddingBottom: 6,
     backgroundColor: '#fff',
     // borderBottomLeftRadius: 24,
     // borderBottomRightRadius: 24,
@@ -800,40 +801,44 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     color: '#111',
   },
-
   earningsCapsule: {
     borderRadius: 40,
     borderWidth: 1,
     borderColor: '#00a2ff',
     backgroundColor: '#e5e5e5',
-    maxWidth: 120,
+    maxWidth: 140,    // Changed from 120 to 140
+    minWidth: 100,    // Added minimum width for better size
+    paddingHorizontal: 2, // Added for better spacing
   },
+  
   earningsContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 8,
-    paddingVertical: 6,
-    gap: 4,
+    paddingHorizontal: 10,  // Changed from 8 to 12
+    paddingVertical: 8,     // Changed from 6 to 8
+    gap: 6,                 // Changed from 4 to 6
   },
+  
   earningsIco: {
-    fontSize: 14,
+    fontSize: 14,     // Changed from 14 to 16
   },
+  
   earningsText: {
-    fontSize: 12,
+    fontSize: 14,     // Changed from 12 to 14
     fontWeight: '800',
     color: '#111',
     flexShrink: 1,
   },
 
   bellButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: 40,
+    height: 40,
+    borderRadius: 22,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: '#e5e5e5',
     borderWidth: 1,
-    borderColor: '#00a2ff', 
+    borderColor: '#00a2ff',
   },
   bellIcon: {
     fontSize: 18,
@@ -855,9 +860,9 @@ const styles = StyleSheet.create({
   avatarCapsule: {
     width: 40,
     height: 40,
-    borderRadius: 20,
+    borderRadius: 23,
     borderWidth: 1.5,
-    borderColor: '#00a2ff',  
+    borderColor: '#00a2ff',
     overflow: 'hidden',
   },
   avatarContainer: {
@@ -868,9 +873,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   meAvatar: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: 39,
+    height: 39,
+    borderRadius: 20,
   },
   meAvatarTxt: {
     fontWeight: '900',

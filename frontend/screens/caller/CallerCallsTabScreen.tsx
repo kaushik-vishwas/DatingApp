@@ -4,6 +4,7 @@ import { ActivityIndicator, Alert, Image, ScrollView, StyleSheet, Text, Touchabl
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import CallerTabScreenHeader from '../../components/caller/CallerTabScreenHeader';
+import ReceiverSwipeableTabs from '../../components/receiver/ReceiverSwipeableTabs';
 import { CALLER_MESSAGE_REQUIRES_CALL } from '../../constants/callerMessaging';
 import { useCallerMessageEligibility } from '../../context/CallerMessageEligibilityContext';
 import { useCallSignals } from '../../context/CallSignalContext';
@@ -15,42 +16,71 @@ import { callerCallMetaLine, callerCallStatusLabel } from '../../utils/callerCal
 import { resolveProfileImageSource } from '../../utils/avatarSource';
 import { SCREEN_FETCH_TIMEOUT_MS, withTimeout } from '../../utils/withTimeout';
 
+type RangeTab = 'all' | 'week' | 'month';
+const RECENT_TABS = [
+  { key: 'all' as const, label: 'All' },
+  { key: 'week' as const, label: 'This Week' },
+  { key: 'month' as const, label: 'This Month' },
+];
+
 export default function CallerCallsTabScreen(): React.JSX.Element {
   const navigation = useCallerAppNavigation();
   const scrollPaddingBottom = useReceiverTabBarBottomInset();
   const { canMessageReceiver } = useCallerMessageEligibility();
   const { startCallInvite } = useCallSignals();
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [range, setRange] = useState<'all' | 'week' | 'month'>('all');
-  const [rows, setRows] = useState<CallerCallHistoryRow[]>([]);
+  const [range, setRange] = useState<RangeTab>('all');
+  const [rowsByRange, setRowsByRange] = useState<Partial<Record<RangeTab, CallerCallHistoryRow[]>>>({});
+  const [loadingByRange, setLoadingByRange] = useState<Partial<Record<RangeTab, boolean>>>({});
+  const [errorByRange, setErrorByRange] = useState<Partial<Record<RangeTab, string | null>>>({});
   const [callingReceiverId, setCallingReceiverId] = useState<string | null>(null);
   const [selectMode, setSelectMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
   const [deleting, setDeleting] = useState(false);
-  const loadGenRef = useRef(0);
+  const loadGenByRangeRef = useRef<Record<RangeTab, number>>({
+    all: 0,
+    week: 0,
+    month: 0,
+  });
 
-  const load = useCallback(async () => {
-    const id = ++loadGenRef.current;
-    setLoading(true);
-    setError(null);
+  const load = useCallback(async (tabRange: RangeTab) => {
+    const id = ++loadGenByRangeRef.current[tabRange];
+    setLoadingByRange((prev) => ({ ...prev, [tabRange]: true }));
+    setErrorByRange((prev) => ({ ...prev, [tabRange]: null }));
     try {
-      const { data } = await withTimeout(profileApi.callerCallHistory(range), SCREEN_FETCH_TIMEOUT_MS);
-      if (loadGenRef.current !== id) return;
-      setRows(data.calls);
+      const { data } = await withTimeout(profileApi.callerCallHistory(tabRange), SCREEN_FETCH_TIMEOUT_MS);
+      if (loadGenByRangeRef.current[tabRange] !== id) return;
+      setRowsByRange((prev) => ({ ...prev, [tabRange]: data.calls }));
     } catch (e) {
-      if (loadGenRef.current !== id) return;
-      setError(getErrorMessage(e));
+      if (loadGenByRangeRef.current[tabRange] !== id) return;
+      setErrorByRange((prev) => ({ ...prev, [tabRange]: getErrorMessage(e) }));
     } finally {
-      if (loadGenRef.current === id) setLoading(false);
+      if (loadGenByRangeRef.current[tabRange] === id) {
+        setLoadingByRange((prev) => ({ ...prev, [tabRange]: false }));
+      }
     }
-  }, [range]);
+  }, []);
+
+  const handleRangeChange = useCallback(
+    (next: RangeTab) => {
+      if (selectMode) {
+        setSelectMode(false);
+        setSelectedIds(new Set());
+      }
+      setRange(next);
+      void load(next);
+    },
+    [load, selectMode]
+  );
 
   useFocusEffect(
     useCallback(() => {
-      void load();
-    }, [load])
+      void load(range);
+    }, [load, range])
   );
+
+  const activeRows = rowsByRange[range] ?? [];
+  const activeLoading = loadingByRange[range] ?? false;
+  const activeError = errorByRange[range] ?? null;
 
   const exitSelectMode = useCallback(() => {
     setSelectMode(false);
@@ -66,7 +96,7 @@ export default function CallerCallsTabScreen(): React.JSX.Element {
     });
   }, []);
 
-  const allVisibleSelected = rows.length > 0 && rows.every((row) => selectedIds.has(row.id));
+  const allVisibleSelected = activeRows.length > 0 && activeRows.every((row) => selectedIds.has(row.id));
   const selectedCount = selectedIds.size;
 
   const onToggleSelectAll = () => {
@@ -74,7 +104,7 @@ export default function CallerCallsTabScreen(): React.JSX.Element {
       setSelectedIds(new Set());
       return;
     }
-    setSelectedIds(new Set(rows.map((row) => row.id)));
+    setSelectedIds(new Set(activeRows.map((row) => row.id)));
   };
 
   const onDeleteSelected = () => {
@@ -94,7 +124,10 @@ export default function CallerCallsTabScreen(): React.JSX.Element {
             void (async () => {
               try {
                 await profileApi.deleteCallerCallHistory([...selectedIds]);
-                setRows((prev) => prev.filter((row) => !selectedIds.has(row.id)));
+                setRowsByRange((prev) => ({
+                  ...prev,
+                  [range]: (prev[range] ?? []).filter((row) => !selectedIds.has(row.id)),
+                }));
                 exitSelectMode();
               } catch (e) {
                 Alert.alert('Delete failed', getErrorMessage(e));
@@ -131,66 +164,53 @@ export default function CallerCallsTabScreen(): React.JSX.Element {
     })();
   };
 
-  return (
-    <SafeAreaView style={styles.safe} edges={['top', 'left', 'right']}>
-      <CallerTabScreenHeader title="Recents" subtitle="Your calls" backTarget="home" />
-      <View style={styles.filtersRow}>
-        <View style={styles.filters}>
-          {(['all', 'week', 'month'] as const).map((r) => (
-            <TouchableOpacity
-              key={r}
-              style={[styles.filterBtn, range === r && styles.filterBtnActive]}
-              onPress={() => {
-                if (selectMode) exitSelectMode();
-                setRange(r);
-              }}
-              disabled={selectMode}
+  const tabBarExtra =
+    !activeLoading && !activeError && activeRows.length > 0 ? (
+      selectMode ? (
+        <View style={styles.selectActions}>
+          <TouchableOpacity onPress={exitSelectMode} activeOpacity={0.85}>
+            <Text style={styles.selectActionText}>Cancel</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            onPress={onDeleteSelected}
+            disabled={selectedCount === 0 || deleting}
+            activeOpacity={0.85}
+          >
+            <Text
+              style={[
+                styles.selectActionText,
+                styles.deleteActionText,
+                (selectedCount === 0 || deleting) && styles.selectActionDisabled,
+              ]}
             >
-              <Text style={[styles.filterText, range === r && styles.filterTextActive]}>
-                {r === 'all' ? 'All' : r === 'week' ? 'This Week' : 'This Month'}
-              </Text>
-            </TouchableOpacity>
-          ))}
+              {deleting ? 'Deleting…' : `Delete${selectedCount > 0 ? ` (${selectedCount})` : ''}`}
+            </Text>
+          </TouchableOpacity>
         </View>
-        {!loading && !error && rows.length > 0 ? (
-          selectMode ? (
-            <View style={styles.selectActions}>
-              <TouchableOpacity onPress={exitSelectMode} activeOpacity={0.85}>
-                <Text style={styles.selectActionText}>Cancel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                onPress={onDeleteSelected}
-                disabled={selectedCount === 0 || deleting}
-                activeOpacity={0.85}
-              >
-                <Text
-                  style={[
-                    styles.selectActionText,
-                    styles.deleteActionText,
-                    (selectedCount === 0 || deleting) && styles.selectActionDisabled,
-                  ]}
-                >
-                  {deleting ? 'Deleting…' : `Delete${selectedCount > 0 ? ` (${selectedCount})` : ''}`}
-                </Text>
-              </TouchableOpacity>
-            </View>
-          ) : (
-            <TouchableOpacity onPress={() => setSelectMode(true)} activeOpacity={0.85}>
-              <Text style={styles.selectActionText}>Select</Text>
-            </TouchableOpacity>
-          )
-        ) : null}
-      </View>
-
-      {selectMode && rows.length > 0 ? (
-        <TouchableOpacity style={styles.selectAllRow} onPress={onToggleSelectAll} activeOpacity={0.85}>
-          <View style={[styles.checkbox, allVisibleSelected && styles.checkboxChecked]}>
-            {allVisibleSelected ? <Text style={styles.checkboxMark}>✓</Text> : null}
-          </View>
-          <Text style={styles.selectAllText}>{allVisibleSelected ? 'Deselect all' : 'Select all'}</Text>
+      ) : (
+        <TouchableOpacity onPress={() => setSelectMode(true)} activeOpacity={0.85}>
+          <Text style={styles.selectActionText}>Select</Text>
         </TouchableOpacity>
-      ) : null}
+      )
+    ) : null;
 
+  const belowTabBar =
+    selectMode && activeRows.length > 0 ? (
+      <TouchableOpacity style={styles.selectAllRow} onPress={onToggleSelectAll} activeOpacity={0.85}>
+        <View style={[styles.checkbox, allVisibleSelected && styles.checkboxChecked]}>
+          {allVisibleSelected ? <Text style={styles.checkboxMark}>✓</Text> : null}
+        </View>
+        <Text style={styles.selectAllText}>{allVisibleSelected ? 'Deselect all' : 'Select all'}</Text>
+      </TouchableOpacity>
+    ) : null;
+
+  const renderRecentPage = (tabRange: RangeTab): React.JSX.Element => {
+    const rows = rowsByRange[tabRange] ?? [];
+    const loading = loadingByRange[tabRange] ?? false;
+    const error = errorByRange[tabRange] ?? null;
+    const isActiveRange = tabRange === range;
+
+    return (
       <ScrollView
         style={styles.listWrap}
         contentContainerStyle={{ paddingBottom: scrollPaddingBottom }}
@@ -201,7 +221,11 @@ export default function CallerCallsTabScreen(): React.JSX.Element {
         ) : error ? (
           <View style={styles.errorBlock}>
             <Text style={styles.errorMsg}>{error}</Text>
-            <TouchableOpacity style={styles.retryBtn} onPress={() => void load()} activeOpacity={0.85}>
+            <TouchableOpacity
+              style={styles.retryBtn}
+              onPress={() => void load(tabRange)}
+              activeOpacity={0.85}
+            >
               <Text style={styles.retryBtnText}>Retry</Text>
             </TouchableOpacity>
           </View>
@@ -209,80 +233,105 @@ export default function CallerCallsTabScreen(): React.JSX.Element {
           <View style={styles.center}>
             <Text style={styles.emoji}>📞</Text>
             <Text style={styles.head}>No calls yet</Text>
-            <Text style={styles.sub}>Your call history will show talk time here after you connect with someone.</Text>
+            <Text style={styles.sub}>
+              Your call history will show talk time here after you connect with someone.
+            </Text>
           </View>
         ) : (
           rows.map((row) => {
             const receiverAvatar = resolveProfileImageSource(row.receiverImage);
             const canMessage = canMessageReceiver(row.receiverId);
-            const isSelected = selectedIds.has(row.id);
+            const isSelected = isActiveRange && selectedIds.has(row.id);
+            const rowSelectMode = isActiveRange && selectMode;
+
             return (
-            <TouchableOpacity
-              key={row.id}
-              style={[styles.row, selectMode && isSelected && styles.rowSelected]}
-              onPress={selectMode ? () => toggleSelected(row.id) : undefined}
-              activeOpacity={selectMode ? 0.85 : 1}
-              disabled={!selectMode}
-            >
-              {selectMode ? (
-                <View style={[styles.checkbox, isSelected && styles.checkboxChecked]}>
-                  {isSelected ? <Text style={styles.checkboxMark}>✓</Text> : null}
-                </View>
-              ) : null}
-              {receiverAvatar ? (
-                <Image source={receiverAvatar} style={styles.avatar} />
-              ) : (
-                <View style={[styles.avatar, styles.avatarPh]}>
-                  <Text style={styles.avatarTxt}>{row.receiverName.charAt(0) || '?'}</Text>
-                </View>
-              )}
-              <View style={{ flex: 1 }}>
-                <Text style={styles.rowName}>{row.receiverName}</Text>
-                <Text style={styles.rowMeta}>
-                  {callerCallMetaLine(row.durationSec, row.status)} •{' '}
-                  <Text style={{ color: statusTone[row.status], fontWeight: '800' }}>
-                    {callerCallStatusLabel(row.status)}
+              <TouchableOpacity
+                key={row.id}
+                style={[styles.row, rowSelectMode && isSelected && styles.rowSelected]}
+                onPress={rowSelectMode ? () => toggleSelected(row.id) : undefined}
+                activeOpacity={rowSelectMode ? 0.85 : 1}
+                disabled={!rowSelectMode}
+              >
+                {rowSelectMode ? (
+                  <View style={[styles.checkbox, isSelected && styles.checkboxChecked]}>
+                    {isSelected ? <Text style={styles.checkboxMark}>✓</Text> : null}
+                  </View>
+                ) : null}
+                {receiverAvatar ? (
+                  <Image source={receiverAvatar} style={styles.avatar} />
+                ) : (
+                  <View style={[styles.avatar, styles.avatarPh]}>
+                    <Text style={styles.avatarTxt}>{row.receiverName.charAt(0) || '?'}</Text>
+                  </View>
+                )}
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.rowName}>{row.receiverName}</Text>
+                  <Text style={styles.rowMeta}>
+                    {callerCallMetaLine(row.durationSec, row.status)} •{' '}
+                    <Text style={{ color: statusTone[row.status], fontWeight: '800' }}>
+                      {callerCallStatusLabel(row.status)}
+                    </Text>
                   </Text>
-                </Text>
-                <Text style={styles.rowAt}>{new Date(row.startedAt).toLocaleString()}</Text>
-              </View>
-              {!selectMode ? (
-              <View style={styles.actions}>
-                <TouchableOpacity
-                  style={[styles.actionBtn, styles.callBtn]}
-                  onPress={() => onCallFromHistory(row)}
-                  disabled={callingReceiverId === row.receiverId}
-                  activeOpacity={0.85}
-                >
-                  <Text style={styles.actionTxt}>
-                    {callingReceiverId === row.receiverId ? '…' : '📞'}
-                  </Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.actionBtn, !canMessage && styles.actionBtnDisabled]}
-                  onPress={() => {
-                    if (!canMessage) {
-                      Alert.alert('Messaging locked', CALLER_MESSAGE_REQUIRES_CALL);
-                      return;
-                    }
-                    navigation.navigate('CallerChat', {
-                      receiverId: row.receiverId,
-                      receiverName: row.receiverName,
-                      receiverImage: row.receiverImage,
-                    });
-                  }}
-                  activeOpacity={canMessage ? 0.85 : 1}
-                  disabled={!canMessage}
-                >
-                  <Text style={[styles.actionTxt, !canMessage && styles.actionTxtDisabled]}>💬</Text>
-                </TouchableOpacity>
-              </View>
-              ) : null}
-            </TouchableOpacity>
+                  <Text style={styles.rowAt}>{new Date(row.startedAt).toLocaleString()}</Text>
+                </View>
+                {!rowSelectMode ? (
+                  <View style={styles.actions}>
+                    <TouchableOpacity
+                      style={[styles.actionBtn, styles.callBtn]}
+                      onPress={() => onCallFromHistory(row)}
+                      disabled={callingReceiverId === row.receiverId}
+                      activeOpacity={0.85}
+                    >
+                      <Text style={styles.actionTxt}>
+                        {callingReceiverId === row.receiverId ? '…' : '📞'}
+                      </Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[styles.actionBtn, !canMessage && styles.actionBtnDisabled]}
+                      onPress={() => {
+                        if (!canMessage) {
+                          Alert.alert('Messaging locked', CALLER_MESSAGE_REQUIRES_CALL);
+                          return;
+                        }
+                        navigation.navigate('CallerChat', {
+                          receiverId: row.receiverId,
+                          receiverName: row.receiverName,
+                          receiverImage: row.receiverImage,
+                        });
+                      }}
+                      activeOpacity={canMessage ? 0.85 : 1}
+                      disabled={!canMessage}
+                    >
+                      <Text style={[styles.actionTxt, !canMessage && styles.actionTxtDisabled]}>💬</Text>
+                    </TouchableOpacity>
+                  </View>
+                ) : null}
+              </TouchableOpacity>
             );
           })
         )}
       </ScrollView>
+    );
+  };
+
+  return (
+    <SafeAreaView style={styles.safe} edges={['top', 'left', 'right']}>
+      <CallerTabScreenHeader title="Recents" subtitle="Your calls" backTarget="home" />
+      <ReceiverSwipeableTabs
+        tabs={RECENT_TABS}
+        activeTab={range}
+        onTabChange={handleRangeChange}
+        swipeEnabled={!selectMode}
+        tabPressEnabled={!selectMode}
+        tabBarExtra={tabBarExtra}
+        belowTabBar={belowTabBar}
+        tabBarStyle={styles.filtersRow}
+        tabButtonStyle={styles.filterBtn}
+        tabButtonActiveStyle={styles.filterBtnActive}
+        tabTextStyle={styles.filterText}
+        tabTextActiveStyle={styles.filterTextActive}
+        renderPage={renderRecentPage}
+      />
     </SafeAreaView>
   );
 }
@@ -290,14 +339,9 @@ export default function CallerCallsTabScreen(): React.JSX.Element {
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: '#f6f6f7' },
   filtersRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
     paddingHorizontal: 14,
     marginBottom: 8,
-    gap: 8,
   },
-  filters: { flexDirection: 'row', gap: 8, flexShrink: 1, flexWrap: 'wrap' },
   selectActions: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   selectActionText: { fontSize: 13, color: '#7b2cff', fontWeight: '800' },
   deleteActionText: { color: '#dc2626' },
@@ -346,7 +390,7 @@ const styles = StyleSheet.create({
     borderRadius: 10,
   },
   retryBtnText: { color: '#fff', fontSize: 13, fontWeight: '800' },
-  center: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 32 },
+  center: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 32, minHeight: 280 },
   emoji: { fontSize: 48, marginBottom: 16 },
   head: { fontSize: 18, fontWeight: '900', color: '#111', marginBottom: 8 },
   sub: { fontSize: 14, color: '#666', textAlign: 'center', lineHeight: 22 },

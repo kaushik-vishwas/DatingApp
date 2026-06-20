@@ -5,9 +5,14 @@ import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useReceiverNotificationData } from '../../context/ReceiverNotificationDataContext';
 import type { ReceiverStackParamList } from '../../navigation/ReceiverStackParamList';
 import ReceiverNotificationActivityList from './ReceiverNotificationActivityList';
+import ReceiverSwipeableTabs from './ReceiverSwipeableTabs';
 
 type PaymentSubTab = 'earning' | 'withdrawal';
 const PAYMENT_RELOAD_THROTTLE_MS = 12_000;
+const PAYMENT_TABS = [
+  { key: 'earning' as const, label: 'Earnings' },
+  { key: 'withdrawal' as const, label: 'Withdrawals' },
+];
 
 export default function ReceiverPaymentTabsContent(): React.JSX.Element {
   const navigation = useNavigation();
@@ -29,32 +34,19 @@ export default function ReceiverPaymentTabsContent(): React.JSX.Element {
     }, [reload])
   );
 
-  return (
-    <View style={styles.root}>
-      <View style={styles.tabs}>
-        <TouchableOpacity
-          style={[styles.tab, subTab === 'earning' && styles.tabActive]}
-          onPress={() => setSubTab('earning')}
-          activeOpacity={0.85}
-        >
-          <Text style={[styles.tabText, subTab === 'earning' && styles.tabTextActive]}>Earnings</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.tab, subTab === 'withdrawal' && styles.tabActive]}
-          onPress={() => setSubTab('withdrawal')}
-          activeOpacity={0.85}
-        >
-          <Text style={[styles.tabText, subTab === 'withdrawal' && styles.tabTextActive]}>Withdrawals</Text>
-        </TouchableOpacity>
-      </View>
+  const renderPaymentPage = useCallback(
+    (tab: PaymentSubTab): React.JSX.Element => {
+      if (tab === 'earning') {
+        return (
+          <ReceiverNotificationActivityList
+            types={['earning']}
+            emptyLabel="No earnings activity yet."
+            showEarningActions
+          />
+        );
+      }
 
-      {subTab === 'earning' ? (
-        <ReceiverNotificationActivityList
-          types={['earning']}
-          emptyLabel="No earnings activity yet."
-          showEarningActions
-        />
-      ) : (
+      return (
         <ReceiverNotificationActivityList
           types={['withdrawal']}
           emptyLabel="No withdrawal activity yet."
@@ -68,7 +60,24 @@ export default function ReceiverPaymentTabsContent(): React.JSX.Element {
             </TouchableOpacity>
           }
         />
-      )}
+      );
+    },
+    [stackNavigation]
+  );
+
+  return (
+    <View style={styles.root}>
+      <ReceiverSwipeableTabs
+        tabs={PAYMENT_TABS}
+        activeTab={subTab}
+        onTabChange={setSubTab}
+        tabBarStyle={styles.tabs}
+        tabButtonStyle={styles.tab}
+        tabButtonActiveStyle={styles.tabActive}
+        tabTextStyle={styles.tabText}
+        tabTextActiveStyle={styles.tabTextActive}
+        renderPage={renderPaymentPage}
+      />
     </View>
   );
 }
@@ -76,7 +85,6 @@ export default function ReceiverPaymentTabsContent(): React.JSX.Element {
 const styles = StyleSheet.create({
   root: { flex: 1 },
   tabs: {
-    flexDirection: 'row',
     gap: 8,
     paddingHorizontal: 16,
     marginBottom: 10,

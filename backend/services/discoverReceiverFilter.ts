@@ -4,7 +4,8 @@ import { CALLER_LANGUAGE_ALLOWLIST } from '../constants/callerProfileAllowlist';
  * Example (combined filters = AND):
  * `GET /discover/receivers?gender=Female&minAge=22&maxAge=35&langs=Hindi,English&limit=50`
  * Response: `{ "receivers": [ { "_id": "...", "name": "...", "age": 28, "gender": "female", ... } ] }`
- * Omit `gender`, `minAge`/`maxAge` to skip those filters (only `accountStatus: approved` is always applied).
+ * Omit `gender`, `minAge`/`maxAge` to skip those filters.
+ * Always excludes suspended/rejected; includes approved and in-progress profiles so offline receivers stay visible on discover.
  */
 
 function escapeRegex(s: string): string {
@@ -29,7 +30,13 @@ export type DiscoverReceiverListQuery = {
  * then `age` must exist and lie in range (no matches for null/missing age).
  */
 export function buildDiscoverReceiverFilter(input: DiscoverReceiverListQuery): Record<string, unknown> {
-  const parts: Record<string, unknown>[] = [{ accountStatus: 'approved' }];
+  const parts: Record<string, unknown>[] = [
+    {
+      suspended: { $ne: true },
+      accountStatus: { $in: ['approved', 'pending_profile'] },
+      isVerified: true,
+    },
+  ];
 
   const langsList = input.langsRaw
     .split(/[,|]/)

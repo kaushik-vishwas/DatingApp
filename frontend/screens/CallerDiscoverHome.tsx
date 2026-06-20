@@ -41,7 +41,6 @@ import SelectoLogo from '../assets/SelectoLogo.png'
 import { CallDiagnosticsTopBarButton } from '../components/call/CallDiagnosticsTopBarButton';
 import { PresenceDiagnosticsTopBarButton } from '../components/call/PresenceDiagnosticsTopBarButton';
 import NoticeBg from '../assets/noticeBg.png'
-import RandomcallBg from '../assets/randomcallBg.png'
 
 const PURPLE = '#7b2cff';
 const GREEN = '#22c55e';
@@ -52,13 +51,11 @@ const NOTICE_BTN_GRADIENT_END = '#A855F7';
 const NOTICE_BTN_BORDER = 'rgba(255, 255, 255, 0.45)';
 const NOTICE_BTN_TEXT = '#ffffff';
 const NOTICE_BTN_ICON = '#ffffff';
-const RANDOM_CARD_GRADIENT_START = '#ddd6fe';
-const RANDOM_CARD_GRADIENT_END = '#bae6fd';
-const RANDOM_CARD_TITLE = '#4c1d95';
-const RANDOM_CARD_SUBTITLE = '#6d28d9';
-const RANDOM_BTN_GRADIENT_START = '#06B6D4'; // Cyan
-const RANDOM_BTN_GRADIENT_END = '#8B5CF6';   // Purple
-const RANDOM_BTN_BORDER = 'rgba(255, 255, 255, 0.5)';
+const PROMO_BTN_GRADIENT_START = '#06b6d4';
+const PROMO_BTN_GRADIENT_END = '#8b5cf6';
+const PROMO_BTN_BORDER = 'rgba(255, 255, 255, 0.55)';
+const PROMO_BTN_TEXT = '#ffffff';
+const PROMO_BTN_ICON = '#ffffff';
 /** Discover list only — shorter than generic screen timeout so home does not spin too long. */
 const DISCOVER_FETCH_TIMEOUT_MS = 12_000;
 const DISCOVER_POLL_MS = 5_000;
@@ -136,28 +133,29 @@ const DiscoverStickyTop = React.memo(function DiscoverStickyTop({
           </View>
           <View style={styles.topRight}>
             <TouchableOpacity style={styles.walletCapsule} onPress={onWalletPress} activeOpacity={0.85}>
-            <View style={styles.walletContainer}>
-  <Text style={styles.wallet}>₹{wallet.toLocaleString('en-IN')}</Text>
-  <View style={styles.plusIconWrapper}>
-    <View style={styles.plusCircle}>
-      <Ionicons name="add" size={15} color="#fff" />
-    </View>
-  </View>
-</View>
+              <View style={styles.walletContainer}>
+                <Text style={styles.walletIco}>💰</Text>
+                <Text style={styles.wallet}>₹{wallet.toLocaleString('en-IN')}</Text>
+                <View style={styles.plusIconWrapper}>
+                  <View style={styles.plusCircle}>
+                    <Ionicons name="add" size={15} color="#fff" />
+                  </View>
+                </View>
+              </View>
             </TouchableOpacity>
             <TouchableOpacity onPress={onProfilePress} activeOpacity={0.85}>
-  {profileImageSource ? (
-    <View style={styles.avatarCapsule}>
-      <Image source={profileImageSource} style={styles.meAvatar} />
-    </View>
-  ) : (
-    <View style={[styles.avatarCapsule, styles.meAvatarPh]}>
-      <View style={styles.avatarContainer}>
-        <Text style={styles.meAvatarTxt}>{userInitial}</Text>
-      </View>
-    </View>
-  )}
-</TouchableOpacity>
+              {profileImageSource ? (
+                <View style={styles.avatarCapsule}>
+                  <Image source={profileImageSource} style={styles.meAvatar} />
+                </View>
+              ) : (
+                <View style={[styles.avatarCapsule, styles.meAvatarPh]}>
+                  <View style={styles.avatarContainer}>
+                    <Text style={styles.meAvatarTxt}>{userInitial}</Text>
+                  </View>
+                </View>
+              )}
+            </TouchableOpacity>
           </View>
         </View>
       </View>
@@ -264,7 +262,7 @@ export default function CallerDiscoverHome(): React.JSX.Element {
   const isFocused = useIsFocused();
   const contentBottomPadding = useReceiverTabBarBottomInset();
   const navigation = useCallerAppNavigation();
-  const { user, refreshUser } = useAuth();
+  const { user, refreshUser, token, bootstrapping } = useAuth();
   const { startCallInvite, startRandomCallEngagement, randomCallMatchingVisible } = useCallSignals();
   const [language, setLanguage] = useState<string | null>(null);
   const [search, setSearch] = useState('');
@@ -286,6 +284,9 @@ export default function CallerDiscoverHome(): React.JSX.Element {
     const t = setTimeout(() => setDebounced(search.trim()), 350);
     return () => clearTimeout(t);
   }, [search]);
+
+  const canFetchDiscover =
+    !bootstrapping && Boolean(token) && user?.role === 'caller';
 
   const fetchList = useCallback(async (): Promise<DiscoverReceiverSummary[]> => {
     const useModalLangs = appliedFilters.languages.length > 0;
@@ -340,11 +341,15 @@ export default function CallerDiscoverHome(): React.JSX.Element {
   );
 
   useEffect(() => {
+    if (!canFetchDiscover) {
+      if (!bootstrapping) setLoading(false);
+      return;
+    }
     void fetchDiscoverReceivers();
     return () => {
       discoverLoadGenRef.current += 1;
     };
-  }, [fetchDiscoverReceivers]);
+  }, [canFetchDiscover, fetchDiscoverReceivers, bootstrapping]);
 
   const loadCallerNotification = useCallback(async (): Promise<void> => {
     try {
@@ -356,6 +361,7 @@ export default function CallerDiscoverHome(): React.JSX.Element {
   }, []);
 
   const refreshDiscoverSilent = useCallback((): void => {
+    if (!canFetchDiscover) return;
     void withTimeout(fetchList(), DISCOVER_FETCH_TIMEOUT_MS)
       .then((rows) => {
         setReceivers((prev) => applyDiscoverReceivers(prev, rows));
@@ -364,29 +370,30 @@ export default function CallerDiscoverHome(): React.JSX.Element {
       .catch(() => {
         // Keep existing cards on transient failures.
       });
-  }, [fetchList]);
+  }, [canFetchDiscover, fetchList]);
 
   useFocusEffect(
     useCallback(() => {
+      if (!canFetchDiscover) return;
       refreshDiscoverSilent();
       void loadCallerNotification();
-    }, [refreshDiscoverSilent, loadCallerNotification])
+    }, [canFetchDiscover, refreshDiscoverSilent, loadCallerNotification])
   );
   useEffect(() => {
     const sub = AppState.addEventListener('change', (state: AppStateStatus) => {
-      if (state === 'active' && isFocused) {
+      if (state === 'active' && isFocused && canFetchDiscover) {
         refreshDiscoverSilent();
       }
     });
     return () => sub.remove();
-  }, [isFocused, refreshDiscoverSilent]);
+  }, [isFocused, canFetchDiscover, refreshDiscoverSilent]);
 
   useEffect(() => {
-    if (!isFocused) return;
+    if (!isFocused || !canFetchDiscover) return;
     refreshDiscoverSilent();
     const poll = setInterval(refreshDiscoverSilent, DISCOVER_POLL_MS);
     return () => clearInterval(poll);
-  }, [isFocused, refreshDiscoverSilent]);
+  }, [isFocused, canFetchDiscover, refreshDiscoverSilent]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -566,46 +573,38 @@ export default function CallerDiscoverHome(): React.JSX.Element {
           activeOpacity={0.9}
           onPress={onCallRandom}
           disabled={randomCallMatchingVisible}
-          style={styles.randomCallCardWrap}
+          style={styles.promoCard}
         >
           <LinearGradient
-            colors={[RANDOM_CARD_GRADIENT_START, RANDOM_CARD_GRADIENT_END]}
+            colors={['#7F00FF', '#A855F7', '#fb5880']}
             start={{ x: 0, y: 0 }}
             end={{ x: 1, y: 1 }}
-            style={styles.randomCallCard}
+            style={styles.promoGradient}
           >
-            <Image source={RandomcallBg} style={styles.randomCallBgImage} resizeMode="cover" />
-            <View style={styles.randomCallBgScrim} />
-            <View style={styles.randomCallRow}>
-              <View style={styles.randomCallLeft}>
-                <View style={styles.randomCallBtnWrap}>
-                  <LinearGradient
-                    colors={[RANDOM_BTN_GRADIENT_START, RANDOM_BTN_GRADIENT_END]}
-                    start={{ x: 0, y: 0 }}
-                    end={{ x: 1, y: 1 }}
-                    style={styles.randomCallBtn}
-                  >
-                    <View style={styles.randomCallBtnContent}>
-                      {!randomCallMatchingVisible ? (
-                        <Ionicons name="shuffle-outline" size={16} color={NOTICE_BTN_ICON} />
-                      ) : (
-                        <ActivityIndicator size="small" color={NOTICE_BTN_ICON} />
-                      )}
-                      <Text style={styles.randomCallBtnText}>
-                        {randomCallMatchingVisible ? 'Please wait…' : 'Random Call'}
-                      </Text>
-                      {!randomCallMatchingVisible ? (
-                        <View style={styles.randomCallIconBadge}>
-                          <Ionicons name="call-outline" size={12} color="#fff" />
-                        </View>
-                      ) : null}
+            <View style={styles.promoTwoColumns}>
+              <View style={styles.promoLeftColumn}>
+                <LinearGradient
+                  colors={[PROMO_BTN_GRADIENT_START, PROMO_BTN_GRADIENT_END]}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 1 }}
+                  style={styles.promoBtn}
+                >
+                  <View style={styles.randomBtnContent}>
+                    {!randomCallMatchingVisible && (
+                      <Ionicons name="shuffle-outline" size={24} color={PROMO_BTN_ICON} />
+                    )}
+                    <Text style={styles.promoBtnText} numberOfLines={1}>
+                      {randomCallMatchingVisible ? 'Please wait…' : 'Random Call'}
+                    </Text>
+                    <View style={styles.callIconWrapper}>
+                      <Ionicons name="call-outline" size={15} color="#fff" />
                     </View>
-                  </LinearGradient>
-                </View>
+                  </View>
+                </LinearGradient>
               </View>
-              <View style={styles.randomCallRight}>
-                <Text style={styles.randomCallTitle}>Meet Someone New!</Text>
-                <Text style={styles.randomCallRate}>₹5/min only</Text>
+              <View style={styles.promoRightColumn}>
+                <Text style={styles.promoTitle}>Meet Someone New!</Text>
+                <Text style={styles.promoRate}>₹5/min only</Text>
               </View>
             </View>
           </LinearGradient>
@@ -676,7 +675,9 @@ export default function CallerDiscoverHome(): React.JSX.Element {
   const listEmpty = useMemo(
     () =>
       !loading && receivers.length === 0 && !err ? (
-        <Text style={styles.empty}>No receivers available right now.</Text>
+        <Text style={styles.empty}>
+          No receivers found. Try clearing search/filters or pull to refresh.
+        </Text>
       ) : null,
     [err, loading, receivers.length]
   );
@@ -817,9 +818,9 @@ const styles = StyleSheet.create({
   },
 
   avatarCapsule: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+    width: 50,
+    height: 50,
+    borderRadius: 25,
     borderWidth: 2,
     borderColor: '#00a2ff',  // Changed from PURPLE to match wallet
     overflow: 'hidden',
@@ -837,9 +838,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   meAvatar: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 47,
+    height: 47,
+    borderRadius: 23,
   },
   meAvatarPh: {
     alignItems: 'center',
@@ -1050,116 +1051,70 @@ const styles = StyleSheet.create({
 
 
 
-  randomCallCardWrap: {
+  promoCard: {
     marginBottom: 6,
   },
-  randomCallCard: {
+  promoGradient: {
     borderRadius: 16,
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    overflow: 'hidden',
-    minHeight: 60,
-    shadowColor: '#7c3aed',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.12,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  randomCallBgImage: {
-    position: 'absolute',
-    right: 2,
-    bottom: 1,
-    width: 100,
-    height: 60,
-    opacity: 0.44,
-  },
-  randomCallBgScrim: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(255, 255, 255, 0.42)',
-  },
-  randomCallRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    position: 'relative',
-    zIndex: 2,
-  },
-  randomCallLeft: {
-    flexGrow: 0,
-    flexShrink: 0,
-    width: '45%',
-    minWidth: 158,
-    justifyContent: 'center',
-    paddingRight: 2,
-  },
-  randomCallBtnWrap: {
-    width: '100%',
-    borderRadius: 20,
-    overflow: 'hidden',
-    shadowColor: '#0d9488',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.28,
-    shadowRadius: 4,
+    padding: 8,
+    shadowColor: '#7F00FF',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
     elevation: 4,
   },
-  randomCallBtn: {
+  promoTwoColumns: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
     width: '100%',
-    minHeight: 40,
-    borderWidth: 1,
-    borderColor: RANDOM_BTN_BORDER,
-    borderRadius: 20,
-    justifyContent: 'center',
-    paddingHorizontal: 10,
-    paddingVertical: 8,
   },
-  randomCallBtnContent: {
+  promoLeftColumn: {
+    width: '50%',
+    alignItems: 'flex-start',
+  },
+  promoRightColumn: {
+    width: '50%',
+    alignItems: 'flex-end',
+  },
+  promoTitle: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '800',
+    textAlign: 'right',
+    marginBottom: 4,
+  },
+  promoRate: {
+    color: 'rgba(255,255,255,0.9)',
+    fontSize: 14,
+    fontWeight: '600',
+    textAlign: 'right',
+  },
+  randomBtnContent: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 5,
-    width: '100%',
+    gap: 6,
   },
-  randomCallBtnText: {
-    flexShrink: 0,
-    color: NOTICE_BTN_TEXT,
-    fontWeight: '800',
-    fontSize: 13,
-    lineHeight: 16,
-    textShadowColor: 'rgba(0, 0, 0, 0.2)',
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 2,
-  },
-  randomCallIconBadge: {
-    width: 22,
-    height: 22,
-    borderRadius: 11,
-    backgroundColor: 'rgba(255, 255, 255, 0.22)',
+  promoBtn: {
+    borderWidth: 1,
+    borderColor: PROMO_BTN_BORDER,
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    borderRadius: 20,
+    paddingLeft: 20,
     alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.35)',
+    minWidth: 150,
+    overflow: 'hidden',
   },
-  randomCallRight: {
-    flex: 1,
-    flexShrink: 1,
-    justifyContent: 'center',
-    paddingLeft: 6,
-    paddingRight: 2,
-    borderLeftWidth: 1,
-    borderLeftColor: 'rgba(124, 58, 237, 0.22)',
-  },
-  randomCallTitle: {
-    color: RANDOM_CARD_TITLE,
-    fontSize: 13,
-    fontWeight: '800',
-    lineHeight: 17,
-    marginBottom: 1,
-  },
-  randomCallRate: {
-    color: RANDOM_CARD_SUBTITLE,
-    fontSize: 12,
-    fontWeight: '700',
-    opacity: 0.9,
+  promoBtnText: {
+    color: PROMO_BTN_TEXT,
+    fontWeight: '900',
+    fontSize: 14,
+    textShadowColor: 'rgba(0, 0, 0, 0.15)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 1,
   },
   adminNoticeCard: {
     marginBottom: 10,
@@ -1550,7 +1505,7 @@ const styles = StyleSheet.create({
     backgroundColor: GREEN,
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: '#fb5880',
+    shadowColor: '#059669',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.3,
     shadowRadius: 4,
