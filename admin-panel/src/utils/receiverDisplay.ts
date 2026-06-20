@@ -20,7 +20,8 @@ export function pseudoMetrics(id: string) {
 }
 
 export function formatINR(n: number): string {
-  return `₹${n.toLocaleString('en-IN')}`;
+  const safe = Number.isFinite(n) ? Math.max(0, n) : 0;
+  return `₹${safe.toLocaleString('en-IN', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`;
 }
 
 export function receiverIsLiveAvailable(r: {

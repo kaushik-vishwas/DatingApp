@@ -77,7 +77,9 @@ export type ReceiverRecord = {
   ratingCount?: number;
   totalCalls?: number;
   callsToday?: number;
+  callsLast7Days?: number;
   earningsToday?: number;
+  earningsLast7Days?: number;
   totalEarnings?: number;
   gender?: string | null;
   age?: number | null;
@@ -313,9 +315,14 @@ export async function updateAdminRole(adminId: string, role: AdminRole) {
 
 export type OverviewDashboardResponse = {
   cards: {
+    /** Caller wallet spend (calls + chat charges) in range. */
+    callerSpend?: number;
     totalRevenue: number;
     adminEarnings: number;
+    /** Receiver share in range (calls + chat credits). */
     receiverRevenue: number;
+    /** Sum of per-receiver earnings — matches Receivers module for same period. */
+    receiverEarningsSum?: number;
     totalCalls: number;
     activeReceivers: number;
     activeUsers: number;

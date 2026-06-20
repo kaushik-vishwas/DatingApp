@@ -98,6 +98,7 @@ export default function ChatConversationScreen({ navigation, route }: Props): Re
   const [thanksOpen, setThanksOpen] = useState(false);
   const [continueOpen, setContinueOpen] = useState(false);
   const [peerTyping, setPeerTyping] = useState(false);
+  const [isBlocked, setIsBlocked] = useState(false);
   const [reportReason, setReportReason] = useState<ChatReportReason>('Spam');
   const socketRef = useRef<Socket | null>(null);
   const listRef = useRef<FlatList<ChatMessageDto>>(null);
@@ -152,6 +153,21 @@ export default function ChatConversationScreen({ navigation, route }: Props): Re
 
   useEffect(() => {
     let cancelled = false;
+    void (async () => {
+      try {
+        const { data } = await chatApi.blockStatus(isCaller ? { receiverId: peerId } : { userId: peerId });
+        if (!cancelled) setIsBlocked(Boolean(data.blocked));
+      } catch {
+        // Keep default false; menu still allows manual block action.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [isCaller, peerId]);
+
+  useEffect(() => {
+    let cancelled = false;
     setLoading(true);
     setLoadError(null);
     void (async () => {
@@ -170,6 +186,7 @@ export default function ChatConversationScreen({ navigation, route }: Props): Re
           const status = (e as { response?: { status?: number } })?.response?.status;
           if (status === 403) {
             const code = (e as { response?: { data?: { code?: string } } })?.response?.data?.code;
+            if (code !== 'CALL_REQUIRED') setIsBlocked(true);
             setLoadError(
               code === 'CALL_REQUIRED'
                 ? CALLER_MESSAGE_REQUIRES_CALL
@@ -272,20 +289,33 @@ export default function ChatConversationScreen({ navigation, route }: Props): Re
 
   const onBlock = (): void => {
     closeMenu();
-    Alert.alert('Block user?', 'You will not be able to message each other anymore.', [
+    const title = isBlocked ? 'Unblock user?' : 'Block user?';
+    const body = isBlocked
+      ? 'You will be able to message each other again.'
+      : 'You will not be able to message each other anymore.';
+    const actionLabel = isBlocked ? 'Unblock' : 'Block';
+    Alert.alert(title, body, [
       { text: 'Cancel', style: 'cancel' },
       {
-        text: 'Block',
-        style: 'destructive',
+        text: actionLabel,
+        style: isBlocked ? 'default' : 'destructive',
         onPress: () => {
           void (async () => {
             try {
-              await chatApi.block(isCaller ? { receiverId: peerId } : { userId: peerId });
-              Alert.alert('Blocked', 'This chat is now blocked.', [
-                { text: 'OK', onPress: () => navigation.goBack() },
-              ]);
+              if (isBlocked) {
+                await chatApi.unblock(isCaller ? { receiverId: peerId } : { userId: peerId });
+                setIsBlocked(false);
+                setLoadError(null);
+                Alert.alert('Unblocked', 'You can message in this chat again.');
+              } else {
+                await chatApi.block(isCaller ? { receiverId: peerId } : { userId: peerId });
+                setIsBlocked(true);
+                Alert.alert('Blocked', 'This chat is now blocked.', [
+                  { text: 'OK', onPress: () => navigation.goBack() },
+                ]);
+              }
             } catch {
-              Alert.alert('Error', 'Could not block. Try again.');
+              Alert.alert('Error', `Could not ${isBlocked ? 'unblock' : 'block'}. Try again.`);
             }
           })();
         },
@@ -488,7 +518,9 @@ export default function ChatConversationScreen({ navigation, route }: Props): Re
           <Pressable style={styles.menuBackdrop} onPress={closeMenu}>
             <View style={styles.menuCard}>
               <TouchableOpacity onPress={onBlock} style={styles.menuItem}>
-                <Text style={styles.menuBlock}>Block user</Text>
+                <Text style={isBlocked ? styles.menuPlain : styles.menuBlock}>
+                  {isBlocked ? 'Unblock user' : 'Block user'}
+                </Text>
               </TouchableOpacity>
               <TouchableOpacity
                 onPress={() => {

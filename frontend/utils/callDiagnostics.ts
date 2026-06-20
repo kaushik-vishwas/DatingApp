@@ -2,6 +2,7 @@ import { AppState, Platform } from 'react-native';
 import Constants from 'expo-constants';
 import * as Device from 'expo-device';
 import {
+  getAndroidTalkGsmSuspectDebounceMs,
   getHoldRemoteLeftDebounceMs,
   getNormalRemoteLeftDebounceMs,
 } from './samsungCallCompat';
@@ -28,6 +29,7 @@ const PERSIST_INTERVAL_MS = 2_000;
 /** While hold is active, use a longer remote-participant absence debounce. */
 export const HOLD_REMOTE_LEFT_DEBOUNCE_MS = getHoldRemoteLeftDebounceMs();
 export const NORMAL_REMOTE_LEFT_DEBOUNCE_MS = getNormalRemoteLeftDebounceMs();
+export const ANDROID_TALK_GSM_SUSPECT_DEBOUNCE_MS = getAndroidTalkGsmSuspectDebounceMs();
 
 export type CallEndCategory =
   | 'manual_hangup'

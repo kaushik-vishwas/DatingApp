@@ -348,6 +348,76 @@ export async function blockChatPeer(req: Request, res: Response): Promise<void> 
 }
 
 /**
+ * POST /chat/unblock — body: `{ receiverId }` (caller) or `{ userId }` (receiver).
+ */
+export async function unblockChatPeer(req: Request, res: Response): Promise<void> {
+  try {
+    const kind = req.accountKind;
+    if (kind === 'user') {
+      if (blockCallerUntilApproved(req, res)) return;
+      const receiverId = typeof req.body.receiverId === 'string' ? req.body.receiverId.trim() : '';
+      if (!receiverId || !mongoose.Types.ObjectId.isValid(receiverId)) {
+        res.status(400).json({ message: 'receiverId is required' });
+        return;
+      }
+      await ChatBlock.deleteOne({ userId: req.user!._id, receiverId });
+      res.status(200).json({ ok: true });
+      return;
+    }
+    if (kind === 'receiver') {
+      if (blockReceiverUntilApproved(req, res)) return;
+      const userId = typeof req.body.userId === 'string' ? req.body.userId.trim() : '';
+      if (!userId || !mongoose.Types.ObjectId.isValid(userId)) {
+        res.status(400).json({ message: 'userId is required' });
+        return;
+      }
+      await ChatBlock.deleteOne({ userId, receiverId: req.receiver!._id });
+      res.status(200).json({ ok: true });
+      return;
+    }
+    res.status(401).json({ message: 'Unauthorized' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: 'Failed to unblock' });
+  }
+}
+
+/**
+ * GET /chat/block-status — query: `receiverId` (caller) or `userId` (receiver).
+ */
+export async function getChatBlockStatus(req: Request, res: Response): Promise<void> {
+  try {
+    const kind = req.accountKind;
+    if (kind === 'user') {
+      if (blockCallerUntilApproved(req, res)) return;
+      const receiverId = typeof req.query.receiverId === 'string' ? req.query.receiverId.trim() : '';
+      if (!receiverId || !mongoose.Types.ObjectId.isValid(receiverId)) {
+        res.status(400).json({ message: 'receiverId is required' });
+        return;
+      }
+      const blocked = Boolean(await ChatBlock.exists({ userId: req.user!._id, receiverId }));
+      res.status(200).json({ blocked });
+      return;
+    }
+    if (kind === 'receiver') {
+      if (blockReceiverUntilApproved(req, res)) return;
+      const userId = typeof req.query.userId === 'string' ? req.query.userId.trim() : '';
+      if (!userId || !mongoose.Types.ObjectId.isValid(userId)) {
+        res.status(400).json({ message: 'userId is required' });
+        return;
+      }
+      const blocked = Boolean(await ChatBlock.exists({ userId, receiverId: req.receiver!._id }));
+      res.status(200).json({ blocked });
+      return;
+    }
+    res.status(401).json({ message: 'Unauthorized' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: 'Failed to fetch block status' });
+  }
+}
+
+/**
  * POST /chat/report — body includes `reason` and optional `preview`; peer id key matches `/chat/block`.
  */
 export async function reportChatPeer(req: Request, res: Response): Promise<void> {

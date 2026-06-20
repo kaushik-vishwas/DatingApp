@@ -3,6 +3,8 @@ import React, { useCallback, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  Modal,
+  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -12,7 +14,13 @@ import {
   type ViewStyle,
 } from 'react-native';
 import ReceiverSwipeableTabs from './ReceiverSwipeableTabs';
-import { getErrorMessage, profileApi } from '../../services/api';
+import {
+  chatApi,
+  CHAT_REPORT_REASONS,
+  getErrorMessage,
+  profileApi,
+  type ChatReportReason,
+} from '../../services/api';
 import type { ReceiverCallInsightsResponse } from '../../types/api';
 import { formatCallDurationCompact } from '../../utils/callDurationDisplay';
 import { SCREEN_FETCH_TIMEOUT_MS, withTimeout } from '../../utils/withTimeout';
@@ -70,6 +78,12 @@ export default function ReceiverCallHistoryContent({
   const [selectMode, setSelectMode] = useState(false);
   const [selectedKeys, setSelectedKeys] = useState<Set<string>>(() => new Set());
   const [deleting, setDeleting] = useState(false);
+  const [menuTarget, setMenuTarget] = useState<{ callerId: string; callerName: string } | null>(null);
+  const [reportTarget, setReportTarget] = useState<{ callerId: string; callerName: string } | null>(null);
+  const [menuBlocked, setMenuBlocked] = useState(false);
+  const [menuBusy, setMenuBusy] = useState(false);
+  const [reportOpen, setReportOpen] = useState(false);
+  const [reportReason, setReportReason] = useState<ChatReportReason>('Spam');
   const loadGenByRangeRef = useRef<Record<RangeTab, number>>({
     all: 0,
     week: 0,
@@ -221,6 +235,80 @@ export default function ReceiverCallHistoryContent({
     );
   };
 
+  const closeMenu = useCallback(() => {
+    setMenuTarget(null);
+  }, []);
+
+  const openMenuForCaller = useCallback((callerId: string, callerName: string) => {
+    setMenuTarget({ callerId, callerName });
+    setMenuBlocked(false);
+    setMenuBusy(true);
+    void (async () => {
+      try {
+        const { data } = await chatApi.blockStatus({ userId: callerId });
+        setMenuBlocked(Boolean(data.blocked));
+      } catch {
+        setMenuBlocked(false);
+      } finally {
+        setMenuBusy(false);
+      }
+    })();
+  }, []);
+
+  const onToggleBlockCaller = useCallback(() => {
+    if (!menuTarget || menuBusy) return;
+    setMenuBusy(true);
+    const action = menuBlocked ? chatApi.unblock : chatApi.block;
+    void (async () => {
+      try {
+        await action({ userId: menuTarget.callerId });
+        setMenuBlocked((prev) => !prev);
+        Alert.alert(
+          menuBlocked ? 'Unblocked' : 'Blocked',
+          menuBlocked
+            ? `${menuTarget.callerName} has been unblocked.`
+            : `${menuTarget.callerName} has been blocked.`
+        );
+      } catch (e) {
+        Alert.alert('Error', getErrorMessage(e));
+      } finally {
+        setMenuBusy(false);
+      }
+    })();
+  }, [menuBlocked, menuBusy, menuTarget]);
+
+  const onOpenReport = useCallback(() => {
+    if (!menuTarget || menuBusy) return;
+    setReportReason('Spam');
+    setReportTarget(menuTarget);
+    // Close the action menu first so the report modal is reliably visible on top.
+    setMenuTarget(null);
+    setTimeout(() => {
+      setReportOpen(true);
+    }, 0);
+  }, [menuBusy, menuTarget]);
+
+  const submitReport = useCallback(() => {
+    if (!reportTarget || menuBusy) return;
+    setMenuBusy(true);
+    void (async () => {
+      try {
+        await chatApi.report({
+          userId: reportTarget.callerId,
+          reason: reportReason,
+          preview: '',
+        });
+        setReportOpen(false);
+        setReportTarget(null);
+        Alert.alert('Reported', 'Thank you for reporting this user.');
+      } catch (e) {
+        Alert.alert('Error', getErrorMessage(e));
+      } finally {
+        setMenuBusy(false);
+      }
+    })();
+  }, [menuBusy, reportReason, reportTarget]);
+
   const renderSelectableCard = (
     itemKey: string,
     cardStyle: StyleProp<ViewStyle>,
@@ -248,6 +336,24 @@ export default function ReceiverCallHistoryContent({
   };
 
   const showSelectActions = callsOnly && !activeLoading && !activeError && selectableItems.length > 0;
+
+  const renderCardHeader = useCallback(
+    (callerName: string, callerId: string, range: RangeTab): React.JSX.Element => (
+      <View style={styles.rowHeader}>
+        <Text style={styles.name}>{callerName}</Text>
+        {callsOnly && !selectMode && range === tab ? (
+          <TouchableOpacity
+            onPress={() => openMenuForCaller(callerId, callerName)}
+            style={styles.moreBtn}
+            hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+          >
+            <Text style={styles.moreDots}>⋮</Text>
+          </TouchableOpacity>
+        ) : null}
+      </View>
+    ),
+    [callsOnly, openMenuForCaller, selectMode, tab]
+  );
 
   const tabBarExtra = showSelectActions ? (
     selectMode ? (
@@ -363,10 +469,11 @@ export default function ReceiverCallHistoryContent({
                 `missed-${group.callerId}`,
                 [styles.rowCard, styles.missedCard],
                 <>
-                  <Text style={styles.name}>
-                    {group.callerName}
-                    {group.missedCount > 1 ? ` (${group.missedCount})` : ''}
-                  </Text>
+                  {renderCardHeader(
+                    `${group.callerName}${group.missedCount > 1 ? ` (${group.missedCount})` : ''}`,
+                    group.callerId,
+                    range
+                  )}
                   <Text style={styles.meta}>
                     {group.missedCount > 1
                       ? `${group.missedCount} missed calls`
@@ -397,10 +504,11 @@ export default function ReceiverCallHistoryContent({
                 `incomplete-${group.callerId}`,
                 [styles.rowCard, styles.missedCard],
                 <>
-                  <Text style={styles.name}>
-                    {group.callerName}
-                    {group.incompleteCount > 1 ? ` (${group.incompleteCount})` : ''}
-                  </Text>
+                  {renderCardHeader(
+                    `${group.callerName}${group.incompleteCount > 1 ? ` (${group.incompleteCount})` : ''}`,
+                    group.callerId,
+                    range
+                  )}
                   <Text style={styles.meta}>
                     {group.incompleteCount > 1
                       ? `${group.incompleteCount} incomplete calls`
@@ -427,7 +535,7 @@ export default function ReceiverCallHistoryContent({
               row.id,
               styles.rowCard,
               <>
-                <Text style={styles.name}>{row.callerName}</Text>
+                {renderCardHeader(row.callerName, row.callerId, range)}
                 <Text style={styles.meta}>{new Date(row.startedAt).toLocaleString()}</Text>
                 <Text style={styles.meta}>
                   Talk time: {formatCallDurationCompact(row.durationSec)}
@@ -481,6 +589,67 @@ export default function ReceiverCallHistoryContent({
         belowTabBar={belowTabBar}
         renderPage={renderHistoryPage}
       />
+
+      <Modal visible={Boolean(menuTarget)} transparent animationType="fade">
+        <Pressable style={styles.menuBackdrop} onPress={closeMenu}>
+          <View style={styles.menuCard}>
+            <TouchableOpacity
+              onPress={onToggleBlockCaller}
+              style={styles.menuItem}
+              disabled={menuBusy}
+            >
+              <Text style={menuBlocked ? styles.menuPlain : styles.menuDanger}>
+                {menuBusy ? 'Please wait…' : menuBlocked ? 'Unblock user' : 'Block user'}
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={onOpenReport} style={styles.menuItem} disabled={menuBusy}>
+              <Text style={styles.menuPlain}>Report user</Text>
+            </TouchableOpacity>
+          </View>
+        </Pressable>
+      </Modal>
+
+      <Modal visible={reportOpen} transparent animationType="slide">
+        <View style={styles.modalOverlay}>
+          <View style={styles.reportCard}>
+            <View style={styles.reportHeader}>
+              <Text style={styles.reportTitle}>Report User</Text>
+              <TouchableOpacity
+                onPress={() => {
+                  setReportOpen(false);
+                  setReportTarget(null);
+                }}
+                hitSlop={12}
+              >
+                <Text style={styles.reportClose}>✕</Text>
+              </TouchableOpacity>
+            </View>
+            <Text style={styles.reportQ}>Why are you reporting this user?</Text>
+            <ScrollView style={styles.reasonList} keyboardShouldPersistTaps="handled">
+              {CHAT_REPORT_REASONS.map((reason) => {
+                const selected = reportReason === reason;
+                return (
+                  <TouchableOpacity
+                    key={reason}
+                    style={[styles.reasonRow, selected && styles.reasonRowOn]}
+                    onPress={() => setReportReason(reason)}
+                    disabled={menuBusy}
+                  >
+                    <Text style={[styles.reasonTxt, selected && styles.reasonTxtOn]}>{reason}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+            <TouchableOpacity
+              style={[styles.submitReportBtn, menuBusy && styles.selectActionDisabled]}
+              onPress={submitReport}
+              disabled={menuBusy}
+            >
+              <Text style={styles.submitReportTxt}>{menuBusy ? 'Submitting…' : 'Submit Report'}</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -489,6 +658,9 @@ const styles = StyleSheet.create({
   screen: { flex: 1 },
   listScroll: { flex: 1 },
   content: { paddingHorizontal: 16 },
+  rowHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
+  moreBtn: { paddingHorizontal: 6, paddingVertical: 2 },
+  moreDots: { fontSize: 18, color: '#4b5563', fontWeight: '900' },
   selectActions: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   selectActionText: { fontSize: 13, color: '#7b2cff', fontWeight: '800' },
   deleteActionText: { color: '#dc2626' },
@@ -558,4 +730,69 @@ const styles = StyleSheet.create({
   },
   name: { fontSize: 13, color: '#111', fontWeight: '800' },
   meta: { marginTop: 3, fontSize: 11, color: '#666', fontWeight: '600' },
+  menuBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.25)',
+    zIndex: 8,
+    paddingTop: 80,
+    alignItems: 'flex-end',
+    paddingRight: 18,
+  },
+  menuCard: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    minWidth: 180,
+    paddingVertical: 6,
+    shadowColor: '#000',
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  menuItem: { paddingVertical: 12, paddingHorizontal: 16 },
+  menuDanger: { color: '#dc2626', fontSize: 16, fontWeight: '700' },
+  menuPlain: { color: '#111', fontSize: 16, fontWeight: '600' },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+  },
+  reportCard: {
+    width: '100%',
+    maxWidth: 360,
+    maxHeight: '88%',
+    backgroundColor: '#fff',
+    borderRadius: 20,
+    padding: 20,
+  },
+  reportHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+  },
+  reportTitle: { fontSize: 20, fontWeight: '900', color: '#111' },
+  reportClose: { fontSize: 20, color: '#666', padding: 4 },
+  reportQ: { fontSize: 15, color: '#444', marginBottom: 12, fontWeight: '600' },
+  reasonList: { maxHeight: 280 },
+  reasonRow: {
+    borderWidth: 1,
+    borderColor: '#e5e5e5',
+    borderRadius: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    marginBottom: 8,
+  },
+  reasonRowOn: { borderColor: '#7b2cff', backgroundColor: '#f5f0ff' },
+  reasonTxt: { fontSize: 15, color: '#111' },
+  reasonTxtOn: { fontWeight: '800', color: '#7b2cff' },
+  submitReportBtn: {
+    marginTop: 8,
+    backgroundColor: '#7b2cff',
+    paddingVertical: 14,
+    borderRadius: 14,
+    alignItems: 'center',
+  },
+  submitReportTxt: { color: '#fff', fontWeight: '900', fontSize: 16 },
 });

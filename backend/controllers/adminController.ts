@@ -18,7 +18,10 @@ import {
   normalizeFixedPerMinuteWindows,
   publicEarningSchedulePayload,
 } from '../services/receiverEarningModel';
-import { getPlatformRevenueForRange } from '../services/adminEarningsService';
+import {
+  getPlatformRevenueForRange,
+} from '../services/adminEarningsService';
+import { aggregateReceiverEarningsByReceiver, sumReceiverEarningsRollup } from '../services/receiverEarningsAggregate';
 import { CHAT_TEXT_CHARGE_INR } from '../constants/chatPricing';
 import { normalizeReceiverWelcome } from '../services/receiverWelcome';
 import { normalizeCallerNotification } from '../services/callerNotification';
@@ -914,8 +917,12 @@ export const getOverviewDashboard = async (
       return;
     }
     const start = toRangeStart(range);
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+    const weekStart = toRangeStart('7d') ?? todayStart;
+    const monthStart = toRangeStart('30d') ?? todayStart;
 
-    const [platformRevenue, calls, chats, activeReceivers, activeUsers, pendingKycApprovals, pendingWithdrawals, flaggedReports] =
+    const [platformRevenue, calls, chats, activeReceivers, activeUsers, pendingKycApprovals, pendingWithdrawals, flaggedReports, allReceiverIds] =
       await Promise.all([
         getPlatformRevenueForRange(start),
         CallSession.find({
@@ -936,9 +943,21 @@ export const getOverviewDashboard = async (
         Receiver.countDocuments({ accountStatus: 'pending_review' }),
         WithdrawalRequest.countDocuments({ status: 'pending' }),
         UserReport.countDocuments({ status: 'pending' }),
+        Receiver.find({}).select('_id').lean<{ _id: mongoose.Types.ObjectId }[]>(),
       ]);
 
-    const totalRevenue = platformRevenue.totalRevenue;
+    const earningsRollups = await aggregateReceiverEarningsByReceiver(
+      allReceiverIds.map((r) => r._id),
+      todayStart,
+      weekStart,
+      monthStart
+    );
+    const earningsPeriod =
+      range === 'all' ? 'lifetime' : range === '30d' ? 'last30Days' : 'last7Days';
+    const receiverEarningsSum = sumReceiverEarningsRollup(earningsRollups.values(), earningsPeriod).earnings;
+
+    const totalRevenue = platformRevenue.callerGross;
+    const adminEarnings = roundInr(Math.max(0, totalRevenue - receiverEarningsSum));
     const totalCalls = calls.length;
     const trendByDay = new Map<string, number>();
 
@@ -967,8 +986,9 @@ export const getOverviewDashboard = async (
     res.status(200).json({
       cards: {
         totalRevenue,
-        adminEarnings: platformRevenue.adminEarnings,
-        receiverRevenue: platformRevenue.receiverRevenue,
+        adminEarnings,
+        receiverRevenue: receiverEarningsSum,
+        receiverEarningsSum,
         totalCalls,
         activeReceivers,
         activeUsers,
@@ -1385,8 +1405,10 @@ export const listAllReceivers = async (_req: Request, res: Response): Promise<vo
     const receiverIds = receivers.map((r) => r._id);
     const todayStart = new Date();
     todayStart.setHours(0, 0, 0, 0);
+    const weekStart = toRangeStart('7d') ?? todayStart;
+    const monthStart = toRangeStart('30d') ?? todayStart;
 
-    const [ratingRows, callStatRows] = await Promise.all([
+    const [ratingRows, earningsByReceiver] = await Promise.all([
       receiverIds.length === 0
         ? Promise.resolve([] as { _id: mongoose.Types.ObjectId; avg: number; count: number }[])
         : ReceiverRating.aggregate<{ _id: mongoose.Types.ObjectId; avg: number; count: number }>([
@@ -1399,46 +1421,7 @@ export const listAllReceivers = async (_req: Request, res: Response): Promise<vo
               },
             },
           ]),
-      receiverIds.length === 0
-        ? Promise.resolve(
-            [] as {
-              _id: mongoose.Types.ObjectId;
-              totalCalls: number;
-              totalEarnings: number;
-              callsToday: number;
-              earningsToday: number;
-            }[]
-          )
-        : CallSession.aggregate<{
-            _id: mongoose.Types.ObjectId;
-            totalCalls: number;
-            totalEarnings: number;
-            callsToday: number;
-            earningsToday: number;
-          }>([
-            {
-              $match: {
-                receiverId: { $in: receiverIds },
-                status: 'completed',
-                talkStartedAt: { $ne: null },
-              },
-            },
-            {
-              $group: {
-                _id: '$receiverId',
-                totalCalls: { $sum: 1 },
-                totalEarnings: { $sum: { $ifNull: ['$receiverEarnedInr', 0] } },
-                callsToday: {
-                  $sum: { $cond: [{ $gte: ['$startedAt', todayStart] }, 1, 0] },
-                },
-                earningsToday: {
-                  $sum: {
-                    $cond: [{ $gte: ['$startedAt', todayStart] }, { $ifNull: ['$receiverEarnedInr', 0] }, 0],
-                  },
-                },
-              },
-            },
-          ]),
+      aggregateReceiverEarningsByReceiver(receiverIds, todayStart, weekStart, monthStart),
     ]);
 
     const ratingByReceiverId = new Map(
@@ -1450,33 +1433,22 @@ export const listAllReceivers = async (_req: Request, res: Response): Promise<vo
         },
       ])
     );
-    const callStatsByReceiverId = new Map(
-      callStatRows.map((row) => [
-        String(row._id),
-        {
-          totalCalls: row.totalCalls ?? 0,
-          totalEarnings: roundInr(row.totalEarnings ?? 0),
-          callsToday: row.callsToday ?? 0,
-          earningsToday: roundInr(row.earningsToday ?? 0),
-        },
-      ])
-    );
 
     const list = receivers.map((r) => {
       const base = toApiReceiver(r as ReceiverDocument);
       const id = String(r._id);
       const rating = ratingByReceiverId.get(id);
-      const calls = callStatsByReceiverId.get(id);
+      const earnings = earningsByReceiver.get(id);
       const isAvailable = Boolean(base.isAvailable);
       const isOnline = Boolean(base.isOnline);
       return {
         ...base,
         ratingAvg: rating && rating.count > 0 ? rating.avg : null,
         ratingCount: rating?.count ?? 0,
-        totalCalls: calls?.totalCalls ?? 0,
-        callsToday: calls?.callsToday ?? 0,
-        earningsToday: calls?.earningsToday ?? 0,
-        totalEarnings: calls?.totalEarnings ?? 0,
+        totalCalls: earnings?.lifetime.calls ?? 0,
+        callsToday: earnings?.today.calls ?? 0,
+        earningsToday: earnings?.today.earnings ?? 0,
+        totalEarnings: earnings?.lifetime.earnings ?? 0,
         isLiveAvailable: isAvailable && isOnline,
       };
     });

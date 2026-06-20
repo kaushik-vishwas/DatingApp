@@ -234,11 +234,11 @@ export function ReceiverEditModal({ receiver, onClose, onSaved }: Props) {
               onChange={(e) => setForm((f) => ({ ...f, profileImage: e.target.value }))}
               className="w-full rounded-xl border border-neutral-200 px-3 py-2 text-sm"
             />
-            {isPresetProfileImage(form.profileImage) ? (
+            {/* {isPresetProfileImage(form.profileImage) ? (
               <p className="mt-1 text-xs text-neutral-500">
                 Bundled avatar id from the app — preview above. Use a https:// URL to replace with a custom photo.
               </p>
-            ) : null}
+            ) : null} */}
           </div>
           <div>
             <label className="mb-1 block text-sm font-semibold text-neutral-700">Aadhaar front URL</label>

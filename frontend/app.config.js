@@ -74,7 +74,7 @@ module.exports = {
         'android.permission.POST_NOTIFICATIONS',
         'android.permission.VIBRATE',
       ],
-      usesCleartextTraffic: false,
+      usesCleartextTraffic: true,
     },
     plugins: [
       ...(appJson.expo.plugins || []),

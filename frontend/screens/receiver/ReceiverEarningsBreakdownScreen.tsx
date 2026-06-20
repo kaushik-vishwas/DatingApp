@@ -27,7 +27,7 @@ export default function ReceiverEarningsBreakdownScreen(): React.JSX.Element {
     setLoading(true);
     setError(null);
     try {
-      const { data } = await withTimeout(profileApi.receiverEarningsBreakdown('week'), SCREEN_FETCH_TIMEOUT_MS);
+      const { data } = await withTimeout(profileApi.receiverEarningsBreakdown('all'), SCREEN_FETCH_TIMEOUT_MS);
       if (loadGenRef.current !== id) return;
       setData(data);
     } catch (e) {
@@ -81,16 +81,26 @@ export default function ReceiverEarningsBreakdownScreen(): React.JSX.Element {
             />
           </View>
           {(() => {
-            const chatEarnings = Math.max(0, data.stats.chatEarnings ?? 0);
-            const callEarnings = Math.max(0, Math.round((data.stats.netEarnings - chatEarnings) * 100) / 100);
-            const bonus = 0;
-            const total = Math.round((callEarnings + chatEarnings + bonus) * 100) / 100;
+            const lifetime = data.lifetime;
+            const chatEarnings = Math.max(
+              0,
+              lifetime?.chatEarnings ?? data.stats.chatEarnings ?? 0
+            );
+            const callEarnings = Math.max(
+              0,
+              lifetime?.callEarnings ??
+                data.stats.callEarnings ??
+                Math.round((data.stats.netEarnings - chatEarnings) * 100) / 100
+            );
+            const total = Math.max(
+              0,
+              lifetime?.totalEarnings ?? Math.round((callEarnings + chatEarnings) * 100) / 100
+            );
             return (
               <View style={styles.summaryCard}>
-                <Text style={styles.summaryTitle}>This week&apos;s earnings</Text>
+                <Text style={styles.summaryTitle}>Total earnings</Text>
                 <Line label="Earnings from calls" value={formatInr(callEarnings)} />
                 <Line label="Earnings from chat" value={formatInr(chatEarnings)} />
-                <Line label="Bonus" value={formatInr(bonus)} />
                 <View style={styles.totalDivider} />
                 <Line label="Total" value={formatInr(total)} strong />
                 <TouchableOpacity style={styles.detailsBtn} onPress={() => navigation.navigate('ReceiverEarningsAnalytics')}>
@@ -114,9 +124,7 @@ export default function ReceiverEarningsBreakdownScreen(): React.JSX.Element {
               </View>
               <Text style={styles.entryAt}>{new Date(row.createdAt).toLocaleString()}</Text>
               <Line label="Duration" value={`${row.durationMin} min`} compact />
-              <Line label="Gross Amount" value={`₹${Math.round(row.grossAmount)}`} compact />
-              <Line label="Platform Fee" value={`-₹${Math.round(row.platformFee)}`} compact danger />
-              <Line label="You Earned" value={`₹${Math.round(row.netEarning)}`} compact strong />
+              <Line label="You earned" value={formatInr(row.netEarning)} compact strong />
             </View>
           ))}
         </>

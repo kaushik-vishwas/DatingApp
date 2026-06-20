@@ -15,7 +15,7 @@ import androidx.core.content.ContextCompat
  * Samsung One UI 6 may delay mode transitions — audio-focus loss is detected earlier.
  */
 object CellularCallHoldWatcher {
-  private const val POLL_MS_DEFAULT = 100L
+  private const val POLL_MS_DEFAULT = 50L
   private const val POLL_MS_SAMSUNG = 40L
 
   private val mainHandler = Handler(Looper.getMainLooper())
@@ -82,6 +82,13 @@ object CellularCallHoldWatcher {
       mode == AudioManager.MODE_RINGTONE
     ) {
       // Incoming GSM ring while VoIP is active — hold before MODE_IN_CALL on some OEMs.
+      gsmPreemptive = true
+    } else if (
+      previousMode == AudioManager.MODE_IN_COMMUNICATION &&
+      mode != AudioManager.MODE_IN_COMMUNICATION &&
+      mode != AudioManager.MODE_NORMAL
+    ) {
+      // VoIP → cellular (or other telephony) without a ringtone phase on some devices.
       gsmPreemptive = true
     } else if (cellularMode) {
       gsmPreemptive = true

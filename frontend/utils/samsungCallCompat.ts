@@ -67,7 +67,16 @@ export function getHoldRemoteLeftDebounceMs(): number {
 }
 
 export function getNormalRemoteLeftDebounceMs(): number {
-  return isSamsungOneUi6OrNewer() ? 2_500 : 500;
+  if (Platform.OS === 'android') {
+    // Stream can drop ~500ms before cellular audio mode flips — allow time for hold signal.
+    return isSamsungOneUi6OrNewer() ? 2_500 : 2_000;
+  }
+  return 500;
+}
+
+/** While talk is active on Android, a missing remote participant may be GSM hold — wait longer. */
+export function getAndroidTalkGsmSuspectDebounceMs(): number {
+  return isSamsungOneUi6OrNewer() ? 6_000 : 5_000;
 }
 
 /** Max time to wait for Stream leave/disconnect during GSM before forcing UI exit. */

@@ -40,6 +40,8 @@ exports.getMessages = getMessages;
 exports.listConversations = listConversations;
 exports.markConversationRead = markConversationRead;
 exports.blockChatPeer = blockChatPeer;
+exports.unblockChatPeer = unblockChatPeer;
+exports.getChatBlockStatus = getChatBlockStatus;
 exports.reportChatPeer = reportChatPeer;
 exports.clearChatHistory = clearChatHistory;
 const mongoose_1 = __importDefault(require("mongoose"));
@@ -348,6 +350,80 @@ async function blockChatPeer(req, res) {
     catch (err) {
         console.error(err);
         res.status(500).json({ message: 'Failed to block' });
+    }
+}
+/**
+ * POST /chat/unblock — body: `{ receiverId }` (caller) or `{ userId }` (receiver).
+ */
+async function unblockChatPeer(req, res) {
+    try {
+        const kind = req.accountKind;
+        if (kind === 'user') {
+            if ((0, accountAccess_1.blockCallerUntilApproved)(req, res))
+                return;
+            const receiverId = typeof req.body.receiverId === 'string' ? req.body.receiverId.trim() : '';
+            if (!receiverId || !mongoose_1.default.Types.ObjectId.isValid(receiverId)) {
+                res.status(400).json({ message: 'receiverId is required' });
+                return;
+            }
+            await ChatBlock_1.default.deleteOne({ userId: req.user._id, receiverId });
+            res.status(200).json({ ok: true });
+            return;
+        }
+        if (kind === 'receiver') {
+            if ((0, accountAccess_1.blockReceiverUntilApproved)(req, res))
+                return;
+            const userId = typeof req.body.userId === 'string' ? req.body.userId.trim() : '';
+            if (!userId || !mongoose_1.default.Types.ObjectId.isValid(userId)) {
+                res.status(400).json({ message: 'userId is required' });
+                return;
+            }
+            await ChatBlock_1.default.deleteOne({ userId, receiverId: req.receiver._id });
+            res.status(200).json({ ok: true });
+            return;
+        }
+        res.status(401).json({ message: 'Unauthorized' });
+    }
+    catch (err) {
+        console.error(err);
+        res.status(500).json({ message: 'Failed to unblock' });
+    }
+}
+/**
+ * GET /chat/block-status — query: `receiverId` (caller) or `userId` (receiver).
+ */
+async function getChatBlockStatus(req, res) {
+    try {
+        const kind = req.accountKind;
+        if (kind === 'user') {
+            if ((0, accountAccess_1.blockCallerUntilApproved)(req, res))
+                return;
+            const receiverId = typeof req.query.receiverId === 'string' ? req.query.receiverId.trim() : '';
+            if (!receiverId || !mongoose_1.default.Types.ObjectId.isValid(receiverId)) {
+                res.status(400).json({ message: 'receiverId is required' });
+                return;
+            }
+            const blocked = Boolean(await ChatBlock_1.default.exists({ userId: req.user._id, receiverId }));
+            res.status(200).json({ blocked });
+            return;
+        }
+        if (kind === 'receiver') {
+            if ((0, accountAccess_1.blockReceiverUntilApproved)(req, res))
+                return;
+            const userId = typeof req.query.userId === 'string' ? req.query.userId.trim() : '';
+            if (!userId || !mongoose_1.default.Types.ObjectId.isValid(userId)) {
+                res.status(400).json({ message: 'userId is required' });
+                return;
+            }
+            const blocked = Boolean(await ChatBlock_1.default.exists({ userId, receiverId: req.receiver._id }));
+            res.status(200).json({ blocked });
+            return;
+        }
+        res.status(401).json({ message: 'Unauthorized' });
+    }
+    catch (err) {
+        console.error(err);
+        res.status(500).json({ message: 'Failed to fetch block status' });
     }
 }
 /**

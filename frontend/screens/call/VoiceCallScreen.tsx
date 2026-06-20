@@ -139,6 +139,7 @@ type StreamCallAvatarExtrasModule = {
   StreamTalkTimingBridge: React.ComponentType<{ onBothConnected: () => void }>;
   StreamRemotePeerLeftBridge: React.ComponentType<{
     onRemotePeerLeft: (reason: 'local_left' | 'remote_empty') => void;
+    onLocalGsmSuspect?: () => void;
   }>;
   StreamMicControlBridge: React.ComponentType<{
     controlRef: React.MutableRefObject<StreamMicControl | null>;
@@ -603,7 +604,8 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
   const emitPeerCallHold = useCallback(
     (onHold: boolean) => {
       const callId = callIdRef.current.trim();
-      if (!callId || endingRef.current) return;
+      if (!callId) return;
+      if (endingRef.current && !onHold) return;
       emitCallHoldSignal(callId, onHold);
       const voiceSocket = signalSocketRef.current;
       if (voiceSocket?.connected) {
@@ -2082,15 +2084,16 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
   const handleStreamSystemHold = useCallback(
     (onHold: boolean) => {
       if (onHold) {
-        if (!endingRef.current) {
-          applySystemCallHold(true);
+        if (endingRef.current) {
+          setEnding(false, 'gsm_hold_cancels_premature_end');
         }
+        applySystemCallHold(true);
         return;
       }
       applySystemCallHold(false);
       void recoverAfterGsmHold();
     },
-    [applySystemCallHold, recoverAfterGsmHold]
+    [applySystemCallHold, recoverAfterGsmHold, setEnding]
   );
 
   const showStreamChrome = ready && Boolean(client) && Boolean(call) && Boolean(sdk);
@@ -2424,6 +2427,12 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
           ) : null}
           {streamAvatarExtras ? (
             <streamAvatarExtras.StreamRemotePeerLeftBridge
+              onLocalGsmSuspect={() => {
+                if (endingRef.current) {
+                  setEnding(false, 'stream_local_gsm_suspect');
+                }
+                applySystemCallHoldRef.current(true);
+              }}
               onRemotePeerLeft={(reason) => {
                 const callId = callIdRef.current.trim();
                 if (!callId || endingRef.current) return;

@@ -1,14 +1,17 @@
 import { Ionicons } from '@expo/vector-icons';
 import React, { useEffect, useRef, useState } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { Platform, StyleSheet, Text, View } from 'react-native';
 import { useCallStateHooks } from '@stream-io/video-react-native-sdk';
 import { CallingState, hasAudio, type StreamVideoParticipant } from '@stream-io/video-client';
 import { AvatarSoundWaveRings } from './AvatarVoiceWaves';
 import {
+  ANDROID_TALK_GSM_SUSPECT_DEBOUNCE_MS,
   callDiag,
+  getCallDiagnosticsSnapshot,
   HOLD_REMOTE_LEFT_DEBOUNCE_MS,
   isCallHoldGuardActive,
   NORMAL_REMOTE_LEFT_DEBOUNCE_MS,
+  setGsmInterruptPending,
 } from '../../utils/callDiagnostics';
 
 const SPEAK_AUDIO_LEVEL_THRESHOLD = 0.035;
@@ -199,8 +202,11 @@ const LOCAL_LEFT_CONFIRM_MS = 2_500;
  */
 export function StreamRemotePeerLeftBridge({
   onRemotePeerLeft,
+  onLocalGsmSuspect,
 }: {
   onRemotePeerLeft: (reason: 'local_left' | 'remote_empty') => void;
+  /** Fired when this device leaves Stream during talk — likely answered a cellular call. */
+  onLocalGsmSuspect?: () => void;
 }): null {
   const { useCallCallingState, useRemoteParticipants } = useCallStateHooks();
   const callingState = useCallCallingState();
@@ -210,11 +216,36 @@ export function StreamRemotePeerLeftBridge({
   const localLeftSinceRef = useRef<number | null>(null);
   const liveSnapshotCountRef = useRef<number | null>(null);
   const onRemotePeerLeftRef = useRef(onRemotePeerLeft);
+  const onLocalGsmSuspectRef = useRef(onLocalGsmSuspect);
+  const gsmSuspectArmedRef = useRef(false);
   const callingStateRef = useRef(callingState);
   const remoteParticipantsRef = useRef(remoteParticipants);
   onRemotePeerLeftRef.current = onRemotePeerLeft;
+  onLocalGsmSuspectRef.current = onLocalGsmSuspect;
   callingStateRef.current = callingState;
   remoteParticipantsRef.current = remoteParticipants;
+
+  const armGsmSuspectGuard = (reason: 'local_left' | 'remote_empty'): void => {
+    if (gsmSuspectArmedRef.current) return;
+    if (Platform.OS !== 'android') return;
+    if (!getCallDiagnosticsSnapshot().talkActive) return;
+    gsmSuspectArmedRef.current = true;
+    setGsmInterruptPending(true, `stream_gsm_suspect_${reason}`);
+    callDiag.info('stream_gsm_suspect', { reason });
+    if (reason === 'local_left') {
+      onLocalGsmSuspectRef.current?.();
+    }
+  };
+
+  const resolveRemoteLeftDebounceMs = (): number => {
+    if (isCallHoldGuardActive()) {
+      return HOLD_REMOTE_LEFT_DEBOUNCE_MS;
+    }
+    if (Platform.OS === 'android' && getCallDiagnosticsSnapshot().talkActive) {
+      return ANDROID_TALK_GSM_SUSPECT_DEBOUNCE_MS;
+    }
+    return NORMAL_REMOTE_LEFT_DEBOUNCE_MS;
+  };
 
   const tryEndCall = (reason: 'local_left' | 'remote_empty', extra?: Record<string, unknown>): void => {
     if (isCallHoldGuardActive()) {
@@ -249,6 +280,7 @@ export function StreamRemotePeerLeftBridge({
         const now = Date.now();
         if (localLeftSinceRef.current === null) {
           localLeftSinceRef.current = now;
+          armGsmSuspectGuard('local_left');
           callDiag.streamStateChange('LEFT', { phase: 'local_left_pending' });
         } else if (now - localLeftSinceRef.current >= LOCAL_LEFT_CONFIRM_MS) {
           tryEndCall('local_left', { callingState: 'LEFT' });
@@ -259,6 +291,7 @@ export function StreamRemotePeerLeftBridge({
       if (callingState !== CallingState.LEFT) {
         hadRemoteRef.current = false;
         emptySinceRef.current = null;
+        gsmSuspectArmedRef.current = false;
       }
       return;
     }
@@ -270,6 +303,7 @@ export function StreamRemotePeerLeftBridge({
         const now = Date.now();
         if (localLeftSinceRef.current === null) {
           localLeftSinceRef.current = now;
+          armGsmSuspectGuard('local_left');
           return;
         }
         if (now - localLeftSinceRef.current >= LOCAL_LEFT_CONFIRM_MS) {
@@ -292,6 +326,7 @@ export function StreamRemotePeerLeftBridge({
         }
         hadRemoteRef.current = true;
         emptySinceRef.current = null;
+        gsmSuspectArmedRef.current = false;
         return;
       }
       if (!hadRemoteRef.current) return;
@@ -299,14 +334,13 @@ export function StreamRemotePeerLeftBridge({
       const now = Date.now();
       if (emptySinceRef.current === null) {
         emptySinceRef.current = now;
+        armGsmSuspectGuard('remote_empty');
         callDiag.connectionLost({
           remoteCount: 0,
           holdGuard: isCallHoldGuardActive(),
         });
       }
-      const debounceMs = isCallHoldGuardActive()
-        ? HOLD_REMOTE_LEFT_DEBOUNCE_MS
-        : NORMAL_REMOTE_LEFT_DEBOUNCE_MS;
+      const debounceMs = resolveRemoteLeftDebounceMs();
       if (now - emptySinceRef.current >= debounceMs) {
         hadRemoteRef.current = false;
         emptySinceRef.current = null;

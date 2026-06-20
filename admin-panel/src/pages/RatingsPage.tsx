@@ -98,7 +98,7 @@ export function RatingsPage() {
             <thead className="bg-neutral-50 text-[11px] uppercase tracking-wide text-neutral-500">
               <tr>
                 <th className="px-3 py-2">User</th>
-                <th className="px-3 py-2">Email</th>
+                {/* <th className="px-3 py-2">Email</th> */}
                 <th className="px-3 py-2">Phone</th>
                 <th className="px-3 py-2">Stars</th>
                 <th className="px-3 py-2">Review</th>
@@ -109,7 +109,7 @@ export function RatingsPage() {
               {rows.map((row) => (
                 <tr key={row._id} className="border-t border-neutral-100">
                   <td className="px-3 py-2.5 font-medium text-neutral-800">{row.userName}</td>
-                  <td className="px-3 py-2.5 text-neutral-600">{row.email || '—'}</td>
+                  {/* <td className="px-3 py-2.5 text-neutral-600">{row.email || '—'}</td> */}
                   <td className="px-3 py-2.5 text-neutral-600">{row.phone || '—'}</td>
                   <td className="px-3 py-2.5">
                     <StarsCell n={row.stars} />

@@ -61,6 +61,9 @@ const JWT_KEY = 'jwt';
 /** Production API (release builds and dev fallback when Metro tunnel cannot reach your PC). */
 const PROD_API = 'https://backend.nesthamapp.com';
 const PROD_ORIGIN = normalizeApiOrigin(PROD_API);
+const LOCAL_API_PORT = Number(process.env.EXPO_PUBLIC_API_LOCAL_PORT) || 5000;
+
+let loggedDevApiChoice = false;
 
 /** Normalize URL */
 function normalizeApiOrigin(raw: string): string {
@@ -102,7 +105,7 @@ function getDevApiBase(): string | undefined {
 
   // Android emulator cannot reach host machine via LAN IP reliably; use special host loopback.
   if (isAndroidEmulator) {
-    return 'http://10.0.2.2:5000';
+    return `http://10.0.2.2:${LOCAL_API_PORT}`;
   }
 
   // Expo tunnel only proxies Metro; your :5000 backend is not on the phone — use prod until you use LAN/USB.
@@ -112,41 +115,69 @@ function getDevApiBase(): string | undefined {
 
   if (host === 'localhost' || host === '127.0.0.1') {
     return Platform.OS === 'android'
-      ? 'http://10.0.2.2:5000'
-      : 'http://127.0.0.1:5000';
+      ? `http://10.0.2.2:${LOCAL_API_PORT}`
+      : `http://127.0.0.1:${LOCAL_API_PORT}`;
   }
 
-  return `http://${host}:5000`;
+  return `http://${host}:${LOCAL_API_PORT}`;
+}
+
+function logDevApiChoice(url: string, reason: string): string {
+  if (__DEV__ && !loggedDevApiChoice) {
+    loggedDevApiChoice = true;
+    console.log(`[API] Dev backend: ${url} (${reason})`);
+  }
+  return url;
 }
 
 const getBaseURL = (): string => {
   const configured = getConfiguredApiBase();
-  if (!__DEV__) return configured || PROD_ORIGIN;
 
-  // Testing against live/staging: set EXPO_PUBLIC_API_DISABLE_PACKAGER_HOST=true in frontend/.env
+  // Release / hosted builds: always production (or explicit EXPO_PUBLIC_API_BASE_URL).
+  if (!__DEV__) {
+    return configured || PROD_ORIGIN;
+  }
+
+  // Dev opt-in: force live backend (set EXPO_PUBLIC_API_DISABLE_PACKAGER_HOST=true in .env).
   if (shouldForceConfiguredApiBase() && configured) {
-    return configured;
+    return logDevApiChoice(configured, 'EXPO_PUBLIC_API_DISABLE_PACKAGER_HOST');
   }
 
-  // In dev, honor explicit non-prod override first (e.g. custom staging/local URL in .env).
+  // Dev: custom non-prod URL in .env (staging, etc.).
   if (configured && configured !== PROD_ORIGIN) {
-    return configured;
+    return logDevApiChoice(configured, 'EXPO_PUBLIC_API_BASE_URL override');
   }
 
-  // Prefer local backend automatically on LAN/emulator when reachable by host metadata.
+  // Dev default: local backend on same LAN as Metro (phone + PC on same Wi‑Fi).
   const devUrl = getDevApiBase();
-  if (devUrl) return normalizeApiOrigin(devUrl);
+  if (devUrl) {
+    return logDevApiChoice(normalizeApiOrigin(devUrl), 'local packager host');
+  }
 
   const c = Constants as any;
   const hostUri: string | undefined = c.expoConfig?.hostUri || c.manifest?.debuggerHost;
   const onTunnel = Boolean(hostUri?.includes('exp.direct'));
-  if (onTunnel) return PROD_ORIGIN;
+  if (onTunnel) {
+    return logDevApiChoice(configured || PROD_ORIGIN, 'Expo tunnel — local :5000 not reachable');
+  }
 
-  // Last-resort local fallback for simulators/emulators.
-  return normalizeApiOrigin(
-    Platform.OS === 'android' ? 'http://10.0.2.2:5000' : 'http://127.0.0.1:5000'
+  // Simulator / emulator fallback.
+  return logDevApiChoice(
+    normalizeApiOrigin(
+      Platform.OS === 'android'
+        ? `http://10.0.2.2:${LOCAL_API_PORT}`
+        : `http://127.0.0.1:${LOCAL_API_PORT}`
+    ),
+    'simulator fallback'
   );
 };
+
+/** True when the app is pointed at a local dev backend (not production). */
+export function isLocalDevApiBackend(): boolean {
+  if (!__DEV__) return false;
+  const base = getBaseURL();
+  return base !== PROD_ORIGIN && !base.startsWith('https://');
+}
 
 /** Debug helper */
 export const getResolvedApiBaseUrl = (): string => getBaseURL();
@@ -395,6 +426,12 @@ export const chatApi = {
 
   block: (body: { receiverId?: string; userId?: string }) =>
     api.post<{ ok: boolean }>('/chat/block', body),
+
+  unblock: (body: { receiverId?: string; userId?: string }) =>
+    api.post<{ ok: boolean }>('/chat/unblock', body),
+
+  blockStatus: (params: { receiverId?: string; userId?: string }) =>
+    api.get<{ blocked: boolean }>('/chat/block-status', { params }),
 
   report: (body: {
     receiverId?: string;

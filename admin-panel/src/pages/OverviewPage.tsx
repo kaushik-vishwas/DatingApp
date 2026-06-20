@@ -3,7 +3,8 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { fetchOverviewDashboard, type OverviewDashboardResponse } from '../api/client';
 
 function inr(v: number): string {
-  return `₹${Math.round(v).toLocaleString('en-IN')}`;
+  const safe = Number.isFinite(v) ? Math.max(0, v) : 0;
+  return `₹${safe.toLocaleString('en-IN', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`;
 }
 
 export function OverviewPage() {
@@ -38,7 +39,7 @@ export function OverviewPage() {
         label: 'Total Revenue',
         value: data ? inr(data.cards.totalRevenue) : '…',
         note: data
-          ? `${rangeLabel} · Admin ${inr(data.cards.adminEarnings)} + Receiver ${inr(data.cards.receiverRevenue)}`
+          ? `${rangeLabel} · Admin ${inr(data.cards.adminEarnings)} + Receiver ${inr(data.cards.receiverEarningsSum ?? data.cards.receiverRevenue)}`
           : rangeLabel,
         icon: IndianRupee,
         tone: 'text-violet-600',
@@ -73,7 +74,7 @@ export function OverviewPage() {
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-neutral-900">Overview</h1>
-          <p className="mt-1 text-sm text-neutral-500">Selecto — high-level snapshot</p>
+          {/* <p className="mt-1 text-sm text-neutral-500">Selecto — high-level snapshot</p> */}
         </div>
         <div className="flex gap-2">
           <select

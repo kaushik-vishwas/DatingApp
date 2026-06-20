@@ -29,11 +29,11 @@ export function ProfileImagePreview({ profileImage, alt = 'Profile', className, 
       >
         <img src={displayUrl} alt={alt} className="h-28 w-28 object-cover" />
       </a>
-      {isPresetProfileImage(stored) ? (
+      {/* {isPresetProfileImage(stored) ? (
         <p className="mt-1 text-xs text-neutral-500">
           Bundled avatar <span className="font-mono text-neutral-600">{stored}</span>
         </p>
-      ) : null}
+      ) : null} */}
     </div>
   );
 }

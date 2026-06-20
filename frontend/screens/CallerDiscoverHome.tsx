@@ -1,10 +1,9 @@
-import { useFocusEffect, useIsFocused } from '@react-navigation/native';
+import { useFocusEffect } from '@react-navigation/native';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { LinearGradient } from 'expo-linear-gradient';
 import {
   ActivityIndicator,
   Alert,
-  AppState,
   FlatList,
   Image,
   KeyboardAvoidingView,
@@ -16,7 +15,6 @@ import {
   TextInput,
   TouchableOpacity,
   View,
-  type AppStateStatus,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -58,7 +56,6 @@ const PROMO_BTN_TEXT = '#ffffff';
 const PROMO_BTN_ICON = '#ffffff';
 /** Discover list only — shorter than generic screen timeout so home does not spin too long. */
 const DISCOVER_FETCH_TIMEOUT_MS = 12_000;
-const DISCOVER_POLL_MS = 5_000;
 const listFooterSpacer = <View style={{ height: 12 }} />;
 
 /** Stable signature for presence + card fields — skip list state updates when unchanged. */
@@ -259,7 +256,6 @@ const DiscoverReceiverRow = React.memo(function DiscoverReceiverRow({
 });
 
 export default function CallerDiscoverHome(): React.JSX.Element {
-  const isFocused = useIsFocused();
   const contentBottomPadding = useReceiverTabBarBottomInset();
   const navigation = useCallerAppNavigation();
   const { user, refreshUser, token, bootstrapping } = useAuth();
@@ -279,6 +275,7 @@ export default function CallerDiscoverHome(): React.JSX.Element {
   const [callerNotification, setCallerNotification] = useState<CallerNotificationContent | null>(null);
   const discoverLoadGenRef = useRef(0);
   const hasDiscoverDataRef = useRef(false);
+  const skipNextFocusRefreshRef = useRef(true);
 
   useEffect(() => {
     const t = setTimeout(() => setDebounced(search.trim()), 350);
@@ -287,6 +284,8 @@ export default function CallerDiscoverHome(): React.JSX.Element {
 
   const canFetchDiscover =
     !bootstrapping && Boolean(token) && user?.role === 'caller';
+
+  const appliedFiltersKey = useMemo(() => JSON.stringify(appliedFilters), [appliedFilters]);
 
   const fetchList = useCallback(async (): Promise<DiscoverReceiverSummary[]> => {
     const useModalLangs = appliedFilters.languages.length > 0;
@@ -345,11 +344,18 @@ export default function CallerDiscoverHome(): React.JSX.Element {
       if (!bootstrapping) setLoading(false);
       return;
     }
-    void fetchDiscoverReceivers();
+    void fetchDiscoverReceivers({ silent: hasDiscoverDataRef.current });
     return () => {
       discoverLoadGenRef.current += 1;
     };
-  }, [canFetchDiscover, fetchDiscoverReceivers, bootstrapping]);
+  }, [
+    canFetchDiscover,
+    bootstrapping,
+    debounced,
+    language,
+    appliedFiltersKey,
+    fetchDiscoverReceivers,
+  ]);
 
   const loadCallerNotification = useCallback(async (): Promise<void> => {
     try {
@@ -360,40 +366,17 @@ export default function CallerDiscoverHome(): React.JSX.Element {
     }
   }, []);
 
-  const refreshDiscoverSilent = useCallback((): void => {
-    if (!canFetchDiscover) return;
-    void withTimeout(fetchList(), DISCOVER_FETCH_TIMEOUT_MS)
-      .then((rows) => {
-        setReceivers((prev) => applyDiscoverReceivers(prev, rows));
-        hasDiscoverDataRef.current = rows.length > 0;
-      })
-      .catch(() => {
-        // Keep existing cards on transient failures.
-      });
-  }, [canFetchDiscover, fetchList]);
-
   useFocusEffect(
     useCallback(() => {
       if (!canFetchDiscover) return;
-      refreshDiscoverSilent();
       void loadCallerNotification();
-    }, [canFetchDiscover, refreshDiscoverSilent, loadCallerNotification])
-  );
-  useEffect(() => {
-    const sub = AppState.addEventListener('change', (state: AppStateStatus) => {
-      if (state === 'active' && isFocused && canFetchDiscover) {
-        refreshDiscoverSilent();
+      if (skipNextFocusRefreshRef.current) {
+        skipNextFocusRefreshRef.current = false;
+        return;
       }
-    });
-    return () => sub.remove();
-  }, [isFocused, canFetchDiscover, refreshDiscoverSilent]);
-
-  useEffect(() => {
-    if (!isFocused || !canFetchDiscover) return;
-    refreshDiscoverSilent();
-    const poll = setInterval(refreshDiscoverSilent, DISCOVER_POLL_MS);
-    return () => clearInterval(poll);
-  }, [isFocused, canFetchDiscover, refreshDiscoverSilent]);
+      void fetchDiscoverReceivers({ silent: true });
+    }, [canFetchDiscover, fetchDiscoverReceivers, loadCallerNotification])
+  );
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);

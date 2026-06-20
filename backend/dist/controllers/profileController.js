@@ -2440,6 +2440,47 @@ const verifyReceiverBankUpdateOtp = async (req, res) => {
     }
 };
 exports.verifyReceiverBankUpdateOtp = verifyReceiverBankUpdateOtp;
+/** Build paid chat earning rows using the same rules as wallet summary (incl. legacy messages). */
+function buildReceiverChatEarningRows(allMessages, minDate) {
+    const byUser = new Map();
+    for (const m of allMessages) {
+        const k = String(m.userId);
+        if (!byUser.has(k))
+            byUser.set(k, []);
+        byUser.get(k).push(m);
+    }
+    const rows = [];
+    let total = 0;
+    for (const list of byUser.values()) {
+        let receiverHasReplied = false;
+        for (const m of list) {
+            if (m.senderType === 'r') {
+                receiverHasReplied = true;
+                continue;
+            }
+            const t = msgTime(m);
+            if (minDate && t < minDate)
+                continue;
+            const earned = effectiveCallerFeeInr(m, receiverHasReplied);
+            if (earned <= 0)
+                continue;
+            total += earned;
+            rows.push({
+                id: `chat-${String(m._id)}`,
+                type: 'chat',
+                title: 'Chat Message',
+                createdAt: t.toISOString(),
+                durationMin: 0,
+                grossAmount: earned,
+                platformFee: 0,
+                netEarning: earned,
+                status: 'completed',
+            });
+        }
+    }
+    rows.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    return { rows, total: roundInr(total) };
+}
 /**
  * GET /profile/receiver-earnings-breakdown — earnings cards, list, analytics (calls + chat).
  */
@@ -2461,7 +2502,7 @@ const getReceiverEarningsBreakdown = async (req, res) => {
         monthStart.setDate(1);
         monthStart.setHours(0, 0, 0, 0);
         const minDate = range === 'all' ? null : range === 'month' ? monthStart : weekStart;
-        const [calls, chats] = await Promise.all([
+        const [calls, allChatMessages] = await Promise.all([
             CallSession_1.default.find({
                 receiverId: rid,
                 status: 'completed',
@@ -2470,61 +2511,46 @@ const getReceiverEarningsBreakdown = async (req, res) => {
             })
                 .sort({ startedAt: -1 })
                 .lean(),
-            ChatMessage_1.default.find({
-                receiverId: rid,
-                senderType: 'u',
-                feeInr: { $gt: 0 },
-                ...(minDate ? { createdAt: { $gte: minDate } } : {}),
-            })
-                .sort({ createdAt: -1 })
+            ChatMessage_1.default.find({ receiverId: rid })
+                .sort({ createdAt: 1 })
+                .select('userId senderType feeInr createdAt')
                 .lean(),
         ]);
         const callRows = calls.map((c) => {
-            const gross = roundInr(typeof c.receiverEarnedInr === 'number' && Number.isFinite(c.receiverEarnedInr)
-                ? c.receiverEarnedInr
-                : (c.durationSec / 60) *
-                    (typeof c.receiverPayoutRatePerMinute === 'number' &&
-                        Number.isFinite(c.receiverPayoutRatePerMinute)
-                        ? c.receiverPayoutRatePerMinute
-                        : 0));
-            const fee = roundInr(gross * 0.2);
-            const net = roundInr(gross - fee);
+            const earned = effectiveCallReceiverEarnedInr(c);
             return {
                 id: `call-${String(c._id)}`,
                 type: 'call',
                 title: 'Voice Call',
                 createdAt: c.startedAt.toISOString(),
                 durationMin: roundInr(c.durationSec / 60),
-                grossAmount: gross,
-                platformFee: fee,
-                netEarning: net,
+                grossAmount: earned,
+                platformFee: 0,
+                netEarning: earned,
                 status: 'completed',
             };
         });
-        const chatRows = chats.map((m) => {
-            const gross = roundInr(m.feeInr);
-            const fee = roundInr(gross * 0.2);
-            const net = roundInr(gross - fee);
-            return {
-                id: `chat-${String(m._id)}`,
-                type: 'chat',
-                title: 'Chat Message',
-                createdAt: m.createdAt.toISOString(),
-                durationMin: 0,
-                grossAmount: gross,
-                platformFee: fee,
-                netEarning: net,
-                status: 'completed',
-            };
-        });
+        const { rows: chatRows, total: chatEarnings } = buildReceiverChatEarningRows(allChatMessages, minDate);
         const entries = [...callRows, ...chatRows].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
         const totalMinutes = roundInr(callRows.reduce((sum, r) => sum + r.durationMin, 0));
-        const grossEarnings = roundInr(entries.reduce((sum, r) => sum + r.grossAmount, 0));
-        const platformFee = roundInr(entries.reduce((sum, r) => sum + r.platformFee, 0));
-        const netEarnings = roundInr(entries.reduce((sum, r) => sum + r.netEarning, 0));
-        const chatEarnings = roundInr(chatRows.reduce((sum, r) => sum + r.netEarning, 0));
+        const callEarnings = roundInr(callRows.reduce((sum, r) => sum + r.netEarning, 0));
+        const netEarnings = roundInr(callEarnings + chatEarnings);
         const totalCalls = callRows.length;
         const avgCallMinutes = totalCalls > 0 ? roundInr(totalMinutes / totalCalls) : 0;
+        const allCallsForLifetime = minDate
+            ? await CallSession_1.default.find({
+                receiverId: rid,
+                status: 'completed',
+                durationSec: { $gt: 0 },
+            })
+                .select('durationSec receiverEarnedInr receiverPayoutRatePerMinute')
+                .lean()
+            : calls;
+        const lifetimeCallEarnings = roundInr(allCallsForLifetime.reduce((sum, row) => sum + effectiveCallReceiverEarnedInr(row), 0));
+        const lifetimeChatEarnings = minDate
+            ? buildReceiverChatEarningRows(allChatMessages, null).total
+            : chatEarnings;
+        const lifetimeTotalEarnings = roundInr(lifetimeCallEarnings + lifetimeChatEarnings);
         function analyticsFor(mode) {
             const baseDate = mode === 'all' ? null : mode === 'month' ? monthStart : weekStart;
             const labels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
@@ -2551,10 +2577,16 @@ const getReceiverEarningsBreakdown = async (req, res) => {
                 totalCalls,
                 avgCallMinutes,
                 totalMinutes,
-                grossEarnings,
-                platformFee,
+                grossEarnings: netEarnings,
+                platformFee: 0,
                 netEarnings,
+                callEarnings,
                 chatEarnings,
+            },
+            lifetime: {
+                callEarnings: lifetimeCallEarnings,
+                chatEarnings: lifetimeChatEarnings,
+                totalEarnings: lifetimeTotalEarnings,
             },
             entries: entries.slice(0, 80),
             analytics: {

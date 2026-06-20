@@ -2,6 +2,7 @@ import CallSession from '../models/CallSession';
 import ChatMessage from '../models/ChatMessage';
 import AdminWithdrawalRequest from '../models/AdminWithdrawalRequest';
 import { CHAT_TEXT_CHARGE_INR } from '../constants/chatPricing';
+import { RESOLVED_RECEIVER_CALL_EARNING_EXPR } from '../utils/receiverCallEarnings';
 
 function roundInr(n: number): number {
   return Math.round(n * 100) / 100;
@@ -59,51 +60,59 @@ function finalizeBreakdown(parts: {
 }
 
 async function aggregateAdminEarnings(since?: Date | null): Promise<AdminEarningsBreakdown> {
-  const callMatch: Record<string, unknown> = { status: 'completed' };
-  if (since) callMatch.startedAt = { $gte: since };
+  const callerSpendMatch: Record<string, unknown> = {
+    status: 'completed',
+    settledAmountInr: { $gt: 0 },
+  };
+  const payoutCallMatch: Record<string, unknown> = { status: 'completed', durationSec: { $gt: 0 } };
+  if (since) {
+    callerSpendMatch.startedAt = { $gte: since };
+    payoutCallMatch.startedAt = { $gte: since };
+  }
 
-  const [callAgg] = await CallSession.aggregate<{
-    callerGross: number;
-    receiverPayout: number;
-    callEarnings: number;
-    calls: number;
-  }>([
-    { $match: callMatch },
-    {
-      $addFields: {
-        settled: { $ifNull: ['$settledAmountInr', 0] },
-        resolvedReceiverPayout: {
-          $cond: [
-            { $gt: ['$receiverEarnedInr', 0] },
-            '$receiverEarnedInr',
-            {
-              $multiply: [
-                { $divide: [{ $ifNull: ['$durationSec', 0] }, 60] },
-                { $ifNull: ['$receiverPayoutRatePerMinute', 0] },
-              ],
-            },
-          ],
+  const [callerSpendRows, callPayoutRows] = await Promise.all([
+    CallSession.aggregate<{ callerGross: number; calls: number }>([
+      { $match: callerSpendMatch },
+      {
+        $group: {
+          _id: null,
+          callerGross: { $sum: '$settledAmountInr' },
+          calls: { $sum: 1 },
         },
       },
-    },
-    {
-      $addFields: {
-        // Per-call margin only — legacy/test rows with receiver payout but no caller debit count as ₹0 admin margin.
-        callMargin: {
-          $max: [0, { $subtract: ['$settled', '$resolvedReceiverPayout'] }],
+    ]),
+    CallSession.aggregate<{
+      receiverPayout: number;
+      callEarnings: number;
+      calls: number;
+    }>([
+      { $match: payoutCallMatch },
+      {
+        $addFields: {
+          settled: { $ifNull: ['$settledAmountInr', 0] },
+          resolvedReceiverPayout: RESOLVED_RECEIVER_CALL_EARNING_EXPR,
         },
       },
-    },
-    {
-      $group: {
-        _id: null,
-        callerGross: { $sum: '$settled' },
-        receiverPayout: { $sum: '$resolvedReceiverPayout' },
-        callEarnings: { $sum: '$callMargin' },
-        calls: { $sum: 1 },
+      {
+        $addFields: {
+          callMargin: {
+            $max: [0, { $subtract: ['$settled', '$resolvedReceiverPayout'] }],
+          },
+        },
       },
-    },
+      {
+        $group: {
+          _id: null,
+          receiverPayout: { $sum: '$resolvedReceiverPayout' },
+          callEarnings: { $sum: '$callMargin' },
+          calls: { $sum: 1 },
+        },
+      },
+    ]),
   ]);
+
+  const callerSpendAgg = callerSpendRows[0];
+  const callAgg = callPayoutRows[0];
 
   const chatMatch: Record<string, unknown> = { senderType: 'u', feeInr: { $gt: 0 } };
   if (since) chatMatch.createdAt = { $gte: since };
@@ -136,9 +145,9 @@ async function aggregateAdminEarnings(since?: Date | null): Promise<AdminEarning
   return finalizeBreakdown({
     callEarnings: callAgg?.callEarnings ?? 0,
     messageEarnings: chatAgg?.messageEarnings ?? 0,
-    calls: callAgg?.calls ?? 0,
+    calls: callerSpendAgg?.calls ?? callAgg?.calls ?? 0,
     messages: chatAgg?.messages ?? 0,
-    callerCallGross: callAgg?.callerGross ?? 0,
+    callerCallGross: callerSpendAgg?.callerGross ?? 0,
     callerMessageGross: chatAgg?.callerMessageGross ?? 0,
     receiverCallPayout: callAgg?.receiverPayout ?? 0,
     receiverMessagePayout: chatAgg?.receiverPayout ?? 0,
@@ -161,13 +170,13 @@ export type PlatformRevenueSnapshot = {
   breakdown: AdminEarningsBreakdown;
 };
 
-/** Caller-facing gross = admin margin + receiver share (always >= admin earnings alone). */
+/** Total revenue = actual caller wallet debits (call settlements + chat charges). */
 export async function getPlatformRevenueForRange(since?: Date | null): Promise<PlatformRevenueSnapshot> {
   const breakdown = await aggregateAdminEarnings(since);
   const adminEarnings = breakdown.totalEarnings;
   const receiverRevenue = roundInr(breakdown.receiverCallPayout + breakdown.receiverMessagePayout);
   const callerGross = roundInr(breakdown.callerCallGross + breakdown.callerMessageGross);
-  const totalRevenue = roundInr(Math.max(callerGross, adminEarnings + receiverRevenue));
+  const totalRevenue = callerGross;
   return {
     totalRevenue,
     adminEarnings,

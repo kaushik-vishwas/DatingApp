@@ -516,7 +516,14 @@ export interface ReceiverEarningsBreakdownResponse {
     grossEarnings: number;
     platformFee: number;
     netEarnings: number;
+    callEarnings?: number;
     chatEarnings: number;
+  };
+  /** Lifetime totals — matches home top bar (`receiver-wallet-summary`). */
+  lifetime?: {
+    callEarnings: number;
+    chatEarnings: number;
+    totalEarnings: number;
   };
   entries: ReceiverEarningEntry[];
   analytics: {

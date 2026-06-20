@@ -18,6 +18,7 @@ const ChatMessage_1 = __importDefault(require("../models/ChatMessage"));
 const AdminSettings_1 = __importDefault(require("../models/AdminSettings"));
 const receiverEarningModel_1 = require("../services/receiverEarningModel");
 const adminEarningsService_1 = require("../services/adminEarningsService");
+const receiverEarningsAggregate_1 = require("../services/receiverEarningsAggregate");
 const chatPricing_1 = require("../constants/chatPricing");
 const receiverWelcome_1 = require("../services/receiverWelcome");
 const callerNotification_1 = require("../services/callerNotification");
@@ -750,7 +751,11 @@ const getOverviewDashboard = async (req, res) => {
             return;
         }
         const start = toRangeStart(range);
-        const [platformRevenue, calls, chats, activeReceivers, activeUsers, pendingKycApprovals, pendingWithdrawals, flaggedReports] = await Promise.all([
+        const todayStart = new Date();
+        todayStart.setHours(0, 0, 0, 0);
+        const weekStart = toRangeStart('7d') ?? todayStart;
+        const monthStart = toRangeStart('30d') ?? todayStart;
+        const [platformRevenue, calls, chats, activeReceivers, activeUsers, pendingKycApprovals, pendingWithdrawals, flaggedReports, allReceiverIds] = await Promise.all([
             (0, adminEarningsService_1.getPlatformRevenueForRange)(start),
             CallSession_1.default.find({
                 status: 'completed',
@@ -770,8 +775,13 @@ const getOverviewDashboard = async (req, res) => {
             Receiver_1.default.countDocuments({ accountStatus: 'pending_review' }),
             WithdrawalRequest_1.default.countDocuments({ status: 'pending' }),
             UserReport_1.default.countDocuments({ status: 'pending' }),
+            Receiver_1.default.find({}).select('_id').lean(),
         ]);
-        const totalRevenue = platformRevenue.totalRevenue;
+        const earningsRollups = await (0, receiverEarningsAggregate_1.aggregateReceiverEarningsByReceiver)(allReceiverIds.map((r) => r._id), todayStart, weekStart, monthStart);
+        const earningsPeriod = range === 'all' ? 'lifetime' : range === '30d' ? 'last30Days' : 'last7Days';
+        const receiverEarningsSum = (0, receiverEarningsAggregate_1.sumReceiverEarningsRollup)(earningsRollups.values(), earningsPeriod).earnings;
+        const totalRevenue = platformRevenue.callerGross;
+        const adminEarnings = roundInr(Math.max(0, totalRevenue - receiverEarningsSum));
         const totalCalls = calls.length;
         const trendByDay = new Map();
         for (const c of calls) {
@@ -797,8 +807,9 @@ const getOverviewDashboard = async (req, res) => {
         res.status(200).json({
             cards: {
                 totalRevenue,
-                adminEarnings: platformRevenue.adminEarnings,
-                receiverRevenue: platformRevenue.receiverRevenue,
+                adminEarnings,
+                receiverRevenue: receiverEarningsSum,
+                receiverEarningsSum,
                 totalCalls,
                 activeReceivers,
                 activeUsers,
@@ -1167,7 +1178,9 @@ const listAllReceivers = async (_req, res) => {
         const receiverIds = receivers.map((r) => r._id);
         const todayStart = new Date();
         todayStart.setHours(0, 0, 0, 0);
-        const [ratingRows, callStatRows] = await Promise.all([
+        const weekStart = toRangeStart('7d') ?? todayStart;
+        const monthStart = toRangeStart('30d') ?? todayStart;
+        const [ratingRows, earningsByReceiver] = await Promise.all([
             receiverIds.length === 0
                 ? Promise.resolve([])
                 : ReceiverRating_1.default.aggregate([
@@ -1180,32 +1193,7 @@ const listAllReceivers = async (_req, res) => {
                         },
                     },
                 ]),
-            receiverIds.length === 0
-                ? Promise.resolve([])
-                : CallSession_1.default.aggregate([
-                    {
-                        $match: {
-                            receiverId: { $in: receiverIds },
-                            status: 'completed',
-                            talkStartedAt: { $ne: null },
-                        },
-                    },
-                    {
-                        $group: {
-                            _id: '$receiverId',
-                            totalCalls: { $sum: 1 },
-                            totalEarnings: { $sum: { $ifNull: ['$receiverEarnedInr', 0] } },
-                            callsToday: {
-                                $sum: { $cond: [{ $gte: ['$startedAt', todayStart] }, 1, 0] },
-                            },
-                            earningsToday: {
-                                $sum: {
-                                    $cond: [{ $gte: ['$startedAt', todayStart] }, { $ifNull: ['$receiverEarnedInr', 0] }, 0],
-                                },
-                            },
-                        },
-                    },
-                ]),
+            (0, receiverEarningsAggregate_1.aggregateReceiverEarningsByReceiver)(receiverIds, todayStart, weekStart, monthStart),
         ]);
         const ratingByReceiverId = new Map(ratingRows.map((row) => [
             String(row._id),
@@ -1214,30 +1202,21 @@ const listAllReceivers = async (_req, res) => {
                 count: row.count ?? 0,
             },
         ]));
-        const callStatsByReceiverId = new Map(callStatRows.map((row) => [
-            String(row._id),
-            {
-                totalCalls: row.totalCalls ?? 0,
-                totalEarnings: roundInr(row.totalEarnings ?? 0),
-                callsToday: row.callsToday ?? 0,
-                earningsToday: roundInr(row.earningsToday ?? 0),
-            },
-        ]));
         const list = receivers.map((r) => {
             const base = (0, authController_1.toApiReceiver)(r);
             const id = String(r._id);
             const rating = ratingByReceiverId.get(id);
-            const calls = callStatsByReceiverId.get(id);
+            const earnings = earningsByReceiver.get(id);
             const isAvailable = Boolean(base.isAvailable);
             const isOnline = Boolean(base.isOnline);
             return {
                 ...base,
                 ratingAvg: rating && rating.count > 0 ? rating.avg : null,
                 ratingCount: rating?.count ?? 0,
-                totalCalls: calls?.totalCalls ?? 0,
-                callsToday: calls?.callsToday ?? 0,
-                earningsToday: calls?.earningsToday ?? 0,
-                totalEarnings: calls?.totalEarnings ?? 0,
+                totalCalls: earnings?.lifetime.calls ?? 0,
+                callsToday: earnings?.today.calls ?? 0,
+                earningsToday: earnings?.today.earnings ?? 0,
+                totalEarnings: earnings?.lifetime.earnings ?? 0,
                 isLiveAvailable: isAvailable && isOnline,
             };
         });
