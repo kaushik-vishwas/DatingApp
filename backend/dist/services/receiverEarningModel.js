@@ -14,10 +14,32 @@ const AdminSettings_1 = __importDefault(require("../models/AdminSettings"));
 const IST_OFFSET_MINUTES = 330;
 exports.DEFAULT_RECEIVER_EARNING_MODEL = 'score_based';
 exports.DEFAULT_FIXED_PER_MINUTE_WINDOWS = [
+    { id: 'morning', label: '6 AM – 9 AM', from: '06:00', to: '09:00', ratePerMinute: 1.7 },
+    { id: 'day', label: '9 AM – 9 PM', from: '09:00', to: '21:00', ratePerMinute: 2 },
+    { id: 'evening', label: '9 PM – 11 PM', from: '21:00', to: '23:00', ratePerMinute: 1.8 },
+    { id: 'night', label: '11 PM – 6 AM', from: '23:00', to: '06:00', ratePerMinute: 2 },
+];
+const LEGACY_FIXED_PER_MINUTE_WINDOWS = [
     { id: 'day', label: '6 AM – 9 PM', from: '06:00', to: '21:00', ratePerMinute: 2 },
     { id: 'evening', label: '9 PM – 11 PM', from: '21:00', to: '23:00', ratePerMinute: 2.2 },
     { id: 'night', label: '11 PM – 6 AM', from: '23:00', to: '06:00', ratePerMinute: 2.5 },
 ];
+function matchesLegacyFixedPerMinuteWindows(windows) {
+    if (windows.length !== LEGACY_FIXED_PER_MINUTE_WINDOWS.length)
+        return false;
+    return windows.every((w, i) => {
+        const leg = LEGACY_FIXED_PER_MINUTE_WINDOWS[i];
+        return (w.id === leg.id &&
+            w.from === leg.from &&
+            w.to === leg.to &&
+            w.ratePerMinute === leg.ratePerMinute);
+    });
+}
+function upgradeLegacyFixedPerMinuteWindows(windows) {
+    if (!matchesLegacyFixedPerMinuteWindows(windows))
+        return windows;
+    return exports.DEFAULT_FIXED_PER_MINUTE_WINDOWS.map((w) => ({ ...w }));
+}
 function roundInr(n) {
     return Math.round(n * 100) / 100;
 }
@@ -69,7 +91,10 @@ function normalizeFixedPerMinuteWindows(raw) {
             ratePerMinute: roundInr(rate),
         });
     }
-    return out.length > 0 ? out : exports.DEFAULT_FIXED_PER_MINUTE_WINDOWS.map((w) => ({ ...w }));
+    if (out.length === 0) {
+        return exports.DEFAULT_FIXED_PER_MINUTE_WINDOWS.map((w) => ({ ...w }));
+    }
+    return upgradeLegacyFixedPerMinuteWindows(out);
 }
 function resolveFixedRatePerMinuteAt(at, windows) {
     const schedule = windows.length > 0 ? windows : exports.DEFAULT_FIXED_PER_MINUTE_WINDOWS;

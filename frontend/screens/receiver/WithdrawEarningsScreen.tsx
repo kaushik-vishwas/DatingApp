@@ -21,6 +21,12 @@ import { getErrorMessage, getJwt, getResolvedApiBaseUrl, profileApi } from '../.
 import type { ReceiverStackParamList } from '../../navigation/ReceiverStackParamList';
 import type { ReceiverWithdrawalOverviewResponse } from '../../types/api';
 import Icon from 'react-native-vector-icons/Ionicons';
+import {
+  computeReceiverWithdrawalBreakdown,
+  RECEIVER_MIN_WITHDRAWAL_INR,
+  RECEIVER_WITHDRAWAL_PLATFORM_FEE_PERCENT,
+} from '../../utils/receiverWithdrawalFees';
+import { receiverPaymentDetailsComplete } from '../../utils/receiverPaymentDetails';
 
 type WithdrawNav = NativeStackNavigationProp<ReceiverStackParamList, 'WithdrawEarnings'>;
 type Step = 'amount' | 'otp' | 'processing' | 'success' | 'failed';
@@ -33,18 +39,6 @@ function formatDate(iso: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;
   return new Intl.DateTimeFormat('en-IN', { dateStyle: 'medium', timeStyle: 'short' }).format(d);
-}
-
-function isValidUpiId(upi: string): boolean {
-  return /^[a-z0-9._-]{2,256}@[a-z]{3,}$/i.test(upi.trim());
-}
-
-function isValidAadhaarNumber(value: string): boolean {
-  return /^\d{12}$/.test(value.replace(/\D/g, ''));
-}
-
-function isValidPanNumber(value: string): boolean {
-  return /^[A-Z]{5}[0-9]{4}[A-Z]$/.test(value.trim().toUpperCase());
 }
 
 export default function WithdrawEarningsScreen(): React.JSX.Element {
@@ -83,6 +77,14 @@ export default function WithdrawEarningsScreen(): React.JSX.Element {
     return Number.isFinite(n) ? Math.round(n * 100) / 100 : 0;
   }, [amount]);
 
+  const withdrawalBreakdown = useMemo(() => {
+    if (parsedAmount < RECEIVER_MIN_WITHDRAWAL_INR) return null;
+    return computeReceiverWithdrawalBreakdown(parsedAmount);
+  }, [parsedAmount]);
+
+  const minWithdrawalInr = overview?.minWithdrawalInr ?? RECEIVER_MIN_WITHDRAWAL_INR;
+  const platformFeePercent = overview?.platformFeePercent ?? RECEIVER_WITHDRAWAL_PLATFORM_FEE_PERCENT;
+
   const maskedMobile = useMemo(() => {
     const d = String(user?.phone ?? '').replace(/\D/g, '');
     if (d.length < 4) return d || 'your mobile';
@@ -91,14 +93,7 @@ export default function WithdrawEarningsScreen(): React.JSX.Element {
 
   const isPaymentComplete = useMemo(() => {
     if (overview?.payment?.complete) return true;
-    if (!user) return false;
-    return Boolean(
-      user.nameAsPerAadhaar?.trim() &&
-        user.upiId?.trim() &&
-        isValidUpiId(user.upiId) &&
-        isValidAadhaarNumber(String(user.aadhaarNumber ?? '')) &&
-        isValidPanNumber(String(user.panNumber ?? '')),
-    );
+    return receiverPaymentDetailsComplete(user);
   }, [overview?.payment?.complete, user]);
 
   const handleCompletePaymentDetails = useCallback(() => {
@@ -107,7 +102,7 @@ export default function WithdrawEarningsScreen(): React.JSX.Element {
 
   const ensurePaymentReady = useCallback((): boolean => {
     if (!isPaymentComplete) {
-      Alert.alert('Payment details', 'Add your UPI ID and required details to withdraw.');
+      Alert.alert('Payment details', 'Add payout details (UPI or bank account) to withdraw.');
       navigation.navigate('ReceiverBankDetails', { returnToWithdraw: true });
       return false;
     }
@@ -117,8 +112,8 @@ export default function WithdrawEarningsScreen(): React.JSX.Element {
   const onSendOtp = async () => {
     if (!overview) return;
     if (!ensurePaymentReady()) return;
-    if (!Number.isFinite(parsedAmount) || parsedAmount < 1) {
-      Alert.alert('Invalid amount', 'Enter a valid withdrawal amount.');
+    if (!Number.isFinite(parsedAmount) || parsedAmount < minWithdrawalInr) {
+      Alert.alert('Invalid amount', `Minimum withdrawal is ${formatInr(minWithdrawalInr)}.`);
       return;
     }
     if (parsedAmount > overview.walletBalance) {
@@ -252,7 +247,7 @@ export default function WithdrawEarningsScreen(): React.JSX.Element {
             {/* <Text style={styles.actionIcon}>⚠️</Text> */}
             <Text style={styles.centeredTitle}>Action Required</Text>
             <Text style={styles.centeredSubtitle}>
-              Add your UPI ID, name as per Aadhaar, Aadhaar number, and PAN to withdraw earnings.
+              Add your name as per Aadhaar, Aadhaar number, and either UPI ID or bank account with IFSC to withdraw.
             </Text>
             <TouchableOpacity onPress={handleCompletePaymentDetails} activeOpacity={0.8}>
               <LinearGradient
@@ -296,10 +291,14 @@ export default function WithdrawEarningsScreen(): React.JSX.Element {
               <View style={styles.balanceCard}>
                 <Text style={styles.balanceLabel}>Available Balance</Text>
                 <Text style={styles.balanceAmount}>{formatInr(overview.walletBalance)}</Text>
-                <Text style={styles.balanceSub}>Withdraw your earnings to your UPI</Text>
+                <Text style={styles.balanceSub}>Withdraw your earnings to your UPI or bank account</Text>
               </View>
 
               <Text style={styles.sectionLabel}>Enter Withdrawal Amount</Text>
+              <Text style={styles.minNote}>
+                Minimum withdrawal {formatInr(minWithdrawalInr)}. A {platformFeePercent}% platform fee is deducted from
+                your request (e.g. {formatInr(1000)} request → {formatInr(950)} to your UPI).
+              </Text>
               <View style={styles.inputWrap}>
                 <Text style={styles.currency}>₹</Text>
                 <TextInput
@@ -313,9 +312,28 @@ export default function WithdrawEarningsScreen(): React.JSX.Element {
                 />
               </View>
 
+              {withdrawalBreakdown ? (
+                <View style={styles.feeCard}>
+                  <View style={styles.feeRow}>
+                    <Text style={styles.feeLabel}>Withdrawal request</Text>
+                    <Text style={styles.feeValue}>{formatInr(withdrawalBreakdown.requestedAmount)}</Text>
+                  </View>
+                  <View style={styles.feeRow}>
+                    <Text style={styles.feeLabel}>Platform fee ({withdrawalBreakdown.platformFeePercent}%)</Text>
+                    <Text style={styles.feeValue}>- {formatInr(withdrawalBreakdown.platformFee)}</Text>
+                  </View>
+                  <View style={[styles.feeRow, styles.feeRowTotal]}>
+                    <Text style={styles.feeTotalLabel}>You receive</Text>
+                    <Text style={styles.feeTotalValue}>{formatInr(withdrawalBreakdown.netPayout)}</Text>
+                  </View>
+                </View>
+              ) : parsedAmount > 0 ? (
+                <Text style={styles.minHint}>Enter at least {formatInr(minWithdrawalInr)} to withdraw.</Text>
+              ) : null}
+
               <Text style={styles.sectionLabel}>Quick Select</Text>
               <View style={styles.quickRow}>
-                {[500, 1000, 2000, 5000].map((v) => (
+                {[200, 500, 1000, 2000].map((v) => (
                   <TouchableOpacity key={v} style={styles.quickBtn} onPress={() => setAmount(String(v))}>
                     <Text style={styles.quickText}>{formatInr(v)}</Text>
                   </TouchableOpacity>
@@ -327,8 +345,10 @@ export default function WithdrawEarningsScreen(): React.JSX.Element {
                   <Text style={styles.bankTitle}>Withdrawal will be sent to</Text>
                   <View />
                 </View>
-                <Text style={styles.bankName}>{overview.payment?.upiMasked ?? overview.bank.accountMasked}</Text>
-                <Text style={styles.bankAcc}>UPI payout</Text>
+                <Text style={styles.bankName}>{overview.bank.accountMasked || overview.payment?.upiMasked}</Text>
+                <Text style={styles.bankAcc}>
+                  {overview.payment?.payoutMethod === 'bank' ? 'Bank transfer (IMPS)' : 'UPI payout'}
+                </Text>
                 <Text style={styles.bankHolder}>
                   {overview.payment?.nameAsPerAadhaar ?? overview.bank.accountHolderName}
                 </Text>
@@ -466,8 +486,11 @@ export default function WithdrawEarningsScreen(): React.JSX.Element {
                   overview.recent.slice(0, 5).map((row) => (
                     <View key={row.id} style={styles.historyRow}>
                       <View>
-                        <Text style={styles.historyAmount}>{formatInr(row.amount)}</Text>
-                        <Text style={styles.historyDate}>{formatDate(row.createdAt)}</Text>
+                        <Text style={styles.historyAmount}>{formatInr(row.payoutAmount ?? row.amount)}</Text>
+                        <Text style={styles.historyDate}>
+                          {formatDate(row.createdAt)}
+                          {row.platformFee ? ` · fee ${formatInr(row.platformFee)}` : ''}
+                        </Text>
                       </View>
                       <Text style={styles.historyStatus}>
                         {row.payoutStatus
@@ -580,6 +603,28 @@ const styles = StyleSheet.create({
   balanceAmount: { fontSize: 34, color: '#fff', fontWeight: '900', marginTop: 4 },
   balanceSub: { marginTop: 6, fontSize: 11, color: '#fff', opacity: 0.9 },
   sectionLabel: { fontSize: 13, fontWeight: '800', color: '#232323', marginTop: 8, marginBottom: 6 },
+  minNote: { fontSize: 11, color: '#666', lineHeight: 16, marginBottom: 8 },
+  minHint: { fontSize: 11, color: '#b45309', marginTop: 6 },
+  feeCard: {
+    marginTop: 10,
+    padding: 12,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#ece6ff',
+    backgroundColor: '#fff',
+    gap: 6,
+  },
+  feeRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  feeRowTotal: {
+    marginTop: 4,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: '#f0f0f0',
+  },
+  feeLabel: { fontSize: 12, color: '#666' },
+  feeValue: { fontSize: 12, color: '#333', fontWeight: '700' },
+  feeTotalLabel: { fontSize: 13, color: '#111', fontWeight: '800' },
+  feeTotalValue: { fontSize: 14, color: '#7b2cff', fontWeight: '900' },
   inputWrap: {
     flexDirection: 'row',
     alignItems: 'center',

@@ -1,14 +1,15 @@
 // Remove ALL static constants - they're not needed anymore
 // Your backend should ONLY use the database for offers
 
-const GST_PERCENTAGE = 28;
+import {
+  WALLET_RECHARGE_GST_PERCENT,
+  walletCreditForRecharge,
+} from './walletRechargeFees';
 
-export function walletCreditForPackage(payAmount: number, bonusPercent: number): number {
-  // Remove GST from the paid amount
-  const baseAmount = payAmount / (1 + GST_PERCENTAGE / 100);
-  // Calculate total credit
-  const totalCredit = baseAmount * (1 + bonusPercent / 100);
-  return Math.round(totalCredit * 100) / 100;
+export { WALLET_RECHARGE_GST_PERCENT as GST_PERCENTAGE };
+
+export function walletCreditForPackage(walletAmount: number, bonusPercent: number): number {
+  return walletCreditForRecharge(walletAmount, bonusPercent);
 }
 
 // Remove assertAllowedWalletPackage - it's not needed

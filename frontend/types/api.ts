@@ -387,6 +387,8 @@ export type ReceiverPayoutStatus = 'processing' | 'success' | 'failed';
 export interface ReceiverWithdrawalRow {
   id: string;
   amount: number;
+  platformFee?: number;
+  payoutAmount?: number;
   status: ReceiverWithdrawalStatus;
   payoutStatus?: ReceiverPayoutStatus;
   createdAt: string;
@@ -397,10 +399,13 @@ export interface ReceiverWithdrawalOverviewResponse {
   pendingAmount: number;
   totalEarnings?: number;
   totalWithdrawn?: number;
+  minWithdrawalInr?: number;
+  platformFeePercent?: number;
   payment?: {
     nameAsPerAadhaar: string;
     upiMasked: string;
     complete: boolean;
+    payoutMethod?: 'upi' | 'bank';
   };
   bank: {
     bankName: string;
@@ -608,9 +613,12 @@ export interface DeleteReceiverAccountPayload {
 
 export interface ReceiverBankDetailsPayload {
   nameAsPerAadhaar: string;
-  upiId: string;
   aadhaarNumber: string;
-  panNumber: string;
+  payoutMethod?: 'upi' | 'bank';
+  upiId?: string;
+  panNumber?: string;
+  bankAccountNumber?: string;
+  bankIfsc?: string;
   aadhaarFront?: string;
   aadhaarBack?: string;
   panFront?: string;

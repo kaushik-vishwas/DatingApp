@@ -4,9 +4,18 @@ export type WithdrawalStatus = 'verification_pending' | 'pending' | 'approved' |
 
 export type PayoutStatus = 'none' | 'processing' | 'success' | 'failed';
 
+export type WithdrawalPayoutMethod = 'upi' | 'bank';
+
 export interface IWithdrawalRequest {
   receiverId: mongoose.Types.ObjectId;
+  /** Gross amount requested (debited from receiver wallet on payout success). */
   amount: number;
+  /** Platform fee retained as admin earnings. */
+  platformFee: number;
+  /** Net amount sent to receiver (UPI or bank). */
+  payoutAmount: number;
+  /** Rail used for RazorpayX payout, frozen when the withdrawal OTP is sent. */
+  payoutMethod: WithdrawalPayoutMethod | null;
   status: WithdrawalStatus;
   verificationCodeHash: string | null;
   verificationExpiresAt: Date | null;
@@ -34,6 +43,9 @@ const withdrawalRequestSchema = new Schema<IWithdrawalRequest>(
   {
     receiverId: { type: Schema.Types.ObjectId, ref: 'Receiver', required: true, index: true },
     amount: { type: Number, required: true, min: 1 },
+    platformFee: { type: Number, default: 0, min: 0 },
+    payoutAmount: { type: Number, default: 0, min: 0 },
+    payoutMethod: { type: String, enum: ['upi', 'bank'], default: null },
     status: {
       type: String,
       enum: ['verification_pending', 'pending', 'approved', 'rejected'],

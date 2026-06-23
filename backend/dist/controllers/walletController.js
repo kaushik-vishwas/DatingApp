@@ -45,7 +45,7 @@ const WalletTopup_1 = __importDefault(require("../models/WalletTopup"));
 const WalletCredit_1 = __importDefault(require("../models/WalletCredit"));
 const authController_1 = require("./authController");
 const accountAccess_1 = require("../utils/accountAccess");
-const GST_PERCENTAGE = 28;
+const walletRechargeFees_1 = require("../constants/walletRechargeFees");
 function getRazorpay() {
     const key_id = process.env.RAZORPAY_KEY_ID?.trim();
     const key_secret = process.env.RAZORPAY_KEY_SECRET?.trim();
@@ -66,14 +66,18 @@ function verifyPaymentSignature(orderId, paymentId, signature, secret) {
     }
 }
 /**
- * Calculate wallet credit by removing GST first
+ * Validate recharge pack + payable total, then return wallet credit.
  */
-function calculateWalletCredit(payAmount, bonusPercent) {
-    // Remove GST from the paid amount to get base amount
-    const baseAmount = payAmount / (1 + GST_PERCENTAGE / 100);
-    // Calculate total credit including bonus
-    const totalCredit = baseAmount * (1 + bonusPercent / 100);
-    return Math.round(totalCredit * 100) / 100;
+function resolveWalletRecharge(payAmount, bonusPercent, walletAmountRaw) {
+    const walletAmount = Number(walletAmountRaw);
+    if (!Number.isFinite(walletAmount) || walletAmount <= 0)
+        return null;
+    if (!(0, walletRechargeFees_1.payableMatchesWalletPack)(walletAmount, payAmount))
+        return null;
+    return {
+        walletAmount: Math.round(walletAmount),
+        credit: (0, walletRechargeFees_1.walletCreditForRecharge)(walletAmount, bonusPercent),
+    };
 }
 /**
  * GET /wallet/credits — non-Razorpay wallet credits (referral rewards, etc.) for callers.
@@ -181,11 +185,13 @@ const createRazorpayWalletOrder = async (req, res) => {
             res.status(400).json({ message: 'payAmount and bonusPercent must be numbers' });
             return;
         }
-        // Remove GST to get base amount for validation
-        const baseAmount = Math.round((payAmount * 100) / (100 + GST_PERCENTAGE));
-        // Validate against database
+        const resolved = resolveWalletRecharge(payAmount, bonusPercent, req.body.walletAmount);
+        if (!resolved) {
+            res.status(400).json({ message: 'Invalid wallet recharge amount' });
+            return;
+        }
         const { validateOfferForOrder } = await Promise.resolve().then(() => __importStar(require('./walletOffersController')));
-        const isValidOffer = await validateOfferForOrder(baseAmount, bonusPercent);
+        const isValidOffer = await validateOfferForOrder(resolved.walletAmount, bonusPercent);
         if (!isValidOffer) {
             res.status(400).json({ message: 'Invalid wallet offer' });
             return;
@@ -259,11 +265,13 @@ const verifyRazorpayWalletPayment = async (req, res) => {
             res.status(400).json({ message: 'payAmount and bonusPercent must be numbers' });
             return;
         }
-        // Remove GST to get base amount for validation
-        const baseAmount = Math.round((payAmount * 100) / (100 + GST_PERCENTAGE));
-        // Validate against database
+        const resolved = resolveWalletRecharge(payAmount, bonusPercent, req.body.walletAmount);
+        if (!resolved) {
+            res.status(400).json({ message: 'Invalid wallet recharge amount' });
+            return;
+        }
         const { validateOfferForCredit } = await Promise.resolve().then(() => __importStar(require('./walletOffersController')));
-        const isValidOffer = await validateOfferForCredit(baseAmount, bonusPercent);
+        const isValidOffer = await validateOfferForCredit(resolved.walletAmount, bonusPercent);
         if (!isValidOffer) {
             res.status(400).json({ message: 'Invalid wallet offer' });
             return;
@@ -310,7 +318,7 @@ const verifyRazorpayWalletPayment = async (req, res) => {
             return;
         }
         // Calculate credit using the helper function
-        const credit = calculateWalletCredit(payAmount, bonusPercent);
+        const credit = resolved.credit;
         const userRow = await User_1.default.findById(authUser._id);
         if (!userRow) {
             res.status(404).json({ message: 'User not found' });
@@ -405,17 +413,18 @@ const creditWallet = async (req, res) => {
             res.status(400).json({ message: 'payAmount and bonusPercent must be numbers' });
             return;
         }
-        // Remove GST to get base amount for validation
-        const baseAmount = Math.round((payAmount * 100) / (100 + GST_PERCENTAGE));
-        // Validate against database
+        const resolved = resolveWalletRecharge(payAmount, bonusPercent, req.body.walletAmount);
+        if (!resolved) {
+            res.status(400).json({ message: 'Invalid wallet recharge amount' });
+            return;
+        }
         const { validateOfferForCredit } = await Promise.resolve().then(() => __importStar(require('./walletOffersController')));
-        const isValidOffer = await validateOfferForCredit(baseAmount, bonusPercent);
+        const isValidOffer = await validateOfferForCredit(resolved.walletAmount, bonusPercent);
         if (!isValidOffer) {
             res.status(400).json({ message: 'Invalid wallet offer' });
             return;
         }
-        // Calculate credit using the helper function
-        const credit = calculateWalletCredit(payAmount, bonusPercent);
+        const credit = resolved.credit;
         const user = await User_1.default.findById(authUser._id);
         if (!user) {
             res.status(404).json({ message: 'User not found' });

@@ -19,7 +19,7 @@ export type ReceiverStackParamList = {
   ReceiverGuidelines: undefined;
   ReceiverHowToEarn: undefined;
   ReceiverNotifications: undefined;
-  ReceiverBankDetails: { returnToWithdraw?: boolean } | undefined;
+  ReceiverBankDetails: { returnToWithdraw?: boolean; method?: 'upi' | 'bank' } | undefined;
   ReceiverEditProfile: { fromWithdrawKyc?: boolean } | undefined;
   ReceiverSelectGender: undefined;
   ReceiverOnboarding: { gender?: Gender } | undefined;

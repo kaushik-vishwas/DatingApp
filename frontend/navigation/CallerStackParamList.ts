@@ -30,6 +30,8 @@ export type CallerStackParamList = {
     bonusPercent: number;
     creditAmount: number;
     gstAmount: number;
+    platformFeeAmount: number;
+    platformFeePercent: number;
     totalAmount: number;
     walletAmount: number;
   };

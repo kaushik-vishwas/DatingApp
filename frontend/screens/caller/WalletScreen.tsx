@@ -9,9 +9,12 @@ import { Ionicons } from '@expo/vector-icons';
 import type { CallerStackParamList } from '../../navigation/CallerStackParamList';
 import type { WalletOfferRow } from '../../types/api';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import {
+  computeWalletRechargeBreakdown,
+  walletCreditForRecharge,
+} from '../../utils/walletRechargeFees';
 
 const PURPLE = '#7b2cff';
-const GST_PERCENTAGE = 28;
 
 type Props = NativeStackScreenProps<CallerStackParamList, 'Wallet'>;
 
@@ -28,11 +31,8 @@ export default function WalletScreen({ navigation }: Props): React.JSX.Element {
 
   const bal = typeof user?.walletBalance === 'number' && Number.isFinite(user.walletBalance) ? user.walletBalance : 0;
 
-  // Calculate credit directly without static function
   const calculateCredit = (amount: number, bonusPercent: number): number => {
-    // amount from API is the base amount (without GST)
-    const totalCredit = amount * (1 + bonusPercent / 100);
-    return Math.round(totalCredit * 100) / 100;
+    return walletCreditForRecharge(amount, bonusPercent);
   };
 
   const onProceed = () => {
@@ -40,17 +40,17 @@ export default function WalletScreen({ navigation }: Props): React.JSX.Element {
       Alert.alert('Select amount', 'Choose a recharge pack to continue.');
       return;
     }
-    
+
+    const breakdown = computeWalletRechargeBreakdown(selected.amount);
     const credit = calculateCredit(selected.amount, selected.bonusPercent);
-    const walletAmount = selected.amount;
-    const gstAmount = (selected.amount * GST_PERCENTAGE) / 100;
-    const totalAmount = selected.amount + gstAmount;
-    
+
     navigation.navigate('PaymentMethod', {
-      walletAmount: walletAmount,
-      payAmount: totalAmount,
-      gstAmount: gstAmount,
-      totalAmount: totalAmount,
+      walletAmount: breakdown.walletAmount,
+      payAmount: breakdown.totalPayable,
+      gstAmount: breakdown.gstAmount,
+      platformFeeAmount: breakdown.platformFee,
+      platformFeePercent: breakdown.platformFeePercent,
+      totalAmount: breakdown.totalPayable,
       bonusPercent: selected.bonusPercent,
       creditAmount: credit,
     });

@@ -392,10 +392,10 @@ export const walletApi = {
 
   offers: () => api.get<WalletOffersResponse>('/wallet/offers'),
 
-  credit: (body: { payAmount: number; bonusPercent: number }) =>
+  credit: (body: { payAmount: number; bonusPercent: number; walletAmount: number }) =>
     api.post<WalletCreditResponse>('/wallet/credit', body),
 
-  createRazorpayOrder: (body: { payAmount: number; bonusPercent: number }) =>
+  createRazorpayOrder: (body: { payAmount: number; bonusPercent: number; walletAmount: number }) =>
     api.post<RazorpayOrderResponse>('/wallet/razorpay-order', body),
 
   verifyRazorpayPayment: (body: {
@@ -404,6 +404,7 @@ export const walletApi = {
     razorpay_signature: string;
     payAmount: number;
     bonusPercent: number;
+    walletAmount: number;
   }) => api.post<WalletCreditResponse>('/wallet/razorpay-verify', body),
 };
 

@@ -30,7 +30,6 @@ const socketRegistry_1 = require("../socket/socketRegistry");
 const authSessionService_1 = require("../services/authSessionService");
 const phoneNormalize_1 = require("../utils/phoneNormalize");
 const OTP_TTL_MS = 5 * 60 * 1000; // 5 minutes
-const PLATFORM_COMMISSION_RATE = 0.2;
 const signAdminToken = (adminId) => {
     const secret = process.env.ADMIN_JWT_SECRET;
     if (!secret) {
@@ -641,94 +640,9 @@ const getRevenueDashboard = async (req, res) => {
             return;
         }
         const start = toRangeStart(range);
-        const [calls, chats] = await Promise.all([
-            CallSession_1.default.find({
-                status: 'completed',
-                ...(start ? { startedAt: { $gte: start } } : {}),
-            })
-                .select('receiverId startedAt settledAmountInr receiverEarnedInr receiverPayoutRatePerMinute durationSec')
-                .lean(),
-            ChatMessage_1.default.find({
-                senderType: 'u',
-                feeInr: { $gt: 0 },
-                ...(start ? { createdAt: { $gte: start } } : {}),
-            })
-                .select('receiverId createdAt feeInr')
-                .lean(),
-        ]);
-        let grossCalls = 0;
-        let grossChat = 0;
-        const dailyCallsGross = new Map();
-        const receiverGross = new Map();
-        for (const row of calls) {
-            const gross = roundInr(Number(row.settledAmountInr || 0));
-            const payout = typeof row.receiverEarnedInr === 'number' && Number.isFinite(row.receiverEarnedInr)
-                ? roundInr(row.receiverEarnedInr)
-                : roundInr((Number(row.durationSec || 0) / 60) * Number(row.receiverPayoutRatePerMinute || 0));
-            grossCalls += gross;
-            const day = new Date(row.startedAt).toISOString().slice(0, 10);
-            dailyCallsGross.set(day, roundInr((dailyCallsGross.get(day) || 0) + gross));
-            const rid = String(row.receiverId);
-            const agg = receiverGross.get(rid) || { gross: 0, payout: 0, calls: 0 };
-            agg.gross = roundInr(agg.gross + gross);
-            agg.payout = roundInr(agg.payout + payout);
-            agg.calls += 1;
-            receiverGross.set(rid, agg);
-        }
-        for (const row of chats) {
-            const gross = roundInr(Number(row.feeInr || 0));
-            grossChat += gross;
-            const day = new Date(row.createdAt).toISOString().slice(0, 10);
-            dailyCallsGross.set(day, roundInr((dailyCallsGross.get(day) || 0) + gross));
-            const rid = String(row.receiverId);
-            const agg = receiverGross.get(rid) || { gross: 0, payout: 0, calls: 0 };
-            agg.gross = roundInr(agg.gross + gross);
-            // Chat credits are receiver payout side for this dashboard.
-            agg.payout = roundInr(agg.payout + gross);
-            receiverGross.set(rid, agg);
-        }
-        const grossRevenue = roundInr(grossCalls + grossChat);
-        const platformCommission = roundInr(grossRevenue * PLATFORM_COMMISSION_RATE);
-        const netPayout = roundInr(grossRevenue - platformCommission);
-        const dailyBreakdown = [...dailyCallsGross.entries()]
-            .sort((a, b) => (a[0] > b[0] ? -1 : 1))
-            .slice(0, 31)
-            .map(([date, callsRevenue]) => {
-            const commission = roundInr(callsRevenue * PLATFORM_COMMISSION_RATE);
-            return {
-                date,
-                callsRevenue: roundInr(callsRevenue),
-                commission,
-                payout: roundInr(callsRevenue - commission),
-            };
-        });
-        const topReceiverIds = [...receiverGross.entries()]
-            .sort((a, b) => b[1].gross - a[1].gross)
-            .slice(0, 10)
-            .map(([rid]) => new mongoose_1.default.Types.ObjectId(rid));
-        const receiverRows = topReceiverIds.length > 0
-            ? await Receiver_1.default.find({ _id: { $in: topReceiverIds } })
-                .select('_id name')
-                .lean()
-            : [];
-        const receiverNameById = new Map(receiverRows.map((r) => [String(r._id), r.name]));
-        const topEarners = [...receiverGross.entries()]
-            .sort((a, b) => b[1].gross - a[1].gross)
-            .slice(0, 5)
-            .map(([rid, v]) => ({
-            receiverId: rid,
-            name: receiverNameById.get(rid) ?? 'Receiver',
-            calls: v.calls,
-            earnings: roundInr(v.gross),
-            payout: roundInr(v.payout),
-        }));
+        const { cards, dailyBreakdown, topEarners } = await (0, adminEarningsService_1.getRevenueDashboardMetrics)(start);
         res.status(200).json({
-            cards: {
-                grossRevenue,
-                platformCommission,
-                netPayout,
-                platformProfit: platformCommission,
-            },
+            cards,
             dailyBreakdown,
             topEarners,
         });

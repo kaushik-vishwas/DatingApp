@@ -64,8 +64,11 @@ const callerVoiceGenderVerifier_1 = require("../services/callerVoiceGenderVerifi
 const receiverScore_1 = require("../services/receiverScore");
 const razorpayXPayoutService_1 = require("../services/razorpayXPayoutService");
 const socketRegistry_2 = require("../socket/socketRegistry");
+const receiverWithdrawalFees_1 = require("../constants/receiverWithdrawalFees");
 const apiTraceLog_1 = require("../utils/apiTraceLog");
 const callerMessageEligibility_1 = require("../utils/callerMessageEligibility");
+const receiverPayoutDestination_1 = require("../utils/receiverPayoutDestination");
+const receiverPaymentDetails_1 = require("../utils/receiverPaymentDetails");
 const callController_1 = require("./callController");
 const receiverEarningModel_1 = require("../services/receiverEarningModel");
 const receiverWelcome_1 = require("../services/receiverWelcome");
@@ -88,27 +91,12 @@ function receiverOnboardingProfileFieldsComplete(r) {
         Array.isArray(r.interests) &&
         r.interests.length > 0);
 }
-function normalizeUpiId(raw) {
-    return typeof raw === 'string' ? raw.trim().toLowerCase() : '';
-}
-function isValidUpiId(upi) {
-    return /^[a-z0-9._-]{2,256}@[a-z]{3,}$/i.test(upi);
-}
 function maskUpiId(upi) {
     const trimmed = upi.trim();
     const at = trimmed.indexOf('@');
     if (at <= 0)
         return '****';
     return `****${trimmed.slice(at)}`;
-}
-function receiverPaymentDetailsComplete(r) {
-    const aadhaarDigits = String(r.aadhaarNumber ?? '').replace(/\D/g, '');
-    const pan = String(r.panNumber ?? '').trim().toUpperCase();
-    return Boolean(r.nameAsPerAadhaar?.trim() &&
-        r.upiId?.trim() &&
-        isValidUpiId(normalizeUpiId(r.upiId)) &&
-        /^\d{12}$/.test(aadhaarDigits) &&
-        /^[A-Z]{5}[0-9]{4}[A-Z]$/.test(pan));
 }
 function parseCallerAudioHttpsUrl(body) {
     const raw = typeof body.userAudio === 'string'
@@ -1227,7 +1215,7 @@ const getReceiverWithdrawalOverview = async (req, res) => {
         if ((0, accountAccess_1.blockReceiverUntilApproved)(req, res))
             return;
         const rid = String(req.receiver._id);
-        const receiver = await Receiver_1.default.findById(rid).select('walletBalance phone nameAsPerAadhaar upiId aadhaarNumber panNumber');
+        const receiver = await Receiver_1.default.findById(rid).select('walletBalance phone nameAsPerAadhaar upiId aadhaarNumber panNumber bankAccountNumber bankIfsc bankAccountHolderName');
         if (!receiver) {
             res.status(404).json({ message: 'Receiver not found' });
             return;
@@ -1238,7 +1226,7 @@ const getReceiverWithdrawalOverview = async (req, res) => {
         })
             .sort({ createdAt: -1 })
             .limit(20)
-            .select('amount status createdAt payoutStatus payoutUtr')
+            .select('amount platformFee payoutAmount status createdAt payoutStatus payoutUtr')
             .lean();
         const withdrawable = await computeReceiverWithdrawableSnapshot(rid, typeof receiver.walletBalance === 'number' && Number.isFinite(receiver.walletBalance)
             ? receiver.walletBalance
@@ -1248,20 +1236,29 @@ const getReceiverWithdrawalOverview = async (req, res) => {
             pendingAmount: withdrawable.pendingAmount,
             totalEarnings: withdrawable.totalEarnings,
             totalWithdrawn: withdrawable.totalWithdrawn,
+            minWithdrawalInr: receiverWithdrawalFees_1.RECEIVER_MIN_WITHDRAWAL_INR,
+            platformFeePercent: receiverWithdrawalFees_1.RECEIVER_WITHDRAWAL_PLATFORM_FEE_PERCENT,
             payment: {
                 nameAsPerAadhaar: receiver.nameAsPerAadhaar ?? '',
                 upiMasked: receiver.upiId ? maskUpiId(receiver.upiId) : '',
-                complete: receiverPaymentDetailsComplete(receiver),
+                complete: (0, receiverPaymentDetails_1.receiverPaymentDetailsComplete)(receiver),
+                payoutMethod: receiver.upiId ? 'upi' : receiver.bankAccountNumber ? 'bank' : undefined,
             },
             bank: {
-                bankName: 'UPI',
-                accountHolderName: receiver.nameAsPerAadhaar ?? '',
-                accountMasked: receiver.upiId ? maskUpiId(receiver.upiId) : '',
+                bankName: receiver.upiId ? 'UPI' : receiver.bankIfsc ? 'Bank' : '',
+                accountHolderName: receiver.nameAsPerAadhaar ?? receiver.bankAccountHolderName ?? '',
+                accountMasked: receiver.upiId
+                    ? maskUpiId(receiver.upiId)
+                    : receiver.bankAccountNumber
+                        ? maskAccountNumber(receiver.bankAccountNumber)
+                        : '',
             },
             phoneMasked: receiver.phone ? maskPhone(receiver.phone) : '',
             recent: recentRows.map((row) => ({
                 id: String(row._id),
                 amount: roundInr(row.amount),
+                platformFee: roundInr(typeof row.platformFee === 'number' ? row.platformFee : 0),
+                payoutAmount: roundInr((0, receiverWithdrawalFees_1.resolveWithdrawalPayoutAmount)(row)),
                 status: row.status,
                 payoutStatus: row.payoutStatus && row.payoutStatus !== 'none' ? row.payoutStatus : undefined,
                 createdAt: row.createdAt.toISOString(),
@@ -1287,30 +1284,43 @@ const sendReceiverWithdrawalOtp = async (req, res) => {
         if ((0, accountAccess_1.blockReceiverUntilApproved)(req, res))
             return;
         const amount = toInrAmount(req.body.amount);
-        if (amount === null) {
-            res.status(400).json({ message: 'amount must be at least 1 INR' });
+        if (!(0, receiverWithdrawalFees_1.isValidReceiverWithdrawalAmount)(amount)) {
+            res.status(400).json({ message: `Minimum withdrawal is ₹${receiverWithdrawalFees_1.RECEIVER_MIN_WITHDRAWAL_INR}` });
+            return;
+        }
+        const breakdown = (0, receiverWithdrawalFees_1.computeReceiverWithdrawalBreakdown)(amount);
+        if (breakdown.netPayout < 1) {
+            res.status(400).json({ message: 'Withdrawal amount is too low after platform fee' });
             return;
         }
         const rid = String(req.receiver._id);
-        const receiver = await Receiver_1.default.findById(rid).select('phone walletBalance nameAsPerAadhaar upiId aadhaarNumber panNumber');
+        const receiver = await Receiver_1.default.findById(rid).select('phone walletBalance nameAsPerAadhaar upiId aadhaarNumber panNumber bankAccountNumber bankIfsc bankAccountHolderName');
         if (!receiver) {
             res.status(404).json({ message: 'Receiver not found' });
             return;
         }
         const withdrawable = await computeReceiverWithdrawableSnapshot(rid, receiver.walletBalance ?? 0);
-        if (amount > withdrawable.withdrawableBalance) {
+        if (breakdown.requestedAmount > withdrawable.withdrawableBalance) {
             res.status(400).json({ message: 'Insufficient wallet balance' });
             return;
         }
-        if (!receiverPaymentDetailsComplete(receiver)) {
+        if (!(0, receiverPaymentDetails_1.receiverPaymentDetailsComplete)(receiver)) {
             res.status(400).json({ message: 'Please complete payment details before requesting a withdrawal' });
             return;
         }
         const code = generateOtpCode();
         const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
+        const payoutMethod = (0, receiverPayoutDestination_1.inferReceiverPayoutMethod)(receiver);
+        if (!payoutMethod) {
+            res.status(400).json({ message: 'Please complete payment details before requesting a withdrawal' });
+            return;
+        }
         await WithdrawalRequest_1.default.findOneAndUpdate({ receiverId: rid, status: 'verification_pending' }, {
             $set: {
-                amount,
+                amount: breakdown.requestedAmount,
+                platformFee: breakdown.platformFee,
+                payoutAmount: breakdown.netPayout,
+                payoutMethod,
                 status: 'verification_pending',
                 verificationCodeHash: otpHash(code),
                 verificationExpiresAt: expiresAt,
@@ -1318,9 +1328,13 @@ const sendReceiverWithdrawalOtp = async (req, res) => {
                 reviewedAt: null,
                 reviewedByAdminId: null,
                 adminNote: null,
-                bankName: 'UPI',
-                accountHolderName: receiver.nameAsPerAadhaar ?? '',
-                accountMasked: maskUpiId(receiver.upiId ?? ''),
+                bankName: payoutMethod === 'upi' ? 'UPI' : 'Bank',
+                accountHolderName: receiver.nameAsPerAadhaar ?? receiver.bankAccountHolderName ?? '',
+                accountMasked: payoutMethod === 'upi' && receiver.upiId
+                    ? maskUpiId(receiver.upiId)
+                    : receiver.bankAccountNumber
+                        ? maskAccountNumber(receiver.bankAccountNumber)
+                        : '',
             },
         }, { upsert: true, new: true, setDefaultsOnInsert: true });
         if (!receiver.phone?.trim()) {
@@ -1402,7 +1416,7 @@ const verifyReceiverWithdrawalOtpAndCreate = async (req, res) => {
         await pendingVerification.save();
         (0, socketRegistry_2.emitReceiverWithdrawalUpdate)(rid, {
             withdrawalId: String(pendingVerification._id),
-            amount: roundInr(pendingVerification.amount),
+            amount: roundInr((0, receiverWithdrawalFees_1.resolveWithdrawalPayoutAmount)(pendingVerification)),
             payoutStatus: 'processing',
             message: 'Please wait, payment is processing',
         });
@@ -1415,6 +1429,8 @@ const verifyReceiverWithdrawalOtpAndCreate = async (req, res) => {
             withdrawal: {
                 id: String(pendingVerification._id),
                 amount: roundInr(pendingVerification.amount),
+                platformFee: roundInr(pendingVerification.platformFee ?? 0),
+                payoutAmount: roundInr((0, receiverWithdrawalFees_1.resolveWithdrawalPayoutAmount)(pendingVerification)),
                 status: pendingVerification.status,
                 payoutStatus: pendingVerification.payoutStatus,
                 createdAt: pendingVerification.createdAt.toISOString(),
@@ -2307,24 +2323,9 @@ const sendReceiverBankUpdateOtp = async (req, res) => {
         }
         if ((0, accountAccess_1.blockReceiverUntilApproved)(req, res))
             return;
-        const nameAsPerAadhaar = String(req.body.nameAsPerAadhaar ?? '').trim();
-        const upiId = normalizeUpiId(req.body.upiId);
-        if (!nameAsPerAadhaar) {
-            res.status(400).json({ message: 'nameAsPerAadhaar is required' });
-            return;
-        }
-        if (!upiId || !isValidUpiId(upiId)) {
-            res.status(400).json({ message: 'Enter a valid UPI ID (e.g. name@bank)' });
-            return;
-        }
-        const aadhaarDigits = String(req.body.aadhaarNumber ?? '').replace(/\D/g, '');
-        const pan = String(req.body.panNumber ?? '').trim().toUpperCase();
-        if (!/^\d{12}$/.test(aadhaarDigits)) {
-            res.status(400).json({ message: 'Aadhaar number must be 12 digits' });
-            return;
-        }
-        if (!/^[A-Z]{5}[0-9]{4}[A-Z]$/.test(pan)) {
-            res.status(400).json({ message: 'Enter a valid PAN (e.g. ABCDE1234F)' });
+        const parsed = (0, receiverPaymentDetails_1.parseReceiverPaymentUpdateBody)(req.body);
+        if ('error' in parsed) {
+            res.status(400).json({ message: parsed.error });
             return;
         }
         const receiver = await Receiver_1.default.findById(String(req.receiver._id)).select('phone');
@@ -2339,10 +2340,15 @@ const sendReceiverBankUpdateOtp = async (req, res) => {
         const otpCode = generateOtpCode();
         receiver.otp = otpHash(otpCode);
         receiver.otpExpiry = new Date(Date.now() + 5 * 60 * 1000);
-        receiver.pendingNameAsPerAadhaar = nameAsPerAadhaar;
-        receiver.pendingUpiId = upiId;
-        receiver.pendingAadhaarNumber = aadhaarDigits;
-        receiver.pendingPanNumber = pan;
+        receiver.pendingNameAsPerAadhaar = parsed.nameAsPerAadhaar;
+        receiver.pendingUpiId = parsed.upiId;
+        receiver.pendingAadhaarNumber = parsed.aadhaarDigits;
+        receiver.pendingPanNumber = parsed.pan;
+        receiver.pendingBankAccountNumber = parsed.bankAccountNumber;
+        receiver.pendingBankIfsc = parsed.bankIfsc;
+        receiver.pendingBankAccountHolderName = parsed.bankAccountHolderName;
+        receiver.pendingBankAccountType = parsed.bankAccountNumber ? 'savings' : null;
+        receiver.pendingBankName = null;
         receiver.pendingAadhaarFront =
             typeof req.body.aadhaarFront === 'string' && req.body.aadhaarFront.trim()
                 ? req.body.aadhaarFront.trim()
@@ -2401,10 +2407,19 @@ const verifyReceiverBankUpdateOtp = async (req, res) => {
             res.status(400).json({ message: 'Incorrect OTP' });
             return;
         }
-        if (!receiver.pendingNameAsPerAadhaar ||
-            !receiver.pendingUpiId ||
-            !receiver.pendingAadhaarNumber ||
-            !receiver.pendingPanNumber) {
+        if (!receiver.pendingNameAsPerAadhaar || !receiver.pendingAadhaarNumber) {
+            res.status(400).json({ message: 'No pending payment details found. Start again' });
+            return;
+        }
+        if (!(0, receiverPaymentDetails_1.receiverPaymentDetailsComplete)({
+            nameAsPerAadhaar: receiver.pendingNameAsPerAadhaar,
+            upiId: receiver.pendingUpiId,
+            aadhaarNumber: receiver.pendingAadhaarNumber,
+            panNumber: receiver.pendingPanNumber,
+            bankAccountNumber: receiver.pendingBankAccountNumber,
+            bankIfsc: receiver.pendingBankIfsc,
+            bankAccountHolderName: receiver.pendingBankAccountHolderName,
+        })) {
             res.status(400).json({ message: 'No pending payment details found. Start again' });
             return;
         }
@@ -2412,6 +2427,18 @@ const verifyReceiverBankUpdateOtp = async (req, res) => {
         receiver.upiId = receiver.pendingUpiId;
         receiver.aadhaarNumber = receiver.pendingAadhaarNumber;
         receiver.panNumber = receiver.pendingPanNumber;
+        receiver.bankAccountNumber = receiver.pendingBankAccountNumber;
+        receiver.bankIfsc = receiver.pendingBankIfsc;
+        receiver.bankAccountHolderName = receiver.pendingBankAccountHolderName;
+        receiver.bankAccountType = receiver.pendingBankAccountNumber ? 'savings' : null;
+        if (!receiver.pendingUpiId)
+            receiver.upiId = null;
+        if (!receiver.pendingBankAccountNumber) {
+            receiver.bankAccountNumber = null;
+            receiver.bankIfsc = null;
+            receiver.bankAccountHolderName = null;
+            receiver.bankAccountType = null;
+        }
         if (receiver.pendingAadhaarFront)
             receiver.aadhaarFront = receiver.pendingAadhaarFront;
         if (receiver.pendingAadhaarBack)
@@ -2422,6 +2449,11 @@ const verifyReceiverBankUpdateOtp = async (req, res) => {
         receiver.pendingUpiId = null;
         receiver.pendingAadhaarNumber = null;
         receiver.pendingPanNumber = null;
+        receiver.pendingBankAccountNumber = null;
+        receiver.pendingBankIfsc = null;
+        receiver.pendingBankAccountHolderName = null;
+        receiver.pendingBankAccountType = null;
+        receiver.pendingBankName = null;
         receiver.pendingAadhaarFront = null;
         receiver.pendingAadhaarBack = null;
         receiver.pendingPanFront = null;

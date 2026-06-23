@@ -15,9 +15,12 @@ import { WebView } from 'react-native-webview';
 import { getErrorMessage, walletApi } from '../../services/api';
 import type { RazorpayOrderResponse, WalletOfferRow } from '../../types/api';
 import { buildRazorpayWalletCheckoutHtml, parseRazorpayWebViewMessage } from '../../utils/razorpayWalletCheckoutHtml';
+import {
+  computeWalletRechargeBreakdown,
+  walletCreditForRecharge,
+} from '../../utils/walletRechargeFees';
 
 const PURPLE = '#7b2cff';
-const GST_PERCENTAGE = 28;
 
 type Props = {
   visible: boolean;
@@ -26,7 +29,7 @@ type Props = {
 };
 
 function creditForOffer(amount: number, bonusPercent: number): number {
-  return Math.round(amount * (1 + bonusPercent / 100) * 100) / 100;
+  return walletCreditForRecharge(amount, bonusPercent);
 }
 
 export default function InCallTalktimeRechargeModal({
@@ -89,12 +92,11 @@ export default function InCallTalktimeRechargeModal({
     checkoutHandledRef.current = false;
     setBusy(true);
     try {
-      const walletAmount = selected.amount;
-      const gstAmount = (walletAmount * GST_PERCENTAGE) / 100;
-      const totalAmount = walletAmount + gstAmount;
+      const breakdown = computeWalletRechargeBreakdown(selected.amount);
       const { data } = await walletApi.createRazorpayOrder({
-        payAmount: totalAmount,
+        payAmount: breakdown.totalPayable,
         bonusPercent: selected.bonusPercent,
+        walletAmount: breakdown.walletAmount,
       });
       setActiveOrder(data);
       setCheckoutHtml(buildRazorpayWalletCheckoutHtml(data));
@@ -133,15 +135,14 @@ export default function InCallTalktimeRechargeModal({
       setBusy(true);
       resetCheckout();
       try {
-        const walletAmount = selected.amount;
-        const gstAmount = (walletAmount * GST_PERCENTAGE) / 100;
-        const totalAmount = walletAmount + gstAmount;
+        const breakdown = computeWalletRechargeBreakdown(selected.amount);
         const { data } = await walletApi.verifyRazorpayPayment({
           razorpay_order_id: msg.razorpay_order_id,
           razorpay_payment_id: msg.razorpay_payment_id,
           razorpay_signature: msg.razorpay_signature,
-          payAmount: totalAmount,
+          payAmount: breakdown.totalPayable,
           bonusPercent: selected.bonusPercent,
+          walletAmount: breakdown.walletAmount,
         });
         const newBalance =
           typeof data.user.walletBalance === 'number' && Number.isFinite(data.user.walletBalance)

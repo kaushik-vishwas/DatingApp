@@ -37,6 +37,9 @@ const mongoose_1 = __importStar(require("mongoose"));
 const withdrawalRequestSchema = new mongoose_1.Schema({
     receiverId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Receiver', required: true, index: true },
     amount: { type: Number, required: true, min: 1 },
+    platformFee: { type: Number, default: 0, min: 0 },
+    payoutAmount: { type: Number, default: 0, min: 0 },
+    payoutMethod: { type: String, enum: ['upi', 'bank'], default: null },
     status: {
         type: String,
         enum: ['verification_pending', 'pending', 'approved', 'rejected'],

@@ -5,7 +5,7 @@ export function roundInr(n: number): number {
 }
 
 export function effectiveCallReceiverEarnedInr(row: {
-  durationSec: number;
+  durationSec?: number;
   receiverEarnedInr?: number;
   receiverPayoutRatePerMinute?: number;
 }): number {

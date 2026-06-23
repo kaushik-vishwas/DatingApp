@@ -19,15 +19,15 @@ import type { CallerStackParamList } from '../../navigation/CallerStackParamList
 import { getErrorMessage, walletApi } from '../../services/api';
 import type { RazorpayOrderResponse } from '../../types/api';
 import { buildRazorpayWalletCheckoutHtml, parseRazorpayWebViewMessage } from '../../utils/razorpayWalletCheckoutHtml';
+import { WALLET_RECHARGE_GST_PERCENT } from '../../utils/walletRechargeFees';
 
 const PURPLE = '#7b2cff';
-const GST_PERCENTAGE = 28;
 
 type Props = NativeStackScreenProps<CallerStackParamList, 'PaymentMethod'>;
 
 export default function PaymentMethodScreen({ navigation, route }: Props): React.JSX.Element {
   const insets = useSafeAreaInsets();
-  const { payAmount, bonusPercent, creditAmount, gstAmount, totalAmount, walletAmount } = route.params;
+  const { payAmount, bonusPercent, creditAmount, gstAmount, platformFeeAmount, platformFeePercent, totalAmount, walletAmount } = route.params;
   const { refreshUser } = useAuth();
   const [busy, setBusy] = useState(false);
   const [checkoutOpen, setCheckoutOpen] = useState(false);
@@ -72,8 +72,9 @@ export default function PaymentMethodScreen({ navigation, route }: Props): React
           razorpay_order_id: msg.razorpay_order_id,
           razorpay_payment_id: msg.razorpay_payment_id,
           razorpay_signature: msg.razorpay_signature,
-          payAmount: totalAmount || payAmount, // Use totalAmount with GST if available
+          payAmount: totalAmount || payAmount,
           bonusPercent,
+          walletAmount,
         });
         await refreshUser();
         const nb =
@@ -88,7 +89,7 @@ export default function PaymentMethodScreen({ navigation, route }: Props): React
         setBusy(false);
       }
     },
-    [bonusPercent, clearCheckoutUi, navigation, payAmount, totalAmount, refreshUser]
+    [bonusPercent, clearCheckoutUi, navigation, payAmount, totalAmount, walletAmount, refreshUser]
   );
 
   const onConfirm = async () => {
@@ -97,7 +98,11 @@ export default function PaymentMethodScreen({ navigation, route }: Props): React
     try {
       // Use totalAmount with GST for payment
       const paymentAmount = totalAmount || payAmount;
-      const { data } = await walletApi.createRazorpayOrder({ payAmount: paymentAmount, bonusPercent });
+      const { data } = await walletApi.createRazorpayOrder({
+        payAmount: paymentAmount,
+        bonusPercent,
+        walletAmount,
+      });
       setActiveOrder(data);
       setCheckoutHtml(buildRazorpayWalletCheckoutHtml(data));
       setCheckoutOpen(true);
@@ -138,12 +143,17 @@ export default function PaymentMethodScreen({ navigation, route }: Props): React
             <Text style={styles.breakdownValue}>₹ {walletAmount.toLocaleString('en-IN')}</Text>
           </View>
 
-          {gstAmount && (
+          <View style={styles.breakdownRow}>
+            <Text style={styles.breakdownLabel}>Platform fee ({platformFeePercent}%):</Text>
+            <Text style={styles.breakdownValue}>₹ {platformFeeAmount.toLocaleString('en-IN')}</Text>
+          </View>
+
+          {gstAmount ? (
             <View style={styles.breakdownRow}>
-              <Text style={styles.breakdownLabel}>GST ({GST_PERCENTAGE}%):</Text>
+              <Text style={styles.breakdownLabel}>GST ({WALLET_RECHARGE_GST_PERCENT}%):</Text>
               <Text style={styles.breakdownValue}>₹ {gstAmount.toLocaleString('en-IN')}</Text>
             </View>
-          )}
+          ) : null}
 
           <View style={styles.divider} />
 
@@ -151,7 +161,7 @@ export default function PaymentMethodScreen({ navigation, route }: Props): React
             <Text style={styles.totalLabel}>Total Payable</Text>
             <Text style={styles.totalValue}>₹ {(totalAmount || payAmount).toLocaleString('en-IN')}</Text>
           </View>
-          <Text style={styles.gstLabel}>28% GST</Text>
+          <Text style={styles.gstLabel}>{WALLET_RECHARGE_GST_PERCENT}% GST on recharge + platform fee</Text>
         </View>
 
         {/* Bonus & Credit Info */}

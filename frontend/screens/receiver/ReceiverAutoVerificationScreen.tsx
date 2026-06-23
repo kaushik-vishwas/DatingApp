@@ -29,13 +29,27 @@ type Nav = NativeStackNavigationProp<ReceiverStackParamList, 'ReceiverAutoVerifi
 const SCRIPT_TRANSLATIONS = {
   english:
     'Hello! Friendship is very special because good friends are always by our side; they increase our happiness, decrease our sadness, and without them, everything feels incomplete—so, thank you, friends!',
+  hindi:
+    'नमस्ते! दोस्ती बहुत खास होती है क्योंकि अच्छे दोस्त हमेशा हमारे साथ रहते हैं; वे हमारी खुशी बढ़ाते हैं, हमारा दुख कम करते हैं, और उनके बिना सब कुछ अधूरा लगता है—इसलिए, धन्यवाद दोस्तों!',
+  tamil:
+    'வணக்கம்! நட்பு மிகவும் சிறப்பானது, ஏனெனில் நல்ல நண்பர்கள் எப்போதும் நம் பக்கத்தில் இருப்பார்கள்; அவர்கள் நம் மகிழ்ச்சியை அதிகரிக்கிறார்கள், நம் சோகத்தைக் குறைக்கிறார்கள், அவர்கள் இல்லாமல் எல்லாமும் முழுமையற்றதாகத் தோன்றுகிறது—அதனால், நன்றி நண்பர்களே!',
   telugu:
     'నమస్కారం! స్నేహం చాలా ప్రత్యేకమైనది ఎందుకంటే మంచి స్నేహితులు ఎప్పుడూ మా పక్కన ఉంటారు; వారు మా ఆనందాన్ని పెంచుతారు, మా విచారాన్ని తగ్గిస్తారు, మరియు వారు లేకుండా, ప్రతిదీ అసంపూర్ణంగా అనిపిస్తుంది—కాబట్టి, ధన్యవాదాలు స్నేహితులారా!',
   kannada:
     'ನಮಸ್ಕಾರ! ಸ್ನೇಹವು ಬಹಳ ವಿಶೇಷವಾಗಿದೆ ಏಕೆಂದರೆ ಉತ್ತಮ ಸ್ನೇಹಿತರು ಯಾವಾಗಲೂ ನಮ್ಮ ಪಕ್ಕದಲ್ಲಿರುತ್ತಾರೆ; ಅವರು ನಮ್ಮ ಸಂತೋಷವನ್ನು ಹೆಚ್ಚಿಸುತ್ತಾರೆ, ನಮ್ಮ ದುಃಖವನ್ನು ಕಡಿಮೆ ಮಾಡುತ್ತಾರೆ, ಮತ್ತು ಅವರಿಲ್ಲದೆ, ಎಲ್ಲವೂ ಅಪೂರ್ಣವಾಗಿ ಭಾಸವಾಗುತ್ತದೆ—ಆದ್ದರಿಂದ, ಧನ್ಯವಾದಗಳು ಸ್ನೇಹಿತರೇ!',
 };
 
-type Language = 'english' | 'telugu' | 'kannada';
+const AUDIO_VERIFICATION_LANGUAGES = ['english', 'hindi', 'tamil', 'telugu', 'kannada'] as const;
+
+const LANGUAGE_TAB_LABELS: Record<(typeof AUDIO_VERIFICATION_LANGUAGES)[number], string> = {
+  english: 'English',
+  hindi: 'हिन्दी',
+  tamil: 'தமிழ்',
+  telugu: 'తెలుగు',
+  kannada: 'ಕನ್ನಡ',
+};
+
+type Language = (typeof AUDIO_VERIFICATION_LANGUAGES)[number];
 
 function voiceVerificationFailureMessage(
   apiMessage?: string,
@@ -134,7 +148,7 @@ export default function ReceiverAutoVerificationScreen(): React.JSX.Element {
         </Text>
 
         <View style={styles.languageTabsContainer}>
-          {(['english', 'telugu', 'kannada'] as const).map((lang) => (
+          {AUDIO_VERIFICATION_LANGUAGES.map((lang) => (
             <TouchableOpacity
               key={lang}
               style={[styles.languageTab, selectedLanguage === lang && styles.languageTabActive]}
@@ -146,7 +160,7 @@ export default function ReceiverAutoVerificationScreen(): React.JSX.Element {
                   selectedLanguage === lang && styles.languageTabTextActive,
                 ]}
               >
-                {lang === 'english' ? 'English' : lang === 'telugu' ? 'తెలుగు' : 'ಕನ್ನಡ'}
+                {LANGUAGE_TAB_LABELS[lang]}
               </Text>
             </TouchableOpacity>
           ))}

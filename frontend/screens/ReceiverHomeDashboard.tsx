@@ -315,9 +315,17 @@ export default function ReceiverHomeDashboard(): React.JSX.Element {
 
   const isFixedEarning = callInsights?.receiverEarningModel === 'fixed_per_minute';
   const earningLevelRows = useMemo(() => {
-    type LevelIcon = 'white-balance-sunny' | 'weather-sunset' | 'moon-waning-crescent' | 'medal-outline' | 'diamond-stone' | 'crown';
+    type LevelIcon =
+      | 'weather-sunny'
+      | 'white-balance-sunny'
+      | 'weather-sunset'
+      | 'moon-waning-crescent'
+      | 'medal-outline'
+      | 'diamond-stone'
+      | 'crown';
     if (isFixedEarning && callInsights?.fixedPerMinuteWindows?.length) {
       const iconById: Record<string, LevelIcon> = {
+        morning: 'weather-sunny',
         day: 'white-balance-sunny',
         evening: 'weather-sunset',
         night: 'moon-waning-crescent',
@@ -337,9 +345,10 @@ export default function ReceiverHomeDashboard(): React.JSX.Element {
       ];
     }
     return [
-      { id: 'day', label: '6 AM – 9 PM', rate: '₹2/min', icon: 'white-balance-sunny' as LevelIcon },
-      { id: 'evening', label: '9 PM – 11 PM', rate: '₹2.2/min', icon: 'weather-sunset' as LevelIcon },
-      { id: 'night', label: '11 PM – 6 AM', rate: '₹2.5/min', icon: 'moon-waning-crescent' as LevelIcon },
+      { id: 'morning', label: '6 AM – 9 AM', rate: '₹1.7/min', icon: 'weather-sunny' as LevelIcon },
+      { id: 'day', label: '9 AM – 9 PM', rate: '₹2/min', icon: 'white-balance-sunny' as LevelIcon },
+      { id: 'evening', label: '9 PM – 11 PM', rate: '₹1.8/min', icon: 'weather-sunset' as LevelIcon },
+      { id: 'night', label: '11 PM – 6 AM', rate: '₹2/min', icon: 'moon-waning-crescent' as LevelIcon },
     ];
   }, [callInsights?.fixedPerMinuteWindows, isFixedEarning]);
 

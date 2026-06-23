@@ -57,6 +57,14 @@ const callQueue_2 = require("../services/callQueue");
 function roundInr(n) {
     return Math.round(n * 100) / 100;
 }
+/** Caller wallet: each started minute (or partial minute) bills as one full minute. */
+function callerCallGrossAmountInr(durationSec, ratePerMinute) {
+    const sec = Math.max(0, Math.floor(durationSec));
+    const rate = Math.max(0, ratePerMinute);
+    if (sec <= 0 || rate <= 0)
+        return 0;
+    return roundInr(Math.ceil(sec / 60) * rate);
+}
 async function readCallerWalletBalanceInr(callerId) {
     if (!mongoose_1.default.Types.ObjectId.isValid(callerId))
         return 0;
@@ -194,7 +202,7 @@ async function settleCallSession(callId, complete) {
             }
             const now = new Date();
             const durationSec = callTalkDurationSec(call, now);
-            const grossAmountInr = roundInr((durationSec / 60) * Math.max(0, call.ratePerMinute));
+            const grossAmountInr = callerCallGrossAmountInr(durationSec, call.ratePerMinute);
             const alreadySettled = roundInr(call.settledAmountInr || 0);
             const dueAmount = roundInr(Math.max(0, grossAmountInr - alreadySettled));
             const earningSettings = await (0, receiverEarningModel_1.getReceiverEarningSettings)();

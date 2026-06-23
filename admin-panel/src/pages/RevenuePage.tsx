@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { fetchRevenueDashboard, type RevenueDashboardResponse } from '../api/client';
 
 function inr(v: number): string {
-  return `₹${Math.round(v).toLocaleString('en-IN')}`;
+  return `₹${(Math.round(v * 100) / 100).toLocaleString('en-IN', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`;
 }
 
 export function RevenuePage() {
@@ -29,34 +29,38 @@ export function RevenuePage() {
     void load();
   }, [load]);
 
+  const rangeLabel = range === 'all' ? 'All time' : `Last ${range === '7d' ? '7' : '30'} days`;
+
   const statCards = useMemo(
     () => [
       {
         label: 'Gross Revenue',
         value: data ? inr(data.cards.grossRevenue) : '…',
-        note: range === 'all' ? 'All time' : `Last ${range === '7d' ? '7' : '30'} days`,
+        note: `${rangeLabel} · Caller spend on calls + chat`,
         tone: 'text-emerald-600',
       },
       {
         label: 'Platform Commission',
         value: data ? inr(data.cards.platformCommission) : '…',
-        note: '20% of gross',
+        note: data
+          ? `Usage ${inr(data.cards.usageCommission)} + recharge ${inr(data.cards.callerRechargeCommission)} + withdrawal ${inr(data.cards.receiverWithdrawalCommission)}`
+          : 'Usage + caller recharge + receiver withdrawal fees',
         tone: 'text-[#7b2cff]',
       },
       {
         label: 'Net Payout',
         value: data ? inr(data.cards.netPayout) : '…',
-        note: 'To receivers',
+        note: 'Total receiver earnings (calls + chat)',
         tone: 'text-sky-600',
       },
       {
         label: 'Platform Profit',
         value: data ? inr(data.cards.platformProfit) : '…',
-        note: 'Before external expenses',
+        note: 'Gross revenue − net payout (usage margin)',
         tone: 'text-emerald-600',
       },
     ],
-    [data, range]
+    [data, rangeLabel]
   );
 
   return (
@@ -88,7 +92,7 @@ export function RevenuePage() {
           <div key={card.label} className="rounded-xl border border-neutral-200 bg-white p-4">
             <p className="text-[11px] font-medium text-neutral-500">{card.label}</p>
             <p className="mt-1.5 text-3xl font-bold text-neutral-900">{loading ? '…' : card.value}</p>
-            <p className={`mt-1 text-xs font-medium ${card.tone}`}>{card.note}</p>
+            <p className={`mt-1 text-xs font-medium leading-relaxed ${card.tone}`}>{card.note}</p>
           </div>
         ))}
       </div>
@@ -96,21 +100,24 @@ export function RevenuePage() {
       <div className="mt-5 grid gap-4 xl:grid-cols-[2fr_1fr]">
         <div className="rounded-xl border border-neutral-200 bg-white p-4">
           <h2 className="text-sm font-bold text-neutral-800">Daily Revenue Breakdown</h2>
+          <p className="mt-1 text-[11px] text-neutral-500">
+            Revenue = caller spend · Commission = revenue − receiver payout · Payout = receiver earnings
+          </p>
           <div className="mt-3 overflow-hidden rounded-lg border border-neutral-200">
             <table className="w-full text-left text-xs">
               <thead className="bg-neutral-50 text-[11px] uppercase tracking-wide text-neutral-500">
                 <tr>
                   <th className="px-3 py-2">Date</th>
-                  <th className="px-3 py-2">Calls Revenue</th>
+                  <th className="px-3 py-2">Revenue (call + chat)</th>
                   <th className="px-3 py-2">Commission</th>
                   <th className="px-3 py-2">Payout</th>
                 </tr>
               </thead>
               <tbody>
                 {(data?.dailyBreakdown ?? []).map((row) => (
-                  <tr key={`${row.date}-${row.callsRevenue}`} className="border-t border-neutral-100">
+                  <tr key={row.date} className="border-t border-neutral-100">
                     <td className="px-3 py-2.5 font-medium text-neutral-700">{row.date}</td>
-                    <td className="px-3 py-2.5 text-neutral-700">{inr(row.callsRevenue)}</td>
+                    <td className="px-3 py-2.5 text-neutral-700">{inr(row.revenue)}</td>
                     <td className="px-3 py-2.5 font-semibold text-[#7b2cff]">{inr(row.commission)}</td>
                     <td className="px-3 py-2.5 font-semibold text-sky-600">{inr(row.payout)}</td>
                   </tr>
@@ -134,10 +141,10 @@ export function RevenuePage() {
                 </div>
                 <div className="mt-1 text-[11px] text-neutral-500">
                   <p>
-                    Gross: <span className="font-medium text-neutral-700">{inr(item.earnings)}</span>
+                    Caller spend: <span className="font-medium text-neutral-700">{inr(item.earnings)}</span>
                   </p>
                   <p>
-                    Payout: <span className="font-semibold text-emerald-600">{inr(item.payout)}</span>
+                    Receiver payout: <span className="font-semibold text-emerald-600">{inr(item.payout)}</span>
                   </p>
                 </div>
               </div>

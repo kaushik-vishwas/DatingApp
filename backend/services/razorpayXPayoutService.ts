@@ -2,6 +2,11 @@ import mongoose from 'mongoose';
 import WithdrawalRequest, { type PayoutStatus } from '../models/WithdrawalRequest';
 import AdminWithdrawalRequest from '../models/AdminWithdrawalRequest';
 import Receiver from '../models/Receiver';
+import {
+  resolveWithdrawalPayoutAmount,
+  resolveWithdrawalWalletDebitAmount,
+} from '../constants/receiverWithdrawalFees';
+import { resolveReceiverPayoutDestination } from '../utils/receiverPayoutDestination';
 import { emitReceiverWithdrawalUpdate } from '../socket/socketRegistry';
 import { razorpayContactEmailFromPhone } from '../utils/razorpayContact';
 
@@ -52,17 +57,7 @@ function basicAuthHeader(keyId: string, keySecret: string): string {
   return `Basic ${Buffer.from(raw, 'utf8').toString('base64')}`;
 }
 
-type RazorpayFundAccount =
-  | {
-      account_type: 'bank_account';
-      bank_account: { name: string; ifsc: string; account_number: string };
-      contact: { name: string; email: string; contact: string; type: string; reference_id: string };
-    }
-  | {
-      account_type: 'vpa';
-      vpa: { address: string };
-      contact: { name: string; email: string; contact: string; type: string; reference_id: string };
-    };
+type RazorpayFundAccount = import('../utils/receiverPayoutDestination').RazorpayPayoutFundAccount;
 
 async function razorpayCreatePayout(params: {
   accountNumber: string;
@@ -173,6 +168,8 @@ export async function trackAndFinalizeRazorpayXPayout(withdrawalId: string): Pro
     _id: mongoose.Types.ObjectId;
     receiverId: mongoose.Types.ObjectId;
     amount: number;
+    payoutAmount?: number | null;
+    payoutMethod?: 'upi' | 'bank' | null;
     status: string;
     payoutStatus: PayoutStatus;
     payoutId: string | null;
@@ -181,6 +178,9 @@ export async function trackAndFinalizeRazorpayXPayout(withdrawalId: string): Pro
 
   if (!withdrawal) return;
   if (withdrawal.payoutStatus !== 'processing') return;
+
+  const payoutInr = resolveWithdrawalPayoutAmount(withdrawal);
+  const walletDebitInr = resolveWithdrawalWalletDebitAmount(withdrawal);
 
   const receiver = await Receiver.findById(withdrawal.receiverId).select(
     'name email phone nameAsPerAadhaar upiId bankAccountHolderName bankAccountNumber bankIfsc bankName walletBalance'
@@ -193,30 +193,34 @@ export async function trackAndFinalizeRazorpayXPayout(withdrawalId: string): Pro
     });
     emitReceiverWithdrawalUpdate(String(withdrawal.receiverId), {
       withdrawalId,
-      amount: withdrawal.amount,
+      amount: payoutInr,
       payoutStatus: 'failed',
       message: 'Payment failed',
     });
     return;
   }
 
-  const upiId = safeTrim(receiver.upiId).toLowerCase();
-  const payeeName = safeTrim(receiver.nameAsPerAadhaar) || safeTrim(receiver.bankAccountHolderName) || safeTrim(receiver.name);
-  const hasUpi = /^[a-z0-9._-]{2,256}@[a-z]{3,}$/i.test(upiId);
-  const hasBank =
-    Boolean(safeTrim(receiver.bankAccountNumber)) &&
-    Boolean(safeTrim(receiver.bankIfsc)) &&
-    Boolean(safeTrim(receiver.bankAccountHolderName));
+  const destination = resolveReceiverPayoutDestination({
+    receiver,
+    contactEmail: razorpayContactEmailFromPhone(safeTrim(receiver.phone)),
+    preferredMethod: withdrawal.payoutMethod ?? null,
+  });
 
-  if ((!hasUpi && !hasBank) || !safeTrim(receiver.phone) || !payeeName) {
+  if (!destination) {
+    const payoutError =
+      withdrawal.payoutMethod === 'bank'
+        ? 'Bank account or IFSC missing for this withdrawal'
+        : withdrawal.payoutMethod === 'upi'
+          ? 'UPI ID missing for this withdrawal'
+          : 'Receiver payment/contact details missing';
     await WithdrawalRequest.findByIdAndUpdate(withdrawalId, {
       status: 'rejected',
       payoutStatus: 'failed',
-      payoutError: 'Receiver payment/contact details missing',
+      payoutError,
     });
     emitReceiverWithdrawalUpdate(String(withdrawal.receiverId), {
       withdrawalId,
-      amount: withdrawal.amount,
+      amount: payoutInr,
       payoutStatus: 'failed',
       message: 'Payment failed',
     });
@@ -224,13 +228,7 @@ export async function trackAndFinalizeRazorpayXPayout(withdrawalId: string): Pro
   }
 
   const payoutAccountNumber = process.env.RAZORPAYX_ACCOUNT_NUMBER?.trim();
-  const modeRaw = process.env.RAZORPAYX_PAYOUT_MODE?.trim().toUpperCase() || (hasUpi ? 'UPI' : 'IMPS');
-  const mode: 'IMPS' | 'NEFT' | 'RTGS' | 'UPI' =
-    modeRaw === 'UPI' || (hasUpi && modeRaw !== 'NEFT' && modeRaw !== 'RTGS' && modeRaw !== 'IMPS')
-      ? 'UPI'
-      : modeRaw === 'NEFT' || modeRaw === 'RTGS' || modeRaw === 'IMPS'
-        ? modeRaw
-        : 'IMPS';
+  const mode = destination.mode;
   const purpose = process.env.RAZORPAYX_PAYOUT_PURPOSE?.trim() || 'payout';
   const narration = safeTrim(process.env.RAZORPAYX_PAYOUT_NARRATION) || 'DatingApp Payout';
 
@@ -242,14 +240,14 @@ export async function trackAndFinalizeRazorpayXPayout(withdrawalId: string): Pro
     });
     emitReceiverWithdrawalUpdate(String(withdrawal.receiverId), {
       withdrawalId,
-      amount: withdrawal.amount,
+      amount: payoutInr,
       payoutStatus: 'failed',
       message: 'Payment failed',
     });
     return;
   }
 
-  const amountPaise = roundInrToPaise(withdrawal.amount);
+  const amountPaise = roundInrToPaise(payoutInr);
   const referenceBase = withdrawal.payoutReferenceId || `wd_${String(withdrawal._id).slice(-10)}`;
   const idempotencyKey = `wd-${referenceBase}`.slice(0, 80);
   let payoutId: string | null = withdrawal.payoutId;
@@ -257,29 +255,7 @@ export async function trackAndFinalizeRazorpayXPayout(withdrawalId: string): Pro
   try {
     if (!payoutId) {
       const refId = referenceBase.slice(0, 40);
-      const contact = {
-        name: payeeName || 'Receiver',
-        email: razorpayContactEmailFromPhone(safeTrim(receiver.phone)),
-        contact: safeTrim(receiver.phone),
-        type: 'customer',
-        reference_id: `recv_${String(receiver._id).slice(-10)}`.slice(0, 40),
-      };
-      const fundAccount: RazorpayFundAccount =
-        mode === 'UPI' && hasUpi
-          ? {
-              account_type: 'vpa',
-              vpa: { address: upiId },
-              contact,
-            }
-          : {
-              account_type: 'bank_account',
-              bank_account: {
-                name: safeTrim(receiver.bankAccountHolderName) || payeeName || 'Receiver',
-                ifsc: safeTrim(receiver.bankIfsc),
-                account_number: safeTrim(receiver.bankAccountNumber),
-              },
-              contact,
-            };
+      const fundAccount: RazorpayFundAccount = destination.fundAccount;
 
       const payout = await razorpayCreatePayout({
         accountNumber: payoutAccountNumber,
@@ -311,7 +287,7 @@ export async function trackAndFinalizeRazorpayXPayout(withdrawalId: string): Pro
       if (payoutStatus === 'failed') {
         emitReceiverWithdrawalUpdate(String(withdrawal.receiverId), {
           withdrawalId,
-          amount: withdrawal.amount,
+          amount: payoutInr,
           payoutStatus: 'failed',
           message: 'Payment failed',
         });
@@ -319,10 +295,10 @@ export async function trackAndFinalizeRazorpayXPayout(withdrawalId: string): Pro
       }
 
       if (payoutStatus === 'success') {
-        await debitReceiverWalletOnPayoutSuccess({ withdrawalId, amount: withdrawal.amount });
+        await debitReceiverWalletOnPayoutSuccess({ withdrawalId, amount: walletDebitInr });
         emitReceiverWithdrawalUpdate(String(withdrawal.receiverId), {
           withdrawalId,
-          amount: withdrawal.amount,
+          amount: payoutInr,
           payoutStatus: 'success',
           message: 'Payment successful',
         });
@@ -345,7 +321,7 @@ export async function trackAndFinalizeRazorpayXPayout(withdrawalId: string): Pro
       const payoutStatus = mapRazorpayPayoutStatusToPayoutStatus(payout.status);
 
       if (payoutStatus === 'success') {
-        await debitReceiverWalletOnPayoutSuccess({ withdrawalId, amount: withdrawal.amount });
+        await debitReceiverWalletOnPayoutSuccess({ withdrawalId, amount: walletDebitInr });
         await WithdrawalRequest.findByIdAndUpdate(withdrawalId, {
           payoutStatus: 'success',
           payoutUtr: payout.utr ?? null,
@@ -354,7 +330,7 @@ export async function trackAndFinalizeRazorpayXPayout(withdrawalId: string): Pro
         });
         emitReceiverWithdrawalUpdate(String(withdrawal.receiverId), {
           withdrawalId,
-          amount: withdrawal.amount,
+          amount: payoutInr,
           payoutStatus: 'success',
           message: 'Payment successful',
         });
@@ -371,7 +347,7 @@ export async function trackAndFinalizeRazorpayXPayout(withdrawalId: string): Pro
         });
         emitReceiverWithdrawalUpdate(String(withdrawal.receiverId), {
           withdrawalId,
-          amount: withdrawal.amount,
+          amount: payoutInr,
           payoutStatus: 'failed',
           message: 'Payment failed',
         });
@@ -391,7 +367,7 @@ export async function trackAndFinalizeRazorpayXPayout(withdrawalId: string): Pro
       });
       emitReceiverWithdrawalUpdate(String(withdrawal.receiverId), {
         withdrawalId,
-        amount: withdrawal.amount,
+        amount: payoutInr,
         payoutStatus: 'failed',
         message: 'Payment failed',
       });

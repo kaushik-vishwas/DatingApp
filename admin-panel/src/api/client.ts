@@ -523,10 +523,13 @@ export type RevenueDashboardResponse = {
     platformCommission: number;
     netPayout: number;
     platformProfit: number;
+    usageCommission: number;
+    callerRechargeCommission: number;
+    receiverWithdrawalCommission: number;
   };
   dailyBreakdown: Array<{
     date: string;
-    callsRevenue: number;
+    revenue: number;
     commission: number;
     payout: number;
   }>;
