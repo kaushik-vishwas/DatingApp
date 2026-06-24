@@ -14,9 +14,8 @@ const AdminSettings_1 = __importDefault(require("../models/AdminSettings"));
 const IST_OFFSET_MINUTES = 330;
 exports.DEFAULT_RECEIVER_EARNING_MODEL = 'score_based';
 exports.DEFAULT_FIXED_PER_MINUTE_WINDOWS = [
-    { id: 'morning', label: '6 AM – 9 AM', from: '06:00', to: '09:00', ratePerMinute: 1.7 },
-    { id: 'day', label: '9 AM – 9 PM', from: '09:00', to: '21:00', ratePerMinute: 2 },
-    { id: 'evening', label: '9 PM – 11 PM', from: '21:00', to: '23:00', ratePerMinute: 1.8 },
+    { id: 'day', label: '6 AM – 9 PM', from: '06:00', to: '21:00', ratePerMinute: 1.8 },
+    { id: 'evening', label: '9 PM – 11 PM', from: '21:00', to: '23:00', ratePerMinute: 1.9 },
     { id: 'night', label: '11 PM – 6 AM', from: '23:00', to: '06:00', ratePerMinute: 2 },
 ];
 const LEGACY_FIXED_PER_MINUTE_WINDOWS = [
@@ -24,21 +23,48 @@ const LEGACY_FIXED_PER_MINUTE_WINDOWS = [
     { id: 'evening', label: '9 PM – 11 PM', from: '21:00', to: '23:00', ratePerMinute: 2.2 },
     { id: 'night', label: '11 PM – 6 AM', from: '23:00', to: '06:00', ratePerMinute: 2.5 },
 ];
-function matchesLegacyFixedPerMinuteWindows(windows) {
-    if (windows.length !== LEGACY_FIXED_PER_MINUTE_WINDOWS.length)
+/** Prior 4-window defaults (auto-upgraded on read). */
+const PREVIOUS_4_WINDOW_SCHEDULES = [
+    [
+        { id: 'morning', label: '6 AM – 9 AM', from: '06:00', to: '09:00', ratePerMinute: 1.7 },
+        { id: 'day', label: '9 AM – 9 PM', from: '09:00', to: '21:00', ratePerMinute: 2 },
+        { id: 'evening', label: '9 PM – 11 PM', from: '21:00', to: '23:00', ratePerMinute: 1.8 },
+        { id: 'night', label: '11 PM – 6 AM', from: '23:00', to: '06:00', ratePerMinute: 2 },
+    ],
+    [
+        { id: 'morning', label: '6 AM – 9 AM', from: '06:00', to: '09:00', ratePerMinute: 1.8 },
+        { id: 'day', label: '9 AM – 9 PM', from: '09:00', to: '21:00', ratePerMinute: 2 },
+        { id: 'evening', label: '9 PM – 11 PM', from: '21:00', to: '23:00', ratePerMinute: 1.9 },
+        { id: 'night', label: '11 PM – 6 AM', from: '23:00', to: '06:00', ratePerMinute: 2 },
+    ],
+];
+function matchesFixedPerMinuteSchedule(a, b) {
+    if (a.length !== b.length)
         return false;
-    return windows.every((w, i) => {
-        const leg = LEGACY_FIXED_PER_MINUTE_WINDOWS[i];
+    return a.every((w, i) => {
+        const leg = b[i];
         return (w.id === leg.id &&
             w.from === leg.from &&
             w.to === leg.to &&
             w.ratePerMinute === leg.ratePerMinute);
     });
 }
+function isSplitMorningDaySchedule(windows) {
+    return (windows.length === 4 &&
+        windows.some((w) => w.id === 'morning' && w.from === '06:00' && w.to === '09:00') &&
+        windows.some((w) => w.id === 'day' && w.from === '09:00' && w.to === '21:00'));
+}
 function upgradeLegacyFixedPerMinuteWindows(windows) {
-    if (!matchesLegacyFixedPerMinuteWindows(windows))
-        return windows;
-    return exports.DEFAULT_FIXED_PER_MINUTE_WINDOWS.map((w) => ({ ...w }));
+    if (matchesFixedPerMinuteSchedule(windows, LEGACY_FIXED_PER_MINUTE_WINDOWS)) {
+        return exports.DEFAULT_FIXED_PER_MINUTE_WINDOWS.map((w) => ({ ...w }));
+    }
+    if (PREVIOUS_4_WINDOW_SCHEDULES.some((schedule) => matchesFixedPerMinuteSchedule(windows, schedule))) {
+        return exports.DEFAULT_FIXED_PER_MINUTE_WINDOWS.map((w) => ({ ...w }));
+    }
+    if (isSplitMorningDaySchedule(windows)) {
+        return exports.DEFAULT_FIXED_PER_MINUTE_WINDOWS.map((w) => ({ ...w }));
+    }
+    return windows;
 }
 function roundInr(n) {
     return Math.round(n * 100) / 100;

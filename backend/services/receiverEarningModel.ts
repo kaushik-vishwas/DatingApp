@@ -7,9 +7,8 @@ export type FixedPerMinuteSchedule = IFixedPerMinuteWindow[];
 export const DEFAULT_RECEIVER_EARNING_MODEL: ReceiverEarningModel = 'score_based';
 
 export const DEFAULT_FIXED_PER_MINUTE_WINDOWS: FixedPerMinuteSchedule = [
-  { id: 'morning', label: '6 AM – 9 AM', from: '06:00', to: '09:00', ratePerMinute: 1.7 },
-  { id: 'day', label: '9 AM – 9 PM', from: '09:00', to: '21:00', ratePerMinute: 2 },
-  { id: 'evening', label: '9 PM – 11 PM', from: '21:00', to: '23:00', ratePerMinute: 1.8 },
+  { id: 'day', label: '6 AM – 9 PM', from: '06:00', to: '21:00', ratePerMinute: 1.8 },
+  { id: 'evening', label: '9 PM – 11 PM', from: '21:00', to: '23:00', ratePerMinute: 1.9 },
   { id: 'night', label: '11 PM – 6 AM', from: '23:00', to: '06:00', ratePerMinute: 2 },
 ];
 
@@ -19,10 +18,26 @@ const LEGACY_FIXED_PER_MINUTE_WINDOWS: FixedPerMinuteSchedule = [
   { id: 'night', label: '11 PM – 6 AM', from: '23:00', to: '06:00', ratePerMinute: 2.5 },
 ];
 
-function matchesLegacyFixedPerMinuteWindows(windows: FixedPerMinuteSchedule): boolean {
-  if (windows.length !== LEGACY_FIXED_PER_MINUTE_WINDOWS.length) return false;
-  return windows.every((w, i) => {
-    const leg = LEGACY_FIXED_PER_MINUTE_WINDOWS[i];
+/** Prior 4-window defaults (auto-upgraded on read). */
+const PREVIOUS_4_WINDOW_SCHEDULES: FixedPerMinuteSchedule[] = [
+  [
+    { id: 'morning', label: '6 AM – 9 AM', from: '06:00', to: '09:00', ratePerMinute: 1.7 },
+    { id: 'day', label: '9 AM – 9 PM', from: '09:00', to: '21:00', ratePerMinute: 2 },
+    { id: 'evening', label: '9 PM – 11 PM', from: '21:00', to: '23:00', ratePerMinute: 1.8 },
+    { id: 'night', label: '11 PM – 6 AM', from: '23:00', to: '06:00', ratePerMinute: 2 },
+  ],
+  [
+    { id: 'morning', label: '6 AM – 9 AM', from: '06:00', to: '09:00', ratePerMinute: 1.8 },
+    { id: 'day', label: '9 AM – 9 PM', from: '09:00', to: '21:00', ratePerMinute: 2 },
+    { id: 'evening', label: '9 PM – 11 PM', from: '21:00', to: '23:00', ratePerMinute: 1.9 },
+    { id: 'night', label: '11 PM – 6 AM', from: '23:00', to: '06:00', ratePerMinute: 2 },
+  ],
+];
+
+function matchesFixedPerMinuteSchedule(a: FixedPerMinuteSchedule, b: FixedPerMinuteSchedule): boolean {
+  if (a.length !== b.length) return false;
+  return a.every((w, i) => {
+    const leg = b[i];
     return (
       w.id === leg.id &&
       w.from === leg.from &&
@@ -32,9 +47,25 @@ function matchesLegacyFixedPerMinuteWindows(windows: FixedPerMinuteSchedule): bo
   });
 }
 
+function isSplitMorningDaySchedule(windows: FixedPerMinuteSchedule): boolean {
+  return (
+    windows.length === 4 &&
+    windows.some((w) => w.id === 'morning' && w.from === '06:00' && w.to === '09:00') &&
+    windows.some((w) => w.id === 'day' && w.from === '09:00' && w.to === '21:00')
+  );
+}
+
 function upgradeLegacyFixedPerMinuteWindows(windows: FixedPerMinuteSchedule): FixedPerMinuteSchedule {
-  if (!matchesLegacyFixedPerMinuteWindows(windows)) return windows;
-  return DEFAULT_FIXED_PER_MINUTE_WINDOWS.map((w) => ({ ...w }));
+  if (matchesFixedPerMinuteSchedule(windows, LEGACY_FIXED_PER_MINUTE_WINDOWS)) {
+    return DEFAULT_FIXED_PER_MINUTE_WINDOWS.map((w) => ({ ...w }));
+  }
+  if (PREVIOUS_4_WINDOW_SCHEDULES.some((schedule) => matchesFixedPerMinuteSchedule(windows, schedule))) {
+    return DEFAULT_FIXED_PER_MINUTE_WINDOWS.map((w) => ({ ...w }));
+  }
+  if (isSplitMorningDaySchedule(windows)) {
+    return DEFAULT_FIXED_PER_MINUTE_WINDOWS.map((w) => ({ ...w }));
+  }
+  return windows;
 }
 
 export type ReceiverEarningSettings = {

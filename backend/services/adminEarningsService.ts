@@ -6,7 +6,7 @@ import WalletTopup from '../models/WalletTopup';
 import Receiver from '../models/Receiver';
 import mongoose from 'mongoose';
 import { CHAT_TEXT_CHARGE_INR } from '../constants/chatPricing';
-import { computeWalletRechargeBreakdown } from '../constants/walletRechargeFees';
+import { computeWalletRechargeBreakdown, payableMatchesWalletPack } from '../constants/walletRechargeFees';
 import { RESOLVED_RECEIVER_CALL_EARNING_EXPR } from '../utils/receiverCallEarnings';
 import { effectiveCallReceiverEarnedInr } from '../utils/receiverCallEarnings';
 
@@ -263,20 +263,36 @@ function bumpDailyUsage(
   map.set(key, row);
 }
 
+/** Platform fee applies only when the paid total includes the fee (post-fee recharge packs). */
+function resolveWalletTopupPlatformFee(row: {
+  payAmount: number;
+  bonusPercent: number;
+  creditAdded: number;
+}): number {
+  const credit = Number(row.creditAdded) || 0;
+  const bonus = Number(row.bonusPercent) || 0;
+  const payAmount = Number(row.payAmount) || 0;
+  if (credit <= 0) return 0;
+
+  const walletAmount = roundInr(credit / (1 + bonus / 100));
+  if (walletAmount <= 0) return 0;
+
+  if (payAmount > 0 && payableMatchesWalletPack(walletAmount, payAmount, 0.05)) {
+    return computeWalletRechargeBreakdown(walletAmount).platformFee;
+  }
+  return 0;
+}
+
 async function aggregateCallerRechargePlatformFees(since?: Date | null): Promise<number> {
   const match: Record<string, unknown> = {};
   if (since) match.createdAt = { $gte: since };
 
-  const rows = await WalletTopup.find(match).select('bonusPercent creditAdded').lean<
-    { bonusPercent: number; creditAdded: number }[]
-  >();
+  const rows = await WalletTopup.find(match)
+    .select('payAmount bonusPercent creditAdded')
+    .lean<{ payAmount: number; bonusPercent: number; creditAdded: number }[]>();
   let total = 0;
   for (const row of rows) {
-    const bonus = Number(row.bonusPercent) || 0;
-    const credit = Number(row.creditAdded) || 0;
-    if (credit <= 0) continue;
-    const walletAmount = roundInr(credit / (1 + bonus / 100));
-    total += computeWalletRechargeBreakdown(walletAmount).platformFee;
+    total += resolveWalletTopupPlatformFee(row);
   }
   return roundInr(total);
 }
@@ -384,9 +400,7 @@ export async function getRevenueDashboardMetrics(since: Date | null): Promise<{
   const grossRevenue = roundInr(grossCalls + grossChat);
   const netPayout = roundInr(payoutCalls + payoutChat);
   const usageCommission = roundInr(Math.max(0, grossRevenue - netPayout));
-  const platformCommission = roundInr(
-    usageCommission + callerRechargeCommission + receiverWithdrawalCommission
-  );
+  const platformCommission = roundInr(callerRechargeCommission + receiverWithdrawalCommission);
   const platformProfit = usageCommission;
 
   const dailyBreakdown: RevenueDashboardDailyRow[] = [...dailyMap.entries()]

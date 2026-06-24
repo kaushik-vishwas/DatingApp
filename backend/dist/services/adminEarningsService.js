@@ -200,19 +200,31 @@ function bumpDailyUsage(map, date, revenue, payout) {
     row.payout = roundInr(row.payout + payout);
     map.set(key, row);
 }
+/** Platform fee applies only when the paid total includes the fee (post-fee recharge packs). */
+function resolveWalletTopupPlatformFee(row) {
+    const credit = Number(row.creditAdded) || 0;
+    const bonus = Number(row.bonusPercent) || 0;
+    const payAmount = Number(row.payAmount) || 0;
+    if (credit <= 0)
+        return 0;
+    const walletAmount = roundInr(credit / (1 + bonus / 100));
+    if (walletAmount <= 0)
+        return 0;
+    if (payAmount > 0 && (0, walletRechargeFees_1.payableMatchesWalletPack)(walletAmount, payAmount, 0.05)) {
+        return (0, walletRechargeFees_1.computeWalletRechargeBreakdown)(walletAmount).platformFee;
+    }
+    return 0;
+}
 async function aggregateCallerRechargePlatformFees(since) {
     const match = {};
     if (since)
         match.createdAt = { $gte: since };
-    const rows = await WalletTopup_1.default.find(match).select('bonusPercent creditAdded').lean();
+    const rows = await WalletTopup_1.default.find(match)
+        .select('payAmount bonusPercent creditAdded')
+        .lean();
     let total = 0;
     for (const row of rows) {
-        const bonus = Number(row.bonusPercent) || 0;
-        const credit = Number(row.creditAdded) || 0;
-        if (credit <= 0)
-            continue;
-        const walletAmount = roundInr(credit / (1 + bonus / 100));
-        total += (0, walletRechargeFees_1.computeWalletRechargeBreakdown)(walletAmount).platformFee;
+        total += resolveWalletTopupPlatformFee(row);
     }
     return roundInr(total);
 }
@@ -271,7 +283,7 @@ async function getRevenueDashboardMetrics(since) {
     const grossRevenue = roundInr(grossCalls + grossChat);
     const netPayout = roundInr(payoutCalls + payoutChat);
     const usageCommission = roundInr(Math.max(0, grossRevenue - netPayout));
-    const platformCommission = roundInr(usageCommission + callerRechargeCommission + receiverWithdrawalCommission);
+    const platformCommission = roundInr(callerRechargeCommission + receiverWithdrawalCommission);
     const platformProfit = usageCommission;
     const dailyBreakdown = [...dailyMap.entries()]
         .sort((a, b) => (a[0] > b[0] ? -1 : 1))

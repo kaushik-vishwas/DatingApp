@@ -43,8 +43,8 @@ export function RevenuePage() {
         label: 'Platform Commission',
         value: data ? inr(data.cards.platformCommission) : '…',
         note: data
-          ? `Usage ${inr(data.cards.usageCommission)} + recharge ${inr(data.cards.callerRechargeCommission)} + withdrawal ${inr(data.cards.receiverWithdrawalCommission)}`
-          : 'Usage + caller recharge + receiver withdrawal fees',
+          ? `Caller recharge ${inr(data.cards.callerRechargeCommission)} (5–10%) + receiver withdrawal ${inr(data.cards.receiverWithdrawalCommission)} (5%)`
+          : 'Caller recharge fees (5–10%) + receiver withdrawal fees (5%)',
         tone: 'text-[#7b2cff]',
       },
       {
