@@ -203,10 +203,13 @@ const LOCAL_LEFT_CONFIRM_MS = 2_500;
 export function StreamRemotePeerLeftBridge({
   onRemotePeerLeft,
   onLocalGsmSuspect,
+  onPeerGsmSuspect,
 }: {
   onRemotePeerLeft: (reason: 'local_left' | 'remote_empty') => void;
   /** Fired when this device leaves Stream during talk — likely answered a cellular call. */
   onLocalGsmSuspect?: () => void;
+  /** Fired when the remote leaves Stream during talk — likely answered a cellular call. */
+  onPeerGsmSuspect?: () => void;
 }): null {
   const { useCallCallingState, useRemoteParticipants } = useCallStateHooks();
   const callingState = useCallCallingState();
@@ -217,24 +220,29 @@ export function StreamRemotePeerLeftBridge({
   const liveSnapshotCountRef = useRef<number | null>(null);
   const onRemotePeerLeftRef = useRef(onRemotePeerLeft);
   const onLocalGsmSuspectRef = useRef(onLocalGsmSuspect);
+  const onPeerGsmSuspectRef = useRef(onPeerGsmSuspect);
   const gsmSuspectArmedRef = useRef(false);
   const callingStateRef = useRef(callingState);
   const remoteParticipantsRef = useRef(remoteParticipants);
   onRemotePeerLeftRef.current = onRemotePeerLeft;
   onLocalGsmSuspectRef.current = onLocalGsmSuspect;
+  onPeerGsmSuspectRef.current = onPeerGsmSuspect;
   callingStateRef.current = callingState;
   remoteParticipantsRef.current = remoteParticipants;
 
   const armGsmSuspectGuard = (reason: 'local_left' | 'remote_empty'): void => {
     if (gsmSuspectArmedRef.current) return;
-    if (Platform.OS !== 'android') return;
     if (!getCallDiagnosticsSnapshot().talkActive) return;
     gsmSuspectArmedRef.current = true;
     setGsmInterruptPending(true, `stream_gsm_suspect_${reason}`);
     callDiag.info('stream_gsm_suspect', { reason });
     if (reason === 'local_left') {
-      onLocalGsmSuspectRef.current?.();
+      if (Platform.OS === 'android') {
+        onLocalGsmSuspectRef.current?.();
+      }
+      return;
     }
+    onPeerGsmSuspectRef.current?.();
   };
 
   const resolveRemoteLeftDebounceMs = (): number => {
@@ -445,7 +453,7 @@ export function StreamParticipantMutedIndicator({
   }, [callingState, remoteParticipant, peerOnHold]);
 
   const joined = callingState === CallingState.JOINED && Boolean(remoteParticipant);
-  const showHold = peerOnHold && (joined || talkActive);
+  const showHold = peerOnHold;
   const showMuted = !showHold && remoteMuted && joined;
 
   if (!showHold && !showMuted) return null;
@@ -467,6 +475,33 @@ export function StreamParticipantMutedIndicator({
   );
 }
 
+/** Force mic off during GSM or while peer is on hold. */
+export function StreamLocalHoldMicBridge({
+  systemOnHold = false,
+  peerOnHold = false,
+  userChosenMuteRef,
+}: {
+  systemOnHold?: boolean;
+  peerOnHold?: boolean;
+  userChosenMuteRef: React.MutableRefObject<boolean>;
+}): null {
+  const { useMicrophoneState } = useCallStateHooks();
+  const { microphone } = useMicrophoneState();
+  const pauseMic = systemOnHold || peerOnHold;
+
+  useEffect(() => {
+    if (pauseMic) {
+      void microphone.disable().catch(() => {});
+      return;
+    }
+    if (!userChosenMuteRef.current) {
+      void microphone.enable().catch(() => {});
+    }
+  }, [pauseMic, microphone, userChosenMuteRef]);
+
+  return null;
+}
+
 /** Pause remote participant audio during GSM / peer hold (both sides silent). */
 export function StreamHoldAudioBridge({
   peerOnHold = false,
@@ -478,27 +513,40 @@ export function StreamHoldAudioBridge({
   const call = useCall();
   const { useRemoteParticipants } = useCallStateHooks();
   const remoteParticipants = useRemoteParticipants();
-  const remoteParticipant = remoteParticipants[0];
-  const pauseRemoteRef = useRef(peerOnHold || systemOnHold);
-  pauseRemoteRef.current = peerOnHold || systemOnHold;
+  const remoteParticipantsRef = useRef(remoteParticipants);
+  remoteParticipantsRef.current = remoteParticipants;
+  const pauseRemote = peerOnHold || systemOnHold;
 
   useEffect(() => {
-    if (!call || !remoteParticipant?.sessionId) return;
-    const sessionId = remoteParticipant.sessionId;
-    const pause = pauseRemoteRef.current;
-    try {
-      call.speaker.setParticipantVolume(sessionId, pause ? 0 : undefined);
-    } catch {
-      // ignore
-    }
-    return () => {
-      try {
-        call.speaker.setParticipantVolume(sessionId, undefined);
-      } catch {
-        // ignore
+    if (!call) return;
+
+    const applyVolumes = (): void => {
+      const pause = peerOnHold || systemOnHold;
+      for (const participant of remoteParticipantsRef.current) {
+        if (!participant?.sessionId || participant.isLocalParticipant) continue;
+        try {
+          call.speaker.setParticipantVolume(participant.sessionId, pause ? 0 : undefined);
+        } catch {
+          // ignore
+        }
       }
     };
-  }, [call, remoteParticipant?.sessionId, peerOnHold, systemOnHold]);
+
+    applyVolumes();
+    if (!pauseRemote) return;
+    const intervalId = setInterval(applyVolumes, 250);
+    return () => {
+      clearInterval(intervalId);
+      for (const participant of remoteParticipantsRef.current) {
+        if (!participant?.sessionId || participant.isLocalParticipant) continue;
+        try {
+          call.speaker.setParticipantVolume(participant.sessionId, undefined);
+        } catch {
+          // ignore
+        }
+      }
+    };
+  }, [call, peerOnHold, systemOnHold, pauseRemote, remoteParticipants]);
 
   return null;
 }

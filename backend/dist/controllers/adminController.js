@@ -669,7 +669,7 @@ const getOverviewDashboard = async (req, res) => {
         todayStart.setHours(0, 0, 0, 0);
         const weekStart = toRangeStart('7d') ?? todayStart;
         const monthStart = toRangeStart('30d') ?? todayStart;
-        const [platformRevenue, calls, chats, activeReceivers, activeUsers, pendingKycApprovals, pendingWithdrawals, flaggedReports, allReceiverIds] = await Promise.all([
+        const [platformRevenue, calls, chats, activeReceivers, activeUsers, pendingKycApprovals, pendingWithdrawals, flaggedReports, allReceiverIds, referralRewardsPaid] = await Promise.all([
             (0, adminEarningsService_1.getPlatformRevenueForRange)(start),
             CallSession_1.default.find({
                 status: 'completed',
@@ -690,12 +690,13 @@ const getOverviewDashboard = async (req, res) => {
             WithdrawalRequest_1.default.countDocuments({ status: 'pending' }),
             UserReport_1.default.countDocuments({ status: 'pending' }),
             Receiver_1.default.find({}).select('_id').lean(),
+            (0, adminEarningsService_1.aggregateReferralRewardsPaid)(start),
         ]);
         const earningsRollups = await (0, receiverEarningsAggregate_1.aggregateReceiverEarningsByReceiver)(allReceiverIds.map((r) => r._id), todayStart, weekStart, monthStart);
         const earningsPeriod = range === 'all' ? 'lifetime' : range === '30d' ? 'last30Days' : 'last7Days';
         const receiverEarningsSum = (0, receiverEarningsAggregate_1.sumReceiverEarningsRollup)(earningsRollups.values(), earningsPeriod).earnings;
         const totalRevenue = platformRevenue.callerGross;
-        const adminEarnings = roundInr(Math.max(0, totalRevenue - receiverEarningsSum));
+        const adminEarnings = roundInr(Math.max(0, totalRevenue - receiverEarningsSum - referralRewardsPaid));
         const totalCalls = calls.length;
         const trendByDay = new Map();
         for (const c of calls) {

@@ -18,9 +18,17 @@ class IncomingCallAndroidModule : Module() {
       }
     }
 
+    AsyncFunction("ensureIncomingCallChannelAsync") {
+      val context = appContext.reactContext
+        ?: return@AsyncFunction mapOf("ensured" to false)
+      IncomingCallNotificationChannels.ensureIncomingCallChannel(context)
+      mapOf("ensured" to true)
+    }
+
     AsyncFunction("applyFullScreenIntentAsync") { identifier: String, debugEnabled: Boolean ->
       val context = appContext.reactContext
         ?: return@AsyncFunction mapOf("applied" to false, "failureReason" to "no_context")
+      IncomingCallNotificationChannels.ensureIncomingCallChannel(context)
       val result =
         IncomingCallNotificationTapEnhancer.enhancePostedNotification(
           context,

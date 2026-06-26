@@ -219,6 +219,8 @@ object IncomingCallNotificationTapEnhancer {
         tapIntent
       }
 
+    IncomingCallNotificationChannels.ensureIncomingCallChannel(context)
+
     val builder = NotificationCompat.Builder(context, channelId)
     applySmallIcon(builder, existing)
     applyIncomingCallAlert(builder, existing, context)
@@ -234,7 +236,7 @@ object IncomingCallNotificationTapEnhancer {
       .setCategory(NotificationCompat.CATEGORY_CALL)
       .setPriority(NotificationCompat.PRIORITY_MAX)
       .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
-      .setOnlyAlertOnce(false)
+      .setOnlyAlertOnce(true)
       .setFullScreenIntent(contentIntent, true)
 
     val actionCopy = copyActions(builder, existing, context, tag, debugEnabled)
@@ -446,6 +448,11 @@ object IncomingCallNotificationTapEnhancer {
     existing: Notification,
     context: Context
   ) {
+    // On O+ the channel owns ringtone/vibration; re-posting must not re-alert.
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+      builder.setDefaults(0)
+      return
+    }
     val sound = existing.sound ?: resolveIncomingCallRingtoneUri(context)
     if (sound != null) {
       @Suppress("DEPRECATION")

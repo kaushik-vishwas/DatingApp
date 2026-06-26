@@ -4,6 +4,7 @@ import AdminWithdrawalRequest from '../models/AdminWithdrawalRequest';
 import WithdrawalRequest from '../models/WithdrawalRequest';
 import WalletTopup from '../models/WalletTopup';
 import Receiver from '../models/Receiver';
+import Referral from '../models/Referral';
 import mongoose from 'mongoose';
 import { CHAT_TEXT_CHARGE_INR } from '../constants/chatPricing';
 import { computeWalletRechargeBreakdown, payableMatchesWalletPack } from '../constants/walletRechargeFees';
@@ -51,10 +52,23 @@ async function aggregateWithdrawalPlatformFees(since?: Date | null): Promise<num
   return roundInr(agg?.total ?? 0);
 }
 
+/** Refer-and-earn payouts are funded from platform admin earnings only. */
+export async function aggregateReferralRewardsPaid(since?: Date | null): Promise<number> {
+  const match: Record<string, unknown> = { status: 'rewarded' };
+  if (since) match.rewardedAt = { $gte: since };
+
+  const [agg] = await Referral.aggregate<{ total: number }>([
+    { $match: match },
+    { $group: { _id: null, total: { $sum: '$rewardInr' } } },
+  ]);
+  return roundInr(agg?.total ?? 0);
+}
+
 function finalizeBreakdown(parts: {
   callEarnings: number;
   messageEarnings: number;
   withdrawalFeeEarnings: number;
+  referralRewardsPaid: number;
   calls: number;
   messages: number;
   callerCallGross: number;
@@ -65,10 +79,12 @@ function finalizeBreakdown(parts: {
   const callEarnings = roundInr(Math.max(0, parts.callEarnings));
   const messageEarnings = roundInr(Math.max(0, parts.messageEarnings));
   const withdrawalFeeEarnings = roundInr(Math.max(0, parts.withdrawalFeeEarnings));
+  const referralRewardsPaid = roundInr(Math.max(0, parts.referralRewardsPaid));
+  const grossAdmin = roundInr(callEarnings + messageEarnings + withdrawalFeeEarnings);
   return {
     callEarnings,
     messageEarnings,
-    totalEarnings: roundInr(Math.max(0, callEarnings + messageEarnings + withdrawalFeeEarnings)),
+    totalEarnings: roundInr(Math.max(0, grossAdmin - referralRewardsPaid)),
     calls: parts.calls,
     messages: parts.messages,
     callerCallGross: roundInr(Math.max(0, parts.callerCallGross)),
@@ -136,7 +152,7 @@ async function aggregateAdminEarnings(since?: Date | null): Promise<AdminEarning
   const chatMatch: Record<string, unknown> = { senderType: 'u', feeInr: { $gt: 0 } };
   if (since) chatMatch.createdAt = { $gte: since };
 
-  const [chatAgg, withdrawalFeeEarnings] = await Promise.all([
+  const [chatAgg, withdrawalFeeEarnings, referralRewardsPaid] = await Promise.all([
     ChatMessage.aggregate<{
       callerMessageGross: number;
       receiverPayout: number;
@@ -162,12 +178,14 @@ async function aggregateAdminEarnings(since?: Date | null): Promise<AdminEarning
       },
     ]).then((rows) => rows[0]),
     aggregateWithdrawalPlatformFees(since),
+    aggregateReferralRewardsPaid(since),
   ]);
 
   return finalizeBreakdown({
     callEarnings: callAgg?.callEarnings ?? 0,
     messageEarnings: chatAgg?.messageEarnings ?? 0,
     withdrawalFeeEarnings,
+    referralRewardsPaid,
     calls: callerSpendAgg?.calls ?? callAgg?.calls ?? 0,
     messages: chatAgg?.messages ?? 0,
     callerCallGross: callerSpendAgg?.callerGross ?? 0,

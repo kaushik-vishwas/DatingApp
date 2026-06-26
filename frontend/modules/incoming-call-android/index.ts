@@ -30,6 +30,7 @@ export type SamsungCallCompatProfile = {
 };
 
 export type IncomingCallAndroidModule = {
+  ensureIncomingCallChannelAsync(): Promise<{ ensured?: boolean }>;
   applyFullScreenIntentAsync(
     identifier: string,
     debugEnabled: boolean

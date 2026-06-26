@@ -3,6 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.aggregateReferralRewardsPaid = aggregateReferralRewardsPaid;
 exports.computeReservedAdminEarningsInr = computeReservedAdminEarningsInr;
 exports.getPlatformRevenueForRange = getPlatformRevenueForRange;
 exports.getAdminEarningsSnapshot = getAdminEarningsSnapshot;
@@ -13,6 +14,7 @@ const AdminWithdrawalRequest_1 = __importDefault(require("../models/AdminWithdra
 const WithdrawalRequest_1 = __importDefault(require("../models/WithdrawalRequest"));
 const WalletTopup_1 = __importDefault(require("../models/WalletTopup"));
 const Receiver_1 = __importDefault(require("../models/Receiver"));
+const Referral_1 = __importDefault(require("../models/Referral"));
 const mongoose_1 = __importDefault(require("mongoose"));
 const chatPricing_1 = require("../constants/chatPricing");
 const walletRechargeFees_1 = require("../constants/walletRechargeFees");
@@ -43,14 +45,27 @@ async function aggregateWithdrawalPlatformFees(since) {
     ]);
     return roundInr(agg?.total ?? 0);
 }
+/** Refer-and-earn payouts are funded from platform admin earnings only. */
+async function aggregateReferralRewardsPaid(since) {
+    const match = { status: 'rewarded' };
+    if (since)
+        match.rewardedAt = { $gte: since };
+    const [agg] = await Referral_1.default.aggregate([
+        { $match: match },
+        { $group: { _id: null, total: { $sum: '$rewardInr' } } },
+    ]);
+    return roundInr(agg?.total ?? 0);
+}
 function finalizeBreakdown(parts) {
     const callEarnings = roundInr(Math.max(0, parts.callEarnings));
     const messageEarnings = roundInr(Math.max(0, parts.messageEarnings));
     const withdrawalFeeEarnings = roundInr(Math.max(0, parts.withdrawalFeeEarnings));
+    const referralRewardsPaid = roundInr(Math.max(0, parts.referralRewardsPaid));
+    const grossAdmin = roundInr(callEarnings + messageEarnings + withdrawalFeeEarnings);
     return {
         callEarnings,
         messageEarnings,
-        totalEarnings: roundInr(Math.max(0, callEarnings + messageEarnings + withdrawalFeeEarnings)),
+        totalEarnings: roundInr(Math.max(0, grossAdmin - referralRewardsPaid)),
         calls: parts.calls,
         messages: parts.messages,
         callerCallGross: roundInr(Math.max(0, parts.callerCallGross)),
@@ -110,7 +125,7 @@ async function aggregateAdminEarnings(since) {
     const chatMatch = { senderType: 'u', feeInr: { $gt: 0 } };
     if (since)
         chatMatch.createdAt = { $gte: since };
-    const [chatAgg, withdrawalFeeEarnings] = await Promise.all([
+    const [chatAgg, withdrawalFeeEarnings, referralRewardsPaid] = await Promise.all([
         ChatMessage_1.default.aggregate([
             { $match: chatMatch },
             {
@@ -131,11 +146,13 @@ async function aggregateAdminEarnings(since) {
             },
         ]).then((rows) => rows[0]),
         aggregateWithdrawalPlatformFees(since),
+        aggregateReferralRewardsPaid(since),
     ]);
     return finalizeBreakdown({
         callEarnings: callAgg?.callEarnings ?? 0,
         messageEarnings: chatAgg?.messageEarnings ?? 0,
         withdrawalFeeEarnings,
+        referralRewardsPaid,
         calls: callerSpendAgg?.calls ?? callAgg?.calls ?? 0,
         messages: chatAgg?.messages ?? 0,
         callerCallGross: callerSpendAgg?.callerGross ?? 0,

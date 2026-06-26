@@ -14,6 +14,7 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
+  useWindowDimensions,
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -119,36 +120,126 @@ const DiscoverStickyTop = React.memo(function DiscoverStickyTop({
   onDiagnosticsPress,
   onPresenceDiagnosticsPress,
 }: DiscoverStickyTopProps): React.JSX.Element {
+  const { width: windowWidth } = useWindowDimensions();
+
+  const topBarMetrics = useMemo(() => {
+    const availableWidth = windowWidth - 32;
+    const narrow = availableWidth < 320;
+    const compact = availableWidth < 360;
+
+    return {
+      logoWidth: narrow ? 84 : compact ? 104 : 132,
+      logoHeight: narrow ? 30 : compact ? 36 : 46,
+      topRightGap: narrow ? 5 : compact ? 7 : 10,
+      walletMaxWidth: narrow ? 92 : compact ? 112 : 136,
+      walletFontSize: narrow ? 10 : compact ? 11 : 13,
+      walletPaddingH: narrow ? 5 : compact ? 6 : 8,
+      walletIcoSize: narrow ? 12 : compact ? 14 : 15,
+      plusSize: narrow ? 20 : compact ? 22 : 25,
+      plusIconSize: narrow ? 12 : compact ? 13 : 15,
+      avatarSize: narrow ? 38 : compact ? 42 : 48,
+      avatarFontSize: narrow ? 14 : compact ? 16 : 17,
+    };
+  }, [windowWidth]);
+
+  const avatarInnerSize = topBarMetrics.avatarSize - 3;
+
   return (
     <View style={styles.stickyTopCard}>
       <View style={styles.topSection}>
         <View style={styles.topBar}>
           <View style={styles.topBarLeft}>
-            <Image source={SelectoLogo} style={styles.brandLogo} resizeMode="contain" />
+            <Image
+              source={SelectoLogo}
+              style={[
+                styles.brandLogo,
+                {
+                  width: topBarMetrics.logoWidth,
+                  height: topBarMetrics.logoHeight,
+                },
+              ]}
+              resizeMode="contain"
+            />
             {/* <CallDiagnosticsTopBarButton onPress={onDiagnosticsPress} />
             <PresenceDiagnosticsTopBarButton onPress={onPresenceDiagnosticsPress} /> */}
           </View>
-          <View style={styles.topRight}>
-            <TouchableOpacity style={styles.walletCapsule} onPress={onWalletPress} activeOpacity={0.85}>
-              <View style={styles.walletContainer}>
-                <Text style={styles.walletIco}>💰</Text>
-                <Text style={styles.wallet}>₹{wallet.toLocaleString('en-IN')}</Text>
+          <View style={[styles.topRight, { gap: topBarMetrics.topRightGap }]}>
+            <TouchableOpacity
+              style={[styles.walletCapsule, { maxWidth: topBarMetrics.walletMaxWidth }]}
+              onPress={onWalletPress}
+              activeOpacity={0.85}
+            >
+              <View
+                style={[
+                  styles.walletContainer,
+                  { paddingHorizontal: topBarMetrics.walletPaddingH },
+                ]}
+              >
+                <Text style={[styles.walletIco, { fontSize: topBarMetrics.walletIcoSize }]}>💰</Text>
+                <Text
+                  style={[styles.wallet, { fontSize: topBarMetrics.walletFontSize }]}
+                  numberOfLines={1}
+                  adjustsFontSizeToFit
+                  minimumFontScale={0.7}
+                >
+                  ₹{wallet.toLocaleString('en-IN')}
+                </Text>
                 <View style={styles.plusIconWrapper}>
-                  <View style={styles.plusCircle}>
-                    <Ionicons name="add" size={15} color="#fff" />
+                  <View
+                    style={[
+                      styles.plusCircle,
+                      {
+                        width: topBarMetrics.plusSize,
+                        height: topBarMetrics.plusSize,
+                        borderRadius: topBarMetrics.plusSize / 2,
+                      },
+                    ]}
+                  >
+                    <Ionicons name="add" size={topBarMetrics.plusIconSize} color="#fff" />
                   </View>
                 </View>
               </View>
             </TouchableOpacity>
             <TouchableOpacity onPress={onProfilePress} activeOpacity={0.85}>
               {profileImageSource ? (
-                <View style={styles.avatarCapsule}>
-                  <Image source={profileImageSource} style={styles.meAvatar} />
+                <View
+                  style={[
+                    styles.avatarCapsule,
+                    {
+                      width: topBarMetrics.avatarSize,
+                      height: topBarMetrics.avatarSize,
+                      borderRadius: topBarMetrics.avatarSize / 2,
+                    },
+                  ]}
+                >
+                  <Image
+                    source={profileImageSource}
+                    style={[
+                      styles.meAvatar,
+                      {
+                        width: avatarInnerSize,
+                        height: avatarInnerSize,
+                        borderRadius: avatarInnerSize / 2,
+                      },
+                    ]}
+                  />
                 </View>
               ) : (
-                <View style={[styles.avatarCapsule, styles.meAvatarPh]}>
+                <View
+                  style={[
+                    styles.avatarCapsule,
+                    styles.meAvatarPh,
+                    {
+                      width: topBarMetrics.avatarSize,
+                      height: topBarMetrics.avatarSize,
+                      borderRadius: topBarMetrics.avatarSize / 2,
+                    },
+                  ]}
+                >
                   <View style={styles.avatarContainer}>
-                    <Text style={styles.meAvatarTxt}>{userInitial}</Text>
+                    <Text style={[styles.meAvatarTxt, { fontSize: topBarMetrics.avatarFontSize }]}>
+                      {userInitial}
+                    </Text>
                   </View>
                 </View>
               )}
@@ -754,22 +845,25 @@ const styles = StyleSheet.create({
   topBar: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
+    gap: 8,
+    minWidth: 0,
   },
   topBarLeft: {
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
+    minWidth: 0,
     flexShrink: 1,
   },
   brandLogo: {
-    width: 140,
-    height: 50,
+    maxWidth: '100%',
   },
   topRight: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12
+    flexShrink: 0,
+    minWidth: 0,
   },
 
   walletCapsule: {
@@ -782,36 +876,35 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.1,
     shadowRadius: 4,
     elevation: 2,
+    flexShrink: 1,
+    minWidth: 0,
   },
   walletContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 8,  // Reduced from 14
-    paddingVertical: 8,
-    gap: 4,  // Reduced from 6
+    paddingVertical: 7,
+    gap: 4,
     backgroundColor: 'transparent',
+    minWidth: 0,
   },
-  walletIco: {
-    fontSize: 16,
-  },
+  walletIco: {},
   wallet: {
-    fontSize: 15,
     fontWeight: '800',
     color: '#111',
+    flexShrink: 1,
+    minWidth: 0,
   },
 
   avatarCapsule: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
     borderWidth: 2,
-    borderColor: '#00a2ff',  // Changed from PURPLE to match wallet
+    borderColor: '#00a2ff',
     overflow: 'hidden',
-    shadowColor: '#00a2ff',  // Changed from PURPLE
+    shadowColor: '#00a2ff',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.15,
     shadowRadius: 4,
     elevation: 3,
+    flexShrink: 0,
   },
   avatarContainer: {
     width: '100%',
@@ -820,11 +913,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  meAvatar: {
-    width: 47,
-    height: 47,
-    borderRadius: 23,
-  },
+  meAvatar: {},
   meAvatarPh: {
     alignItems: 'center',
     justifyContent: 'center',
@@ -832,7 +921,6 @@ const styles = StyleSheet.create({
   meAvatarTxt: {
     fontWeight: '900',
     color: '#fff',
-    fontSize: 18,
   },
 
 
@@ -842,9 +930,6 @@ const styles = StyleSheet.create({
     marginLeft: 0,
   },
   plusCircle: {
-    width: 25,
-    height: 25,
-    borderRadius: 14,
     backgroundColor: '#00a2ff',
     alignItems: 'center',
     justifyContent: 'center',
@@ -853,6 +938,7 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.3,
     shadowRadius: 4,
     elevation: 3,
+    flexShrink: 0,
   },
 
   matchOverlay: {

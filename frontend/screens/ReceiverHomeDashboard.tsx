@@ -14,6 +14,7 @@ import {
   Text,
   Switch,
   TouchableOpacity,
+  useWindowDimensions,
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -121,6 +122,7 @@ function CompactInfoCard({ colors, bgImage, title, subtitle, children, bgImageSt
 }
 
 export default function ReceiverHomeDashboard(): React.JSX.Element {
+  const { width: windowWidth } = useWindowDimensions();
   const navigation = useNavigation<ReceiverHomeNav>();
   const { signOut, user, refreshUser } = useAuth();
   const { totalUnread, refreshUnreadFromServer } = useChatInbox();
@@ -133,6 +135,23 @@ export default function ReceiverHomeDashboard(): React.JSX.Element {
   const [notificationUnread, setNotificationUnread] = useState(0);
   const scrollBottomInset = useReceiverTabBarBottomInset();
   const { setQueueMode } = useCallSignals();
+
+  const topBarMetrics = useMemo(() => {
+    const availableWidth = windowWidth - 32;
+    const narrow = availableWidth < 320;
+    const compact = availableWidth < 360;
+
+    return {
+      logoWidth: narrow ? 84 : compact ? 104 : 132,
+      logoHeight: narrow ? 30 : compact ? 36 : 46,
+      topRightGap: narrow ? 5 : compact ? 7 : 10,
+      earningsMaxWidth: narrow ? 72 : compact ? 92 : 118,
+      earningsFontSize: narrow ? 10 : compact ? 11 : 13,
+      earningsPaddingH: narrow ? 5 : compact ? 7 : 9,
+      actionSize: narrow ? 34 : compact ? 36 : 40,
+      bellFontSize: narrow ? 15 : 17,
+    };
+  }, [windowWidth]);
 
   const receiverId = user?.role === 'receiver' ? user._id : undefined;
   const autoAvailabilityAppliedForRef = React.useRef<string | null>(null);
@@ -382,7 +401,13 @@ export default function ReceiverHomeDashboard(): React.JSX.Element {
             <View style={styles.topBarLeft}>
               <Image
                 source={SelectoLogo}
-                style={styles.brandLogo}
+                style={[
+                  styles.brandLogo,
+                  {
+                    width: topBarMetrics.logoWidth,
+                    height: topBarMetrics.logoHeight,
+                  },
+                ]}
                 resizeMode="contain"
               />
               {/* <CallDiagnosticsTopBarButton
@@ -392,7 +417,7 @@ export default function ReceiverHomeDashboard(): React.JSX.Element {
                 onPress={() => navigation.navigate('PresenceDiagnostics')}
               /> */}
             </View>
-            <View style={styles.topRight}>
+            <View style={[styles.topRight, { gap: topBarMetrics.topRightGap }]}>
               {showScoreInTopBar ? (
                 <TouchableOpacity
                   style={styles.scoreCapsule}
@@ -409,13 +434,26 @@ export default function ReceiverHomeDashboard(): React.JSX.Element {
               ) : null}
 
               <TouchableOpacity
-                style={styles.earningsCapsule}
+                style={[
+                  styles.earningsCapsule,
+                  { maxWidth: topBarMetrics.earningsMaxWidth },
+                ]}
                 onPress={() => navigation.navigate('WithdrawEarnings')}
                 activeOpacity={0.85}
               >
-                <View style={styles.earningsContainer}>
+                <View
+                  style={[
+                    styles.earningsContainer,
+                    { paddingHorizontal: topBarMetrics.earningsPaddingH },
+                  ]}
+                >
                   <Text style={styles.earningsIco}>💰</Text>
-                  <Text style={styles.earningsText} numberOfLines={1}>
+                  <Text
+                    style={[styles.earningsText, { fontSize: topBarMetrics.earningsFontSize }]}
+                    numberOfLines={1}
+                    adjustsFontSizeToFit
+                    minimumFontScale={0.7}
+                  >
                     {formatInr(totalEarningsLifetime)}
                   </Text>
                   {/* <View style={styles.plusIconWrapper}>
@@ -427,7 +465,14 @@ export default function ReceiverHomeDashboard(): React.JSX.Element {
               </TouchableOpacity>
 
               <TouchableOpacity
-                style={styles.bellButton}
+                style={[
+                  styles.bellButton,
+                  {
+                    width: topBarMetrics.actionSize,
+                    height: topBarMetrics.actionSize,
+                    borderRadius: topBarMetrics.actionSize / 2,
+                  },
+                ]}
                 onPress={() => {
                   void (async () => {
                     await markNotificationsSeenNow('receiver');
@@ -437,7 +482,7 @@ export default function ReceiverHomeDashboard(): React.JSX.Element {
                 }}
                 activeOpacity={0.85}
               >
-                <Text style={styles.bellIcon}>🔔</Text>
+                <Text style={[styles.bellIcon, { fontSize: topBarMetrics.bellFontSize }]}>🔔</Text>
                 {notificationUnread > 0 ? (
                   <View style={styles.bellBadge}>
                     <Text style={styles.bellBadgeText}>
@@ -448,14 +493,32 @@ export default function ReceiverHomeDashboard(): React.JSX.Element {
               </TouchableOpacity>
 
               <TouchableOpacity
-                style={styles.avatarCapsule}
+                style={[
+                  styles.avatarCapsule,
+                  {
+                    width: topBarMetrics.actionSize,
+                    height: topBarMetrics.actionSize,
+                    borderRadius: topBarMetrics.actionSize / 2,
+                  },
+                ]}
                 onPress={() => navigation.navigate('ReceiverSettings')}
                 activeOpacity={0.85}
               >
                 {(() => {
                   const meSrc = user?.profileImage ? resolveProfileImageSource(user.profileImage) : null;
+                  const avatarSize = topBarMetrics.actionSize - 1;
                   return meSrc ? (
-                    <Image source={meSrc} style={styles.meAvatar} />
+                    <Image
+                      source={meSrc}
+                      style={[
+                        styles.meAvatar,
+                        {
+                          width: avatarSize,
+                          height: avatarSize,
+                          borderRadius: avatarSize / 2,
+                        },
+                      ]}
+                    />
                   ) : (
                     <View style={styles.avatarContainer}>
                       <Text style={styles.meAvatarTxt}>{user?.name?.charAt(0) ?? '?'}</Text>
@@ -768,22 +831,25 @@ const styles = StyleSheet.create({
   topBar: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
+    gap: 8,
+    minWidth: 0,
   },
   topBarLeft: {
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
+    minWidth: 0,
     flexShrink: 1,
   },
   brandLogo: {
-    width: 140,
-    height: 50,
+    maxWidth: '100%',
   },
   topRight: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12
+    flexShrink: 0,
+    minWidth: 0,
   },
 
   scoreCapsule: {
@@ -813,43 +879,38 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#00a2ff',
     backgroundColor: '#e5e5e5',
-    maxWidth: 140,    // Changed from 120 to 140
-    minWidth: 100,    // Added minimum width for better size
-    paddingHorizontal: 2, // Added for better spacing
+    flexShrink: 1,
+    minWidth: 0,
   },
-  
+
   earningsContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 10,  // Changed from 8 to 12
-    paddingVertical: 8,     // Changed from 6 to 8
-    gap: 6,                 // Changed from 4 to 6
+    paddingVertical: 7,
+    gap: 4,
+    minWidth: 0,
   },
-  
+
   earningsIco: {
-    fontSize: 14,     // Changed from 14 to 16
+    fontSize: 13,
   },
-  
+
   earningsText: {
-    fontSize: 14,     // Changed from 12 to 14
     fontWeight: '800',
     color: '#111',
     flexShrink: 1,
+    minWidth: 0,
   },
 
   bellButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 22,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: '#e5e5e5',
     borderWidth: 1,
     borderColor: '#00a2ff',
+    flexShrink: 0,
   },
-  bellIcon: {
-    fontSize: 18,
-  },
+  bellIcon: {},
   bellBadge: {
     position: 'absolute',
     top: -4,
@@ -865,12 +926,10 @@ const styles = StyleSheet.create({
   bellBadgeText: { color: '#fff', fontSize: 9, fontWeight: '900' },
 
   avatarCapsule: {
-    width: 40,
-    height: 40,
-    borderRadius: 23,
     borderWidth: 1.5,
     borderColor: '#00a2ff',
     overflow: 'hidden',
+    flexShrink: 0,
   },
   avatarContainer: {
     width: '100%',
@@ -879,11 +938,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  meAvatar: {
-    width: 39,
-    height: 39,
-    borderRadius: 20,
-  },
+  meAvatar: {},
   meAvatarTxt: {
     fontWeight: '900',
     color: '#fff',

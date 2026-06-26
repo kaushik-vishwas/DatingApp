@@ -9,6 +9,7 @@ import {
   Platform,
   Image,
   Modal,
+  ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -140,6 +141,7 @@ type StreamCallAvatarExtrasModule = {
   StreamRemotePeerLeftBridge: React.ComponentType<{
     onRemotePeerLeft: (reason: 'local_left' | 'remote_empty') => void;
     onLocalGsmSuspect?: () => void;
+    onPeerGsmSuspect?: () => void;
   }>;
   StreamMicControlBridge: React.ComponentType<{
     controlRef: React.MutableRefObject<StreamMicControl | null>;
@@ -150,6 +152,11 @@ type StreamCallAvatarExtrasModule = {
   StreamHoldAudioBridge: React.ComponentType<{
     peerOnHold?: boolean;
     systemOnHold?: boolean;
+  }>;
+  StreamLocalHoldMicBridge: React.ComponentType<{
+    systemOnHold?: boolean;
+    peerOnHold?: boolean;
+    userChosenMuteRef: React.MutableRefObject<boolean>;
   }>;
   StreamSystemHoldBridge: React.ComponentType<{
     userChosenMuteRef: React.MutableRefObject<boolean>;
@@ -170,6 +177,29 @@ function loadStreamCallAvatarExtras(): StreamCallAvatarExtrasModule | null {
 type Props =
   | NativeStackScreenProps<CallerStackParamList, 'VoiceCall'>
   | NativeStackScreenProps<ReceiverStackParamList, 'VoiceCall'>;
+
+type PostCallDetails = {
+  durationSec: number;
+  costInr: number;
+  walletInr: number;
+};
+
+/** Must match backend `VOICE_CALL_ISSUE_TAGS`. */
+const POST_CALL_ISSUE_TAGS = [
+  'Background noise',
+  'Not Talking',
+  'Asked me to end Call',
+  'Wrong Gender',
+  'Call Disconnected',
+] as const;
+
+function formatCallDurationShort(totalSec: number): string {
+  const s = Math.max(0, Math.floor(totalSec));
+  const m = Math.floor(s / 60);
+  const rem = s % 60;
+  if (m <= 0) return `${rem}s`;
+  return `${m}m ${String(rem).padStart(2, '0')}s`;
+}
 
 async function applyVoiceCallAudioMode(speaker: boolean, bluetooth = false): Promise<void> {
   await applyVoiceCallOutputRoute(
@@ -340,6 +370,10 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
   const [ratingOpen, setRatingOpen] = useState(false);
   const [selectedRating, setSelectedRating] = useState(0);
   const [submittingRating, setSubmittingRating] = useState(false);
+  const [postCallOpen, setPostCallOpen] = useState(false);
+  const [postCallDetails, setPostCallDetails] = useState<PostCallDetails | null>(null);
+  const [selectedIssueTags, setSelectedIssueTags] = useState<Set<string>>(() => new Set());
+  const [submittingIssue, setSubmittingIssue] = useState(false);
   const autoEndByBalanceRef = useRef(false);
   const activeCallRef = useRef<{
     leave: () => Promise<void>;
@@ -533,6 +567,8 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
   const holdForcedMicOffRef = useRef(false);
   const peerHoldPausedMicRef = useRef(false);
   const peerCallHoldRef = useRef(false);
+  const lastPeerHoldClearAtRef = useRef(0);
+  const gsmHoldMutedPeerRef = useRef(false);
   const receiverAvailabilitySessionRef = useRef(receiverAvailabilitySession);
   const userAvailableRef = useRef(Boolean(user?.isAvailable));
   useEffect(() => {
@@ -565,6 +601,9 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
   const applyPeerHoldFromRemote = useCallback((onHold: boolean) => {
     peerCallHoldRef.current = onHold;
     setPeerCallHold(onHold);
+    if (!onHold) {
+      lastPeerHoldClearAtRef.current = Date.now();
+    }
     if (onHold) {
       callDiag.holdStarted('remote_socket');
       peerHoldPausedMicRef.current = true;
@@ -633,15 +672,24 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
       setSystemCallHold(onHold);
       setGsmInterruptPending(onHold);
       emitPeerCallHold(onHold);
-      if (onHold && !userChosenMuteRef.current) {
-        holdForcedMicOffRef.current = true;
-        void streamMicControlRef.current?.setEnabled(false).catch(() => {});
+      if (onHold) {
+        if (!userChosenMuteRef.current) {
+          holdForcedMicOffRef.current = true;
+          gsmHoldMutedPeerRef.current = true;
+          void streamMicControlRef.current?.setEnabled(false).catch(() => {});
+          emitPeerCallMute(true);
+        }
+      } else if (gsmHoldMutedPeerRef.current) {
+        gsmHoldMutedPeerRef.current = false;
+        if (!userChosenMuteRef.current) {
+          emitPeerCallMute(false);
+        }
       }
       callDiag.info(onHold ? 'system_hold_applied' : 'system_hold_cleared', {
         samsung: isSamsungOneUi6OrNewer(),
       });
     },
-    [emitPeerCallHold]
+    [emitPeerCallHold, emitPeerCallMute]
   );
   applySystemCallHoldRef.current = applySystemCallHold;
 
@@ -843,6 +891,22 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
             ? Math.max(0, data.receiverEarnedInr)
             : 0
         );
+        const costInr =
+          typeof data.settledAmountInr === 'number' && Number.isFinite(data.settledAmountInr)
+            ? Math.max(0, data.settledAmountInr)
+            : 0;
+        const walletFromApi =
+          typeof data.callerWalletBalanceInr === 'number' && Number.isFinite(data.callerWalletBalanceInr)
+            ? Math.max(0, data.callerWalletBalanceInr)
+            : null;
+        setPostCallDetails({
+          durationSec,
+          costInr,
+          walletInr:
+            walletFromApi ??
+            sessionCallerWalletInrRef.current ??
+            (userRoleRef.current === 'caller' ? callerWalletInrRef.current : 0),
+        });
         return result;
       } catch {
         // Allow future retries if a transient failure happens now.
@@ -861,6 +925,34 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
 
   const showRatingPromptRef = useRef(showRatingPrompt);
   showRatingPromptRef.current = showRatingPrompt;
+
+  const openPostCallSummary = () => {
+    setSelectedIssueTags(new Set());
+    setPostCallOpen(true);
+  };
+
+  const proceedAfterCallerRating = () => {
+    setRatingOpen(false);
+    if (userRoleRef.current !== 'caller') {
+      stopQueueAndExit();
+      return;
+    }
+    openPostCallSummary();
+  };
+
+  const closePostCallAndExit = () => {
+    setPostCallOpen(false);
+    stopQueueAndExit();
+  };
+
+  const toggleIssueTag = (tag: string) => {
+    setSelectedIssueTags((prev) => {
+      const next = new Set(prev);
+      if (next.has(tag)) next.delete(tag);
+      else next.add(tag);
+      return next;
+    });
+  };
 
   const callerMeetsRatingThreshold = (serverDurationSec?: number): boolean => {
     const duration = Math.max(elapsedSecRef.current, serverDurationSec ?? 0);
@@ -1895,13 +1987,20 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
       setSystemCallHold(false);
       emitPeerCallHold(false);
     }
+    if (gsmHoldMutedPeerRef.current) {
+      gsmHoldMutedPeerRef.current = false;
+      if (!userChosenMuteRef.current) {
+        emitPeerCallMute(false);
+      }
+    }
     if (peerCallHoldRef.current) {
       peerCallHoldRef.current = false;
       setPeerCallHold(false);
       peerHoldPausedMicRef.current = false;
+      lastPeerHoldClearAtRef.current = Date.now();
     }
     setGsmInterruptPending(false, 'teardown');
-  }, [emitPeerCallHold]);
+  }, [emitPeerCallHold, emitPeerCallMute]);
 
   const hangup = async () => {
     const hangupStartedAt = Date.now();
@@ -2183,6 +2282,14 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
   const shellShowIncomingActions =
     receiverAvailabilitySession && receiverSessionPhase === 'incoming' && Boolean(incomingReq);
 
+  const handlePeerGsmSuspect = useCallback(() => {
+    if (endingRef.current || peerCallHoldRef.current) return;
+    if (Date.now() - lastPeerHoldClearAtRef.current < 2000) return;
+    applyPeerHoldFromRemote(true);
+  }, [applyPeerHoldFromRemote]);
+  const handlePeerGsmSuspectRef = useRef(handlePeerGsmSuspect);
+  handlePeerGsmSuspectRef.current = handlePeerGsmSuspect;
+
   const renderCallShell = (): React.JSX.Element => {
     const peerSrc =
       !shellPeerEmpty && shellPeerImage ? resolveProfileImageSource(shellPeerImage) : null;
@@ -2219,6 +2326,11 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
                       <Text style={styles.avatarInitial}>{peerInitial}</Text>
                     </View>
                   )}
+                  {peerCallHold ? (
+                    <View style={styles.shellHoldBadge} pointerEvents="none">
+                      <Text style={styles.shellHoldBadgeText}>On hold</Text>
+                    </View>
+                  ) : null}
                 </View>
               </View>
               <Text style={styles.avatarCaption} numberOfLines={1}>
@@ -2375,8 +2487,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
                   // Keep exit behavior even if rating submit fails.
                 } finally {
                   setSubmittingRating(false);
-                  setRatingOpen(false);
-                  stopQueueAndExit();
+                  proceedAfterCallerRating();
                 }
               })();
             }}
@@ -2394,8 +2505,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
             style={styles.ratingSkipBtn}
             disabled={submittingRating}
             onPress={() => {
-              setRatingOpen(false);
-              stopQueueAndExit();
+              proceedAfterCallerRating();
             }}
           >
             <Text style={styles.ratingSkipText}>Skip</Text>
@@ -2404,6 +2514,113 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
       </View>
     </Modal>
   );
+
+  const postCallPeerSrc =
+    shellPeerImage && !shellPeerEmpty ? resolveProfileImageSource(shellPeerImage) : null;
+  const postCallPeerInitial = (shellPeerName || 'U').trim().charAt(0).toUpperCase();
+  const summaryDurationSec = postCallDetails?.durationSec ?? elapsedSec;
+  const summaryCostInr = postCallDetails?.costInr ?? 0;
+  const summaryWalletInr =
+    postCallDetails?.walletInr ?? sessionCallerWalletInr ?? callerWalletInr;
+
+  const postCallModal =
+    user?.role === 'caller' ? (
+      <Modal visible={postCallOpen} animationType="fade" transparent>
+        <View style={styles.postModalRoot}>
+          <ScrollView
+            style={styles.postScroll}
+            contentContainerStyle={{
+              paddingHorizontal: 22,
+              paddingTop: insets.top + 18,
+              paddingBottom: insets.bottom + 28,
+            }}
+            keyboardShouldPersistTaps="handled"
+          >
+            <View style={styles.postHeroAvatar}>
+              {postCallPeerSrc ? (
+                <Image source={postCallPeerSrc} style={styles.postHeroAvatarImg} />
+              ) : (
+                <View style={[styles.postHeroAvatarImg, styles.postHeroAvatarPh]}>
+                  <Text style={styles.postHeroAvatarInitial}>{postCallPeerInitial}</Text>
+                </View>
+              )}
+            </View>
+            <Text style={styles.postPeerTitle}>{shellPeerName || 'Receiver'}</Text>
+
+            <View style={styles.postDetailBox}>
+              <View style={styles.postDetailRow}>
+                <Text style={styles.postDetailLabel}>Total Duration</Text>
+                <Text style={styles.postDetailValue}>{formatCallDurationShort(summaryDurationSec)}</Text>
+              </View>
+              <View style={styles.postDetailRow}>
+                <Text style={styles.postDetailLabel}>Total Cost</Text>
+                <Text style={styles.postDetailValue}>₹{summaryCostInr.toLocaleString('en-IN')}</Text>
+              </View>
+              <View style={[styles.postDetailRow, styles.postDetailRowLast]}>
+                <Text style={styles.postDetailLabel}>Remaining Balance</Text>
+                <Text style={[styles.postDetailValue, styles.postDetailValueAccent]}>
+                  ₹{summaryWalletInr.toLocaleString('en-IN')}
+                </Text>
+              </View>
+            </View>
+
+            <Text style={styles.postReportHeading}>
+              Faced any Issue? <Text style={styles.postReportHere}>Report Here</Text>
+            </Text>
+            <View style={styles.postChipWrap}>
+              {POST_CALL_ISSUE_TAGS.map((tag) => {
+                const on = selectedIssueTags.has(tag);
+                return (
+                  <TouchableOpacity
+                    key={tag}
+                    onPress={() => toggleIssueTag(tag)}
+                    activeOpacity={0.85}
+                    style={[styles.postChip, on && styles.postChipOn]}
+                  >
+                    <Text style={[styles.postChipTxt, on && styles.postChipTxtOn]}>{tag}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+            <TouchableOpacity
+              activeOpacity={0.9}
+              disabled={selectedIssueTags.size === 0 || submittingIssue}
+              onPress={() => {
+                void (async () => {
+                  if (selectedIssueTags.size === 0) return;
+                  setSubmittingIssue(true);
+                  try {
+                    await callApi.sessionReport(callIdRef.current, [...selectedIssueTags]);
+                    setSelectedIssueTags(new Set());
+                    Alert.alert('Submitted', 'Thank you. Our team will review your report.');
+                  } catch (e) {
+                    Alert.alert('Report', getErrorMessage(e));
+                  } finally {
+                    setSubmittingIssue(false);
+                  }
+                })();
+              }}
+              style={[
+                styles.postIssueBtn,
+                (selectedIssueTags.size === 0 || submittingIssue) && styles.postBtnDisabled,
+              ]}
+            >
+              <Text style={styles.postIssueBtnTxt}>
+                {submittingIssue ? 'Submitting...' : 'Submit Issue'}
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.postSkipBtn}
+              disabled={submittingIssue}
+              onPress={closePostCallAndExit}
+            >
+              <Text style={styles.postSkipTxt}>Skip, go to home</Text>
+            </TouchableOpacity>
+          </ScrollView>
+        </View>
+      </Modal>
+    ) : null;
 
   let screenBody: React.JSX.Element;
 
@@ -2463,11 +2680,21 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
                 if (endingRef.current) return;
                 applySystemCallHoldRef.current(true);
               }}
+              onPeerGsmSuspect={() => {
+                handlePeerGsmSuspectRef.current();
+              }}
               onRemotePeerLeft={(reason) => {
                 const callId = callIdRef.current.trim();
                 if (!callId || endingRef.current) return;
                 handlePeerCallEndedRef.current(callId, `stream_${reason}`);
               }}
+            />
+          ) : null}
+          {streamAvatarExtras ? (
+            <streamAvatarExtras.StreamLocalHoldMicBridge
+              systemOnHold={systemCallHold}
+              peerOnHold={peerCallHold}
+              userChosenMuteRef={userChosenMuteRef}
             />
           ) : null}
           {streamAvatarExtras ? (
@@ -2656,6 +2883,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
       />
       {screenBody}
       {ratingModal}
+      {postCallModal}
       <InCallTalktimeRechargeModal
         visible={talktimeRechargeOpen}
         onClose={() => setTalktimeRechargeOpen(false)}
@@ -2735,6 +2963,18 @@ const styles = StyleSheet.create({
     fontSize: 30,
     fontWeight: '900',
   },
+  shellHoldBadge: {
+    position: 'absolute',
+    bottom: 2,
+    alignSelf: 'center',
+    backgroundColor: 'rgba(127, 29, 29, 0.92)',
+    borderColor: 'rgba(254, 202, 202, 0.45)',
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+  },
+  shellHoldBadgeText: { color: '#fef2f2', fontSize: 10, fontWeight: '800' },
   peerName: { marginTop: 14, color: '#faf5ff', fontSize: 28, fontWeight: '900' },
   durationLabel: { marginTop: 20, color: '#c4b5fd', fontSize: 13, fontWeight: '700' },
   durationValue: { marginTop: 4, color: '#f5f3ff', fontSize: 46, fontWeight: '900' },
@@ -2906,4 +3146,85 @@ const styles = StyleSheet.create({
   ratingSubmitText: { color: '#fff', fontSize: 15, fontWeight: '900' },
   ratingSkipBtn: { marginTop: 10, paddingVertical: 8, paddingHorizontal: 12 },
   ratingSkipText: { color: '#6d28d9', fontSize: 14, fontWeight: '700' },
+  postModalRoot: { flex: 1, backgroundColor: '#fff' },
+  postScroll: { flex: 1, backgroundColor: '#fff' },
+  postHeroAvatar: {
+    alignSelf: 'center',
+    width: 88,
+    height: 88,
+    borderRadius: 44,
+    overflow: 'hidden',
+    borderWidth: 2,
+    borderColor: '#e5e7eb',
+    backgroundColor: '#f9fafb',
+  },
+  postHeroAvatarImg: { width: '100%', height: '100%' },
+  postHeroAvatarPh: { alignItems: 'center', justifyContent: 'center' },
+  postHeroAvatarInitial: { fontSize: 32, fontWeight: '900', color: '#6b7280' },
+  postPeerTitle: {
+    marginTop: 14,
+    textAlign: 'center',
+    fontSize: 22,
+    fontWeight: '800',
+    color: '#111827',
+  },
+  postDetailBox: {
+    marginTop: 22,
+    backgroundColor: '#f3f4f6',
+    borderRadius: 14,
+    paddingHorizontal: 16,
+    paddingVertical: 4,
+  },
+  postDetailRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 14,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: '#e5e7eb',
+  },
+  postDetailRowLast: { borderBottomWidth: 0 },
+  postDetailLabel: { fontSize: 14, fontWeight: '600', color: '#4b5563' },
+  postDetailValue: { fontSize: 15, fontWeight: '800', color: '#111827' },
+  postDetailValueAccent: { color: '#7b2cff' },
+  postReportHeading: {
+    marginTop: 28,
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#374151',
+    textAlign: 'center',
+  },
+  postReportHere: { color: '#ef4444', fontWeight: '800' },
+  postChipWrap: {
+    marginTop: 14,
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+    justifyContent: 'center',
+  },
+  postChip: {
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderRadius: 22,
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+    backgroundColor: '#fff',
+  },
+  postChipOn: {
+    borderColor: '#7b2cff',
+    backgroundColor: 'rgba(123,44,255,0.08)',
+  },
+  postChipTxt: { fontSize: 13, fontWeight: '600', color: '#4b5563' },
+  postChipTxtOn: { color: '#5b21b6' },
+  postIssueBtn: {
+    marginTop: 18,
+    backgroundColor: '#ef4444',
+    borderRadius: 14,
+    paddingVertical: 15,
+    alignItems: 'center',
+  },
+  postIssueBtnTxt: { color: '#fff', fontSize: 16, fontWeight: '800' },
+  postBtnDisabled: { opacity: 0.45 },
+  postSkipBtn: { marginTop: 20, alignSelf: 'center', paddingVertical: 10, paddingHorizontal: 12 },
+  postSkipTxt: { color: '#6b7280', fontSize: 14, fontWeight: '700' },
 });

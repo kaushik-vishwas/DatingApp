@@ -19,6 +19,7 @@ import {
   publicEarningSchedulePayload,
 } from '../services/receiverEarningModel';
 import {
+  aggregateReferralRewardsPaid,
   getPlatformRevenueForRange,
   getRevenueDashboardMetrics,
 } from '../services/adminEarningsService';
@@ -815,7 +816,7 @@ export const getOverviewDashboard = async (
     const weekStart = toRangeStart('7d') ?? todayStart;
     const monthStart = toRangeStart('30d') ?? todayStart;
 
-    const [platformRevenue, calls, chats, activeReceivers, activeUsers, pendingKycApprovals, pendingWithdrawals, flaggedReports, allReceiverIds] =
+    const [platformRevenue, calls, chats, activeReceivers, activeUsers, pendingKycApprovals, pendingWithdrawals, flaggedReports, allReceiverIds, referralRewardsPaid] =
       await Promise.all([
         getPlatformRevenueForRange(start),
         CallSession.find({
@@ -837,6 +838,7 @@ export const getOverviewDashboard = async (
         WithdrawalRequest.countDocuments({ status: 'pending' }),
         UserReport.countDocuments({ status: 'pending' }),
         Receiver.find({}).select('_id').lean<{ _id: mongoose.Types.ObjectId }[]>(),
+        aggregateReferralRewardsPaid(start),
       ]);
 
     const earningsRollups = await aggregateReceiverEarningsByReceiver(
@@ -850,7 +852,7 @@ export const getOverviewDashboard = async (
     const receiverEarningsSum = sumReceiverEarningsRollup(earningsRollups.values(), earningsPeriod).earnings;
 
     const totalRevenue = platformRevenue.callerGross;
-    const adminEarnings = roundInr(Math.max(0, totalRevenue - receiverEarningsSum));
+    const adminEarnings = roundInr(Math.max(0, totalRevenue - receiverEarningsSum - referralRewardsPaid));
     const totalCalls = calls.length;
     const trendByDay = new Map<string, number>();
 

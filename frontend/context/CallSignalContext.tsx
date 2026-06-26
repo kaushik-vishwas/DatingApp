@@ -21,6 +21,7 @@ import type { VoiceCallScreenParams } from '../navigation/voiceCallParams';
 import { navigationRef } from '../navigation/navigationRef';
 import {
   ensureIncomingRingtoneLoaded,
+  ensureIncomingRingtonePlaying,
   startIncomingRingtone,
   stopIncomingRingtonePlayback,
   stopOutboundRingtonePlayback,
@@ -907,7 +908,7 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
   const stopIncomingRingtone = useCallback(() => stopIncomingRingtonePlayback(), []);
   const startIncomingRingtoneCtx = useCallback(async () => {
-    await startIncomingRingtone();
+    await ensureIncomingRingtonePlaying();
   }, []);
 
   const setIncomingCallHandler = useCallback((handler: ((req: IncomingCallRequest) => void) | null) => {
@@ -1210,7 +1211,14 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
           !rejectedIncomingCallIdsRef.current.has(pending.callId) &&
           !incomingCallHandlerRef.current
         ) {
-          openIncomingCallRef.current(pending);
+          void (async () => {
+            try {
+              await startIncomingRingtone();
+            } catch {
+              // UI still works if ring fails.
+            }
+            openIncomingCallRef.current(pending);
+          })();
         }
       }
     });
@@ -1399,9 +1407,11 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
           if (isAppInBackground()) {
             void showIncomingCallNotification(incoming);
-          } else {
-            clearIncomingCallNotificationDedupe(incoming.callId);
+            void ensureIncomingBootstrapPromise(incoming);
+            return;
           }
+
+          clearIncomingCallNotificationDedupe(incoming.callId);
 
           void (async () => {
             await stopIncomingRingtonePlayback();

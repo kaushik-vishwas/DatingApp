@@ -15,7 +15,7 @@ import {
   logIncomingCallNotif,
 } from './incomingCallNotificationDebug';
 import { prefetchIncomingCallBootstrapFromNotification } from './incomingCallBootstrapPrefetch';
-import { startIncomingRingtone } from './callSounds';
+import { ensureIncomingRingtonePlaying } from './callSounds';
 import { applyIncomingCallFullScreenIntent } from './incomingCallAndroidFullScreen';
 import { ensureIncomingCallNativeTapDebugListener } from './incomingCallAndroidTapDebug';
 
@@ -82,6 +82,21 @@ export async function markIncomingCallHandled(callId: string): Promise<void> {
 
 export function releaseIncomingCallNavigation(callId: string): void {
   handledIncomingCallIds.delete(callId.trim());
+}
+
+async function ensureNativeIncomingCallChannel(): Promise<void> {
+  if (Platform.OS !== 'android') return;
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const mod = require('incoming-call-android').default as {
+      ensureIncomingCallChannelAsync?: () => Promise<{ ensured?: boolean }>;
+    };
+    if (typeof mod.ensureIncomingCallChannelAsync === 'function') {
+      await mod.ensureIncomingCallChannelAsync();
+    }
+  } catch {
+    // Native module may be unavailable before rebuild.
+  }
 }
 
 let notificationsModulePromise: Promise<typeof import('expo-notifications') | null> | null =
@@ -334,13 +349,14 @@ async function openIncomingFromNotificationTap(
     callId: incoming.callId,
     fromId: incoming.fromId,
   });
-  // Start in-app ring before dismissing the tray notification (dismiss stops notification sound).
+  // Start in-app ring before dismissing tray sound; navigate after dismiss for seamless handoff.
   try {
-    await startIncomingRingtone();
+    await ensureIncomingRingtonePlaying();
   } catch {
     // UI still works if ring fails.
   }
   void dismissIncomingCallNotification(incoming.callId);
+  dispatchIncomingOpen(incoming);
   void persistPendingIncomingCallTap(incoming);
 
   // Direct handler navigation is reliable on Android; Linking.openURL can race with
@@ -353,8 +369,6 @@ async function openIncomingFromNotificationTap(
       // Linking may fail if the activity is already foreground.
     }
   }
-
-  dispatchIncomingOpen(incoming);
 }
 
 const MAX_NOTIFICATION_TAP_AGE_MS = 5 * 60 * 1000;
@@ -566,17 +580,28 @@ export async function ensureIncomingCallNotificationSetup(): Promise<void> {
       const appActive = AppState.currentState === 'active';
       const identifier = notification.request.identifier ?? '';
 
-      // Background incoming-call push: do not add a second tray row; socket/push handler
-      // presents one local notification with tag incoming-{callId} and correct tap intent.
+      // Remote FCM duplicate while background: suppress a second tray row.
+      // Local incoming-{callId} notifications must still play channel ringtone.
       if (isIncomingCall && !appActive) {
+        const isLocalIncoming = identifier.startsWith(INCOMING_CALL_NOTIFICATION_ID_PREFIX);
         logIncomingCallNotif('handler.decision', {
           identifier,
-          suppressTray: true,
+          suppressTray: !isLocalIncoming,
+          allowSound: isLocalIncoming,
           appActive,
         });
+        if (!isLocalIncoming) {
+          return {
+            shouldShowAlert: false,
+            shouldPlaySound: false,
+            shouldSetBadge: false,
+            shouldShowBanner: false,
+            shouldShowList: false,
+          };
+        }
         return {
           shouldShowAlert: false,
-          shouldPlaySound: false,
+          shouldPlaySound: true,
           shouldSetBadge: false,
           shouldShowBanner: false,
           shouldShowList: false,
@@ -728,6 +753,10 @@ export async function showIncomingCallNotification(
     await ensureIncomingCallNotificationSetup();
     if (!(await ensureNotificationPermission())) return;
 
+    if (Platform.OS === 'android') {
+      await ensureNativeIncomingCallChannel();
+    }
+
     let showSessionId = callId;
     if (isIncomingCallNotifDebugBuild()) {
       const fileDbg = await import('./incomingCallNotificationFileDebug');
@@ -745,7 +774,7 @@ export async function showIncomingCallNotification(
     });
     if (Platform.OS === 'android') {
       // Let the first tray post alert (ringtone) before tap-overlay re-post.
-      await new Promise((resolve) => setTimeout(resolve, 280));
+      await new Promise((resolve) => setTimeout(resolve, 400));
       void applyIncomingCallFullScreenIntent(identifier);
     }
     await captureIncomingCallNotifDebugSnapshot('after_show_scheduled', {

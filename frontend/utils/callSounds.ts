@@ -172,7 +172,25 @@ export async function startRandomMatchingTone(): Promise<() => Promise<void>> {
   };
 }
 
-/** Start looping incoming ring (receiver) using the preloaded sound when possible. */
+/** Start looping incoming ring without restarting if already playing (tap handoff). */
+export async function ensureIncomingRingtonePlaying(): Promise<() => Promise<void>> {
+  await ensureIncomingRingtoneAudioMode();
+  await ensureIncomingRingtoneLoaded();
+  const sound = incomingRingSound!;
+  try {
+    const status = await sound.getStatusAsync();
+    if (status.isLoaded && status.isPlaying) {
+      return stopIncomingRingtonePlayback;
+    }
+    await sound.setPositionAsync(0);
+    await sound.playAsync();
+  } catch {
+    // ignore
+  }
+  return stopIncomingRingtonePlayback;
+}
+
+/** Start looping incoming ring (receiver) from the beginning. */
 export async function startIncomingRingtone(): Promise<() => Promise<void>> {
   await ensureIncomingRingtoneAudioMode();
   await ensureIncomingRingtoneLoaded();
