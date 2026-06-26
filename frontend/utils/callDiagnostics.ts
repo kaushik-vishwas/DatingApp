@@ -772,6 +772,18 @@ export function isCallHoldGuardActive(): boolean {
   );
 }
 
+let talkActiveReader: (() => boolean) | null = null;
+
+/** Live talk flag for GSM suspect guards (diagnostics snapshot can lag one render). */
+export function registerTalkActiveReader(reader: (() => boolean) | null): void {
+  talkActiveReader = reader;
+}
+
+export function isTalkActiveForGsmGuard(): boolean {
+  if (talkActiveReader?.()) return true;
+  return liveSnapshot.talkActive;
+}
+
 export function clearCallDiagnostics(): void {
   entries.length = 0;
   lastCallId = null;

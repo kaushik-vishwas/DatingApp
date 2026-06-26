@@ -73,6 +73,7 @@ module.exports = {
         'android.permission.ACCESS_NETWORK_STATE',
         'android.permission.POST_NOTIFICATIONS',
         'android.permission.VIBRATE',
+        'android.permission.READ_PHONE_STATE',
       ],
       usesCleartextTraffic: true,
     },

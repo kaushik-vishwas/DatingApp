@@ -30,7 +30,7 @@ function getEmitter(): EventEmitter | null {
   return emitter;
 }
 
-/** Audio-mode watcher only — no READ_PHONE_STATE permission. */
+/** Audio-mode + telephony watcher when READ_PHONE_STATE is granted at runtime. */
 export function startAndroidCellularCallHoldWatch(): void {
   const mod = getNativeModule();
   if (!mod) return;

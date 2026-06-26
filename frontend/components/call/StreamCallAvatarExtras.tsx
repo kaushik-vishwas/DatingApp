@@ -10,6 +10,7 @@ import {
   getCallDiagnosticsSnapshot,
   HOLD_REMOTE_LEFT_DEBOUNCE_MS,
   isCallHoldGuardActive,
+  isTalkActiveForGsmGuard,
   NORMAL_REMOTE_LEFT_DEBOUNCE_MS,
   setGsmInterruptPending,
 } from '../../utils/callDiagnostics';
@@ -232,7 +233,7 @@ export function StreamRemotePeerLeftBridge({
 
   const armGsmSuspectGuard = (reason: 'local_left' | 'remote_empty'): void => {
     if (gsmSuspectArmedRef.current) return;
-    if (!getCallDiagnosticsSnapshot().talkActive) return;
+    if (!isTalkActiveForGsmGuard()) return;
     gsmSuspectArmedRef.current = true;
     setGsmInterruptPending(true, `stream_gsm_suspect_${reason}`);
     callDiag.info('stream_gsm_suspect', { reason });
@@ -488,40 +489,56 @@ export function StreamLocalHoldMicBridge({
   const { useMicrophoneState } = useCallStateHooks();
   const { microphone } = useMicrophoneState();
   const pauseMic = systemOnHold || peerOnHold;
+  const pauseMicRef = useRef(pauseMic);
+  pauseMicRef.current = pauseMic;
 
   useEffect(() => {
-    if (pauseMic) {
-      void microphone.disable().catch(() => {});
-      return;
-    }
-    if (!userChosenMuteRef.current) {
-      void microphone.enable().catch(() => {});
-    }
+    const applyMic = (): void => {
+      if (pauseMicRef.current) {
+        void microphone.disable().catch(() => {});
+        return;
+      }
+      if (!userChosenMuteRef.current) {
+        void microphone.enable().catch(() => {});
+      }
+    };
+
+    applyMic();
+    if (!pauseMic) return;
+    const intervalId = setInterval(applyMic, 250);
+    return () => {
+      clearInterval(intervalId);
+      if (!pauseMicRef.current && !userChosenMuteRef.current) {
+        void microphone.enable().catch(() => {});
+      }
+    };
   }, [pauseMic, microphone, userChosenMuteRef]);
 
   return null;
 }
 
-/** Pause remote participant audio during GSM / peer hold (both sides silent). */
+/** Pause remote participant audio during GSM / peer hold / peer mute (both sides silent). */
 export function StreamHoldAudioBridge({
   peerOnHold = false,
   systemOnHold = false,
+  peerMuted = false,
 }: {
   peerOnHold?: boolean;
   systemOnHold?: boolean;
+  peerMuted?: boolean;
 }): null {
   const call = useCall();
   const { useRemoteParticipants } = useCallStateHooks();
   const remoteParticipants = useRemoteParticipants();
   const remoteParticipantsRef = useRef(remoteParticipants);
   remoteParticipantsRef.current = remoteParticipants;
-  const pauseRemote = peerOnHold || systemOnHold;
+  const pauseRemote = peerOnHold || systemOnHold || peerMuted;
 
   useEffect(() => {
     if (!call) return;
 
     const applyVolumes = (): void => {
-      const pause = peerOnHold || systemOnHold;
+      const pause = peerOnHold || systemOnHold || peerMuted;
       for (const participant of remoteParticipantsRef.current) {
         if (!participant?.sessionId || participant.isLocalParticipant) continue;
         try {
@@ -546,7 +563,7 @@ export function StreamHoldAudioBridge({
         }
       }
     };
-  }, [call, peerOnHold, systemOnHold, pauseRemote, remoteParticipants]);
+  }, [call, peerOnHold, systemOnHold, peerMuted, pauseRemote, remoteParticipants]);
 
   return null;
 }

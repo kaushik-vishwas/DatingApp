@@ -15,7 +15,11 @@ import {
   logIncomingCallNotif,
 } from './incomingCallNotificationDebug';
 import { prefetchIncomingCallBootstrapFromNotification } from './incomingCallBootstrapPrefetch';
-import { ensureIncomingRingtonePlaying } from './callSounds';
+import {
+  ensureIncomingRingtoneLoaded,
+  ensureIncomingRingtonePlaying,
+  startIncomingRingtone,
+} from './callSounds';
 import { applyIncomingCallFullScreenIntent } from './incomingCallAndroidFullScreen';
 import { ensureIncomingCallNativeTapDebugListener } from './incomingCallAndroidTapDebug';
 
@@ -43,6 +47,8 @@ const notifiedCallIds = new Set<string>();
 /** Burst debounce so notification + linking + consumePending do not triple-navigate. */
 const lastHandledTapAtByCallId = new Map<string, number>();
 const TAP_DEDUPE_MS = 5000;
+/** Let channel ringtone start before native full-screen re-post (setOnlyAlertOnce). */
+const FULL_SCREEN_ENHANCE_DELAY_MS = 1200;
 const CLEAR_LAST_RESPONSE_DELAY_MS = 5000;
 /** After accept/reject, block all notification/linking routes to IncomingCall for this id. */
 const handledIncomingCallIds = new Set<string>();
@@ -600,11 +606,11 @@ export async function ensureIncomingCallNotificationSetup(): Promise<void> {
           };
         }
         return {
-          shouldShowAlert: false,
+          shouldShowAlert: true,
           shouldPlaySound: true,
           shouldSetBadge: false,
-          shouldShowBanner: false,
-          shouldShowList: false,
+          shouldShowBanner: true,
+          shouldShowList: true,
         };
       }
 
@@ -738,6 +744,25 @@ function buildNotificationData(incoming: IncomingCallNotificationPayload): Recor
   };
 }
 
+async function playIncomingRingtoneForBackgroundAlert(): Promise<void> {
+  try {
+    await ensureIncomingRingtoneLoaded();
+    await startIncomingRingtone();
+  } catch {
+    // Notification channel sound remains the fallback.
+  }
+}
+
+/**
+ * Receiver minimized/background: in-app ring (socket still alive) + tray notification.
+ */
+export async function alertReceiverIncomingCallInBackground(
+  incoming: IncomingCallNotificationPayload
+): Promise<void> {
+  void playIncomingRingtoneForBackgroundAlert();
+  await showIncomingCallNotification(incoming);
+}
+
 /** Shows a high-priority local notification (Android background / minimized app). */
 export async function showIncomingCallNotification(
   incoming: IncomingCallNotificationPayload
@@ -773,8 +798,8 @@ export async function showIncomingCallNotification(
       trigger: null,
     });
     if (Platform.OS === 'android') {
-      // Let the first tray post alert (ringtone) before tap-overlay re-post.
-      await new Promise((resolve) => setTimeout(resolve, 400));
+      // Let channel / in-app ringtone start before native re-post (setOnlyAlertOnce).
+      await new Promise((resolve) => setTimeout(resolve, FULL_SCREEN_ENHANCE_DELAY_MS));
       void applyIncomingCallFullScreenIntent(identifier);
     }
     await captureIncomingCallNotifDebugSnapshot('after_show_scheduled', {
@@ -883,7 +908,7 @@ export function ensureIncomingCallNotificationInfrastructure(): () => void {
         identifier: notification.request.identifier ?? '',
         callId: incoming.callId,
       });
-      void showIncomingCallNotification(incoming);
+      void alertReceiverIncomingCallInBackground(incoming);
     });
 
     const onAppState = (state: AppStateStatus): void => {

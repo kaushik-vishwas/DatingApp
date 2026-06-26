@@ -58,6 +58,7 @@ import {
   setGsmInterruptPending,
   updateCallDiagnosticsLiveState,
   setCallDiagnosticsContext,
+  registerTalkActiveReader,
 } from '../../utils/callDiagnostics';
 import {
   getSamsungCallCompatProfile,
@@ -152,6 +153,7 @@ type StreamCallAvatarExtrasModule = {
   StreamHoldAudioBridge: React.ComponentType<{
     peerOnHold?: boolean;
     systemOnHold?: boolean;
+    peerMuted?: boolean;
   }>;
   StreamLocalHoldMicBridge: React.ComponentType<{
     systemOnHold?: boolean;
@@ -441,11 +443,13 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
   useEffect(() => {
     if (Platform.OS !== 'android' || !ready) {
       registerCallHoldKeepaliveReader(null);
+      registerTalkActiveReader(null);
       setCallKeepaliveActive('', false);
       stopGsmDisconnectProbe();
       return;
     }
     registerCallHoldKeepaliveReader(() => systemCallHoldRef.current);
+    registerTalkActiveReader(() => talkActiveRef.current);
     const callId = callIdRef.current.trim();
     if (callId) {
       startGsmDisconnectProbe(callId);
@@ -453,6 +457,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
     setCallKeepaliveActive(callId, callId.length > 0);
     return () => {
       registerCallHoldKeepaliveReader(null);
+      registerTalkActiveReader(null);
       setCallKeepaliveActive('', false);
       stopGsmDisconnectProbe();
     };
@@ -568,6 +573,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
   const peerHoldPausedMicRef = useRef(false);
   const peerCallHoldRef = useRef(false);
   const lastPeerHoldClearAtRef = useRef(0);
+  const peerGsmSuspectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const gsmHoldMutedPeerRef = useRef(false);
   const receiverAvailabilitySessionRef = useRef(receiverAvailabilitySession);
   const userAvailableRef = useRef(Boolean(user?.isAvailable));
@@ -601,6 +607,10 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
   const applyPeerHoldFromRemote = useCallback((onHold: boolean) => {
     peerCallHoldRef.current = onHold;
     setPeerCallHold(onHold);
+    updateCallDiagnosticsLiveState({ peerCallHold: onHold });
+    if (onHold) {
+      setPeerCallMuted(true);
+    }
     if (!onHold) {
       lastPeerHoldClearAtRef.current = Date.now();
     }
@@ -671,6 +681,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
       systemCallHoldRef.current = onHold;
       setSystemCallHold(onHold);
       setGsmInterruptPending(onHold);
+      updateCallDiagnosticsLiveState({ systemCallHold: onHold });
       emitPeerCallHold(onHold);
       if (onHold) {
         if (!userChosenMuteRef.current) {
@@ -697,17 +708,20 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
     systemCallHoldRef.current = systemCallHold;
   }, [systemCallHold]);
 
-  // Re-broadcast hold while on a cellular call so the peer catches missed socket events.
+  // Re-broadcast hold + mute while on a cellular call so the peer catches missed socket events.
   useEffect(() => {
     if (!systemCallHold || endingRef.current) return;
     const announceHold = (): void => {
       if (!systemCallHoldRef.current || endingRef.current) return;
       emitPeerCallHold(true);
+      if (gsmHoldMutedPeerRef.current) {
+        emitPeerCallMute(true);
+      }
     };
     announceHold();
     const intervalId = setInterval(announceHold, 4000);
     return () => clearInterval(intervalId);
-  }, [systemCallHold, emitPeerCallHold]);
+  }, [systemCallHold, emitPeerCallHold, emitPeerCallMute]);
 
   useEffect(() => {
     if (!receiverAvailabilitySession || !user?.isAvailable) return;
@@ -1052,12 +1066,17 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
     // Socket + server sync are authoritative when the peer hung up.
     if (source.startsWith('socket_') || source === 'session_sync_completed') return false;
     if (systemCallHoldRef.current && source.startsWith('stream_')) return true;
+    if (peerCallHoldRef.current && source.startsWith('stream_')) return true;
     if (isCallHoldGuardActive() && source.startsWith('stream_')) return true;
     return false;
   }, []);
 
   const handlePeerCallEnded = useCallback((endedCallId: string, source = 'unknown'): void => {
     if (!matchesActiveCallIdRef.current(endedCallId)) return;
+    if (peerGsmSuspectTimerRef.current) {
+      clearTimeout(peerGsmSuspectTimerRef.current);
+      peerGsmSuspectTimerRef.current = null;
+    }
     callDiag.stateMachineDump('handle_peer_call_ended_enter', {
       source,
       endedCallId,
@@ -1070,6 +1089,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
         reason: 'deferred_during_gsm',
         deferredDuringGsm: true,
         systemCallHold: systemCallHoldRef.current,
+        peerCallHold: peerCallHoldRef.current,
         endCategory: categorizeEndSource(source),
       });
       callDiag.stateMismatch(
@@ -1077,6 +1097,16 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
         'Remote/signal reported call end while this device was on GSM hold — end deferred',
         { source, endedCallId, systemCallHold: systemCallHoldRef.current }
       );
+      return;
+    }
+    const suppressStreamEndWhilePeerOnHold =
+      peerCallHoldRef.current && source.startsWith('stream_');
+    if (suppressStreamEndWhilePeerOnHold) {
+      callDiag.callEndSuppressed(source, {
+        reason: 'peer_on_hold',
+        peerOnHold: true,
+        endCategory: categorizeEndSource(source),
+      });
       return;
     }
     if (peerCallHoldRef.current) {
@@ -1107,19 +1137,6 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
       return;
     }
     if (role === 'receiver') {
-      if (peerCallHoldRef.current && source.startsWith('stream_')) {
-        callDiag.callEndSuppressed(source, {
-          reason: 'peer_on_hold',
-          peerOnHold: true,
-          endCategory: categorizeEndSource(source),
-        });
-        callDiag.stateMismatch(
-          'stream_end_while_peer_on_hold',
-          'Stream reported end while peer is marked on hold — suppressed',
-          { source, endedCallId }
-        );
-        return;
-      }
       void teardownFromRemotePeerEndRef.current();
     }
   }, [emitPeerCallHold, shouldDeferEndDuringGsm]);
@@ -2209,6 +2226,9 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
 
   const handleStreamSystemHold = useCallback(
     (onHold: boolean) => {
+      if (onHold && endingRef.current) {
+        setEnding(false, 'gsm_native_hold_recover');
+      }
       if (endingRef.current) {
         if (!onHold && systemCallHoldRef.current) {
           systemCallHoldRef.current = false;
@@ -2224,7 +2244,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
       applySystemCallHold(false);
       void recoverAfterGsmHold();
     },
-    [applySystemCallHold, recoverAfterGsmHold]
+    [applySystemCallHold, recoverAfterGsmHold, setEnding]
   );
 
   const showStreamChrome = ready && Boolean(client) && Boolean(call) && Boolean(sdk);
@@ -2285,7 +2305,12 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
   const handlePeerGsmSuspect = useCallback(() => {
     if (endingRef.current || peerCallHoldRef.current) return;
     if (Date.now() - lastPeerHoldClearAtRef.current < 2000) return;
-    applyPeerHoldFromRemote(true);
+    if (peerGsmSuspectTimerRef.current) return;
+    peerGsmSuspectTimerRef.current = setTimeout(() => {
+      peerGsmSuspectTimerRef.current = null;
+      if (endingRef.current || peerCallHoldRef.current) return;
+      applyPeerHoldFromRemote(true);
+    }, 350);
   }, [applyPeerHoldFromRemote]);
   const handlePeerGsmSuspectRef = useRef(handlePeerGsmSuspect);
   handlePeerGsmSuspectRef.current = handlePeerGsmSuspect;
@@ -2354,6 +2379,11 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
                       </View>
                     );
                   })()}
+                  {systemCallHold ? (
+                    <View style={styles.shellHoldBadge} pointerEvents="none">
+                      <Text style={styles.shellHoldBadgeText}>On hold</Text>
+                    </View>
+                  ) : null}
                 </View>
               </View>
               <Text style={styles.avatarCaption}>
@@ -2701,6 +2731,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
             <streamAvatarExtras.StreamHoldAudioBridge
               peerOnHold={peerCallHold}
               systemOnHold={systemCallHold}
+              peerMuted={peerCallMuted}
             />
           ) : null}
           <View style={[styles.overlay, { paddingTop: Math.max(insets.top + 16, 36) }]}>
@@ -2776,6 +2807,11 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
                         </View>
                       );
                     })()}
+                    {systemCallHold ? (
+                      <View style={styles.shellHoldBadge} pointerEvents="none">
+                        <Text style={styles.shellHoldBadgeText}>On hold</Text>
+                      </View>
+                    ) : null}
                   </View>
                 </View>
                 <Text style={styles.avatarCaption}>{systemCallHold ? 'Your call is on hold' : 'You'}</Text>

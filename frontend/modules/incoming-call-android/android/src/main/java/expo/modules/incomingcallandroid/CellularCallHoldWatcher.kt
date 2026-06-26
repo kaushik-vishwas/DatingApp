@@ -1,18 +1,23 @@
 package expo.modules.incomingcallandroid
 
 import android.content.Context
+import android.content.pm.PackageManager
 import android.media.AudioManager
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.telephony.PhoneStateListener
+import android.telephony.TelephonyCallback
+import android.telephony.TelephonyManager
 import androidx.core.content.ContextCompat
 
 /**
- * Detects cellular call interruption via [AudioManager] mode, audio-focus loss, and (API 31+)
- * mode-change callbacks — no phone permission required.
+ * Detects cellular call interruption via [AudioManager] mode, telephony off-hook
+ * (when READ_PHONE_STATE is granted), system mic mute during VoIP, and (API 31+)
+ * mode-change callbacks.
  *
- * VoIP uses MODE_IN_COMMUNICATION; an answered carrier call uses MODE_IN_CALL.
- * Samsung One UI 6 may delay mode transitions — audio-focus loss is detected earlier.
+ * VoIP uses MODE_IN_COMMUNICATION; an answered carrier call uses MODE_IN_CALL or
+ * keeps IN_COMMUNICATION while telephony goes OFFHOOK on some OEMs.
  */
 object CellularCallHoldWatcher {
   private const val POLL_MS_DEFAULT = 50L
@@ -21,13 +26,17 @@ object CellularCallHoldWatcher {
   private val mainHandler = Handler(Looper.getMainLooper())
   private var appContext: Context? = null
   private var audioManager: AudioManager? = null
+  private var telephonyManager: TelephonyManager? = null
   private var onChange: ((Boolean, Int, String) -> Unit)? = null
   private var lastEmitted = false
   private var polling = false
   private var gsmPreemptive = false
+  private var telephonyOffhook = false
   private var lastMode = AudioManager.MODE_INVALID
 
   private var modeChangedListener: AudioManager.OnModeChangedListener? = null
+  private var telephonyCallback31: TelephonyCallback? = null
+  private var phoneStateListenerLegacy: PhoneStateListener? = null
 
   private val pollRunnable =
     object : Runnable {
@@ -44,9 +53,11 @@ object CellularCallHoldWatcher {
     appContext = context.applicationContext
     onChange = onActiveChanged
     audioManager = appContext?.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
+    telephonyManager = appContext?.getSystemService(Context.TELEPHONY_SERVICE) as? TelephonyManager
     polling = true
     lastMode = audioManager?.mode ?: AudioManager.MODE_INVALID
     registerModeChangedListener()
+    registerTelephonyListenerIfPermitted()
     mainHandler.post(pollRunnable)
     evaluateAndEmit("start")
   }
@@ -55,12 +66,23 @@ object CellularCallHoldWatcher {
     polling = false
     mainHandler.removeCallbacks(pollRunnable)
     unregisterModeChangedListener()
+    unregisterTelephonyListener()
     audioManager = null
+    telephonyManager = null
     appContext = null
     onChange = null
     lastEmitted = false
     gsmPreemptive = false
+    telephonyOffhook = false
     lastMode = AudioManager.MODE_INVALID
+  }
+
+  private fun hasReadPhoneStatePermission(): Boolean {
+    val ctx = appContext ?: return false
+    return (
+      ContextCompat.checkSelfPermission(ctx, android.Manifest.permission.READ_PHONE_STATE) ==
+        PackageManager.PERMISSION_GRANTED
+    )
   }
 
   private fun audioModeSuggestsCellularCall(mode: Int): Boolean =
@@ -70,38 +92,48 @@ object CellularCallHoldWatcher {
       else -> false
     }
 
+  private fun systemMicMutedDuringVoip(am: AudioManager, mode: Int): Boolean =
+    Build.VERSION.SDK_INT >= Build.VERSION_CODES.M &&
+      mode == AudioManager.MODE_IN_COMMUNICATION &&
+      am.isMicrophoneMute
+
   private fun evaluateAndEmit(source: String) {
     val am = audioManager ?: return
     val mode = am.mode
     val previousMode = lastMode
     lastMode = mode
     val cellularMode = audioModeSuggestsCellularCall(mode)
+    val micMutedDuringVoip = systemMicMutedDuringVoip(am, mode)
 
     if (
       previousMode == AudioManager.MODE_IN_COMMUNICATION &&
       mode == AudioManager.MODE_RINGTONE
     ) {
-      // Incoming GSM ring while VoIP is active — hold before MODE_IN_CALL on some OEMs.
       gsmPreemptive = true
     } else if (
       previousMode == AudioManager.MODE_IN_COMMUNICATION &&
       mode != AudioManager.MODE_IN_COMMUNICATION &&
       mode != AudioManager.MODE_NORMAL
     ) {
-      // VoIP → cellular (or other telephony) without a ringtone phase on some devices.
       gsmPreemptive = true
     } else if (cellularMode) {
       gsmPreemptive = true
+    } else if (micMutedDuringVoip && polling) {
+      gsmPreemptive = true
     } else if (gsmPreemptive && !cellularMode && mode == AudioManager.MODE_IN_COMMUNICATION) {
-      gsmPreemptive = false
+      if (!telephonyOffhook && !micMutedDuringVoip) {
+        gsmPreemptive = false
+      }
     }
 
     TelephonyDiagnosticsWatcher.recordAudioModeFromWatcher(mode, source)
 
-    val active = cellularMode || gsmPreemptive
+    val active = cellularMode || gsmPreemptive || telephonyOffhook
     val resolvedSource =
       when {
         cellularMode -> "audio_mode"
+        telephonyOffhook -> "telephony_offhook"
+        micMutedDuringVoip -> "system_mic_mute"
         gsmPreemptive -> "preemptive_ring"
         else -> source
       }
@@ -118,15 +150,87 @@ object CellularCallHoldWatcher {
     mainHandler.post { onChange?.invoke(active, mode, source) }
   }
 
+  private fun onTelephonyCallStateChanged(state: Int) {
+    val offhook = state == TelephonyManager.CALL_STATE_OFFHOOK
+    if (telephonyOffhook == offhook) return
+    telephonyOffhook = offhook
+    evaluateAndEmit("telephony_state")
+  }
+
+  private fun registerTelephonyListenerIfPermitted() {
+    if (!hasReadPhoneStatePermission()) return
+    val tm = telephonyManager ?: return
+
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+      if (telephonyCallback31 != null) return
+      val callback =
+        object : TelephonyCallback(), TelephonyCallback.CallStateListener {
+          override fun onCallStateChanged(state: Int) {
+            mainHandler.post { onTelephonyCallStateChanged(state) }
+          }
+        }
+      telephonyCallback31 = callback
+      try {
+        tm.registerTelephonyCallback(mainHandler::post, callback)
+      } catch (_: Exception) {
+        telephonyCallback31 = null
+      }
+      return
+    }
+
+    if (phoneStateListenerLegacy != null) return
+    @Suppress("DEPRECATION")
+    val listener =
+      object : PhoneStateListener() {
+        @Deprecated("Deprecated in Java")
+        override fun onCallStateChanged(state: Int, phoneNumber: String?) {
+          onTelephonyCallStateChanged(state)
+        }
+      }
+    phoneStateListenerLegacy = listener
+    try {
+      @Suppress("DEPRECATION")
+      tm.listen(listener, PhoneStateListener.LISTEN_CALL_STATE)
+    } catch (_: Exception) {
+      phoneStateListenerLegacy = null
+    }
+  }
+
+  private fun unregisterTelephonyListener() {
+    val tm = telephonyManager
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+      val callback = telephonyCallback31
+      if (tm != null && callback != null) {
+        try {
+          tm.unregisterTelephonyCallback(callback)
+        } catch (_: Exception) {
+          // ignore
+        }
+      }
+      telephonyCallback31 = null
+      return
+    }
+
+    val listener = phoneStateListenerLegacy
+    if (tm != null && listener != null) {
+      try {
+        @Suppress("DEPRECATION")
+        tm.listen(listener, PhoneStateListener.LISTEN_NONE)
+      } catch (_: Exception) {
+        // ignore
+      }
+    }
+    phoneStateListenerLegacy = null
+    telephonyOffhook = false
+  }
+
   private fun registerModeChangedListener() {
     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return
     val am = audioManager ?: return
     val ctx = appContext ?: return
     if (modeChangedListener != null) return
 
-    val listener = AudioManager.OnModeChangedListener { mode ->
-      evaluateAndEmit("mode_changed")
-    }
+    val listener = AudioManager.OnModeChangedListener { evaluateAndEmit("mode_changed") }
     modeChangedListener = listener
     am.addOnModeChangedListener(ContextCompat.getMainExecutor(ctx), listener)
   }

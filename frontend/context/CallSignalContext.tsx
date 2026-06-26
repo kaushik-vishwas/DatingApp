@@ -34,6 +34,7 @@ import {
   markIncomingCallHandled,
   registerReceiverExpoPushToken,
   setIncomingCallNavigationGuard,
+  alertReceiverIncomingCallInBackground,
   showIncomingCallNotification,
 } from '../utils/incomingCallNotifications';
 import { registerIncomingCallBootstrapPrefetch } from '../utils/incomingCallBootstrapPrefetch';
@@ -1170,6 +1171,7 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         if (userRoleRef.current === 'receiver' && userAvailableRef.current) {
           if (state === 'background' || state === 'inactive') {
             touchReceiverBackgroundPresence(`appstate_${state}`);
+            void ensureIncomingRingtoneLoaded();
             if (!backgroundHeartbeat) {
               backgroundHeartbeat = setInterval(() => {
                 touchReceiverBackgroundPresence('background_heartbeat');
@@ -1406,8 +1408,8 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
           pendingIncomingCallRequestRef.current = incoming;
 
           if (isAppInBackground()) {
-            void showIncomingCallNotification(incoming);
             void ensureIncomingBootstrapPromise(incoming);
+            void alertReceiverIncomingCallInBackground(incoming);
             return;
           }
 
