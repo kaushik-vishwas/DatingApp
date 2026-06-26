@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import React, { useEffect, useRef, useState } from 'react';
 import { Platform, StyleSheet, Text, View } from 'react-native';
-import { useCallStateHooks } from '@stream-io/video-react-native-sdk';
+import { useCallStateHooks, useCall } from '@stream-io/video-react-native-sdk';
 import { CallingState, hasAudio, type StreamVideoParticipant } from '@stream-io/video-client';
 import { AvatarSoundWaveRings } from './AvatarVoiceWaves';
 import {
@@ -465,6 +465,42 @@ export function StreamParticipantMutedIndicator({
       <Text style={mutedStyles.label}>Muted</Text>
     </View>
   );
+}
+
+/** Pause remote participant audio during GSM / peer hold (both sides silent). */
+export function StreamHoldAudioBridge({
+  peerOnHold = false,
+  systemOnHold = false,
+}: {
+  peerOnHold?: boolean;
+  systemOnHold?: boolean;
+}): null {
+  const call = useCall();
+  const { useRemoteParticipants } = useCallStateHooks();
+  const remoteParticipants = useRemoteParticipants();
+  const remoteParticipant = remoteParticipants[0];
+  const pauseRemoteRef = useRef(peerOnHold || systemOnHold);
+  pauseRemoteRef.current = peerOnHold || systemOnHold;
+
+  useEffect(() => {
+    if (!call || !remoteParticipant?.sessionId) return;
+    const sessionId = remoteParticipant.sessionId;
+    const pause = pauseRemoteRef.current;
+    try {
+      call.speaker.setParticipantVolume(sessionId, pause ? 0 : undefined);
+    } catch {
+      // ignore
+    }
+    return () => {
+      try {
+        call.speaker.setParticipantVolume(sessionId, undefined);
+      } catch {
+        // ignore
+      }
+    };
+  }, [call, remoteParticipant?.sessionId, peerOnHold, systemOnHold]);
+
+  return null;
 }
 
 const mutedStyles = StyleSheet.create({

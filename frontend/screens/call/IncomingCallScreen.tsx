@@ -16,7 +16,8 @@ const AUTO_ACCEPT_MS = 5_000;
 export default function IncomingCallScreen({ navigation, route }: Props): React.JSX.Element {
   const insets = useSafeAreaInsets();
   const { callId, fromType, fromId, peerName, peerImage } = route.params;
-  const { acceptIncomingCall, rejectIncomingCall, stopIncomingRingtone } = useCallSignals();
+  const { acceptIncomingCall, rejectIncomingCall, stopIncomingRingtone, startIncomingRingtone } =
+    useCallSignals();
 
   const req: IncomingCallRequest = useMemo(
     () => ({ callId, fromType, fromId, peerName, peerImage: peerImage ?? null }),
@@ -37,10 +38,14 @@ export default function IncomingCallScreen({ navigation, route }: Props): React.
   }, []);
 
   useEffect(() => {
-    return () => {
-      void stopIncomingRingtone();
-    };
-  }, [stopIncomingRingtone]);
+    void (async () => {
+      try {
+        await startIncomingRingtone();
+      } catch {
+        // UI still works if ring fails.
+      }
+    })();
+  }, [startIncomingRingtone]);
 
   // "Ringtone-like" pulsing rings behind the avatar.
   const pulse = useRef(new Animated.Value(0)).current;

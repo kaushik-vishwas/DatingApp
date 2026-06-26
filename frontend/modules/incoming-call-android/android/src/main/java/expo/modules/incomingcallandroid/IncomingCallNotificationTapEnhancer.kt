@@ -6,7 +6,7 @@ import android.app.PendingIntent
 import android.content.ContentResolver
 import android.content.Context
 import android.content.Intent
-import android.media.AudioAttributes
+import android.media.AudioManager
 import android.net.Uri
 import android.os.Build
 import android.widget.RemoteViews
@@ -448,16 +448,8 @@ object IncomingCallNotificationTapEnhancer {
   ) {
     val sound = existing.sound ?: resolveIncomingCallRingtoneUri(context)
     if (sound != null) {
-      builder.setSound(sound)
-      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-        builder.setAudioAttributes(
-          AudioAttributes.Builder()
-            .setUsage(AudioAttributes.USAGE_NOTIFICATION_RINGTONE)
-            .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-            .setFlags(AudioAttributes.FLAG_AUDIBILITY_ENFORCED)
-            .build()
-        )
-      }
+      @Suppress("DEPRECATION")
+      builder.setSound(sound, AudioManager.STREAM_RING)
     }
     builder.setVibrate(longArrayOf(0, 280, 200, 280))
     builder.setDefaults(0)

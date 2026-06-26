@@ -1243,6 +1243,7 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         return;
       }
       activeIncomingCallUiCallIdRef.current = req.callId;
+      void startIncomingRingtoneCtx();
       openIncomingCallRef.current(req);
     });
     return () => {

@@ -15,6 +15,7 @@ import {
   logIncomingCallNotif,
 } from './incomingCallNotificationDebug';
 import { prefetchIncomingCallBootstrapFromNotification } from './incomingCallBootstrapPrefetch';
+import { startIncomingRingtone } from './callSounds';
 import { applyIncomingCallFullScreenIntent } from './incomingCallAndroidFullScreen';
 import { ensureIncomingCallNativeTapDebugListener } from './incomingCallAndroidTapDebug';
 
@@ -333,6 +334,12 @@ async function openIncomingFromNotificationTap(
     callId: incoming.callId,
     fromId: incoming.fromId,
   });
+  // Start in-app ring before dismissing the tray notification (dismiss stops notification sound).
+  try {
+    await startIncomingRingtone();
+  } catch {
+    // UI still works if ring fails.
+  }
   void dismissIncomingCallNotification(incoming.callId);
   void persistPendingIncomingCallTap(incoming);
 
