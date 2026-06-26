@@ -238,9 +238,7 @@ export function StreamRemotePeerLeftBridge({
     setGsmInterruptPending(true, `stream_gsm_suspect_${reason}`);
     callDiag.info('stream_gsm_suspect', { reason });
     if (reason === 'local_left') {
-      if (Platform.OS === 'android') {
-        onLocalGsmSuspectRef.current?.();
-      }
+      onLocalGsmSuspectRef.current?.();
       return;
     }
     onPeerGsmSuspectRef.current?.();

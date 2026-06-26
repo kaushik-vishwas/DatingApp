@@ -1,6 +1,6 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, AppState, type AppStateStatus } from 'react-native';
-import { callDiag } from '../utils/callDiagnostics';
+import { callDiag, isCallHoldGuardActive } from '../utils/callDiagnostics';
 import { instrumentedEmitCallEnd } from '../utils/callEndInstrumentation';
 import { CommonActions } from '@react-navigation/native';
 import { io, type Socket } from 'socket.io-client';
@@ -1215,7 +1215,7 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         ) {
           void (async () => {
             try {
-              await startIncomingRingtone();
+              await ensureIncomingRingtonePlaying();
             } catch {
               // UI still works if ring fails.
             }
@@ -1253,7 +1253,7 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         return;
       }
       activeIncomingCallUiCallIdRef.current = req.callId;
-      void startIncomingRingtoneCtx();
+      void ensureIncomingRingtonePlaying();
       openIncomingCallRef.current(req);
     });
     return () => {
@@ -1416,9 +1416,8 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
           clearIncomingCallNotificationDedupe(incoming.callId);
 
           void (async () => {
-            await stopIncomingRingtonePlayback();
             try {
-              await startIncomingRingtone();
+              await ensureIncomingRingtonePlaying();
             } catch {
               // Keep UI even if ring fails.
             }
@@ -1556,8 +1555,10 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
           receiverRole: userRoleRef.current,
         });
         clearIncomingCallNotificationDedupe(payload.callId);
-        peerCallHoldHandlerRef.current?.(payload.callId, false);
-        peerCallMuteHandlerRef.current?.(payload.callId, false);
+        if (!isCallHoldGuardActive()) {
+          peerCallHoldHandlerRef.current?.(payload.callId, false);
+          peerCallMuteHandlerRef.current?.(payload.callId, false);
+        }
         seenIncomingCallIdsRef.current.delete(payload.callId);
         rejectedIncomingCallIdsRef.current.delete(payload.callId);
         acceptedIncomingCallIdsRef.current.delete(payload.callId);

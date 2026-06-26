@@ -18,7 +18,7 @@ import { prefetchIncomingCallBootstrapFromNotification } from './incomingCallBoo
 import {
   ensureIncomingRingtoneLoaded,
   ensureIncomingRingtonePlaying,
-  startIncomingRingtone,
+  isIncomingRingtonePlaying,
 } from './callSounds';
 import { applyIncomingCallFullScreenIntent } from './incomingCallAndroidFullScreen';
 import { ensureIncomingCallNativeTapDebugListener } from './incomingCallAndroidTapDebug';
@@ -32,6 +32,8 @@ export type IncomingCallNotificationPayload = {
 };
 
 const INCOMING_CALL_CHANNEL_ID = 'incoming_calls';
+/** Tray-only channel when in-app ringtone is already looping (avoids double alert sounds). */
+const INCOMING_CALL_VISUAL_CHANNEL_ID = 'incoming_calls_visual';
 /** Android `res/raw` basename (no extension). */
 const INCOMING_CALL_NOTIFICATION_SOUND_ANDROID = 'receiver_ringtone';
 /** Bundled via expo-notifications plugin (iOS). */
@@ -49,6 +51,8 @@ const lastHandledTapAtByCallId = new Map<string, number>();
 const TAP_DEDUPE_MS = 5000;
 /** Let channel ringtone start before native full-screen re-post (setOnlyAlertOnce). */
 const FULL_SCREEN_ENHANCE_DELAY_MS = 1200;
+/** Shorter delay when tray is visual-only (in-app ring is primary). */
+const FULL_SCREEN_ENHANCE_DELAY_VISUAL_MS = 500;
 const CLEAR_LAST_RESPONSE_DELAY_MS = 5000;
 /** After accept/reject, block all notification/linking routes to IncomingCall for this id. */
 const handledIncomingCallIds = new Set<string>();
@@ -355,15 +359,17 @@ async function openIncomingFromNotificationTap(
     callId: incoming.callId,
     fromId: incoming.fromId,
   });
-  // Start in-app ring before dismissing tray sound; navigate after dismiss for seamless handoff.
+  // Keep in-app ring looping; dismiss tray later so audio focus does not flicker.
   try {
     await ensureIncomingRingtonePlaying();
   } catch {
     // UI still works if ring fails.
   }
-  void dismissIncomingCallNotification(incoming.callId);
   dispatchIncomingOpen(incoming);
   void persistPendingIncomingCallTap(incoming);
+  setTimeout(() => {
+    void dismissIncomingCallNotification(incoming.callId);
+  }, 600);
 
   // Direct handler navigation is reliable on Android; Linking.openURL can race with
   // NotificationForwarderActivity on Samsung and drop the deep link.
@@ -607,7 +613,7 @@ export async function ensureIncomingCallNotificationSetup(): Promise<void> {
         }
         return {
           shouldShowAlert: true,
-          shouldPlaySound: true,
+          shouldPlaySound: !isIncomingRingtonePlaying(),
           shouldSetBadge: false,
           shouldShowBanner: true,
           shouldShowList: true,
@@ -656,6 +662,17 @@ export async function ensureIncomingCallNotificationSetup(): Promise<void> {
         },
       },
     });
+    await Notifications.setNotificationChannelAsync(INCOMING_CALL_VISUAL_CHANNEL_ID, {
+      name: 'Incoming calls',
+      importance: Notifications.AndroidImportance.MAX,
+      vibrationPattern: [0, 280, 200, 280],
+      lightColor: '#7c3aed',
+      sound: null,
+      enableLights: true,
+      enableVibrate: true,
+      lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
+      bypassDnd: true,
+    });
   }
 
   const defaultAction =
@@ -693,14 +710,17 @@ async function ensureNotificationPermission(): Promise<boolean> {
 
 function buildIncomingCallNotificationContent(
   Notifications: typeof import('expo-notifications'),
-  incoming: IncomingCallNotificationPayload
+  incoming: IncomingCallNotificationPayload,
+  options?: { visualOnly?: boolean }
 ): import('expo-notifications').NotificationContentInput {
+  const visualOnly = Boolean(options?.visualOnly);
   const base = {
     title: 'Incoming call',
     body: `${incoming.peerName} is calling you`,
     data: buildNotificationData(incoming),
-    sound:
-      Platform.OS === 'ios'
+    sound: visualOnly
+      ? false
+      : Platform.OS === 'ios'
         ? INCOMING_CALL_NOTIFICATION_SOUND_IOS
         : INCOMING_CALL_NOTIFICATION_SOUND_ANDROID,
     categoryIdentifier: INCOMING_CALL_CATEGORY_ID,
@@ -711,11 +731,11 @@ function buildIncomingCallNotificationContent(
           threadIdentifier: `incoming-${incoming.callId}`,
         }
       : {
-          channelId: INCOMING_CALL_CHANNEL_ID,
+          channelId: visualOnly ? INCOMING_CALL_VISUAL_CHANNEL_ID : INCOMING_CALL_CHANNEL_ID,
           sticky: false,
           autoDismiss: true,
           color: '#7c3aed',
-          vibrate: [0, 280, 200, 280],
+          vibrate: visualOnly ? undefined : [0, 280, 200, 280],
         }),
   };
   return base;
@@ -744,28 +764,30 @@ function buildNotificationData(incoming: IncomingCallNotificationPayload): Recor
   };
 }
 
-async function playIncomingRingtoneForBackgroundAlert(): Promise<void> {
+async function playIncomingRingtoneForBackgroundAlert(): Promise<boolean> {
   try {
-    await ensureIncomingRingtoneLoaded();
-    await startIncomingRingtone();
+    await ensureIncomingRingtonePlaying();
+    return isIncomingRingtonePlaying();
   } catch {
-    // Notification channel sound remains the fallback.
+    return false;
   }
 }
 
 /**
- * Receiver minimized/background: in-app ring (socket still alive) + tray notification.
+ * Receiver minimized/background: looping in-app ring + tray notification.
+ * When in-app ring is active the tray is visual-only (no channel ding).
  */
 export async function alertReceiverIncomingCallInBackground(
   incoming: IncomingCallNotificationPayload
 ): Promise<void> {
-  void playIncomingRingtoneForBackgroundAlert();
-  await showIncomingCallNotification(incoming);
+  const inAppRinging = await playIncomingRingtoneForBackgroundAlert();
+  await showIncomingCallNotification(incoming, { visualOnly: inAppRinging });
 }
 
 /** Shows a high-priority local notification (Android background / minimized app). */
 export async function showIncomingCallNotification(
-  incoming: IncomingCallNotificationPayload
+  incoming: IncomingCallNotificationPayload,
+  options?: { visualOnly?: boolean }
 ): Promise<void> {
   if (!canUseLocalNotifications()) return;
   const callId = incoming.callId.trim();
@@ -791,15 +813,18 @@ export async function showIncomingCallNotification(
     prefetchIncomingCallBootstrapFromNotification(incoming);
     await collapseIncomingCallTrayToSingle(incoming);
 
+    const visualOnly = Boolean(options?.visualOnly);
     const identifier = `${INCOMING_CALL_NOTIFICATION_ID_PREFIX}${callId}`;
     await Notifications.scheduleNotificationAsync({
       identifier,
-      content: buildIncomingCallNotificationContent(Notifications, incoming),
+      content: buildIncomingCallNotificationContent(Notifications, incoming, { visualOnly }),
       trigger: null,
     });
     if (Platform.OS === 'android') {
-      // Let channel / in-app ringtone start before native re-post (setOnlyAlertOnce).
-      await new Promise((resolve) => setTimeout(resolve, FULL_SCREEN_ENHANCE_DELAY_MS));
+      const enhanceDelayMs = visualOnly
+        ? FULL_SCREEN_ENHANCE_DELAY_VISUAL_MS
+        : FULL_SCREEN_ENHANCE_DELAY_MS;
+      await new Promise((resolve) => setTimeout(resolve, enhanceDelayMs));
       void applyIncomingCallFullScreenIntent(identifier);
     }
     await captureIncomingCallNotifDebugSnapshot('after_show_scheduled', {

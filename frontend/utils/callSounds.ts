@@ -13,6 +13,20 @@ let incomingRingBackgroundAudio = false;
 /** One shared incoming ring sound (preloaded) so the next ring can start immediately. */
 let incomingRingSound: Audio.Sound | null = null;
 let incomingRingLoadPromise: Promise<void> | null = null;
+let incomingRingtonePlaying = false;
+
+/** True while the in-app incoming ring should be audible (looping). */
+export function isIncomingRingtonePlaying(): boolean {
+  return incomingRingtonePlaying;
+}
+
+function attachIncomingRingLoopGuard(sound: Audio.Sound): void {
+  sound.setOnPlaybackStatusUpdate((status) => {
+    const s = status as AVPlaybackStatusSuccess;
+    if (!incomingRingtonePlaying || !s.isLoaded || !s.didJustFinish) return;
+    void sound.playAsync().catch(() => {});
+  });
+}
 
 function wait(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -73,6 +87,7 @@ export async function ensureIncomingRingtoneLoaded(): Promise<void> {
       await ensureIncomingRingtoneAudioMode();
       const s = new Audio.Sound();
       await s.loadAsync(RECEIVER_RINGTONE, { shouldPlay: false, isLooping: true, volume: 1.0 });
+      attachIncomingRingLoopGuard(s);
       incomingRingSound = s;
     })();
   }
@@ -81,6 +96,7 @@ export async function ensureIncomingRingtoneLoaded(): Promise<void> {
 
 /** Stop the shared incoming ring (safe to call repeatedly). */
 export async function stopIncomingRingtonePlayback(): Promise<void> {
+  incomingRingtonePlaying = false;
   if (!incomingRingSound) {
     await releaseIncomingRingtoneAudioMode();
     return;
@@ -180,12 +196,18 @@ export async function ensureIncomingRingtonePlaying(): Promise<() => Promise<voi
   try {
     const status = await sound.getStatusAsync();
     if (status.isLoaded && status.isPlaying) {
+      incomingRingtonePlaying = true;
       return stopIncomingRingtonePlayback;
     }
-    await sound.setPositionAsync(0);
-    await sound.playAsync();
+    if (!status.isLoaded || !status.isPlaying) {
+      if (!status.isPlaying) {
+        await sound.setPositionAsync(0);
+      }
+      await sound.playAsync();
+      incomingRingtonePlaying = true;
+    }
   } catch {
-    // ignore
+    incomingRingtonePlaying = false;
   }
   return stopIncomingRingtonePlayback;
 }
@@ -196,10 +218,16 @@ export async function startIncomingRingtone(): Promise<() => Promise<void>> {
   await ensureIncomingRingtoneLoaded();
   const sound = incomingRingSound!;
   try {
+    const status = await sound.getStatusAsync();
+    if (status.isLoaded && status.isPlaying) {
+      incomingRingtonePlaying = true;
+      return stopIncomingRingtonePlayback;
+    }
     await sound.setPositionAsync(0);
     await sound.playAsync();
+    incomingRingtonePlaying = true;
   } catch {
-    // ignore
+    incomingRingtonePlaying = false;
   }
   return stopIncomingRingtonePlayback;
 }
