@@ -637,7 +637,8 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
   }, []);
 
   const applyPeerMuteFromRemote = useCallback((muted: boolean) => {
-    if (peerCallHoldRef.current) return;
+    // During peer hold, accept mute-on for audio silencing only — UI still shows hold badge.
+    if (peerCallHoldRef.current && !muted) return;
     setPeerCallMuted(muted);
   }, []);
   const applyPeerHoldFromRemoteRef = useRef(applyPeerHoldFromRemote);

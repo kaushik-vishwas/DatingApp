@@ -549,13 +549,22 @@ export function StreamHoldAudioBridge({
   const remoteParticipants = useRemoteParticipants();
   const remoteParticipantsRef = useRef(remoteParticipants);
   remoteParticipantsRef.current = remoteParticipants;
-  const pauseRemote = peerOnHold || systemOnHold || peerMuted;
+
+  const peerOnHoldRef = useRef(peerOnHold);
+  const systemOnHoldRef = useRef(systemOnHold);
+  const peerMutedRef = useRef(peerMuted);
+  peerOnHoldRef.current = peerOnHold;
+  systemOnHoldRef.current = systemOnHold;
+  peerMutedRef.current = peerMuted;
+
+  const shouldPauseRemote = (): boolean =>
+    peerOnHoldRef.current || systemOnHoldRef.current || peerMutedRef.current;
 
   useEffect(() => {
     if (!call) return;
 
     const applyVolumes = (): void => {
-      const pause = peerOnHold || systemOnHold || peerMuted;
+      const pause = shouldPauseRemote();
       for (const participant of remoteParticipantsRef.current) {
         if (!participant?.sessionId || participant.isLocalParticipant) continue;
         try {
@@ -567,10 +576,10 @@ export function StreamHoldAudioBridge({
     };
 
     applyVolumes();
-    if (!pauseRemote) return;
-    const intervalId = setInterval(applyVolumes, 100);
+    const intervalId = setInterval(applyVolumes, 50);
     return () => {
       clearInterval(intervalId);
+      if (shouldPauseRemote()) return;
       for (const participant of remoteParticipantsRef.current) {
         if (!participant?.sessionId || participant.isLocalParticipant) continue;
         try {
@@ -580,7 +589,7 @@ export function StreamHoldAudioBridge({
         }
       }
     };
-  }, [call, peerOnHold, systemOnHold, peerMuted, pauseRemote, remoteParticipants]);
+  }, [call, peerOnHold, systemOnHold, peerMuted, remoteParticipants]);
 
   return null;
 }
