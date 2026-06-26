@@ -7,6 +7,8 @@ import {
   getNormalRemoteLeftDebounceMs,
 } from './samsungCallCompat';
 import { isIncomingCallNativeAvailable } from './incomingCallNativeBridge';
+import {
+  clearPersistedCallDiagnostics,
   loadPersistedCallDiagnosticsBundle,
   persistCallDiagnosticsBundle,
   type PersistedCallDiagnosticsBundle,

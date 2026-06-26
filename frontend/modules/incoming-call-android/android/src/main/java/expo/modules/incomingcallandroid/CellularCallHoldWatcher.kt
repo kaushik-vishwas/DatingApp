@@ -32,6 +32,8 @@ object CellularCallHoldWatcher {
   private var polling = false
   private var gsmPreemptive = false
   private var telephonyOffhook = false
+  private var telephonyRinging = false
+  private var audioFocusLost = false
   private var lastMode = AudioManager.MODE_INVALID
 
   private var modeChangedListener: AudioManager.OnModeChangedListener? = null
@@ -47,10 +49,11 @@ object CellularCallHoldWatcher {
         AudioManager.AUDIOFOCUS_LOSS,
         AudioManager.AUDIOFOCUS_LOSS_TRANSIENT,
         AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> {
-          gsmPreemptive = true
+          audioFocusLost = true
           mainHandler.post { evaluateAndEmit("audio_focus_loss") }
         }
         AudioManager.AUDIOFOCUS_GAIN -> {
+          audioFocusLost = false
           mainHandler.post { evaluateAndEmit("audio_focus_gain") }
         }
       }
@@ -81,11 +84,8 @@ object CellularCallHoldWatcher {
     if (hasReadPhoneStatePermission()) {
       try {
         when (telephonyManager?.callState) {
-          TelephonyManager.CALL_STATE_OFFHOOK -> {
-            telephonyOffhook = true
-            gsmPreemptive = true
-          }
-          TelephonyManager.CALL_STATE_RINGING -> gsmPreemptive = true
+          TelephonyManager.CALL_STATE_OFFHOOK -> telephonyOffhook = true
+          TelephonyManager.CALL_STATE_RINGING -> telephonyRinging = true
         }
       } catch (_: Exception) {
         // ignore
@@ -118,6 +118,8 @@ object CellularCallHoldWatcher {
     lastEmitted = false
     gsmPreemptive = false
     telephonyOffhook = false
+    telephonyRinging = false
+    audioFocusLost = false
     lastMode = AudioManager.MODE_INVALID
   }
 
@@ -147,38 +149,30 @@ object CellularCallHoldWatcher {
     val previousMode = lastMode
     lastMode = mode
     val cellularMode = audioModeSuggestsCellularCall(mode)
-    val micMutedDuringVoip = systemMicMutedDuringVoip(am, mode)
 
     if (
       previousMode == AudioManager.MODE_IN_COMMUNICATION &&
       mode == AudioManager.MODE_RINGTONE
     ) {
-      gsmPreemptive = true
-    } else if (
-      previousMode == AudioManager.MODE_IN_COMMUNICATION &&
-      mode != AudioManager.MODE_IN_COMMUNICATION &&
-      mode != AudioManager.MODE_NORMAL
-    ) {
-      gsmPreemptive = true
+      telephonyRinging = true
     } else if (cellularMode) {
       gsmPreemptive = true
-    } else if (micMutedDuringVoip && polling) {
-      gsmPreemptive = true
     } else if (gsmPreemptive && !cellularMode && mode == AudioManager.MODE_IN_COMMUNICATION) {
-      if (!telephonyOffhook && !micMutedDuringVoip) {
+      if (!telephonyOffhook && !audioFocusLost) {
         gsmPreemptive = false
       }
     }
 
     TelephonyDiagnosticsWatcher.recordAudioModeFromWatcher(mode, source)
 
-    val active = cellularMode || gsmPreemptive || telephonyOffhook
+    // Hold only after the cellular call is answered (OFFHOOK / MODE_IN_CALL), not while ringing.
+    val active = cellularMode || telephonyOffhook || (audioFocusLost && telephonyOffhook)
     val resolvedSource =
       when {
         cellularMode -> "audio_mode"
         telephonyOffhook -> "telephony_offhook"
-        micMutedDuringVoip -> "system_mic_mute"
-        gsmPreemptive -> "preemptive_ring"
+        audioFocusLost -> "audio_focus_loss"
+        telephonyRinging -> "telephony_ringing"
         else -> source
       }
     emitIfChanged(active, mode, resolvedSource)
@@ -195,17 +189,28 @@ object CellularCallHoldWatcher {
   }
 
   private fun onTelephonyCallStateChanged(state: Int) {
-    if (state == TelephonyManager.CALL_STATE_RINGING && polling) {
-      gsmPreemptive = true
-      evaluateAndEmit("telephony_ringing")
+    when (state) {
+      TelephonyManager.CALL_STATE_RINGING -> {
+        telephonyRinging = true
+        telephonyOffhook = false
+        evaluateAndEmit("telephony_ringing")
+        return
+      }
+      TelephonyManager.CALL_STATE_OFFHOOK -> {
+        telephonyRinging = false
+        telephonyOffhook = true
+        gsmPreemptive = true
+        evaluateAndEmit("telephony_state")
+        return
+      }
+      TelephonyManager.CALL_STATE_IDLE -> {
+        telephonyRinging = false
+        telephonyOffhook = false
+        audioFocusLost = false
+        gsmPreemptive = false
+        evaluateAndEmit("telephony_idle")
+      }
     }
-    val offhook = state == TelephonyManager.CALL_STATE_OFFHOOK
-    if (offhook) {
-      gsmPreemptive = true
-    }
-    if (telephonyOffhook == offhook) return
-    telephonyOffhook = offhook
-    evaluateAndEmit("telephony_state")
   }
 
   @Suppress("DEPRECATION")

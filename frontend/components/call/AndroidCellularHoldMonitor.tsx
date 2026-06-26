@@ -6,7 +6,6 @@ import {
   startAndroidCellularCallHoldWatch,
   stopAndroidCellularCallHoldWatch,
   subscribeAndroidCellularCallHold,
-  subscribeAndroidTelephonyHoldSignals,
 } from '../../utils/androidCellularCallHold';
 import { callDiag, setGsmInterruptPending } from '../../utils/callDiagnostics';
 import { isIncomingCallNativeAvailable } from '../../utils/incomingCallNativeBridge';
@@ -15,6 +14,24 @@ import { isSamsungOneUi6OrNewer } from '../../utils/samsungCallCompat';
 
 const AUDIO_MODE_IN_CALL = 2;
 const AUDIO_MODE_IN_COMMUNICATION = 3;
+
+/** Hold only after cellular call is answered — not on ring or audio-mode hints alone. */
+function isAnsweredCellularHold(active: boolean, source?: string): boolean {
+  if (!active) return false;
+  const s = (source ?? '').toLowerCase();
+  if (s === 'preemptive_ring' || s === 'telephony_ringing' || s === 'poll' || s === 'start') {
+    return false;
+  }
+  return (
+    s === 'telephony_offhook' ||
+    s === 'telephony_state' ||
+    s === 'audio_mode' ||
+    s === 'audio_focus_loss' ||
+    s === 'phone_state_broadcast' ||
+    s === 'telephony_callback' ||
+    s === 'telephony_legacy'
+  );
+}
 
 /**
  * Detects external cellular calls via Android audio mode (independent of Stream JOINED state).
@@ -32,8 +49,8 @@ export function AndroidCellularHoldMonitor({
   onSystemHoldChangeRef.current = onSystemHoldChange;
 
   const applyHoldState = (next: boolean, details?: Record<string, unknown>): void => {
-    if (holdActiveRef.current === next && !next) return;
     if (next) {
+      if (holdActiveRef.current) return;
       holdActiveRef.current = true;
       callDiag.holdStarted('local_system', details);
       callDiag.info('cellular_hold_monitor_on', details ?? {});
@@ -82,23 +99,21 @@ export function AndroidCellularHoldMonitor({
             ? 'MODE_IN_COMMUNICATION'
             : `mode_${audioMode ?? 'unknown'}`;
       const samsung = isSamsungOneUi6OrNewer();
-      if (active) {
-        callDiag.gsmDetected({ audioMode, modeLabel, source, samsung });
-        callDiag.gsmAnswered({ audioMode, modeLabel, source, samsung });
-        applyHoldState(true, { audioMode, modeLabel, source, samsung, path: 'native_cellular' });
-        return;
-      }
-      callDiag.gsmEnded({ audioMode, modeLabel, source, samsung });
-      applyHoldState(false, { audioMode, modeLabel, source, samsung, path: 'native_cellular' });
-    });
+      const details = { audioMode, modeLabel, source, samsung, path: 'native_cellular' };
 
-    const unsubTelephony = subscribeAndroidTelephonyHoldSignals((active, source) => {
-      callDiag.info('cellular_hold_telephony_signal', { active, source });
       if (active) {
-        applyHoldState(true, { source, path: 'telephony_diagnostic' });
+        if (!isAnsweredCellularHold(true, source)) {
+          callDiag.info('cellular_hold_ignored_pre_answer', details);
+          return;
+        }
+        callDiag.gsmDetected(details);
+        callDiag.gsmAnswered(details);
+        applyHoldState(true, details);
         return;
       }
-      applyHoldState(false, { source, path: 'telephony_diagnostic' });
+
+      callDiag.gsmEnded(details);
+      applyHoldState(false, details);
     });
 
     startAndroidCellularCallHoldWatch();
@@ -106,7 +121,6 @@ export function AndroidCellularHoldMonitor({
     return () => {
       cancelled = true;
       unsubCellular();
-      unsubTelephony();
       stopAndroidCellularCallHoldWatch();
       holdActiveRef.current = false;
       callDiag.info('cellular_hold_watch_stopped', {});

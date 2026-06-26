@@ -142,7 +142,7 @@ export function subscribeAndroidCellularCallHold(
   };
 }
 
-/** Backup path: telephony diagnostics OFFHOOK/RINGING while in a voice call. */
+/** Hold only after cellular call is answered (OFFHOOK), not while ringing. */
 export function subscribeAndroidTelephonyHoldSignals(
   handler: (active: boolean, source: string) => void
 ): () => void {
@@ -154,7 +154,7 @@ export function subscribeAndroidTelephonyHoldSignals(
     'onTelephonyDiagnostic',
     (payload: { kind?: string; callStateLabel?: string }) => {
       const kind = typeof payload?.kind === 'string' ? payload.kind : '';
-      if (kind === 'call_state_offhook' || kind === 'call_state_ringing') {
+      if (kind === 'call_state_offhook') {
         handler(true, `telephony_${kind}`);
         return;
       }

@@ -505,7 +505,7 @@ export function StreamLocalHoldMicBridge({
 }): null {
   const { useMicrophoneState } = useCallStateHooks();
   const { microphone } = useMicrophoneState();
-  const pauseMic = systemOnHold || peerOnHold;
+  const pauseMic = systemOnHold;
   const pauseMicRef = useRef(pauseMic);
   pauseMicRef.current = pauseMic;
 

@@ -626,45 +626,23 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
     updateCallDiagnosticsLiveState({ peerCallHold: onHold });
     if (onHold) {
       setGsmInterruptPending(true, 'peer_hold_remote');
-      setPeerCallMuted(true);
-    }
-    if (!onHold) {
-      lastPeerHoldClearAtRef.current = Date.now();
-    }
-    if (onHold) {
       callDiag.holdStarted('remote_socket');
-      peerHoldPausedMicRef.current = true;
-      void streamMicControlRef.current?.setEnabled(false).catch(() => {});
       return;
     }
+    lastPeerHoldClearAtRef.current = Date.now();
     callDiag.holdEnded('remote_socket');
     if (!systemCallHoldRef.current) {
       setGsmInterruptPending(false, 'peer_hold_cleared');
     }
-    if (peerHoldPausedMicRef.current) {
-      peerHoldPausedMicRef.current = false;
-      if (!systemCallHoldRef.current && !userChosenMuteRef.current) {
-        void streamMicControlRef.current?.setEnabled(true).catch(() => {});
-      }
-    }
+  }, []);
+
+  const applyPeerMuteFromRemote = useCallback((muted: boolean) => {
+    if (peerCallHoldRef.current) return;
+    setPeerCallMuted(muted);
   }, []);
   const applyPeerHoldFromRemoteRef = useRef(applyPeerHoldFromRemote);
   applyPeerHoldFromRemoteRef.current = applyPeerHoldFromRemote;
 
-  const applyPeerMuteFromRemote = useCallback(
-    (muted: boolean) => {
-      setPeerCallMuted(muted);
-      if (
-        muted &&
-        talkActiveRef.current &&
-        !peerCallHoldRef.current &&
-        isCallHoldGuardActive()
-      ) {
-        applyPeerHoldFromRemote(true);
-      }
-    },
-    [applyPeerHoldFromRemote]
-  );
   const applyPeerMuteFromRemoteRef = useRef(applyPeerMuteFromRemote);
   applyPeerMuteFromRemoteRef.current = applyPeerMuteFromRemote;
 
@@ -2376,12 +2354,8 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
 
   const handlePeerGsmSuspect = useCallback(() => {
     if (endingRef.current || peerCallHoldRef.current) return;
-    if (
-      !isCallHoldGuardActive() &&
-      Date.now() - lastPeerHoldClearAtRef.current < 2000
-    ) {
-      return;
-    }
+    if (!isCallHoldGuardActive()) return;
+    if (Date.now() - lastPeerHoldClearAtRef.current < 2000) return;
     applyPeerHoldFromRemote(true);
     callDiag.info('peer_gsm_suspect_hold_applied', { immediate: true });
   }, [applyPeerHoldFromRemote]);
@@ -2768,7 +2742,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
               onMutedChange={setMuted}
               onUserMuteToggled={emitPeerCallMute}
               userChosenMuteRef={userChosenMuteRef}
-              forceMicOff={systemCallHold || peerCallHold}
+              forceMicOff={systemCallHold}
             />
           ) : null}
           {streamAvatarExtras ? (
@@ -2797,7 +2771,6 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
           {streamAvatarExtras ? (
             <streamAvatarExtras.StreamLocalHoldMicBridge
               systemOnHold={systemCallHold}
-              peerOnHold={peerCallHold}
               userChosenMuteRef={userChosenMuteRef}
             />
           ) : null}
