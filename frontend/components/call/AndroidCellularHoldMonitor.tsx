@@ -6,8 +6,10 @@ import {
   startAndroidCellularCallHoldWatch,
   stopAndroidCellularCallHoldWatch,
   subscribeAndroidCellularCallHold,
+  subscribeAndroidTelephonyHoldSignals,
 } from '../../utils/androidCellularCallHold';
 import { callDiag, setGsmInterruptPending } from '../../utils/callDiagnostics';
+import { isIncomingCallNativeAvailable } from '../../utils/incomingCallNativeBridge';
 import { markGsmTimeline } from '../../utils/gsmDisconnectProbe';
 import { isSamsungOneUi6OrNewer } from '../../utils/samsungCallCompat';
 
@@ -30,21 +32,37 @@ export function AndroidCellularHoldMonitor({
   onSystemHoldChangeRef.current = onSystemHoldChange;
 
   const applyHoldState = (next: boolean, details?: Record<string, unknown>): void => {
-    if (holdActiveRef.current === next) return;
-    holdActiveRef.current = next;
+    if (holdActiveRef.current === next && !next) return;
     if (next) {
+      holdActiveRef.current = true;
       callDiag.holdStarted('local_system', details);
-    } else {
-      callDiag.holdEnded('local_system', details);
+      callDiag.info('cellular_hold_monitor_on', details ?? {});
+      setGsmInterruptPending(true);
+      markGsmTimeline('T0_gsm_arrived');
+      markGsmTimeline('T1_audio_focus_lost');
+      onSystemHoldChangeRef.current(true);
+      return;
     }
-    callDiag.info(next ? 'cellular_hold_monitor_on' : 'cellular_hold_monitor_off', details ?? {});
-    onSystemHoldChangeRef.current(next);
+    if (!holdActiveRef.current) return;
+    holdActiveRef.current = false;
+    callDiag.holdEnded('local_system', details);
+    callDiag.info('cellular_hold_monitor_off', details ?? {});
+    setGsmInterruptPending(false);
+    markGsmTimeline('T6_gsm_ended');
+    onSystemHoldChangeRef.current(false);
   };
 
   useEffect(() => {
     if (!enabled || Platform.OS !== 'android') {
+      if (Platform.OS === 'android') {
+        callDiag.info('cellular_hold_monitor_disabled', { enabled });
+      }
       return;
     }
+
+    callDiag.info('cellular_hold_monitor_enabling', {
+      nativeAvailable: isIncomingCallNativeAvailable(),
+    });
 
     let cancelled = false;
     void (async () => {
@@ -65,25 +83,30 @@ export function AndroidCellularHoldMonitor({
             : `mode_${audioMode ?? 'unknown'}`;
       const samsung = isSamsungOneUi6OrNewer();
       if (active) {
-        setGsmInterruptPending(true);
-        markGsmTimeline('T0_gsm_arrived');
-        markGsmTimeline('T1_audio_focus_lost');
         callDiag.gsmDetected({ audioMode, modeLabel, source, samsung });
         callDiag.gsmAnswered({ audioMode, modeLabel, source, samsung });
-        applyHoldState(true, { audioMode, modeLabel, source, samsung });
+        applyHoldState(true, { audioMode, modeLabel, source, samsung, path: 'native_cellular' });
         return;
       }
-      setGsmInterruptPending(false);
-      markGsmTimeline('T6_gsm_ended');
       callDiag.gsmEnded({ audioMode, modeLabel, source, samsung });
-      applyHoldState(false, { audioMode, modeLabel, source, samsung });
+      applyHoldState(false, { audioMode, modeLabel, source, samsung, path: 'native_cellular' });
     });
+
+    const unsubTelephony = subscribeAndroidTelephonyHoldSignals((active, source) => {
+      callDiag.info('cellular_hold_telephony_signal', { active, source });
+      if (active) {
+        applyHoldState(true, { source, path: 'telephony_diagnostic' });
+        return;
+      }
+      applyHoldState(false, { source, path: 'telephony_diagnostic' });
+    });
+
     startAndroidCellularCallHoldWatch();
-    callDiag.info('cellular_hold_watch_started', { enabled: true });
 
     return () => {
       cancelled = true;
       unsubCellular();
+      unsubTelephony();
       stopAndroidCellularCallHoldWatch();
       holdActiveRef.current = false;
       callDiag.info('cellular_hold_watch_stopped', {});

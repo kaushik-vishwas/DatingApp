@@ -425,6 +425,22 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
     if (bootId) {
       callDiag.callCreated(bootId, { phase: outgoingCallerPhase ?? 'active' });
     }
+    if (Platform.OS === 'android') {
+      void Promise.all([
+        import('../../utils/incomingCallNativeBridge'),
+        import('../../utils/androidCellularCallHold'),
+      ]).then(([bridge, cellular]) => {
+        callDiag.info('cellular_hold_native_probe', {
+          nativeAvailable: bridge.isIncomingCallNativeAvailable(),
+        });
+        void cellular.ensureAndroidReadPhoneStatePermission().then((granted) => {
+          callDiag.info('cellular_hold_permission_on_mount', { granted });
+          if (granted) {
+            cellular.refreshAndroidCellularCallHoldWatch();
+          }
+        });
+      });
+    }
     if (outgoingCallerPhase === 'ringing') {
       callDiag.callRinging({ role: user?.role });
     }
@@ -2970,9 +2986,9 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
     );
   }
 
-  const cellularHoldMonitorEnabled =
-    Boolean(callIdRef.current.trim()) &&
-    (Boolean(streamBootstrap) || ready || talkActive || showStreamChrome);
+  const cellularHoldMonitorEnabled = Boolean(
+    (getVoiceBootstrap(callParams)?.callId ?? callIdRef.current).trim()
+  );
 
   return (
     <>

@@ -481,19 +481,19 @@ function initNetworkProbe(): void {
 function initTelephonyProbe(): void {
   if (!isAndroidPlatform()) return;
   try {
-    const mod = require('incoming-call-android').default as {
-      startTelephonyDiagnosticsWatch?: () => boolean;
-      stopTelephonyDiagnosticsWatch?: () => void;
-    };
-    const { EventEmitter } = require('expo-modules-core') as {
-      EventEmitter: new (mod: Record<string, unknown>) => {
-        addListener: (ev: string, fn: (p: Record<string, unknown>) => void) => { remove: () => void };
-      };
-    };
-    if (typeof mod.startTelephonyDiagnosticsWatch !== 'function') return;
-    mod.startTelephonyDiagnosticsWatch();
-    const emitter = new EventEmitter(mod as unknown as Record<string, unknown>);
-    const sub = emitter.addListener('onTelephonyDiagnostic', (payload) => {
+    const {
+      getIncomingCallNativeEventEmitter,
+      getIncomingCallNativeModule,
+    } = require('./incomingCallNativeBridge') as typeof import('./incomingCallNativeBridge');
+    const mod = getIncomingCallNativeModule();
+    const emitter = getIncomingCallNativeEventEmitter();
+    if (!mod || !emitter || typeof mod.startTelephonyDiagnosticsWatch !== 'function') {
+      callDiag.info('probe_telephony_unavailable', { reason: 'native_module' });
+      return;
+    }
+    const started = mod.startTelephonyDiagnosticsWatch();
+    callDiag.info('probe_telephony_started', { started });
+    const sub = emitter.addListener('onTelephonyDiagnostic', (payload: Record<string, unknown>) => {
       const eventAtMs =
         typeof payload.eventAtMs === 'number' ? payload.eventAtMs : nowMs();
       const receivedAtMs = nowMs();

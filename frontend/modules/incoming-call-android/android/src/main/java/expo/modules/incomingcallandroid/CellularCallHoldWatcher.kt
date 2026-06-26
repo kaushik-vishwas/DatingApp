@@ -37,6 +37,7 @@ object CellularCallHoldWatcher {
   private var modeChangedListener: AudioManager.OnModeChangedListener? = null
   private var telephonyCallback31: TelephonyCallback? = null
   private var phoneStateListenerLegacy: PhoneStateListener? = null
+  private var phoneStateReceiver: PhoneStateBroadcastReceiver? = null
   private var audioFocusHeld = false
 
   @Suppress("DEPRECATION")
@@ -75,7 +76,21 @@ object CellularCallHoldWatcher {
     lastMode = audioManager?.mode ?: AudioManager.MODE_INVALID
     registerModeChangedListener()
     registerTelephonyListenerIfPermitted()
+    registerPhoneStateBroadcastReceiver()
     acquireVoipAudioFocus(audioManager)
+    if (hasReadPhoneStatePermission()) {
+      try {
+        when (telephonyManager?.callState) {
+          TelephonyManager.CALL_STATE_OFFHOOK -> {
+            telephonyOffhook = true
+            gsmPreemptive = true
+          }
+          TelephonyManager.CALL_STATE_RINGING -> gsmPreemptive = true
+        }
+      } catch (_: Exception) {
+        // ignore
+      }
+    }
     mainHandler.post(pollRunnable)
     evaluateAndEmit("start")
   }
@@ -83,7 +98,9 @@ object CellularCallHoldWatcher {
   /** Re-register telephony after READ_PHONE_STATE is granted at runtime. */
   fun refreshTelephonyListener() {
     unregisterTelephonyListener()
+    unregisterPhoneStateBroadcastReceiver()
     registerTelephonyListenerIfPermitted()
+    registerPhoneStateBroadcastReceiver()
     evaluateAndEmit("telephony_refresh")
   }
 
@@ -93,6 +110,7 @@ object CellularCallHoldWatcher {
     releaseVoipAudioFocus(audioManager)
     unregisterModeChangedListener()
     unregisterTelephonyListener()
+    unregisterPhoneStateBroadcastReceiver()
     audioManager = null
     telephonyManager = null
     appContext = null
@@ -207,6 +225,27 @@ object CellularCallHoldWatcher {
     if (am == null || !audioFocusHeld) return
     am.abandonAudioFocus(audioFocusListener)
     audioFocusHeld = false
+  }
+
+  private fun registerPhoneStateBroadcastReceiver() {
+    if (!hasReadPhoneStatePermission()) return
+    val ctx = appContext ?: return
+    if (phoneStateReceiver != null) return
+    val receiver =
+      PhoneStateBroadcastReceiver { state ->
+        mainHandler.post { onTelephonyCallStateChanged(state) }
+      }
+    phoneStateReceiver = receiver
+    receiver.register(ctx)
+  }
+
+  private fun unregisterPhoneStateBroadcastReceiver() {
+    val ctx = appContext
+    val receiver = phoneStateReceiver
+    if (ctx != null && receiver != null) {
+      receiver.unregister(ctx)
+    }
+    phoneStateReceiver = null
   }
 
   private fun registerTelephonyListenerIfPermitted() {

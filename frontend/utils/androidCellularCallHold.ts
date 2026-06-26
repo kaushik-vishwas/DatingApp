@@ -1,34 +1,60 @@
 import { PermissionsAndroid, Platform } from 'react-native';
-import { EventEmitter, type EventSubscription } from 'expo-modules-core';
+import type { EventSubscription } from 'expo-modules-core';
+import { callDiag } from './callDiagnostics';
+import {
+  getIncomingCallNativeEventEmitter,
+  getIncomingCallNativeModule,
+  isIncomingCallNativeAvailable,
+} from './incomingCallNativeBridge';
 
-type IncomingCallAndroidNative = {
-  startCellularCallHoldWatch(): boolean;
-  stopCellularCallHoldWatch(): void;
-  refreshCellularCallHoldTelephony?(): boolean;
+let watchRefCount = 0;
+let cellularHoldSub: EventSubscription | null = null;
+const cellularHoldHandlers = new Set<(event: CellularCallHoldEvent) => void>();
+
+export type CellularCallHoldEvent = {
+  active: boolean;
+  audioMode?: number;
+  source?: string;
 };
 
-let nativeModule: IncomingCallAndroidNative | null | undefined;
-let emitter: EventEmitter | null = null;
-let watchRefCount = 0;
-
-function getNativeModule(): IncomingCallAndroidNative | null {
-  if (Platform.OS !== 'android') return null;
-  if (nativeModule !== undefined) return nativeModule;
-  try {
-    nativeModule = require('incoming-call-android').default as IncomingCallAndroidNative;
-  } catch {
-    nativeModule = null;
+function dispatchCellularHold(event: CellularCallHoldEvent): void {
+  for (const handler of cellularHoldHandlers) {
+    try {
+      handler(event);
+    } catch {
+      // ignore handler errors
+    }
   }
-  return nativeModule;
 }
 
-function getEmitter(): EventEmitter | null {
-  const mod = getNativeModule();
-  if (!mod) return null;
+function ensureCellularHoldListener(): void {
+  if (cellularHoldSub) return;
+  const emitter = getIncomingCallNativeEventEmitter();
   if (!emitter) {
-    emitter = new EventEmitter(mod as unknown as Record<string, unknown>);
+    callDiag.info('cellular_hold_native_unavailable', {
+      nativeAvailable: isIncomingCallNativeAvailable(),
+    });
+    return;
   }
-  return emitter;
+  cellularHoldSub = emitter.addListener(
+    'onCellularCallStateChanged',
+    (payload: { active?: boolean; audioMode?: number; source?: string }) => {
+      const event: CellularCallHoldEvent = {
+        active: Boolean(payload?.active),
+        audioMode: payload?.audioMode,
+        source: typeof payload?.source === 'string' ? payload.source : undefined,
+      };
+      callDiag.info('cellular_hold_native_event', event);
+      dispatchCellularHold(event);
+    }
+  );
+  callDiag.info('cellular_hold_listener_attached', {});
+}
+
+function releaseCellularHoldListenerIfIdle(): void {
+  if (cellularHoldHandlers.size > 0 || watchRefCount > 0) return;
+  cellularHoldSub?.remove();
+  cellularHoldSub = null;
 }
 
 /** Request READ_PHONE_STATE so telephony OFFHOOK detection works during in-app calls. */
@@ -53,61 +79,88 @@ export async function ensureAndroidReadPhoneStatePermission(): Promise<boolean> 
 
 /** Re-bind telephony listener after runtime permission is granted. */
 export function refreshAndroidCellularCallHoldWatch(): void {
-  const mod = getNativeModule();
+  const mod = getIncomingCallNativeModule();
   if (!mod?.refreshCellularCallHoldTelephony) return;
   try {
-    mod.refreshCellularCallHoldTelephony();
-  } catch {
-    // ignore
+    const ok = mod.refreshCellularCallHoldTelephony();
+    callDiag.info('cellular_hold_telephony_refreshed', { ok });
+  } catch (e) {
+    callDiag.error('cellular_hold_telephony_refresh_failed', {
+      message: e instanceof Error ? e.message : String(e),
+    });
   }
 }
 
-/** Audio-mode + telephony watcher when READ_PHONE_STATE is granted at runtime. */
 export function startAndroidCellularCallHoldWatch(): void {
-  const mod = getNativeModule();
-  if (!mod) return;
+  const mod = getIncomingCallNativeModule();
+  if (!mod) {
+    callDiag.info('cellular_hold_start_skipped', { reason: 'native_module_missing' });
+    return;
+  }
+  ensureCellularHoldListener();
   watchRefCount += 1;
   if (watchRefCount > 1) return;
   try {
-    mod.startCellularCallHoldWatch();
-  } catch {
+    const started = mod.startCellularCallHoldWatch();
+    callDiag.info('cellular_hold_native_watch_started', { started });
+    if (typeof mod.startTelephonyDiagnosticsWatch === 'function') {
+      mod.startTelephonyDiagnosticsWatch();
+    }
+  } catch (e) {
     watchRefCount = Math.max(0, watchRefCount - 1);
+    callDiag.error('cellular_hold_native_watch_failed', {
+      message: e instanceof Error ? e.message : String(e),
+    });
   }
 }
 
 export function stopAndroidCellularCallHoldWatch(): void {
-  const mod = getNativeModule();
+  const mod = getIncomingCallNativeModule();
   if (!mod) return;
   watchRefCount = Math.max(0, watchRefCount - 1);
   if (watchRefCount > 0) return;
   try {
     mod.stopCellularCallHoldWatch();
+    mod.stopTelephonyDiagnosticsWatch?.();
   } catch {
     // ignore
   }
+  releaseCellularHoldListenerIfIdle();
 }
-
-export type CellularCallHoldEvent = {
-  active: boolean;
-  audioMode?: number;
-  source?: string;
-};
 
 export function subscribeAndroidCellularCallHold(
   handler: (event: CellularCallHoldEvent) => void
 ): () => void {
-  const ev = getEmitter();
-  if (!ev) {
+  if (Platform.OS !== 'android') {
     return () => {};
   }
-  const sub: EventSubscription = ev.addListener(
-    'onCellularCallStateChanged',
-    (payload: { active?: boolean; audioMode?: number; source?: string }) => {
-      handler({
-        active: Boolean(payload?.active),
-        audioMode: payload?.audioMode,
-        source: typeof payload?.source === 'string' ? payload.source : undefined,
-      });
+  ensureCellularHoldListener();
+  cellularHoldHandlers.add(handler);
+  return () => {
+    cellularHoldHandlers.delete(handler);
+    releaseCellularHoldListenerIfIdle();
+  };
+}
+
+/** Backup path: telephony diagnostics OFFHOOK/RINGING while in a voice call. */
+export function subscribeAndroidTelephonyHoldSignals(
+  handler: (active: boolean, source: string) => void
+): () => void {
+  const emitter = getIncomingCallNativeEventEmitter();
+  if (!emitter) {
+    return () => {};
+  }
+  const sub = emitter.addListener(
+    'onTelephonyDiagnostic',
+    (payload: { kind?: string; callStateLabel?: string }) => {
+      const kind = typeof payload?.kind === 'string' ? payload.kind : '';
+      if (kind === 'call_state_offhook' || kind === 'call_state_ringing') {
+        handler(true, `telephony_${kind}`);
+        return;
+      }
+      if (kind === 'call_state_idle') {
+        handler(false, 'telephony_idle');
+      }
     }
   );
   return () => sub.remove();

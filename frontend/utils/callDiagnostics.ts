@@ -6,8 +6,7 @@ import {
   getHoldRemoteLeftDebounceMs,
   getNormalRemoteLeftDebounceMs,
 } from './samsungCallCompat';
-import {
-  clearPersistedCallDiagnostics,
+import { isIncomingCallNativeAvailable } from './incomingCallNativeBridge';
   loadPersistedCallDiagnosticsBundle,
   persistCallDiagnosticsBundle,
   type PersistedCallDiagnosticsBundle,
@@ -594,6 +593,7 @@ export function getLastCallDebugPreview(): string {
   const lastHold = holdEvents.slice(-3).map((e) => `${e.eventType}:${JSON.stringify(e.details).slice(0, 80)}`);
   return [
     `Call: ${summary.callId ?? '—'}`,
+    `Native GSM module: ${isIncomingCallNativeAvailable() ? 'yes' : 'NO — rebuild APK'}`,
     `Ended: ${summary.endedAt ?? 'active/unknown'}`,
     `System hold: ${snap?.systemCallHold ?? '—'} | Peer hold: ${snap?.peerCallHold ?? '—'}`,
     `GSM pending: ${snap?.gsmInterruptPending ?? '—'}`,

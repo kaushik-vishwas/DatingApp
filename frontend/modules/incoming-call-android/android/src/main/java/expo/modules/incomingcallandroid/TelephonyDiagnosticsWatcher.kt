@@ -7,6 +7,7 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
+import android.telephony.PhoneStateListener
 import android.telephony.TelephonyCallback
 import android.telephony.TelephonyManager
 import androidx.core.content.ContextCompat
@@ -27,6 +28,8 @@ object TelephonyDiagnosticsWatcher {
   private var appThinksGsmActive = false
 
   private var telephonyCallback31: TelephonyCallback? = null
+  private var phoneStateListenerLegacy: PhoneStateListener? = null
+  private var phoneStateReceiver: PhoneStateBroadcastReceiver? = null
 
   fun start(context: Context, onEvent: (Map<String, Any?>) -> Unit) {
     stop()
@@ -38,12 +41,14 @@ object TelephonyDiagnosticsWatcher {
     lastAudioMode = audioManager?.mode ?: AudioManager.MODE_INVALID
     lastCallState = readCallStateSafe()
     registerTelephonyCallback()
+    registerPhoneStateBroadcastReceiver()
     emitDiagnostic("watch_started", "start", lastAudioMode, lastCallState, null)
   }
 
   fun stop() {
     watching = false
     unregisterTelephonyCallback()
+    unregisterPhoneStateBroadcastReceiver()
     audioManager = null
     telephonyManager = null
     appContext = null
@@ -90,53 +95,116 @@ object TelephonyDiagnosticsWatcher {
   }
 
   private fun registerTelephonyCallback() {
-    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return
+    if (!hasReadPhoneStatePermission()) return
     val tm = telephonyManager ?: return
     val ctx = appContext ?: return
-    if (
-      ContextCompat.checkSelfPermission(ctx, android.Manifest.permission.READ_PHONE_STATE) !=
-      PackageManager.PERMISSION_GRANTED
-    ) {
-      return
-    }
-    val callback =
-      object : TelephonyCallback(), TelephonyCallback.CallStateListener {
-        override fun onCallStateChanged(state: Int) {
-          val detectedAt = SystemClock.elapsedRealtime()
-          mainHandler.post {
-            val callbackAt = SystemClock.elapsedRealtime()
-            val delayMs = callbackAt - detectedAt
-            val previous = lastCallState
-            lastCallState = state
-            val kind =
-              when (state) {
-                TelephonyManager.CALL_STATE_RINGING -> "call_state_ringing"
-                TelephonyManager.CALL_STATE_OFFHOOK -> "call_state_offhook"
-                TelephonyManager.CALL_STATE_IDLE -> "call_state_idle"
-                else -> "call_state_unknown"
-              }
-            emitDiagnostic(kind, "telephony_callback", lastAudioMode, state, previous, delayMs)
+
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+      if (telephonyCallback31 != null) return
+      val callback =
+        object : TelephonyCallback(), TelephonyCallback.CallStateListener {
+          override fun onCallStateChanged(state: Int) {
+            val detectedAt = SystemClock.elapsedRealtime()
+            mainHandler.post {
+              val callbackAt = SystemClock.elapsedRealtime()
+              val delayMs = callbackAt - detectedAt
+              onCallStateChanged(state, "telephony_callback", delayMs)
+            }
           }
         }
+      telephonyCallback31 = callback
+      try {
+        tm.registerTelephonyCallback(mainHandler::post, callback)
+      } catch (_: Exception) {
+        telephonyCallback31 = null
       }
-    telephonyCallback31 = callback
+      return
+    }
+
+    if (phoneStateListenerLegacy != null) return
+    @Suppress("DEPRECATION")
+    val listener =
+      object : PhoneStateListener() {
+        @Deprecated("Deprecated in Java")
+        override fun onCallStateChanged(state: Int, phoneNumber: String?) {
+          onCallStateChanged(state, "telephony_legacy", null)
+        }
+      }
+    phoneStateListenerLegacy = listener
     try {
-      tm.registerTelephonyCallback(mainHandler::post, callback)
+      @Suppress("DEPRECATION")
+      tm.listen(listener, PhoneStateListener.LISTEN_CALL_STATE)
     } catch (_: Exception) {
-      telephonyCallback31 = null
+      phoneStateListenerLegacy = null
     }
   }
 
-  private fun unregisterTelephonyCallback() {
-    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return
-    val tm = telephonyManager ?: return
-    val callback = telephonyCallback31 ?: return
-    try {
-      tm.unregisterTelephonyCallback(callback)
-    } catch (_: Exception) {
-      // ignore
+  private fun hasReadPhoneStatePermission(): Boolean {
+    val ctx = appContext ?: return false
+    return (
+      ContextCompat.checkSelfPermission(ctx, android.Manifest.permission.READ_PHONE_STATE) ==
+        PackageManager.PERMISSION_GRANTED
+    )
+  }
+
+  private fun onCallStateChanged(state: Int, source: String, callbackDelayMs: Long?) {
+    val previous = lastCallState
+    lastCallState = state
+    val kind =
+      when (state) {
+        TelephonyManager.CALL_STATE_RINGING -> "call_state_ringing"
+        TelephonyManager.CALL_STATE_OFFHOOK -> "call_state_offhook"
+        TelephonyManager.CALL_STATE_IDLE -> "call_state_idle"
+        else -> "call_state_unknown"
+      }
+    emitDiagnostic(kind, source, lastAudioMode, state, previous, callbackDelayMs)
+  }
+
+  private fun registerPhoneStateBroadcastReceiver() {
+    if (!hasReadPhoneStatePermission()) return
+    val ctx = appContext ?: return
+    if (phoneStateReceiver != null) return
+    val receiver =
+      PhoneStateBroadcastReceiver { state ->
+        mainHandler.post { onCallStateChanged(state, "phone_state_broadcast", null) }
+      }
+    phoneStateReceiver = receiver
+    receiver.register(ctx)
+  }
+
+  private fun unregisterPhoneStateBroadcastReceiver() {
+    val ctx = appContext
+    val receiver = phoneStateReceiver
+    if (ctx != null && receiver != null) {
+      receiver.unregister(ctx)
     }
-    telephonyCallback31 = null
+    phoneStateReceiver = null
+  }
+
+  private fun unregisterTelephonyCallback() {
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+      val tm = telephonyManager ?: return
+      val callback = telephonyCallback31 ?: return
+      try {
+        tm.unregisterTelephonyCallback(callback)
+      } catch (_: Exception) {
+        // ignore
+      }
+      telephonyCallback31 = null
+      return
+    }
+
+    val tm = telephonyManager
+    val listener = phoneStateListenerLegacy
+    if (tm != null && listener != null) {
+      try {
+        @Suppress("DEPRECATION")
+        tm.listen(listener, PhoneStateListener.LISTEN_NONE)
+      } catch (_: Exception) {
+        // ignore
+      }
+    }
+    phoneStateListenerLegacy = null
   }
 
   private fun audioModeLabel(mode: Int): String =
