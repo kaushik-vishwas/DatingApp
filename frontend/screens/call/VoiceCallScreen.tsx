@@ -885,6 +885,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
     if (durationMs >= timeoutMs - 100) {
       callDiag.failure('leave_media_timeout', { timeoutMs, durationMs });
     }
+    await ensureSessionEnded();
     if (await shouldShowCallerRating()) {
       callDiag.hangupDisconnectComplete({
         path: 'caller_rating_prompt',
@@ -948,15 +949,10 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
 
   const shouldDeferEndDuringGsm = useCallback((source: string): boolean => {
     if (source === 'user_hangup') return false;
-    if (systemCallHoldRef.current) return true;
+    // Socket + server sync are authoritative when the peer hung up.
+    if (source.startsWith('socket_') || source === 'session_sync_completed') return false;
+    if (systemCallHoldRef.current && source.startsWith('stream_')) return true;
     if (isCallHoldGuardActive() && source.startsWith('stream_')) return true;
-    if (
-      isSamsungOneUi6OrNewer() &&
-      isCallHoldGuardActive() &&
-      (source.startsWith('socket_') || source === 'session_sync_completed')
-    ) {
-      return true;
-    }
     return false;
   }, []);
 
@@ -990,19 +986,19 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
     });
     const role = userRoleRef.current;
     if (role === 'caller') {
-      if (endingRef.current) return;
-      setEnding(true, 'handle_peer_call_ended_caller', { source, endedCallId });
-      endingStartedAtRef.current = Date.now();
       talkActiveRef.current = false;
       setTalkActive(false);
+      if (endingRef.current) {
+        void finishCallerCallEndRef.current();
+        return;
+      }
+      setEnding(true, 'handle_peer_call_ended_caller', { source, endedCallId });
+      endingStartedAtRef.current = Date.now();
       void finishCallerCallEndRef.current();
       return;
     }
     if (role === 'receiver') {
-      if (
-        peerCallHoldRef.current &&
-        (source.startsWith('stream_') || source === 'session_sync_completed')
-      ) {
+      if (peerCallHoldRef.current && source.startsWith('stream_')) {
         callDiag.callEndSuppressed(source, {
           reason: 'peer_on_hold',
           peerOnHold: true,
@@ -1010,7 +1006,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
         });
         callDiag.stateMismatch(
           'stream_end_while_peer_on_hold',
-          'Stream/session reported end while peer is marked on hold — suppressed',
+          'Stream reported end while peer is marked on hold — suppressed',
           { source, endedCallId }
         );
         return;
@@ -1979,7 +1975,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
     await leaveMediaWithTimeout(
       systemCallHoldRef.current ? SAMSUNG_GSM_TEARDOWN_TIMEOUT_MS : 8_000
     );
-    void ensureSessionEnded();
+    await ensureSessionEnded();
 
     if (receiverAvailabilitySession && Boolean(user?.isAvailable)) {
       const resetMs = Date.now() - disconnectStartedAt;

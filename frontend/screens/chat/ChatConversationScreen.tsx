@@ -5,6 +5,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ActivityIndicator,
   Alert,
+  Animated,
   FlatList,
   Image,
   KeyboardAvoidingView,
@@ -44,6 +45,26 @@ import {
 } from '../../constants/chatPricing';
 
 const PURPLE = '#7b2cff';
+const PEER_TYPING_CLEAR_MS = 2500;
+
+function normalizeChatPeerId(id: string): string {
+  return String(id || '').trim().toLowerCase();
+}
+
+function messageMatchesConversation(
+  msg: ChatNewMessageEvent,
+  peerId: string,
+  isCaller: boolean
+): boolean {
+  if (msg.peerId) {
+    return normalizeChatPeerId(msg.peerId) === normalizeChatPeerId(peerId);
+  }
+  if (msg.userId && msg.receiverId) {
+    const convPeer = isCaller ? msg.receiverId : msg.userId;
+    return normalizeChatPeerId(convPeer) === normalizeChatPeerId(peerId);
+  }
+  return true;
+}
 
 type Props =
   | NativeStackScreenProps<CallerStackParamList, 'CallerChat'>
@@ -60,7 +81,10 @@ type ChatSendAck = {
   code?: string;
   walletBalance?: number;
   requiredInr?: number;
+  message?: ChatMessageDto;
 };
+
+type ChatNewMessageEvent = ChatMessageDto & { peerId?: string; userId?: string; receiverId?: string };
 
 type ChatTypingEvent = {
   peerId: string;
@@ -69,10 +93,51 @@ type ChatTypingEvent = {
   typing: boolean;
 };
 
+function TypingBubble(): React.JSX.Element {
+  const dot1 = useRef(new Animated.Value(0.35)).current;
+  const dot2 = useRef(new Animated.Value(0.35)).current;
+  const dot3 = useRef(new Animated.Value(0.35)).current;
+
+  useEffect(() => {
+    const pulse = (value: Animated.Value, delay: number): Animated.CompositeAnimation =>
+      Animated.loop(
+        Animated.sequence([
+          Animated.delay(delay),
+          Animated.timing(value, { toValue: 1, duration: 320, useNativeDriver: true }),
+          Animated.timing(value, { toValue: 0.35, duration: 320, useNativeDriver: true }),
+          Animated.delay(640 - delay),
+        ])
+      );
+    const a1 = pulse(dot1, 0);
+    const a2 = pulse(dot2, 160);
+    const a3 = pulse(dot3, 320);
+    a1.start();
+    a2.start();
+    a3.start();
+    return () => {
+      a1.stop();
+      a2.stop();
+      a3.stop();
+    };
+  }, [dot1, dot2, dot3]);
+
+  return (
+    <View style={styles.bubbleRowTheirs}>
+      <View style={[styles.bubble, styles.bubbleTheirs, styles.typingBubble]}>
+        <View style={styles.typingDotsRow}>
+          <Animated.View style={[styles.typingDot, { opacity: dot1 }]} />
+          <Animated.View style={[styles.typingDot, { opacity: dot2 }]} />
+          <Animated.View style={[styles.typingDot, { opacity: dot3 }]} />
+        </View>
+      </View>
+    </View>
+  );
+}
+
 export default function ChatConversationScreen({ navigation, route }: Props): React.JSX.Element {
   const { user, refreshUser } = useAuth();
   const { registerPeer, startCallInvite } = useCallSignals();
-  const { markPeerReadLocal, setActivePeer } = useChatInbox();
+  const { markPeerReadLocal, setActivePeer, registerNewMessageHandler } = useChatInbox();
   const callerNav = useNavigation<NativeStackNavigationProp<CallerStackParamList>>();
   const isCaller = route.name === 'CallerChat';
   const messageEligibility = useCallerMessageEligibilityOptional();
@@ -104,6 +169,7 @@ export default function ChatConversationScreen({ navigation, route }: Props): Re
   const listRef = useRef<FlatList<ChatMessageDto>>(null);
   const typingStatusRef = useRef(false);
   const typingStopTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const peerTypingClearTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const markReadOnServer = useCallback(async () => {
     try {
@@ -132,10 +198,60 @@ export default function ChatConversationScreen({ navigation, route }: Props): Re
     });
   }, []);
 
+  const confirmSentMessage = useCallback((localId: string, serverMsg: ChatMessageDto) => {
+    setMessages((prev) => {
+      const withoutLocal = prev.filter((x) => x.id !== localId);
+      if (withoutLocal.some((x) => x.id === serverMsg.id)) return withoutLocal;
+      return [...withoutLocal, serverMsg];
+    });
+  }, []);
+
+  const clearPeerTyping = useCallback(() => {
+    if (peerTypingClearTimerRef.current) {
+      clearTimeout(peerTypingClearTimerRef.current);
+      peerTypingClearTimerRef.current = null;
+    }
+    setPeerTyping(false);
+  }, []);
+
+  const setPeerTypingActive = useCallback(() => {
+    setPeerTyping(true);
+    if (peerTypingClearTimerRef.current) clearTimeout(peerTypingClearTimerRef.current);
+    peerTypingClearTimerRef.current = setTimeout(() => {
+      peerTypingClearTimerRef.current = null;
+      setPeerTyping(false);
+    }, PEER_TYPING_CLEAR_MS);
+  }, []);
+
+  const handleIncomingMessage = useCallback(
+    (msg: ChatNewMessageEvent) => {
+      if (!messageMatchesConversation(msg, peerId, isCaller)) return;
+      appendMessage(msg);
+      if (msg.senderType !== mySenderType) {
+        clearPeerTyping();
+        markPeerReadLocal(peerId);
+        void markReadOnServer();
+      }
+    },
+    [appendMessage, clearPeerTyping, isCaller, markPeerReadLocal, markReadOnServer, mySenderType, peerId]
+  );
+
+  useEffect(() => {
+    registerNewMessageHandler(handleIncomingMessage);
+    return () => registerNewMessageHandler(null);
+  }, [handleIncomingMessage, registerNewMessageHandler]);
+
   useFocusEffect(
     useCallback(() => {
       if (isCaller) void messageEligibility?.refresh();
-    }, [isCaller, messageEligibility])
+      const s = socketRef.current;
+      if (s?.connected) {
+        s.emit(
+          'chat:join',
+          isCaller ? { receiverId: peerId } : { userId: peerId }
+        );
+      }
+    }, [isCaller, messageEligibility, peerId])
   );
 
   useEffect(() => {
@@ -256,17 +372,18 @@ export default function ChatConversationScreen({ navigation, route }: Props): Re
         );
       });
 
-      socket.on('chat:newMessage', (msg: ChatMessageDto) => {
-        appendMessage(msg);
-        if (msg.senderType !== mySenderType) {
-          markPeerReadLocal(peerId);
-          void markReadOnServer();
-        }
+      socket.on('chat:newMessage', (msg: ChatNewMessageEvent) => {
+        handleIncomingMessage(msg);
       });
 
       socket.on('chat:typing', (payload: ChatTypingEvent) => {
         if (payload.fromType === mySenderType) return;
-        setPeerTyping(Boolean(payload.typing));
+        if (normalizeChatPeerId(payload.fromId) !== normalizeChatPeerId(peerId)) return;
+        if (payload.typing) {
+          setPeerTypingActive();
+        } else {
+          clearPeerTyping();
+        }
       });
 
       socket.on('call:response', () => setCalling(false));
@@ -283,7 +400,13 @@ export default function ChatConversationScreen({ navigation, route }: Props): Re
         socketRef.current = null;
       }
     };
-  }, [appendMessage, isCaller, markPeerReadLocal, markReadOnServer, mySenderType, peerId, refreshUser]);
+  }, [clearPeerTyping, handleIncomingMessage, isCaller, mySenderType, peerId, refreshUser, setPeerTypingActive]);
+
+  useEffect(() => {
+    if (!peerTyping) return;
+    const t = setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 50);
+    return () => clearTimeout(t);
+  }, [peerTyping]);
 
   const closeMenu = (): void => setMenuOpen(false);
 
@@ -376,13 +499,26 @@ export default function ChatConversationScreen({ navigation, route }: Props): Re
       return;
     }
     const sentText = text;
+    const localId = `local-${Date.now()}`;
     setInput('');
     emitTyping(false);
     if (typingStopTimerRef.current) {
       clearTimeout(typingStopTimerRef.current);
       typingStopTimerRef.current = null;
     }
+    appendMessage({
+      id: localId,
+      senderType: mySenderType,
+      text: sentText,
+      createdAt: new Date().toISOString(),
+    });
     s.emit('chat:message', { text: sentText }, (res: ChatSendAck) => {
+      if (res?.ok !== false && res?.message) {
+        confirmSentMessage(localId, res.message);
+        setSocketError(null);
+        return;
+      }
+      setMessages((prev) => prev.filter((x) => x.id !== localId));
       if (res && res.ok === false) {
         if (res.code === 'INSUFFICIENT_WALLET' && isCaller) {
           setContinueOpen(true);
@@ -398,7 +534,6 @@ export default function ChatConversationScreen({ navigation, route }: Props): Re
         }
         setSocketError(res.error || 'Send failed');
         setInput((prev) => (prev.trim().length > 0 ? prev : sentText));
-        return;
       }
     });
   };
@@ -418,6 +553,7 @@ export default function ChatConversationScreen({ navigation, route }: Props): Re
   useEffect(() => {
     return () => {
       if (typingStopTimerRef.current) clearTimeout(typingStopTimerRef.current);
+      if (peerTypingClearTimerRef.current) clearTimeout(peerTypingClearTimerRef.current);
       emitTyping(false);
     };
   }, [emitTyping]);
@@ -495,7 +631,6 @@ export default function ChatConversationScreen({ navigation, route }: Props): Re
           <Text style={styles.title} numberOfLines={1}>
             {peerName}
           </Text>
-          {peerTyping ? <Text style={styles.typingText}>typing...</Text> : null}
           {isCaller ? (
             <TouchableOpacity
               onPress={onStartVoiceCall}
@@ -555,6 +690,7 @@ export default function ChatConversationScreen({ navigation, route }: Props): Re
             keyExtractor={(item) => item.id}
             renderItem={renderItem}
             contentContainerStyle={styles.listContent}
+            ListFooterComponent={peerTyping ? <TypingBubble /> : null}
             onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: true })}
           />
         )}
@@ -692,7 +828,6 @@ const styles = StyleSheet.create({
   peerAvPh: { backgroundColor: '#e8dff9', alignItems: 'center', justifyContent: 'center' },
   peerAvTxt: { fontWeight: '900', color: PURPLE, fontSize: 14 },
   title: { flex: 1, fontSize: 17, fontWeight: '900', color: '#111' },
-  typingText: { fontSize: 11, color: PURPLE, fontWeight: '700' },
   callBtnTop: {
     backgroundColor: PURPLE,
     paddingHorizontal: 12,
@@ -759,6 +894,9 @@ const styles = StyleSheet.create({
   bubbleText: { fontSize: 15, lineHeight: 20 },
   bubbleTextMine: { color: '#fff' },
   bubbleTextTheirs: { color: '#111' },
+  typingBubble: { paddingVertical: 14, paddingHorizontal: 16, minWidth: 56 },
+  typingDotsRow: { flexDirection: 'row', alignItems: 'center', gap: 5 },
+  typingDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: '#8e8e93' },
   inputRow: {
     flexDirection: 'row',
     alignItems: 'flex-end',

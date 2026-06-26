@@ -63,7 +63,7 @@ function inviteCallerId(invite: ActiveCallInvite): string {
 }
 
 export function roomKey(userId: string, receiverId: string): string {
-  return `chat:${userId}:${receiverId}`;
+  return `chat:${toMongoRoomId(userId)}:${toMongoRoomId(receiverId)}`;
 }
 
 function parseRoom(room: string): { userId: string; receiverId: string } | null {
@@ -372,8 +372,8 @@ export function attachChatSocket(httpServer: HTTPServer): Server {
               ack?.({ ok: false, error: 'Invalid receiverId' });
               return;
             }
-            userHex = myId;
-            receiverHex = rid;
+            userHex = toMongoRoomId(myId);
+            receiverHex = toMongoRoomId(rid);
             const u = await User.findById(myId).select('accountStatus suspended');
             if (!u || u.suspended || u.accountStatus !== 'approved') {
               ack?.({ ok: false, error: 'Account not allowed' });
@@ -390,8 +390,8 @@ export function attachChatSocket(httpServer: HTTPServer): Server {
               ack?.({ ok: false, error: 'Invalid userId' });
               return;
             }
-            userHex = uid;
-            receiverHex = myId;
+            userHex = toMongoRoomId(uid);
+            receiverHex = toMongoRoomId(myId);
             const recv = await Receiver.findById(myId).select('accountStatus suspended');
             if (!recv || recv.accountStatus !== 'approved' || recv.suspended) {
               ack?.({ ok: false, error: 'Account not allowed' });
@@ -614,8 +614,20 @@ export function attachChatSocket(httpServer: HTTPServer): Server {
             senderType: typ,
             text: doc.text,
             createdAt: doc.createdAt.toISOString(),
+            userId: parsed.userId,
+            receiverId: parsed.receiverId,
           };
           io.to(room).emit('chat:newMessage', out);
+          // Mirror chat:typing — deliver via account rooms when chat:join is still in flight
+          // or the peer is not in the room yet (skip sockets already in the chat room).
+          io.to(accountRoom('u', parsed.userId)).except(room).emit('chat:newMessage', {
+            ...out,
+            peerId: parsed.receiverId,
+          });
+          io.to(accountRoom('r', parsed.receiverId)).except(room).emit('chat:newMessage', {
+            ...out,
+            peerId: parsed.userId,
+          });
           io.to(accountRoom('u', parsed.userId)).emit('chat:inbox', {
             peerId: parsed.receiverId,
             lastText: doc.text,

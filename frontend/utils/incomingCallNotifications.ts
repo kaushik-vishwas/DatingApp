@@ -27,8 +27,10 @@ export type IncomingCallNotificationPayload = {
 };
 
 const INCOMING_CALL_CHANNEL_ID = 'incoming_calls';
-/** Bundled via expo-notifications plugin → android res/raw (incoming-call ring). */
-const INCOMING_CALL_NOTIFICATION_SOUND = 'receiver_ringtone.mp3';
+/** Android `res/raw` basename (no extension). */
+const INCOMING_CALL_NOTIFICATION_SOUND_ANDROID = 'receiver_ringtone';
+/** Bundled via expo-notifications plugin (iOS). */
+const INCOMING_CALL_NOTIFICATION_SOUND_IOS = 'receiver_ringtone.mp3';
 /** expo-notifications: `categoryIdentifier` (iOS + Android action category). */
 const INCOMING_CALL_CATEGORY_ID = 'call';
 const INCOMING_CALL_NOTIFICATION_ID_PREFIX = 'incoming-';
@@ -602,7 +604,7 @@ export async function ensureIncomingCallNotificationSetup(): Promise<void> {
       importance: Notifications.AndroidImportance.MAX,
       vibrationPattern: [0, 280, 200, 280],
       lightColor: '#7c3aed',
-      sound: INCOMING_CALL_NOTIFICATION_SOUND,
+      sound: INCOMING_CALL_NOTIFICATION_SOUND_ANDROID,
       enableLights: true,
       enableVibrate: true,
       lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
@@ -661,8 +663,8 @@ function buildIncomingCallNotificationContent(
     data: buildNotificationData(incoming),
     sound:
       Platform.OS === 'ios'
-        ? ('defaultCritical' as const)
-        : INCOMING_CALL_NOTIFICATION_SOUND,
+        ? INCOMING_CALL_NOTIFICATION_SOUND_IOS
+        : INCOMING_CALL_NOTIFICATION_SOUND_ANDROID,
     categoryIdentifier: INCOMING_CALL_CATEGORY_ID,
     interruptionLevel: 'critical' as const,
     priority: Notifications.AndroidNotificationPriority.MAX,
@@ -735,6 +737,8 @@ export async function showIncomingCallNotification(
       trigger: null,
     });
     if (Platform.OS === 'android') {
+      // Let the first tray post alert (ringtone) before tap-overlay re-post.
+      await new Promise((resolve) => setTimeout(resolve, 280));
       void applyIncomingCallFullScreenIntent(identifier);
     }
     await captureIncomingCallNotifDebugSnapshot('after_show_scheduled', {

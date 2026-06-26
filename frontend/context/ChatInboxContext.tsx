@@ -3,6 +3,8 @@ import { io, type Socket } from 'socket.io-client';
 import { useAuth } from './AuthContext';
 import { chatApi, getJwt, getResolvedApiBaseUrl } from '../services/api';
 
+import type { ChatMessageDto } from '../types/api';
+
 type ChatInboxEvent = {
   peerId: string;
   lastText: string;
@@ -17,6 +19,8 @@ type ChatTypingEvent = {
   typing: boolean;
 };
 
+type ChatNewMessageEvent = ChatMessageDto & { peerId?: string; userId?: string; receiverId?: string };
+
 type ChatInboxContextValue = {
   totalUnread: number;
   getUnreadCount: (peerId: string) => number;
@@ -24,9 +28,14 @@ type ChatInboxContextValue = {
   markPeerReadLocal: (peerId: string) => void;
   refreshUnreadFromServer: () => Promise<void>;
   setActivePeer: (peerId: string | null) => void;
+  registerNewMessageHandler: (handler: ((msg: ChatNewMessageEvent) => void) | null) => void;
 };
 
 const ChatInboxContext = createContext<ChatInboxContextValue | null>(null);
+
+function normalizeChatPeerId(id: string): string {
+  return String(id || '').trim().toLowerCase();
+}
 
 function oppositeSenderType(role: 'caller' | 'receiver' | null): 'u' | 'r' | null {
   if (role === 'caller') return 'r';
@@ -40,6 +49,7 @@ export const ChatInboxProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const [typingByPeer, setTypingByPeer] = useState<Record<string, boolean>>({});
   const socketRef = useRef<Socket | null>(null);
   const activePeerRef = useRef<string | null>(null);
+  const newMessageHandlerRef = useRef<((msg: ChatNewMessageEvent) => void) | null>(null);
   const typingTimersRef = useRef<Record<string, ReturnType<typeof setTimeout> | undefined>>({});
   const roleRef = useRef<'caller' | 'receiver' | null>(user?.role ?? null);
 
@@ -74,6 +84,10 @@ export const ChatInboxProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
   const setActivePeer = useCallback((peerId: string | null) => {
     activePeerRef.current = peerId;
+  }, []);
+
+  const registerNewMessageHandler = useCallback((handler: ((msg: ChatNewMessageEvent) => void) | null) => {
+    newMessageHandlerRef.current = handler;
   }, []);
 
   useEffect(() => {
@@ -130,6 +144,19 @@ export const ChatInboxProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           }, 2500);
         }
       });
+
+      socket.on('chat:newMessage', (msg: ChatNewMessageEvent) => {
+        const activePeer = activePeerRef.current;
+        if (!activePeer) return;
+        const role = roleRef.current;
+        let convPeerId = msg.peerId;
+        if (!convPeerId && msg.userId && msg.receiverId) {
+          convPeerId = role === 'caller' ? msg.receiverId : msg.userId;
+        }
+        if (!convPeerId) return;
+        if (normalizeChatPeerId(convPeerId) !== normalizeChatPeerId(activePeer)) return;
+        newMessageHandlerRef.current?.(msg);
+      });
     })();
 
     return () => {
@@ -160,8 +187,9 @@ export const ChatInboxProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       markPeerReadLocal,
       refreshUnreadFromServer,
       setActivePeer,
+      registerNewMessageHandler,
     }),
-    [markPeerReadLocal, refreshUnreadFromServer, totalUnread, typingByPeer, unreadByPeer, setActivePeer]
+    [markPeerReadLocal, refreshUnreadFromServer, registerNewMessageHandler, totalUnread, typingByPeer, unreadByPeer, setActivePeer]
   );
 
   return <ChatInboxContext.Provider value={value}>{children}</ChatInboxContext.Provider>;
