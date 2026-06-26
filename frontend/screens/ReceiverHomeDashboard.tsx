@@ -38,6 +38,7 @@ import { type ReceiverPresenceInfo } from '../utils/receiverStatus';
 import { resolveProfileImageSource } from '../utils/avatarSource';
 import SelectoLogo from '../assets/SelectoLogo.png';
 import { CallDiagnosticsTopBarButton } from '../components/call/CallDiagnosticsTopBarButton';
+import { LastCallDebugFab } from '../components/call/LastCallDebugFab';
 import { PresenceDiagnosticsTopBarButton } from '../components/call/PresenceDiagnosticsTopBarButton';
 import EarningsCardBg from '../assets/earnBg.png';
 import InstructionsCardBg from '../assets/instructionBg.png';
@@ -799,6 +800,11 @@ export default function ReceiverHomeDashboard(): React.JSX.Element {
           </CompactInfoCard>
         ) : null}
       </ScrollView>
+      {/* DEBUG: comment out LastCallDebugFab when GSM hold is verified */}
+      <LastCallDebugFab
+        bottomOffset={scrollBottomInset + 12}
+        onPress={() => navigation.navigate('CallDiagnostics')}
+      />
     </SafeAreaView>
   );
 }

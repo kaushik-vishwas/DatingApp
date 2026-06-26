@@ -37,6 +37,23 @@ object CellularCallHoldWatcher {
   private var modeChangedListener: AudioManager.OnModeChangedListener? = null
   private var telephonyCallback31: TelephonyCallback? = null
   private var phoneStateListenerLegacy: PhoneStateListener? = null
+  private var audioFocusHeld = false
+
+  @Suppress("DEPRECATION")
+  private val audioFocusListener =
+    AudioManager.OnAudioFocusChangeListener { focusChange ->
+      when (focusChange) {
+        AudioManager.AUDIOFOCUS_LOSS,
+        AudioManager.AUDIOFOCUS_LOSS_TRANSIENT,
+        AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> {
+          gsmPreemptive = true
+          mainHandler.post { evaluateAndEmit("audio_focus_loss") }
+        }
+        AudioManager.AUDIOFOCUS_GAIN -> {
+          mainHandler.post { evaluateAndEmit("audio_focus_gain") }
+        }
+      }
+    }
 
   private val pollRunnable =
     object : Runnable {
@@ -58,13 +75,22 @@ object CellularCallHoldWatcher {
     lastMode = audioManager?.mode ?: AudioManager.MODE_INVALID
     registerModeChangedListener()
     registerTelephonyListenerIfPermitted()
+    acquireVoipAudioFocus(audioManager)
     mainHandler.post(pollRunnable)
     evaluateAndEmit("start")
+  }
+
+  /** Re-register telephony after READ_PHONE_STATE is granted at runtime. */
+  fun refreshTelephonyListener() {
+    unregisterTelephonyListener()
+    registerTelephonyListenerIfPermitted()
+    evaluateAndEmit("telephony_refresh")
   }
 
   fun stop() {
     polling = false
     mainHandler.removeCallbacks(pollRunnable)
+    releaseVoipAudioFocus(audioManager)
     unregisterModeChangedListener()
     unregisterTelephonyListener()
     audioManager = null
@@ -151,10 +177,36 @@ object CellularCallHoldWatcher {
   }
 
   private fun onTelephonyCallStateChanged(state: Int) {
+    if (state == TelephonyManager.CALL_STATE_RINGING && polling) {
+      gsmPreemptive = true
+      evaluateAndEmit("telephony_ringing")
+    }
     val offhook = state == TelephonyManager.CALL_STATE_OFFHOOK
+    if (offhook) {
+      gsmPreemptive = true
+    }
     if (telephonyOffhook == offhook) return
     telephonyOffhook = offhook
     evaluateAndEmit("telephony_state")
+  }
+
+  @Suppress("DEPRECATION")
+  private fun acquireVoipAudioFocus(am: AudioManager?) {
+    if (am == null || audioFocusHeld) return
+    val result =
+      am.requestAudioFocus(
+        audioFocusListener,
+        AudioManager.STREAM_VOICE_CALL,
+        AudioManager.AUDIOFOCUS_GAIN
+      )
+    audioFocusHeld = result == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
+  }
+
+  @Suppress("DEPRECATION")
+  private fun releaseVoipAudioFocus(am: AudioManager?) {
+    if (am == null || !audioFocusHeld) return
+    am.abandonAudioFocus(audioFocusListener)
+    audioFocusHeld = false
   }
 
   private fun registerTelephonyListenerIfPermitted() {

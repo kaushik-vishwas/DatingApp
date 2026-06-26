@@ -61,6 +61,11 @@ class IncomingCallAndroidModule : Module() {
       CellularCallHoldWatcher.stop()
     }
 
+    Function("refreshCellularCallHoldTelephony") {
+      CellularCallHoldWatcher.refreshTelephonyListener()
+      true
+    }
+
     Function("startCallWebSocketForegroundService") { callLabel: String ->
       val context = appContext.reactContext ?: return@Function false
       AndroidCallResilience.startCallWebSocketForegroundService(context, callLabel)

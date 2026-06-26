@@ -38,6 +38,7 @@ export type IncomingCallAndroidModule = {
   getSamsungCallCompatProfile(): SamsungCallCompatProfile;
   startCellularCallHoldWatch(): boolean;
   stopCellularCallHoldWatch(): void;
+  refreshCellularCallHoldTelephony(): boolean;
   startCallWebSocketForegroundService(callLabel: string): boolean;
   stopCallWebSocketForegroundService(): void;
   requestIgnoreBatteryOptimizationsAsync(): Promise<{

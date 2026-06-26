@@ -149,6 +149,7 @@ type StreamCallAvatarExtrasModule = {
     onMutedChange: (muted: boolean) => void;
     onUserMuteToggled?: (muted: boolean) => void;
     userChosenMuteRef: React.MutableRefObject<boolean>;
+    forceMicOff?: boolean;
   }>;
   StreamHoldAudioBridge: React.ComponentType<{
     peerOnHold?: boolean;
@@ -679,15 +680,20 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
   const emitPeerCallHold = useCallback(
     (onHold: boolean) => {
       const callId = callIdRef.current.trim();
-      if (!callId) return;
+      if (!callId) {
+        callDiag.info('emit_peer_hold_skipped', { reason: 'no_call_id', onHold });
+        return;
+      }
       if (
         endingRef.current &&
         onHold &&
         !systemCallHoldRef.current &&
         !isCallHoldGuardActive()
       ) {
+        callDiag.info('emit_peer_hold_skipped', { reason: 'ending_ref', onHold, callId });
         return;
       }
+      callDiag.info('emit_peer_hold', { onHold, callId });
       emitCallHoldSignal(callId, onHold);
       const voiceSocket = signalSocketRef.current;
       if (voiceSocket?.connected) {
@@ -706,6 +712,23 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
 
   const applySystemCallHold = useCallback(
     (onHold: boolean) => {
+      callDiag.info('apply_system_call_hold', {
+        onHold,
+        previous: systemCallHoldRef.current,
+        ending: endingRef.current,
+        talkActive: talkActiveRef.current,
+      });
+      if (onHold && systemCallHoldRef.current === onHold) {
+        setGsmInterruptPending(true, 'system_hold_reannounce');
+        emitPeerCallHold(true);
+        if (!userChosenMuteRef.current) {
+          holdForcedMicOffRef.current = true;
+          gsmHoldMutedPeerRef.current = true;
+          void streamMicControlRef.current?.setEnabled(false).catch(() => {});
+          emitPeerCallMute(true);
+        }
+        return;
+      }
       if (systemCallHoldRef.current === onHold) return;
       systemCallHoldRef.current = onHold;
       setSystemCallHold(onHold);
@@ -732,6 +755,19 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
     [emitPeerCallHold, emitPeerCallMute]
   );
   applySystemCallHoldRef.current = applySystemCallHold;
+
+  useEffect(() => {
+    if (!talkActive || Platform.OS !== 'android') return;
+    void (async () => {
+      const { ensureAndroidReadPhoneStatePermission, refreshAndroidCellularCallHoldWatch } =
+        await import('../../utils/androidCellularCallHold');
+      const granted = await ensureAndroidReadPhoneStatePermission();
+      callDiag.info('talk_active_phone_permission', { granted });
+      if (granted) {
+        refreshAndroidCellularCallHoldWatch();
+      }
+    })();
+  }, [talkActive]);
 
   useEffect(() => {
     systemCallHoldRef.current = systemCallHold;
@@ -2716,6 +2752,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
               onMutedChange={setMuted}
               onUserMuteToggled={emitPeerCallMute}
               userChosenMuteRef={userChosenMuteRef}
+              forceMicOff={systemCallHold || peerCallHold}
             />
           ) : null}
           {streamAvatarExtras ? (
@@ -2934,7 +2971,8 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
   }
 
   const cellularHoldMonitorEnabled =
-    Boolean(streamBootstrap) || ready || talkActive;
+    Boolean(callIdRef.current.trim()) &&
+    (Boolean(streamBootstrap) || ready || talkActive || showStreamChrome);
 
   return (
     <>

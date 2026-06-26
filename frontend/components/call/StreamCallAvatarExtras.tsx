@@ -81,6 +81,7 @@ export function StreamMicControlBridge({
   onMutedChange,
   onUserMuteToggled,
   userChosenMuteRef,
+  forceMicOff = false,
 }: {
   controlRef: React.MutableRefObject<StreamMicControl | null>;
   onMutedChange: (muted: boolean) => void;
@@ -88,11 +89,26 @@ export function StreamMicControlBridge({
   onUserMuteToggled?: (muted: boolean) => void;
   /** True only after the user taps Mute/Unmute — not when Stream reports mute during connect. */
   userChosenMuteRef: React.MutableRefObject<boolean>;
+  /** GSM / peer hold — keep mic disabled even if user did not tap mute. */
+  forceMicOff?: boolean;
 }): null {
   const { useMicrophoneState, useCallCallingState } = useCallStateHooks();
   const callingState = useCallCallingState();
   const { microphone } = useMicrophoneState();
   const ensuredUnmuteAfterJoinRef = useRef(false);
+  const forceMicOffRef = useRef(forceMicOff);
+  forceMicOffRef.current = forceMicOff;
+
+  useEffect(() => {
+    const enforceOff = (): void => {
+      if (!forceMicOffRef.current) return;
+      void microphone.disable().catch(() => {});
+    };
+    enforceOff();
+    if (!forceMicOff) return;
+    const intervalId = setInterval(enforceOff, 100);
+    return () => clearInterval(intervalId);
+  }, [forceMicOff, microphone]);
 
   useEffect(() => {
     if (callingState !== CallingState.JOINED) {
@@ -121,12 +137,12 @@ export function StreamMicControlBridge({
         }
       },
       setEnabled: async (enabled: boolean) => {
-        if (enabled) {
-          if (userChosenMuteRef.current) return;
-          await microphone.enable();
-        } else {
+        if (!enabled || forceMicOffRef.current) {
           await microphone.disable();
+          return;
         }
+        if (userChosenMuteRef.current) return;
+        await microphone.enable();
       },
     };
     return () => {
@@ -233,7 +249,10 @@ export function StreamRemotePeerLeftBridge({
 
   const armGsmSuspectGuard = (reason: 'local_left' | 'remote_empty'): void => {
     if (gsmSuspectArmedRef.current) return;
-    if (!isTalkActiveForGsmGuard()) return;
+    if (!isTalkActiveForGsmGuard()) {
+      callDiag.info('stream_gsm_suspect_skipped', { reason, talkActive: isTalkActiveForGsmGuard() });
+      return;
+    }
     gsmSuspectArmedRef.current = true;
     setGsmInterruptPending(true, `stream_gsm_suspect_${reason}`);
     callDiag.info('stream_gsm_suspect', { reason });
@@ -503,7 +522,7 @@ export function StreamLocalHoldMicBridge({
 
     applyMic();
     if (!pauseMic) return;
-    const intervalId = setInterval(applyMic, 250);
+    const intervalId = setInterval(applyMic, 100);
     return () => {
       clearInterval(intervalId);
       if (!pauseMicRef.current && !userChosenMuteRef.current) {
@@ -549,7 +568,7 @@ export function StreamHoldAudioBridge({
 
     applyVolumes();
     if (!pauseRemote) return;
-    const intervalId = setInterval(applyVolumes, 250);
+    const intervalId = setInterval(applyVolumes, 100);
     return () => {
       clearInterval(intervalId);
       for (const participant of remoteParticipantsRef.current) {

@@ -1,9 +1,10 @@
-import { Platform } from 'react-native';
+import { PermissionsAndroid, Platform } from 'react-native';
 import { EventEmitter, type EventSubscription } from 'expo-modules-core';
 
 type IncomingCallAndroidNative = {
   startCellularCallHoldWatch(): boolean;
   stopCellularCallHoldWatch(): void;
+  refreshCellularCallHoldTelephony?(): boolean;
 };
 
 let nativeModule: IncomingCallAndroidNative | null | undefined;
@@ -28,6 +29,37 @@ function getEmitter(): EventEmitter | null {
     emitter = new EventEmitter(mod as unknown as Record<string, unknown>);
   }
   return emitter;
+}
+
+/** Request READ_PHONE_STATE so telephony OFFHOOK detection works during in-app calls. */
+export async function ensureAndroidReadPhoneStatePermission(): Promise<boolean> {
+  if (Platform.OS !== 'android') return false;
+  const permission = PermissionsAndroid.PERMISSIONS.READ_PHONE_STATE;
+  try {
+    const alreadyGranted = await PermissionsAndroid.check(permission);
+    if (alreadyGranted) return true;
+    const result = await PermissionsAndroid.request(permission, {
+      title: 'Phone permission',
+      message:
+        'Allow phone state access so your in-app call can pause when you answer a cellular call.',
+      buttonPositive: 'Allow',
+      buttonNegative: 'Not now',
+    });
+    return result === PermissionsAndroid.RESULTS.GRANTED;
+  } catch {
+    return false;
+  }
+}
+
+/** Re-bind telephony listener after runtime permission is granted. */
+export function refreshAndroidCellularCallHoldWatch(): void {
+  const mod = getNativeModule();
+  if (!mod?.refreshCellularCallHoldTelephony) return;
+  try {
+    mod.refreshCellularCallHoldTelephony();
+  } catch {
+    // ignore
+  }
 }
 
 /** Audio-mode + telephony watcher when READ_PHONE_STATE is granted at runtime. */

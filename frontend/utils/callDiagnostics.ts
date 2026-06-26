@@ -573,6 +573,35 @@ export function hasLastCallDiagnostics(): boolean {
   return getLastCallDiagnosticEntries().length > 0 || lastOutcomeSummary !== null;
 }
 
+/** Short preview for the home-screen debug button. */
+export function getLastCallDebugPreview(): string {
+  const summary = getLastCallDiagnosticsSummary();
+  const snap = summary.snapshot;
+  const holdEvents = getLastCallDiagnosticEntries().filter((e) => {
+    if (
+      e.eventType === 'call_hold_started' ||
+      e.eventType === 'call_hold_ended' ||
+      e.eventType === 'gsm_detected' ||
+      e.eventType === 'gsm_answered' ||
+      e.eventType === 'gsm_ended'
+    ) {
+      return true;
+    }
+    if (e.eventType !== 'info') return false;
+    const blob = JSON.stringify(e.details).toLowerCase();
+    return blob.includes('hold') || blob.includes('gsm') || blob.includes('cellular');
+  });
+  const lastHold = holdEvents.slice(-3).map((e) => `${e.eventType}:${JSON.stringify(e.details).slice(0, 80)}`);
+  return [
+    `Call: ${summary.callId ?? '—'}`,
+    `Ended: ${summary.endedAt ?? 'active/unknown'}`,
+    `System hold: ${snap?.systemCallHold ?? '—'} | Peer hold: ${snap?.peerCallHold ?? '—'}`,
+    `GSM pending: ${snap?.gsmInterruptPending ?? '—'}`,
+    `Logs: ${summary.entryCount} | Issues: ${summary.issueCount}`,
+    lastHold.length ? `Recent: ${lastHold.join(' | ')}` : 'Recent hold/GSM: none',
+  ].join('\n');
+}
+
 function archiveLastCall(reason: string): void {
   const id = activeCallId;
   if (!id) return;

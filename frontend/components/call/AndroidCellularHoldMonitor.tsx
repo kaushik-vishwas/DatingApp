@@ -1,6 +1,8 @@
 import { useEffect, useRef } from 'react';
 import { Platform } from 'react-native';
 import {
+  ensureAndroidReadPhoneStatePermission,
+  refreshAndroidCellularCallHoldWatch,
   startAndroidCellularCallHoldWatch,
   stopAndroidCellularCallHoldWatch,
   subscribeAndroidCellularCallHold,
@@ -27,14 +29,15 @@ export function AndroidCellularHoldMonitor({
   const holdActiveRef = useRef(false);
   onSystemHoldChangeRef.current = onSystemHoldChange;
 
-  const applyHoldState = (next: boolean): void => {
+  const applyHoldState = (next: boolean, details?: Record<string, unknown>): void => {
     if (holdActiveRef.current === next) return;
     holdActiveRef.current = next;
     if (next) {
-      callDiag.holdStarted('local_system');
+      callDiag.holdStarted('local_system', details);
     } else {
-      callDiag.holdEnded('local_system');
+      callDiag.holdEnded('local_system', details);
     }
+    callDiag.info(next ? 'cellular_hold_monitor_on' : 'cellular_hold_monitor_off', details ?? {});
     onSystemHoldChangeRef.current(next);
   };
 
@@ -42,6 +45,16 @@ export function AndroidCellularHoldMonitor({
     if (!enabled || Platform.OS !== 'android') {
       return;
     }
+
+    let cancelled = false;
+    void (async () => {
+      const granted = await ensureAndroidReadPhoneStatePermission();
+      if (cancelled) return;
+      callDiag.info('cellular_hold_permission', { readPhoneStateGranted: granted });
+      if (granted) {
+        refreshAndroidCellularCallHoldWatch();
+      }
+    })();
 
     const unsubCellular = subscribeAndroidCellularCallHold(({ active, audioMode, source }) => {
       const modeLabel =
@@ -57,20 +70,23 @@ export function AndroidCellularHoldMonitor({
         markGsmTimeline('T1_audio_focus_lost');
         callDiag.gsmDetected({ audioMode, modeLabel, source, samsung });
         callDiag.gsmAnswered({ audioMode, modeLabel, source, samsung });
-        applyHoldState(true);
+        applyHoldState(true, { audioMode, modeLabel, source, samsung });
         return;
       }
       setGsmInterruptPending(false);
       markGsmTimeline('T6_gsm_ended');
       callDiag.gsmEnded({ audioMode, modeLabel, source, samsung });
-      applyHoldState(false);
+      applyHoldState(false, { audioMode, modeLabel, source, samsung });
     });
     startAndroidCellularCallHoldWatch();
+    callDiag.info('cellular_hold_watch_started', { enabled: true });
 
     return () => {
+      cancelled = true;
       unsubCellular();
       stopAndroidCellularCallHoldWatch();
       holdActiveRef.current = false;
+      callDiag.info('cellular_hold_watch_stopped', {});
     };
   }, [enabled]);
 

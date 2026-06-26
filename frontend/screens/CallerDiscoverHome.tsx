@@ -38,6 +38,7 @@ import { getReceiverPresenceInfo, sortDiscoverReceivers } from '../utils/receive
 import { withTimeout } from '../utils/withTimeout';
 import SelectoLogo from '../assets/SelectoLogo.png'
 import { CallDiagnosticsTopBarButton } from '../components/call/CallDiagnosticsTopBarButton';
+import { LastCallDebugFab } from '../components/call/LastCallDebugFab';
 import { PresenceDiagnosticsTopBarButton } from '../components/call/PresenceDiagnosticsTopBarButton';
 import NoticeBg from '../assets/noticeBg.png'
 
@@ -809,6 +810,11 @@ export default function CallerDiscoverHome(): React.JSX.Element {
           setAppliedFilters({ ...modalDraft });
           setFilterModalVisible(false);
         }}
+      />
+      {/* DEBUG: comment out LastCallDebugFab when GSM hold is verified */}
+      <LastCallDebugFab
+        bottomOffset={contentBottomPadding + 12}
+        onPress={() => navigation.navigate('CallDiagnostics')}
       />
     </SafeAreaView>
   );
