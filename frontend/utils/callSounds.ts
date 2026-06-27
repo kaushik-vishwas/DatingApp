@@ -245,9 +245,12 @@ export async function startIncomingRingtone(): Promise<() => Promise<void>> {
 }
 
 let activeOutboundRingtoneStop: (() => Promise<void>) | null = null;
+/** Bumped on every stop so in-flight `startOutboundRingtoneLoop` cannot register after cancel. */
+let outboundRingEpoch = 0;
 
 /** Stop outbound ringtone immediately (e.g. caller cancelled while ringing). */
 export async function stopOutboundRingtonePlayback(): Promise<void> {
+  outboundRingEpoch += 1;
   const stop = activeOutboundRingtoneStop;
   activeOutboundRingtoneStop = null;
   if (stop) {
@@ -258,9 +261,24 @@ export async function stopOutboundRingtonePlayback(): Promise<void> {
 /** Looping phone-style ring while the caller waits for the receiver to answer. */
 export async function startOutboundRingtoneLoop(): Promise<() => Promise<void>> {
   await stopOutboundRingtonePlayback();
+  const startEpoch = outboundRingEpoch;
   await ensureOutboundRingtoneAudioMode();
   const sound = new Audio.Sound();
   await sound.loadAsync(CALLER_RINGTONE, { shouldPlay: true, isLooping: true, volume: 0.92 });
+
+  if (startEpoch !== outboundRingEpoch) {
+    try {
+      await sound.stopAsync();
+    } catch {
+      // ignore
+    }
+    try {
+      await sound.unloadAsync();
+    } catch {
+      // ignore
+    }
+    return async () => {};
+  }
 
   const stop = async () => {
     if (activeOutboundRingtoneStop === stop) {

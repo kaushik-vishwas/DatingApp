@@ -589,8 +589,19 @@ export async function ensureIncomingCallNotificationSetup(): Promise<void> {
   Notifications.setNotificationHandler({
     handleNotification: async (notification) => {
       const isIncomingCall = notification.request.content.data?.type === 'call_incoming';
+      const isActiveVoiceCall = notification.request.content.data?.type === 'active_voice_call';
       const appActive = AppState.currentState === 'active';
       const identifier = notification.request.identifier ?? '';
+
+      if (isActiveVoiceCall) {
+        return {
+          shouldShowAlert: !appActive,
+          shouldPlaySound: false,
+          shouldSetBadge: false,
+          shouldShowBanner: !appActive,
+          shouldShowList: !appActive,
+        };
+      }
 
       // Remote FCM duplicate while background: suppress a second tray row.
       // Local incoming-{callId} notifications must still play channel ringtone.

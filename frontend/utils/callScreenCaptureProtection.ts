@@ -15,28 +15,33 @@ function parseEnvBool(value: string | undefined, defaultValue: boolean): boolean
 
 /**
  * Toggle call-screen screenshot / screen-recording protection.
- * Set `EXPO_PUBLIC_CALL_SCREEN_CAPTURE_PROTECTION=false` in frontend/.env to disable.
- * Default: true (protection on).
+ * Set `EXPO_PUBLIC_CALL_SCREEN_CAPTURE_PROTECTION=true` in frontend/.env to block capture.
+ * Default: false (screen recording allowed on call screen).
  */
 export function isCallScreenCaptureProtectionEnabled(): boolean {
   const fromEnv = process.env.EXPO_PUBLIC_CALL_SCREEN_CAPTURE_PROTECTION;
   if (fromEnv !== undefined && fromEnv.trim() !== '') {
-    return parseEnvBool(fromEnv, true);
+    return parseEnvBool(fromEnv, false);
   }
 
   const extra = Constants.expoConfig?.extra?.callScreenCaptureProtection;
   if (typeof extra === 'boolean') return extra;
-  if (typeof extra === 'string') return parseEnvBool(extra, true);
+  if (typeof extra === 'string') return parseEnvBool(extra, false);
 
-  return true;
+  return false;
 }
 
 /** Blocks screenshots and screen recording while `active` is true (Android + iOS). */
 export function useCallScreenCaptureProtection(active: boolean): void {
   useEffect(() => {
-    if (!active || !isCallScreenCaptureProtectionEnabled() || Platform.OS === 'web') {
+    if (Platform.OS === 'web') return;
+
+    if (!isCallScreenCaptureProtectionEnabled()) {
+      void ScreenCapture.allowScreenCaptureAsync(CAPTURE_KEY).catch(() => {});
       return;
     }
+
+    if (!active) return;
 
     void ScreenCapture.preventScreenCaptureAsync(CAPTURE_KEY).catch(() => {});
 

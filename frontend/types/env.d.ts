@@ -9,7 +9,7 @@ declare namespace NodeJS {
     /** Set to 1 only for Samsung notification debug APK builds */
     EXPO_PUBLIC_INCOMING_CALL_NOTIF_DEBUG?: string;
     EXPO_PUBLIC_INCOMING_CALL_NOTIF_LOG?: string;
-    /** true/1 = block screenshots & screen recording on active call screen; false/0 = allow */
+    /** true/1 = block call-screen recording; false/0 or unset = allow (default) */
     EXPO_PUBLIC_CALL_SCREEN_CAPTURE_PROTECTION?: string;
   }
 }

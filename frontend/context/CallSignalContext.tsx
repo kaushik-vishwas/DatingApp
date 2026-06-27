@@ -348,6 +348,7 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   }, [user?.role, user?.isAvailable]);
 
   const dismissCallerVoiceCallScreen = useCallback((): void => {
+    void stopOutboundRingtonePlayback();
     const nav = navigationRef.current;
     if (!nav?.isReady()) return;
     try {
@@ -1475,6 +1476,9 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
         if (!payload.accepted) {
           clearOutgoingCallSessionRef.current(payload.callId);
+          if (userRoleRef.current === 'caller') {
+            void stopOutboundRingtonePlayback();
+          }
           if (!waiter) {
             Alert.alert('Call unavailable', 'Receiver is not available right now.');
           }
@@ -1563,6 +1567,9 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         rejectedIncomingCallIdsRef.current.delete(payload.callId);
         acceptedIncomingCallIdsRef.current.delete(payload.callId);
         clearOutgoingCallSessionRef.current(payload.callId);
+        if (userRoleRef.current === 'caller') {
+          void stopOutboundRingtonePlayback();
+        }
 
         if (userRoleRef.current === 'receiver') {
           const onVoiceCallScreen = Boolean(remoteCallEndedHandlerRef.current);

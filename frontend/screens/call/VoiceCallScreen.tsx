@@ -33,7 +33,7 @@ import { useCallSignals } from '../../context/CallSignalContext';
 import { useCallerMessageEligibilityOptional } from '../../context/CallerMessageEligibilityContext';
 import { useAuth } from '../../context/AuthContext';
 import { callApi, getErrorMessage, getJwt, getResolvedApiBaseUrl, profileApi } from '../../services/api';
-import { ensureIncomingRingtonePlaying, startOutboundRingtoneLoop } from '../../utils/callSounds';
+import { ensureIncomingRingtonePlaying, startOutboundRingtoneLoop, stopOutboundRingtonePlayback } from '../../utils/callSounds';
 import {
   applyVoiceCallOutputRoute,
   isBluetoothVoiceOutputAvailable,
@@ -42,6 +42,7 @@ import {
 import { profileImageUrlForStreamOrNetwork, resolveProfileImageSource } from '../../utils/avatarSource';
 import { AvatarSoundWaveRings } from '../../components/call/AvatarVoiceWaves';
 import { useCallScreenCaptureProtection } from '../../utils/callScreenCaptureProtection';
+import { useActiveCallOngoingNotification } from '../../utils/activeCallOngoingNotification';
 import { AndroidCellularHoldMonitor } from '../../components/call/AndroidCellularHoldMonitor';
 import InCallTalktimeRechargeModal from '../../components/call/InCallTalktimeRechargeModal';
 import type { StreamMicControl } from '../../components/call/StreamCallAvatarExtras';
@@ -1039,6 +1040,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
   };
 
   const finishCallerCallEnd = async (): Promise<void> => {
+    void stopOutboundRingtonePlayback();
     const startedAt = Date.now();
     const timeoutMs =
       systemCallHoldRef.current || isSamsungOneUi6OrNewer()
@@ -1555,16 +1557,15 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
 
   useEffect(() => {
     if (user?.role !== 'caller' || outgoingCallerPhase !== 'ringing') return;
-    let stopFn: (() => Promise<void>) | undefined;
     void (async () => {
       try {
-        stopFn = await startOutboundRingtoneLoop();
+        await startOutboundRingtoneLoop();
       } catch {
         // ignore ring load failures
       }
     })();
     return () => {
-      void stopFn?.();
+      void stopOutboundRingtonePlayback();
     };
   }, [user?.role, outgoingCallerPhase, ringingBootstrapCallId]);
 
@@ -2331,6 +2332,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
   const shellPeerEmpty = receiverAvailabilitySession && receiverSessionPhase === 'waiting';
   const peerDisplayName =
     ('peerName' in callParams ? callParams.peerName : undefined) || 'Contact';
+  useActiveCallOngoingNotification(showStreamChrome && talkActive, peerDisplayName);
   const shellStatusLabel = receiverAvailabilitySession
     ? systemCallHold
       ? 'Your call is on hold'
