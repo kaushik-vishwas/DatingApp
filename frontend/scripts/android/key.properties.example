@@ -1,0 +1,8 @@
+# Copy to android/key.properties before release builds (after expo prebuild if needed).
+# Keep this file and your .keystore outside git — use android-signing/ locally.
+#
+# storeFile path is relative to android/app/
+storeFile=release.keystore
+storePassword=YOUR_STORE_PASSWORD
+keyAlias=YOUR_KEY_ALIAS
+keyPassword=YOUR_KEY_PASSWORD

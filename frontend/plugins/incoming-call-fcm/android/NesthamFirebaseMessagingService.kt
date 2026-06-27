@@ -1,4 +1,4 @@
-package com.kaushikvishwas.frontend.fcm
+package com.selecto.app.fcm
 
 import com.google.firebase.messaging.RemoteMessage
 import expo.modules.notifications.notifications.RemoteMessageSerializer

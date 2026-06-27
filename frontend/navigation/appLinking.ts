@@ -11,7 +11,7 @@ import {
 import { logIncomingCallNotif } from '../utils/incomingCallNotificationDebug';
 import { readPendingIncomingCallTap } from '../utils/pendingIncomingCallTapStorage';
 
-const APP_PREFIXES = ['nestham://', 'com.kaushikvishwas.frontend://'];
+const APP_PREFIXES = ['nestham://', 'com.selecto.app://'];
 
 function urlFromNotificationResponse(
   response: import('expo-notifications').NotificationResponse | null

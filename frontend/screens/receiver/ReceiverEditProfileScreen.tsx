@@ -2,7 +2,6 @@
   import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
   import React, { useEffect, useState } from 'react';
   import * as DocumentPicker from 'expo-document-picker';
-  import * as ImagePicker from 'expo-image-picker';
   import {
     Alert,
     Image,
@@ -49,46 +48,17 @@
   type PickedDocument = { uri: string; name?: string; mimeType?: string };
 
   async function pickKycDocument(onPicked: (doc: PickedDocument) => void): Promise<void> {
-    Alert.alert('Upload document', 'Choose source', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Photo library',
-        onPress: async () => {
-          const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-          if (!perm.granted) {
-            Alert.alert('Permission', 'Photo library access is required.');
-            return;
-          }
-          const result = await ImagePicker.launchImageLibraryAsync({
-            mediaTypes: ImagePicker.MediaTypeOptions.Images,
-            quality: 0.9,
-          });
-          if (result.canceled || !result.assets[0]) return;
-          const a = result.assets[0];
-          onPicked({
-            uri: a.uri,
-            name: a.fileName ?? 'document.jpg',
-            mimeType: a.mimeType ?? 'image/jpeg',
-          });
-        },
-      },
-      {
-        text: 'Document (PDF)',
-        onPress: async () => {
-          const result = await DocumentPicker.getDocumentAsync({
-            type: ['application/pdf', 'image/*'],
-            copyToCacheDirectory: true,
-          });
-          if (result.canceled || !result.assets[0]) return;
-          const a = result.assets[0];
-          onPicked({
-            uri: a.uri,
-            name: a.name ?? 'document.pdf',
-            mimeType: a.mimeType ?? 'application/pdf',
-          });
-        },
-      },
-    ]);
+    const result = await DocumentPicker.getDocumentAsync({
+      type: ['application/pdf', 'image/*'],
+      copyToCacheDirectory: true,
+    });
+    if (result.canceled || !result.assets[0]) return;
+    const a = result.assets[0];
+    onPicked({
+      uri: a.uri,
+      name: a.name ?? 'document.pdf',
+      mimeType: a.mimeType ?? 'application/pdf',
+    });
   }
 
   async function ensureUploadedUrl(doc: PickedDocument, fileName: string): Promise<string> {

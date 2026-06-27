@@ -1,5 +1,4 @@
 import * as DocumentPicker from 'expo-document-picker';
-import * as ImagePicker from 'expo-image-picker';
 import React from 'react';
 import {
   Alert,
@@ -24,46 +23,17 @@ type Props = NativeStackScreenProps<CompleteProfileStackParamList, 'DocumentUplo
 async function pickAadhaarSide(
   onPicked: (doc: PickedDocument) => void
 ): Promise<void> {
-  Alert.alert('Upload Aadhaar', 'Choose source', [
-    { text: 'Cancel', style: 'cancel' },
-    {
-      text: 'Photo library',
-      onPress: async () => {
-        const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-        if (!perm.granted) {
-          Alert.alert('Permission', 'Photo library access is required.');
-          return;
-        }
-        const result = await ImagePicker.launchImageLibraryAsync({
-          mediaTypes: ImagePicker.MediaTypeOptions.Images,
-          quality: 0.9,
-        });
-        if (result.canceled || !result.assets[0]) return;
-        const a = result.assets[0];
-        onPicked({
-          uri: a.uri,
-          name: a.fileName ?? 'aadhaar.jpg',
-          mimeType: a.mimeType ?? 'image/jpeg',
-        });
-      },
-    },
-    {
-      text: 'Document (PDF)',
-      onPress: async () => {
-        const result = await DocumentPicker.getDocumentAsync({
-          type: ['application/pdf', 'image/*'],
-          copyToCacheDirectory: true,
-        });
-        if (result.canceled || !result.assets[0]) return;
-        const a = result.assets[0];
-        onPicked({
-          uri: a.uri,
-          name: a.name ?? 'document.pdf',
-          mimeType: a.mimeType ?? 'application/pdf',
-        });
-      },
-    },
-  ]);
+  const result = await DocumentPicker.getDocumentAsync({
+    type: ['application/pdf', 'image/*'],
+    copyToCacheDirectory: true,
+  });
+  if (result.canceled || !result.assets[0]) return;
+  const a = result.assets[0];
+  onPicked({
+    uri: a.uri,
+    name: a.name ?? 'document.pdf',
+    mimeType: a.mimeType ?? 'application/pdf',
+  });
 }
 
 export default function DocumentUploadScreen({ navigation }: Props): React.JSX.Element {

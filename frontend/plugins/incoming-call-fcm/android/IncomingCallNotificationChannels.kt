@@ -1,4 +1,4 @@
-package com.kaushikvishwas.frontend.fcm
+package com.selecto.app.fcm
 
 import android.app.NotificationChannel
 import android.app.NotificationManager

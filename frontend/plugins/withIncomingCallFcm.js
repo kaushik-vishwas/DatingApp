@@ -7,7 +7,7 @@ const {
   AndroidConfig,
 } = require('@expo/config-plugins');
 
-const APP_PACKAGE = 'com.kaushikvishwas.frontend';
+const APP_PACKAGE = 'com.selecto.app';
 const FCM_SERVICE = `${APP_PACKAGE}.fcm.NesthamFirebaseMessagingService`;
 const EXPO_FCM_SERVICE = 'expo.modules.notifications.service.ExpoFirebaseMessagingService';
 const FIREBASE_MESSAGING_DEP = 'implementation("com.google.firebase:firebase-messaging")';

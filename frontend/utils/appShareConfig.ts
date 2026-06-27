@@ -13,7 +13,7 @@ export type AppShareConfig = {
   referralLandingBaseUrl: string;
 };
 
-const ANDROID_PACKAGE = 'com.kaushikvishwas.frontend';
+const ANDROID_PACKAGE = 'com.selecto.app';
 
 function readExtraShare(): Record<string, unknown> {
   const c = Constants as {
