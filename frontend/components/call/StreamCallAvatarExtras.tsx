@@ -132,7 +132,7 @@ export function StreamMicControlBridge({
         onUserMuteToggled?.(nextMuted);
         if (nextMuted) {
           await microphone.disable();
-        } else {
+        } else if (!forceMicOffRef.current) {
           await microphone.enable();
         }
       },
@@ -391,6 +391,9 @@ const REMOTE_MUTE_ON_MS = 180;
 const REMOTE_MUTE_OFF_MS = 120;
 const REMOTE_MUTE_POLL_MS = 80;
 
+/** Suppress false "Muted" badge while remote mic recovers after GSM hold ends. */
+const PEER_HOLD_CLEAR_MUTE_GRACE_MS = 2500;
+
 export function StreamParticipantMutedIndicator({
   peerOnHold = false,
   talkActive = false,
@@ -408,7 +411,16 @@ export function StreamParticipantMutedIndicator({
   const audioOffSinceRef = useRef<number | null>(null);
   const audioOnSinceRef = useRef<number | null>(null);
   const peerOnHoldRef = useRef(peerOnHold);
+  const prevPeerOnHoldRef = useRef(peerOnHold);
+  const peerHoldClearedAtRef = useRef<number | null>(null);
   peerOnHoldRef.current = peerOnHold;
+
+  useEffect(() => {
+    if (prevPeerOnHoldRef.current && !peerOnHold) {
+      peerHoldClearedAtRef.current = Date.now();
+    }
+    prevPeerOnHoldRef.current = peerOnHold;
+  }, [peerOnHold]);
 
   useEffect(() => {
     if (callingState !== CallingState.JOINED || !remoteParticipant) {
@@ -425,6 +437,17 @@ export function StreamParticipantMutedIndicator({
 
     const evaluate = (): void => {
       if (peerOnHoldRef.current) {
+        audioOffSinceRef.current = null;
+        audioOnSinceRef.current = null;
+        setRemoteMuted(false);
+        return;
+      }
+
+      const holdClearedAt = peerHoldClearedAtRef.current;
+      if (
+        holdClearedAt !== null &&
+        Date.now() - holdClearedAt < PEER_HOLD_CLEAR_MUTE_GRACE_MS
+      ) {
         audioOffSinceRef.current = null;
         audioOnSinceRef.current = null;
         setRemoteMuted(false);
@@ -534,15 +557,17 @@ export function StreamLocalHoldMicBridge({
   return null;
 }
 
-/** Pause remote participant audio during GSM / peer hold / peer mute (both sides silent). */
+/**
+ * Pause remote participant audio during GSM / peer hold only.
+ * Peer mute is handled by Stream mic publish state — RN setParticipantVolume(0) often
+ * does not restore after undefined, which breaks audio after mute → unmute or hold end.
+ */
 export function StreamHoldAudioBridge({
   peerOnHold = false,
   systemOnHold = false,
-  peerMuted = false,
 }: {
   peerOnHold?: boolean;
   systemOnHold?: boolean;
-  peerMuted?: boolean;
 }): null {
   const call = useCall();
   const { useRemoteParticipants } = useCallStateHooks();
@@ -552,44 +577,69 @@ export function StreamHoldAudioBridge({
 
   const peerOnHoldRef = useRef(peerOnHold);
   const systemOnHoldRef = useRef(systemOnHold);
-  const peerMutedRef = useRef(peerMuted);
   peerOnHoldRef.current = peerOnHold;
   systemOnHoldRef.current = systemOnHold;
-  peerMutedRef.current = peerMuted;
+
+  const wasPausedRef = useRef(false);
 
   const shouldPauseRemote = (): boolean =>
-    peerOnHoldRef.current || systemOnHoldRef.current || peerMutedRef.current;
+    peerOnHoldRef.current || systemOnHoldRef.current;
 
   useEffect(() => {
     if (!call) return;
 
-    const applyVolumes = (): void => {
-      const pause = shouldPauseRemote();
+    const setRemoteVolume = (level: number | undefined): void => {
       for (const participant of remoteParticipantsRef.current) {
         if (!participant?.sessionId || participant.isLocalParticipant) continue;
         try {
-          call.speaker.setParticipantVolume(participant.sessionId, pause ? 0 : undefined);
+          call.speaker.setParticipantVolume(participant.sessionId, level);
         } catch {
           // ignore
         }
       }
     };
 
-    applyVolumes();
-    const intervalId = setInterval(applyVolumes, 50);
-    return () => {
-      clearInterval(intervalId);
-      if (shouldPauseRemote()) return;
-      for (const participant of remoteParticipantsRef.current) {
-        if (!participant?.sessionId || participant.isLocalParticipant) continue;
-        try {
-          call.speaker.setParticipantVolume(participant.sessionId, undefined);
-        } catch {
-          // ignore
-        }
+    const silenceRemote = (): void => setRemoteVolume(0);
+
+    const restoreRemote = (): void => {
+      // RN often ignores `undefined` — use full volume after hold ends.
+      setRemoteVolume(1);
+    };
+
+    let restoreTimers: ReturnType<typeof setTimeout>[] = [];
+
+    const scheduleRestoreRetries = (): void => {
+      restoreRemote();
+      restoreTimers = [100, 400, 1000].map((ms) => setTimeout(restoreRemote, ms));
+    };
+
+    const tick = (): void => {
+      const pause = shouldPauseRemote();
+      if (pause) {
+        silenceRemote();
+        wasPausedRef.current = true;
+        return;
+      }
+      if (wasPausedRef.current) {
+        scheduleRestoreRetries();
+        wasPausedRef.current = false;
       }
     };
-  }, [call, peerOnHold, systemOnHold, peerMuted, remoteParticipants]);
+
+    tick();
+    const intervalId = setInterval(tick, 50);
+
+    return () => {
+      clearInterval(intervalId);
+      for (const timerId of restoreTimers) {
+        clearTimeout(timerId);
+      }
+      if (wasPausedRef.current) {
+        scheduleRestoreRetries();
+        wasPausedRef.current = false;
+      }
+    };
+  }, [call, peerOnHold, systemOnHold, remoteParticipants]);
 
   return null;
 }

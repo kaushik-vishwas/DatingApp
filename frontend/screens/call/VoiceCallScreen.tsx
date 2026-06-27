@@ -154,7 +154,6 @@ type StreamCallAvatarExtrasModule = {
   StreamHoldAudioBridge: React.ComponentType<{
     peerOnHold?: boolean;
     systemOnHold?: boolean;
-    peerMuted?: boolean;
   }>;
   StreamLocalHoldMicBridge: React.ComponentType<{
     systemOnHold?: boolean;
@@ -590,6 +589,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
   const peerHoldPausedMicRef = useRef(false);
   const peerCallHoldRef = useRef(false);
   const lastPeerHoldClearAtRef = useRef(0);
+  const recoverAfterPeerHoldClearRef = useRef<() => Promise<void>>(async () => {});
   const gsmHoldMutedPeerRef = useRef(false);
   const receiverAvailabilitySessionRef = useRef(receiverAvailabilitySession);
   const userAvailableRef = useRef(Boolean(user?.isAvailable));
@@ -630,10 +630,12 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
       return;
     }
     lastPeerHoldClearAtRef.current = Date.now();
+    setPeerCallMuted(false);
     callDiag.holdEnded('remote_socket');
     if (!systemCallHoldRef.current) {
       setGsmInterruptPending(false, 'peer_hold_cleared');
     }
+    void recoverAfterPeerHoldClearRef.current();
   }, []);
 
   const applyPeerMuteFromRemote = useCallback((muted: boolean) => {
@@ -2049,6 +2051,19 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
     }
   }, []);
 
+  const recoverAfterPeerHoldClear = useCallback(async (): Promise<void> => {
+    callDiag.info('peer_hold_recovery_start', { role: userRoleRef.current });
+    try {
+      await applyVoiceCallAudioMode(speakerOnRef.current, bluetoothOnRef.current);
+      callDiag.success('peer_hold_audio_mode_restored');
+    } catch (e) {
+      callDiag.error('peer_hold_audio_restore_failed', {
+        message: e instanceof Error ? e.message : String(e),
+      });
+    }
+  }, []);
+  recoverAfterPeerHoldClearRef.current = recoverAfterPeerHoldClear;
+
   const clearCallHoldStateForTeardown = useCallback(() => {
     if (systemCallHoldRef.current) {
       systemCallHoldRef.current = false;
@@ -2779,7 +2794,6 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
             <streamAvatarExtras.StreamHoldAudioBridge
               peerOnHold={peerCallHold}
               systemOnHold={systemCallHold}
-              peerMuted={peerCallMuted}
             />
           ) : null}
           <View style={[styles.overlay, { paddingTop: Math.max(insets.top + 16, 36) }]}>
