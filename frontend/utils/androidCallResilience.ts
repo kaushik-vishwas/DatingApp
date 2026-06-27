@@ -11,7 +11,6 @@ type IncomingCallAndroidResilience = {
 };
 
 let nativeModule: IncomingCallAndroidResilience | null | undefined;
-let batteryOptRequestedThisSession = false;
 
 function getNativeModule(): IncomingCallAndroidResilience | null {
   if (Platform.OS !== 'android') return null;
@@ -24,7 +23,7 @@ function getNativeModule(): IncomingCallAndroidResilience | null {
   return nativeModule;
 }
 
-/** Start call foreground service + request battery-opt exemption (Android only). */
+/** Start call foreground service (Android only). No optional permission prompts. */
 export async function activateAndroidCallResilience(callLabel: string): Promise<void> {
   if (Platform.OS !== 'android') return;
   const mod = getNativeModule();
@@ -33,14 +32,6 @@ export async function activateAndroidCallResilience(callLabel: string): Promise<
   const label = callLabel.trim() || 'active_call';
   try {
     mod.startCallWebSocketForegroundService?.(label);
-  } catch {
-    // ignore
-  }
-
-  if (batteryOptRequestedThisSession) return;
-  batteryOptRequestedThisSession = true;
-  try {
-    await mod.requestIgnoreBatteryOptimizationsAsync?.();
   } catch {
     // ignore
   }

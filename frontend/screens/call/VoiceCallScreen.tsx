@@ -1546,7 +1546,6 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
       try {
         const perm = await Audio.getPermissionsAsync();
         if (perm.status !== 'granted') return;
-        await applyVoiceCallAudioMode(true);
         streamSdk.StreamVideoClient.getOrCreateInstance({
           apiKey: boot.apiKey,
           user: {
@@ -1557,10 +1556,15 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
           token: boot.token,
         });
       } catch {
-        // Warm-up is best-effort.
+        // Warm-up is best-effort; voice audio mode waits until join after accept.
       }
     })();
   }, [route.params, outgoingCallerPhase]);
+
+  const ringingBootstrapCallId =
+    outgoingCallerPhase === 'ringing'
+      ? getVoiceBootstrap(route.params as VoiceCallScreenParams)?.callId?.trim() ?? ''
+      : '';
 
   useEffect(() => {
     if (user?.role !== 'caller' || outgoingCallerPhase !== 'ringing') return;
@@ -1575,7 +1579,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
     return () => {
       void stopFn?.();
     };
-  }, [user?.role, outgoingCallerPhase]);
+  }, [user?.role, outgoingCallerPhase, ringingBootstrapCallId]);
 
   const outgoingPhaseCleanupRef = useRef(outgoingCallerPhase);
   outgoingPhaseCleanupRef.current = outgoingCallerPhase;

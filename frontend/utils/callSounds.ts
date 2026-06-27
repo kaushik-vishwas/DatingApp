@@ -109,6 +109,18 @@ export async function stopIncomingRingtonePlayback(): Promise<void> {
   await releaseIncomingRingtoneAudioMode();
 }
 
+async function ensureOutboundRingtoneAudioMode(): Promise<void> {
+  await Audio.setAudioModeAsync({
+    allowsRecordingIOS: false,
+    playsInSilentModeIOS: true,
+    staysActiveInBackground: false,
+    interruptionModeIOS: InterruptionModeIOS.DoNotMix,
+    interruptionModeAndroid: InterruptionModeAndroid.DoNotMix,
+    shouldDuckAndroid: false,
+    playThroughEarpieceAndroid: false,
+  });
+}
+
 export async function startOutgoingCallTone(): Promise<() => Promise<void>> {
   await ensureAudioMode();
   const sound = new Audio.Sound();
@@ -246,7 +258,7 @@ export async function stopOutboundRingtonePlayback(): Promise<void> {
 /** Looping phone-style ring while the caller waits for the receiver to answer. */
 export async function startOutboundRingtoneLoop(): Promise<() => Promise<void>> {
   await stopOutboundRingtonePlayback();
-  await ensureAudioMode();
+  await ensureOutboundRingtoneAudioMode();
   const sound = new Audio.Sound();
   await sound.loadAsync(CALLER_RINGTONE, { shouldPlay: true, isLooping: true, volume: 0.92 });
 

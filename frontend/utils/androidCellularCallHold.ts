@@ -57,24 +57,23 @@ function releaseCellularHoldListenerIfIdle(): void {
   cellularHoldSub = null;
 }
 
-/** Request READ_PHONE_STATE so telephony OFFHOOK detection works during in-app calls. */
-export async function ensureAndroidReadPhoneStatePermission(): Promise<boolean> {
+/** True when READ_PHONE_STATE is already granted (never shows a runtime prompt). */
+export async function hasAndroidReadPhoneStatePermission(): Promise<boolean> {
   if (Platform.OS !== 'android') return false;
   const permission = PermissionsAndroid.PERMISSIONS.READ_PHONE_STATE;
   try {
-    const alreadyGranted = await PermissionsAndroid.check(permission);
-    if (alreadyGranted) return true;
-    const result = await PermissionsAndroid.request(permission, {
-      title: 'Phone permission',
-      message:
-        'Allow phone state access so your in-app call can pause when you answer a cellular call.',
-      buttonPositive: 'Allow',
-      buttonNegative: 'Not now',
-    });
-    return result === PermissionsAndroid.RESULTS.GRANTED;
+    return await PermissionsAndroid.check(permission);
   } catch {
     return false;
   }
+}
+
+/**
+ * Returns whether telephony OFFHOOK detection can run.
+ * Does not request runtime permission — avoids interrupting an active call UI.
+ */
+export async function ensureAndroidReadPhoneStatePermission(): Promise<boolean> {
+  return hasAndroidReadPhoneStatePermission();
 }
 
 /** Re-bind telephony listener after runtime permission is granted. */
