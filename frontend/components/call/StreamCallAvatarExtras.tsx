@@ -2,7 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import React, { useEffect, useRef, useState } from 'react';
 import { Platform, StyleSheet, Text, View } from 'react-native';
 import { useCallStateHooks, useCall } from '@stream-io/video-react-native-sdk';
-import { CallingState, hasAudio, type StreamVideoParticipant } from '@stream-io/video-client';
+import { CallingState, type StreamVideoParticipant } from '@stream-io/video-client';
 import { AvatarSoundWaveRings } from './AvatarVoiceWaves';
 import {
   ANDROID_TALK_GSM_SUSPECT_DEBOUNCE_MS,
@@ -385,18 +385,10 @@ export function StreamRemotePeerLeftBridge({
   return null;
 }
 
-/** Peer hold/mute badges on the remote avatar. Hold uses socket; mute reads Stream publish state. */
-const REMOTE_MUTE_JOIN_GRACE_MS = 1500;
-const REMOTE_MUTE_ON_MS = 180;
-const REMOTE_MUTE_OFF_MS = 120;
-const REMOTE_MUTE_POLL_MS = 80;
-
-/** Suppress false "Muted" badge while remote mic recovers after GSM hold ends. */
-const PEER_HOLD_CLEAR_MUTE_GRACE_MS = 2500;
-
+/** Peer hold/mute badges on the remote avatar. Both use socket state (not Stream mic detection). */
 export function StreamParticipantMutedIndicator({
   peerOnHold = false,
-  talkActive = false,
+  peerMuted = false,
 }: {
   peerOnHold?: boolean;
   peerMuted?: boolean;
@@ -406,96 +398,10 @@ export function StreamParticipantMutedIndicator({
   const remoteParticipants = useRemoteParticipants();
   const remoteParticipant = remoteParticipants[0];
   const callingState = useCallCallingState();
-  const [remoteMuted, setRemoteMuted] = useState(false);
-  const remoteJoinedAtRef = useRef<number | null>(null);
-  const audioOffSinceRef = useRef<number | null>(null);
-  const audioOnSinceRef = useRef<number | null>(null);
-  const peerOnHoldRef = useRef(peerOnHold);
-  const prevPeerOnHoldRef = useRef(peerOnHold);
-  const peerHoldClearedAtRef = useRef<number | null>(null);
-  peerOnHoldRef.current = peerOnHold;
-
-  useEffect(() => {
-    if (prevPeerOnHoldRef.current && !peerOnHold) {
-      peerHoldClearedAtRef.current = Date.now();
-    }
-    prevPeerOnHoldRef.current = peerOnHold;
-  }, [peerOnHold]);
-
-  useEffect(() => {
-    if (callingState !== CallingState.JOINED || !remoteParticipant) {
-      remoteJoinedAtRef.current = null;
-      audioOffSinceRef.current = null;
-      audioOnSinceRef.current = null;
-      setRemoteMuted(false);
-      return;
-    }
-
-    if (remoteJoinedAtRef.current === null) {
-      remoteJoinedAtRef.current = Date.now();
-    }
-
-    const evaluate = (): void => {
-      if (peerOnHoldRef.current) {
-        audioOffSinceRef.current = null;
-        audioOnSinceRef.current = null;
-        setRemoteMuted(false);
-        return;
-      }
-
-      const holdClearedAt = peerHoldClearedAtRef.current;
-      if (
-        holdClearedAt !== null &&
-        Date.now() - holdClearedAt < PEER_HOLD_CLEAR_MUTE_GRACE_MS
-      ) {
-        audioOffSinceRef.current = null;
-        audioOnSinceRef.current = null;
-        setRemoteMuted(false);
-        return;
-      }
-
-      const joinedAt = remoteJoinedAtRef.current;
-      const inGrace =
-        joinedAt !== null && Date.now() - joinedAt < REMOTE_MUTE_JOIN_GRACE_MS;
-      if (inGrace) {
-        audioOffSinceRef.current = null;
-        audioOnSinceRef.current = null;
-        setRemoteMuted(false);
-        return;
-      }
-
-      const micLive = hasAudio(remoteParticipant);
-      const now = Date.now();
-
-      if (!micLive) {
-        audioOnSinceRef.current = null;
-        if (audioOffSinceRef.current === null) {
-          audioOffSinceRef.current = now;
-        }
-        if (now - audioOffSinceRef.current >= REMOTE_MUTE_ON_MS) {
-          setRemoteMuted(true);
-        }
-        return;
-      }
-
-      audioOffSinceRef.current = null;
-      if (audioOnSinceRef.current === null) {
-        audioOnSinceRef.current = now;
-      }
-      if (now - audioOnSinceRef.current >= REMOTE_MUTE_OFF_MS) {
-        audioOnSinceRef.current = null;
-        setRemoteMuted(false);
-      }
-    };
-
-    evaluate();
-    const intervalId = setInterval(evaluate, REMOTE_MUTE_POLL_MS);
-    return () => clearInterval(intervalId);
-  }, [callingState, remoteParticipant, peerOnHold]);
 
   const joined = callingState === CallingState.JOINED && Boolean(remoteParticipant);
   const showHold = peerOnHold;
-  const showMuted = !showHold && remoteMuted && joined;
+  const showMuted = !showHold && peerMuted && joined;
 
   if (!showHold && !showMuted) return null;
 
