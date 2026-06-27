@@ -71,10 +71,6 @@ import {
   getCallSocketIoOptions,
 } from '../../utils/androidCallNetwork';
 import {
-  activateAndroidCallResilience,
-  deactivateAndroidCallResilience,
-} from '../../utils/androidCallResilience';
-import {
   registerCallKeepaliveSocket,
   setCallKeepaliveActive,
   registerCallHoldKeepaliveReader,
@@ -479,15 +475,6 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
     };
   }, [ready]);
 
-  useEffect(() => {
-    if (Platform.OS !== 'android' || !ready) return;
-    const callId = callIdRef.current.trim();
-    if (!callId) return;
-    void activateAndroidCallResilience(callId);
-    return () => {
-      deactivateAndroidCallResilience();
-    };
-  }, [ready]);
   const streamJoinAttemptRef = useRef(0);
   const displayNameRef = useRef(user?.name ?? 'User');
   const displayImageRef = useRef(user?.profileImage);
@@ -1785,7 +1772,6 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
       detachSocketIoProbe('voice_duplicate');
       detachStreamCallProbe();
       teardownCallKeepalive();
-      deactivateAndroidCallResilience();
       const s = signalSocketRef.current;
       if (s) {
         s.removeAllListeners();

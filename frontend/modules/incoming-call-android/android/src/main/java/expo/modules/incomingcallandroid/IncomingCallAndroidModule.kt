@@ -66,22 +66,6 @@ class IncomingCallAndroidModule : Module() {
       true
     }
 
-    Function("startCallWebSocketForegroundService") { callLabel: String ->
-      val context = appContext.reactContext ?: return@Function false
-      AndroidCallResilience.startCallWebSocketForegroundService(context, callLabel)
-    }
-
-    Function("stopCallWebSocketForegroundService") {
-      val context = appContext.reactContext ?: return@Function Unit
-      AndroidCallResilience.stopCallWebSocketForegroundService(context)
-    }
-
-    AsyncFunction("requestIgnoreBatteryOptimizationsAsync") {
-      val context = appContext.reactContext
-        ?: return@AsyncFunction mapOf("requested" to false, "alreadyIgnored" to false, "unavailable" to true)
-      AndroidCallResilience.requestIgnoreBatteryOptimizations(context)
-    }
-
     Function("startTelephonyDiagnosticsWatch") {
       val context = appContext.reactContext ?: return@Function false
       TelephonyDiagnosticsWatcher.start(context) { payload ->

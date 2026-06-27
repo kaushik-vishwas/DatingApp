@@ -39,13 +39,6 @@ export type IncomingCallAndroidModule = {
   startCellularCallHoldWatch(): boolean;
   stopCellularCallHoldWatch(): void;
   refreshCellularCallHoldTelephony(): boolean;
-  startCallWebSocketForegroundService(callLabel: string): boolean;
-  stopCallWebSocketForegroundService(): void;
-  requestIgnoreBatteryOptimizationsAsync(): Promise<{
-    requested?: boolean;
-    alreadyIgnored?: boolean;
-    unavailable?: boolean;
-  }>;
   startTelephonyDiagnosticsWatch(): boolean;
   stopTelephonyDiagnosticsWatch(): void;
   isBluetoothVoiceOutputAvailable(): boolean;
@@ -74,7 +67,7 @@ function unavailableMethod(name: string): (...args: unknown[]) => unknown {
   return (..._args: unknown[]) => {
     if (name === 'isBluetoothVoiceOutputAvailable') return false;
     if (name.startsWith('start')) return false;
-    if (name === 'stopCellularCallHoldWatch' || name === 'stopCallWebSocketForegroundService') return undefined;
+    if (name === 'stopCellularCallHoldWatch' || name === 'releaseVoiceCallAudioRoute') return undefined;
     if (name === 'releaseVoiceCallAudioRoute') return undefined;
     if (name.endsWith('Async')) {
       return Promise.resolve({ applied: false, unavailable: true });

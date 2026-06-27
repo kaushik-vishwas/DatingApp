@@ -1,15 +1,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-  <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-  <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
-  <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
-  <uses-permission android:name="android.permission.WAKE_LOCK" />
   <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
 
   <application>
-    <service
-      android:name=".CallWebSocketForegroundService"
-      android:exported="false"
-      android:foregroundServiceType="dataSync" />
     <receiver
       android:name=".IncomingCallNotificationTapRelayReceiver"
       android:exported="false">
