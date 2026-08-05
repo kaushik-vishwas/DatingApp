@@ -127,33 +127,15 @@ const envCandidates = [
 ];
 const envPath = envCandidates.find((candidate) => fs_1.default.existsSync(candidate));
 if (envPath) {
-    console.log('Loading .env from:', envPath);
     const result = dotenv_1.default.config({ path: envPath, override: true });
     if (result.error) {
         console.error('Error loading .env:', result.error);
-    }
-    else {
-        console.log('✅ .env loaded successfully');
     }
 }
 else {
     // In production, env vars are often injected by PM2/systemd/container runtime.
     console.warn('⚠️ No .env file found. Continuing with existing process environment variables.');
 }
-console.log('MONGODB_URI:', process.env.MONGODB_URI ? '✅ SET' : '❌ NOT SET');
-console.log('HF_API_TOKEN:', process.env.HF_API_TOKEN && process.env.HF_API_TOKEN.trim()
-    ? `✅ SET (len=${process.env.HF_API_TOKEN.trim().length})`
-    : '❌ NOT SET');
-console.log('HF_VOICE_GENDER_MODEL_ID:', process.env.HF_VOICE_GENDER_MODEL_ID || 'audeering/wav2vec2-large-robust-24-ft-age-gender (default)');
-console.log('VOICE_GENDER_FEMALE_MIN_CONFIDENCE:', process.env.VOICE_GENDER_FEMALE_MIN_CONFIDENCE || '0.70 (default)');
-console.log('VOICE_GENDER_VERIFICATION_MODE:', process.env.VOICE_GENDER_VERIFICATION_MODE || 'required (default)');
-console.log('VOICE_GENDER_PROVIDER:', process.env.VOICE_GENDER_PROVIDER || 'local (default)');
-console.log('VOICE_GENDER_LOCAL_MODEL_ID:', process.env.VOICE_GENDER_LOCAL_MODEL_ID ||
-    'Xenova/wav2vec2-large-xlsr-53-gender-recognition-librispeech (default)');
-console.log('VOICE_GENDER_LOCAL_DTYPE:', process.env.VOICE_GENDER_LOCAL_DTYPE || 'q4 (default)');
-console.log('VOICE_GENDER_WORKER_HEAP_MB:', process.env.VOICE_GENDER_WORKER_HEAP_MB || '512 (default)');
-console.log('VOICE_GENDER_MAX_AUDIO_SEC:', process.env.VOICE_GENDER_MAX_AUDIO_SEC || '12 (default)');
-console.log('VOICE_GENDER_TIMEOUT_MS:', process.env.VOICE_GENDER_TIMEOUT_MS || '120000 (default)');
 // Normal imports
 require("./config/bootstrapEnv");
 const http_1 = __importDefault(require("http"));
@@ -163,6 +145,7 @@ const mongoose_1 = __importDefault(require("mongoose"));
 const email_1 = require("./config/email");
 const superAdminSync_1 = require("./services/superAdminSync");
 const dropLegacyEmailIndexes_1 = require("./services/dropLegacyEmailIndexes");
+const otpBypass_1 = require("./utils/otpBypass");
 const authRoutes_1 = __importDefault(require("./routes/authRoutes"));
 const profileRoutes_1 = __importDefault(require("./routes/profileRoutes"));
 const adminRoutes_1 = __importDefault(require("./routes/adminRoutes"));
@@ -225,20 +208,15 @@ const start = async () => {
         if (!process.env.MONGODB_URI) {
             throw new Error('MONGODB_URI is not set');
         }
-        console.log('Attempting to connect to MongoDB...');
-        console.log('Using SRV resolution (let Node.js resolve normally)');
         await mongoose_1.default.connect(process.env.MONGODB_URI, {
             serverSelectionTimeoutMS: 10000,
             socketTimeoutMS: 45000,
             family: 4, // Force IPv4
         });
-        console.log('✅ MongoDB connected successfully');
         await (0, dropLegacyEmailIndexes_1.dropLegacyEmailIndexes)();
         await (0, superAdminSync_1.syncSuperAdminFromEnv)();
         try {
-            const { shouldUseVoiceGenderWorker, voiceGenderWorkerScriptPath, warmVoiceGenderWorkerInBackground, } = await Promise.resolve().then(() => __importStar(require('./services/voiceGenderLocalClassifier')));
-            const workerScript = voiceGenderWorkerScriptPath();
-            console.log('VOICE_GENDER_WORKER_SCRIPT:', workerScript, shouldUseVoiceGenderWorker() ? 'enabled' : 'disabled');
+            const { warmVoiceGenderWorkerInBackground } = await Promise.resolve().then(() => __importStar(require('./services/voiceGenderLocalClassifier')));
             void warmVoiceGenderWorkerInBackground().catch((err) => {
                 console.warn('[voice-gender-worker] warmup failed:', err);
             });
@@ -247,14 +225,11 @@ const start = async () => {
             console.warn('[voice-gender] worker bootstrap check failed:', err);
         }
         void (0, email_1.verifyEmailConfig)().then((r) => {
-            if (!r.ok && process.env.OTP_BYPASS?.toLowerCase() !== 'true') {
+            if (!r.ok && !(0, otpBypass_1.otpBypassEnabled)()) {
                 console.warn('[email] OTP mail may fail until SMTP is fixed:', r.error);
             }
         });
-        httpServer.listen(PORT, '0.0.0.0', () => {
-            console.log(`✅ Server listening on port ${PORT}`);
-            console.log(`📍 http://localhost:${PORT}`);
-        });
+        httpServer.listen(PORT, '0.0.0.0');
     }
     catch (error) {
         console.error('❌ Failed to start:', error);

@@ -70,7 +70,6 @@ function getOrSpawnWorker(): ChildProcess | null {
   });
 
   workerChild = child;
-  console.log('[voice-gender-worker] spawned', { pid: child.pid, script: workerScript });
   return child;
 }
 
@@ -240,7 +239,6 @@ export async function warmVoiceGenderWorkerInBackground(): Promise<void> {
   const id = `warmup-${Date.now()}`;
   const out = await runWorkerJob({ id, warmup: true }, 180_000);
   if (out.ok) {
-    console.log('[voice-gender-worker] warmup complete');
     return;
   }
   console.warn('[voice-gender-worker] warmup failed:', out.error);

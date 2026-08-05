@@ -69,8 +69,12 @@ function toCard(r, ratingByReceiverId, busyByReceiverId) {
     const id = String(r._id);
     const switchOn = Boolean(o.isAvailable);
     const discoverAvailable = switchOn;
-    /** Online when Go Online is on and socket is live, or within 5 min after minimize/background disconnect. */
-    const discoverOnline = switchOn && (0, receiverPresence_1.isReceiverDiscoverPresenceLive)(id, o.discoverGraceUntil ?? null);
+    /** Online when Go Online is on and (socket live, background grace, or push-reachable). */
+    const discoverOnline = switchOn &&
+        (0, receiverPresence_1.isReceiverDiscoverPresenceLive)(id, o.discoverGraceUntil ?? null, {
+            isAvailable: switchOn,
+            expoPushToken: o.expoPushToken ?? null,
+        });
     return {
         _id: id,
         name: o.name,
@@ -119,7 +123,7 @@ const listReceiversForCaller = async (req, res) => {
             ? { _id: { $nin: blockedReceiverIds } }
             : {};
         const receivers = await Receiver_1.default.find({ ...filter, ...blockClause })
-            .select('name age state interests languages profileImage audioCallRate updatedAt gender isAvailable isOnline discoverGraceUntil')
+            .select('name age state interests languages profileImage audioCallRate updatedAt gender isAvailable isOnline discoverGraceUntil expoPushToken')
             .sort({ updatedAt: -1 })
             .limit(limit)
             .exec();

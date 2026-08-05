@@ -15,7 +15,9 @@ import {
   listAppUsers,
   listPendingAppUsers,
   updateAppUser,
+  deleteAppUser,
   updateReceiver,
+  deleteReceiverPermanently,
   approveAppUser,
   rejectAppUser,
   listModerationReports,
@@ -60,6 +62,7 @@ router.get('/users/pending', adminProtect, listPendingAppUsers);
 router.patch('/users/:id/approve', adminProtect, approveAppUser);
 router.patch('/users/:id/reject', adminProtect, rejectAppUser);
 router.patch('/users/:id', adminProtect, updateAppUser);
+router.delete('/users/:id', adminProtect, deleteAppUser);
 
 router.get('/receivers', adminProtect, listAllReceivers);
 router.get('/receivers/pending', adminProtect, listPendingReceivers);
@@ -67,6 +70,7 @@ router.get('/kyc/stats', adminProtect, getKycStats);
 router.patch('/receivers/:id/approve', adminProtect, approveReceiver);
 router.patch('/receivers/:id/reject', adminProtect, rejectReceiver);
 router.patch('/receivers/:id', adminProtect, updateReceiver);
+router.delete('/receivers/:id', adminProtect, deleteReceiverPermanently);
 
 router.get('/reports', adminProtect, listModerationReports);
 router.patch('/reports/:id', adminProtect, resolveModerationReport);

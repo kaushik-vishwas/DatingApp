@@ -753,11 +753,19 @@ export function attachChatSocket(httpServer: HTTPServer): Server {
           }
           if (!hasActiveSocketForAccount('r', targetId)) {
             const recvPresence = await Receiver.findById(targetId)
-              .select('expoPushToken discoverGraceUntil')
-              .lean<{ expoPushToken?: string | null; discoverGraceUntil?: Date | null } | null>();
+              .select('expoPushToken discoverGraceUntil isAvailable')
+              .lean<{
+                expoPushToken?: string | null;
+                discoverGraceUntil?: Date | null;
+                isAvailable?: boolean;
+              } | null>();
             const presenceLive = isReceiverDiscoverPresenceLive(
               targetId,
-              recvPresence?.discoverGraceUntil ?? null
+              recvPresence?.discoverGraceUntil ?? null,
+              {
+                isAvailable: Boolean(recvPresence?.isAvailable),
+                expoPushToken: recvPresence?.expoPushToken ?? null,
+              }
             );
             const pushToken = recvPresence?.expoPushToken?.trim();
             if (!presenceLive && !pushToken) {

@@ -1,5 +1,4 @@
 import type { Request, Response } from 'express';
-import crypto from 'crypto';
 import mongoose from 'mongoose';
 import User, { type Gender, type UserDocument } from '../models/User';
 import Receiver, {
@@ -38,6 +37,13 @@ import {
 } from '../services/callerVoiceGenderVerifier';
 import { finalizeReceiverOnlineSession } from '../services/receiverScore';
 import { trackAndFinalizeRazorpayXPayout } from '../services/razorpayXPayoutService';
+import {
+  assertSmsOtpValid,
+  encodeStoredSmsOtp,
+  issueSmsOtp,
+  MessageCentralError,
+} from '../services/smsOtp';
+import { httpStatusForMessageCentral } from '../services/messageCentral';
 import { emitReceiverWithdrawalUpdate } from '../socket/socketRegistry';
 import {
   computeReceiverWithdrawalBreakdown,
@@ -69,9 +75,9 @@ function callerCallNotificationSubtitle(durationSec: number): string {
 type CompleteProfileBody = {
   name: string;
   profileImage: string;
-  aadhaarFront: string;
-  aadhaarBack: string;
-  aadhaarNumber: string;
+  aadhaarFront?: string;
+  aadhaarBack?: string;
+  aadhaarNumber?: string;
   panNumber: string;
   panFront: string;
   languages: string[];
@@ -99,9 +105,9 @@ type ReceiverKycProfileInfoBody = {
 
 /** PATCH /profile/receiver/kyc/documents — step 2 (incremental save). */
 type ReceiverKycDocumentsBody = {
-  aadhaarFront: string;
-  aadhaarBack: string;
-  aadhaarNumber: string;
+  aadhaarFront?: string;
+  aadhaarBack?: string;
+  aadhaarNumber?: string;
   panNumber: string;
   panFront: string;
 };
@@ -325,20 +331,16 @@ export const completeProfile = async (
       reply(400, { message: 'profileImage URL is required', error: 'COMPLETE_PROFILE_MISSING_PROFILE_IMAGE' });
       return;
     }
-    if (!aadhaarFront || typeof aadhaarFront !== 'string') {
-      warn('validation_failed_aadhaar_front');
-      reply(400, { message: 'aadhaarFront URL is required', error: 'COMPLETE_PROFILE_MISSING_AADHAAR_FRONT' });
-      return;
-    }
-    if (!aadhaarBack || typeof aadhaarBack !== 'string') {
-      warn('validation_failed_aadhaar_back');
-      reply(400, { message: 'aadhaarBack URL is required', error: 'COMPLETE_PROFILE_MISSING_AADHAAR_BACK' });
-      return;
-    }
-    if (!aadhaarNumber || typeof aadhaarNumber !== 'string' || !/^\d{12}$/.test(aadhaarNumber.trim())) {
+    const aadhaarFrontUrl =
+      typeof aadhaarFront === 'string' && aadhaarFront.trim() ? aadhaarFront.trim() : null;
+    const aadhaarBackUrl =
+      typeof aadhaarBack === 'string' && aadhaarBack.trim() ? aadhaarBack.trim() : null;
+    const aadhaarDigits =
+      typeof aadhaarNumber === 'string' ? aadhaarNumber.replace(/\D/g, '').trim() : '';
+    if (aadhaarDigits && !/^\d{12}$/.test(aadhaarDigits)) {
       warn('validation_failed_aadhaar_number');
       reply(400, {
-        message: 'aadhaarNumber must be a valid 12-digit number',
+        message: 'aadhaarNumber must be a valid 12-digit number when provided',
         error: 'COMPLETE_PROFILE_INVALID_AADHAAR_NUMBER',
       });
       return;
@@ -437,18 +439,18 @@ export const completeProfile = async (
       return;
     }
 
-    const front = String(aadhaarFront).trim();
-    const back = String(aadhaarBack).trim();
     const panFrontUrl = String(panFront).trim();
 
     receiver.name = String(name).trim();
     receiver.profileImage = profileImage.trim();
-    receiver.aadhaarFront = front;
-    receiver.aadhaarBack = back;
-    receiver.aadhaarNumber = String(aadhaarNumber).trim();
+    receiver.aadhaarFront = aadhaarFrontUrl;
+    receiver.aadhaarBack = aadhaarBackUrl;
+    receiver.aadhaarNumber = aadhaarDigits || null;
     receiver.panNumber = String(panNumber).trim().toUpperCase();
     receiver.panFront = panFrontUrl;
-    receiver.documents = [front, back, panFrontUrl];
+    receiver.documents = [aadhaarFrontUrl, aadhaarBackUrl, panFrontUrl].filter(
+      (u): u is string => Boolean(u)
+    );
     receiver.languages = languages.map((l) => String(l).trim()).filter(Boolean);
     receiver.interests = interests.map((i) => String(i).trim()).filter(Boolean);
     receiver.gender = gender;
@@ -606,17 +608,15 @@ export const saveReceiverKycDocuments = async (
     }
 
     const { aadhaarFront, aadhaarBack, aadhaarNumber, panNumber, panFront } = req.body;
-    if (!aadhaarFront || typeof aadhaarFront !== 'string' || !aadhaarFront.trim()) {
-      t.json(400, { message: 'aadhaarFront is required', error: 'KYC_DOCS_MISSING_AADHAAR_FRONT' });
-      return;
-    }
-    if (!aadhaarBack || typeof aadhaarBack !== 'string' || !aadhaarBack.trim()) {
-      t.json(400, { message: 'aadhaarBack is required', error: 'KYC_DOCS_MISSING_AADHAAR_BACK' });
-      return;
-    }
-    if (!aadhaarNumber || typeof aadhaarNumber !== 'string' || !/^\d{12}$/.test(aadhaarNumber.trim())) {
+    const aadhaarFrontUrl =
+      typeof aadhaarFront === 'string' && aadhaarFront.trim() ? aadhaarFront.trim() : null;
+    const aadhaarBackUrl =
+      typeof aadhaarBack === 'string' && aadhaarBack.trim() ? aadhaarBack.trim() : null;
+    const aadhaarDigits =
+      typeof aadhaarNumber === 'string' ? aadhaarNumber.replace(/\D/g, '').trim() : '';
+    if (aadhaarDigits && !/^\d{12}$/.test(aadhaarDigits)) {
       t.json(400, {
-        message: 'aadhaarNumber must be a valid 12-digit number',
+        message: 'aadhaarNumber must be a valid 12-digit number when provided',
         error: 'KYC_DOCS_INVALID_AADHAAR_NUMBER',
       });
       return;
@@ -658,16 +658,16 @@ export const saveReceiverKycDocuments = async (
       return;
     }
 
-    const front = String(aadhaarFront).trim();
-    const back = String(aadhaarBack).trim();
     const panFrontUrl = String(panFront).trim();
 
-    receiver.aadhaarFront = front;
-    receiver.aadhaarBack = back;
-    receiver.aadhaarNumber = String(aadhaarNumber).trim();
+    receiver.aadhaarFront = aadhaarFrontUrl;
+    receiver.aadhaarBack = aadhaarBackUrl;
+    receiver.aadhaarNumber = aadhaarDigits || null;
     receiver.panNumber = String(panNumber).trim().toUpperCase();
     receiver.panFront = panFrontUrl;
-    receiver.documents = [front, back, panFrontUrl];
+    receiver.documents = [aadhaarFrontUrl, aadhaarBackUrl, panFrontUrl].filter(
+      (u): u is string => Boolean(u)
+    );
     await receiver.save();
 
     t.log('kyc_documents_ok');
@@ -747,12 +747,8 @@ export const saveReceiverKycBankFinalize = async (
       t.json(400, { message: 'Complete step 1 first', error: 'KYC_BANK_STEP1_REQUIRED' });
       return;
     }
-    if (!receiver.aadhaarFront?.trim() || !receiver.aadhaarBack?.trim() || !receiver.panFront?.trim()) {
+    if (!receiver.panFront?.trim() || !receiver.panNumber?.trim()) {
       t.json(400, { message: 'Complete step 2 (documents) first', error: 'KYC_BANK_STEP2_REQUIRED' });
-      return;
-    }
-    if (!receiver.aadhaarNumber?.trim() || !receiver.panNumber?.trim()) {
-      t.json(400, { message: 'Complete step 2 (documents) first', error: 'KYC_BANK_STEP2_NUMBERS_REQUIRED' });
       return;
     }
     if (!receiver.languages?.length || !receiver.interests?.length || !receiver.gender) {
@@ -764,10 +760,10 @@ export const saveReceiverKycBankFinalize = async (
       return;
     }
 
-    const front = String(receiver.aadhaarFront).trim();
-    const back = String(receiver.aadhaarBack).trim();
+    const front = receiver.aadhaarFront?.trim() || null;
+    const back = receiver.aadhaarBack?.trim() || null;
     const panFrontUrl = String(receiver.panFront).trim();
-    receiver.documents = [front, back, panFrontUrl];
+    receiver.documents = [front, back, panFrontUrl].filter((u): u is string => Boolean(u));
 
     receiver.bankAccountHolderName = String(bankAccountHolderName).trim();
     receiver.bankAccountType = bankAccountType;
@@ -1240,23 +1236,10 @@ function maskAccountNumber(accountNumber: string): string {
   return `****${last4}`;
 }
 
-function otpHash(code: string): string {
-  return crypto.createHash('sha256').update(code).digest('hex');
-}
-
-function generateOtpCode(): string {
-  const n = Math.floor(100000 + Math.random() * 900000);
-  return String(n);
-}
-
 function maskPhone(phone: string): string {
   const d = phone.replace(/\D/g, '');
   if (d.length < 4) return '******';
   return `******${d.slice(-4)}`;
-}
-
-function logReceiverMobileOtp(context: string, phone: string, code: string): void {
-  console.log(`[OTP] ${context} +91${phone.replace(/\D/g, '').slice(-10)} → ${code}`);
 }
 
 type MsgLean = {
@@ -1601,14 +1584,18 @@ export const sendReceiverWithdrawalOtp = async (
       return;
     }
 
-    const code = generateOtpCode();
-    const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
-
     const payoutMethod = inferReceiverPayoutMethod(receiver);
     if (!payoutMethod) {
       res.status(400).json({ message: 'Please complete payment details before requesting a withdrawal' });
       return;
     }
+
+    if (!receiver.phone?.trim()) {
+      res.status(400).json({ message: 'Mobile number is required for OTP verification' });
+      return;
+    }
+
+    const issued = await issueSmsOtp(receiver.phone, 'withdrawal');
 
     await WithdrawalRequest.findOneAndUpdate(
       { receiverId: rid, status: 'verification_pending' },
@@ -1619,8 +1606,8 @@ export const sendReceiverWithdrawalOtp = async (
           payoutAmount: breakdown.netPayout,
           payoutMethod,
           status: 'verification_pending',
-          verificationCodeHash: otpHash(code),
-          verificationExpiresAt: expiresAt,
+          verificationCodeHash: encodeStoredSmsOtp(issued),
+          verificationExpiresAt: issued.otpExpiry,
           verifiedAt: null,
           reviewedAt: null,
           reviewedByAdminId: null,
@@ -1638,18 +1625,20 @@ export const sendReceiverWithdrawalOtp = async (
       { upsert: true, new: true, setDefaultsOnInsert: true }
     );
 
-    if (!receiver.phone?.trim()) {
-      res.status(400).json({ message: 'Mobile number is required for OTP verification' });
-      return;
-    }
-    logReceiverMobileOtp('withdrawal', receiver.phone, code);
-
     res.status(200).json({
       message: 'OTP sent to your mobile number',
       phoneMasked: maskPhone(receiver.phone),
       expiresInSec: 300,
     });
   } catch (err) {
+    if (err instanceof MessageCentralError) {
+      res.status(httpStatusForMessageCentral(err)).json({
+        message: err.message,
+        error: 'SEND_WITHDRAWAL_OTP_SMS_FAILED',
+        responseCode: err.responseCode,
+      });
+      return;
+    }
     const msg = err instanceof Error ? err.message : String(err);
     console.error('sendReceiverWithdrawalOtp error:', msg);
     res.status(500).json({ message: msg || 'Server error' });
@@ -1664,7 +1653,6 @@ export const verifyReceiverWithdrawalOtpAndCreate = async (
   res: Response
 ): Promise<void> => {
   try {
-    const otpBypass = process.env.OTP_BYPASS?.toLowerCase() === 'true';
     if (req.accountKind !== 'receiver') {
       res.status(403).json({ message: 'Only receivers can request withdrawals' });
       return;
@@ -1693,18 +1681,33 @@ export const verifyReceiverWithdrawalOtpAndCreate = async (
 
     if (
       !pendingVerification.verificationCodeHash ||
-      !pendingVerification.verificationExpiresAt ||
-      pendingVerification.verificationExpiresAt.getTime() < Date.now()
+      !pendingVerification.verificationExpiresAt
     ) {
       await WithdrawalRequest.deleteOne({ _id: pendingVerification._id });
       res.status(400).json({ message: 'OTP expired. Please request again' });
       return;
     }
 
-    const localBypass = /^\d{6}$/.test(otp);
-    if (!otpBypass && !localBypass && otpHash(otp) !== pendingVerification.verificationCodeHash) {
-      res.status(400).json({ message: 'Incorrect OTP' });
-      return;
+    try {
+      await assertSmsOtpValid({
+        storedOtp: pendingVerification.verificationCodeHash,
+        otpExpiry: pendingVerification.verificationExpiresAt,
+        submitted: otp,
+        allowStaticReceiver: true,
+      });
+    } catch (e) {
+      if (e instanceof MessageCentralError) {
+        if (e.responseCode === 705) {
+          await WithdrawalRequest.deleteOne({ _id: pendingVerification._id });
+        }
+        res.status(httpStatusForMessageCentral(e)).json({
+          message: e.message,
+          error: 'VERIFY_WITHDRAWAL_OTP_INVALID',
+          responseCode: e.responseCode,
+        });
+        return;
+      }
+      throw e;
     }
 
     const withdrawable = await computeReceiverWithdrawableSnapshot(rid, receiver.walletBalance ?? 0);
@@ -1752,6 +1755,14 @@ export const verifyReceiverWithdrawalOtpAndCreate = async (
       walletBalance: withdrawable.withdrawableBalance,
     });
   } catch (err) {
+    if (err instanceof MessageCentralError) {
+      res.status(httpStatusForMessageCentral(err)).json({
+        message: err.message,
+        error: 'VERIFY_WITHDRAWAL_OTP_FAILED',
+        responseCode: err.responseCode,
+      });
+      return;
+    }
     const msg = err instanceof Error ? err.message : String(err);
     console.error('verifyReceiverWithdrawalOtpAndCreate error:', msg);
     res.status(500).json({ message: msg || 'Server error' });
@@ -2706,7 +2717,7 @@ export const reopenRejectedReceiverKyc = async (req: Request, res: Response): Pr
 };
 
 /**
- * DELETE /profile/receiver — deletes receiver account and related receiver-side data.
+ * DELETE /profile/receiver — deletes receiver account and all related receiver-side data.
  */
 export const deleteReceiverAccount = async (
   req: Request<{}, {}, { reason?: string }>,
@@ -2722,27 +2733,14 @@ export const deleteReceiverAccount = async (
       res.status(400).json({ message: 'Invalid receiver id' });
       return;
     }
-    const rid = new mongoose.Types.ObjectId(receiverId);
 
-    // Soft logging for ops visibility.
     const reason = String(req.body.reason ?? '').trim();
     if (reason) {
       console.log(`[receiver-delete] receiver=${receiverId} reason="${reason}"`);
     }
 
-    await Promise.all([
-      ChatMessage.deleteMany({ receiverId: rid }),
-      ChatBlock.deleteMany({ receiverId: rid }),
-      WithdrawalRequest.deleteMany({ receiverId: rid }),
-      CallSession.deleteMany({ receiverId: rid }),
-      UserReport.deleteMany({
-        $or: [
-          { reporterKind: 'receiver', reporterId: rid },
-          { reportedKind: 'receiver', reportedId: rid },
-        ],
-      }),
-      Receiver.deleteOne({ _id: rid }),
-    ]);
+    const { cascadeDeleteReceiverAccount } = await import('../services/accountCascadeDelete');
+    await cascadeDeleteReceiverAccount(receiverId);
 
     res.status(200).json({ message: 'Account deleted' });
   } catch (err) {
@@ -2782,9 +2780,9 @@ export const sendReceiverBankUpdateOtp = async (
       return;
     }
 
-    const otpCode = generateOtpCode();
-    receiver.otp = otpHash(otpCode);
-    receiver.otpExpiry = new Date(Date.now() + 5 * 60 * 1000);
+    const issued = await issueSmsOtp(receiver.phone, 'bank_update');
+    receiver.otp = encodeStoredSmsOtp(issued);
+    receiver.otpExpiry = issued.otpExpiry;
     receiver.pendingNameAsPerAadhaar = parsed.nameAsPerAadhaar;
     receiver.pendingUpiId = parsed.upiId;
     receiver.pendingAadhaarNumber = parsed.aadhaarDigits;
@@ -2808,13 +2806,20 @@ export const sendReceiverBankUpdateOtp = async (
         : null;
     await receiver.save();
 
-    logReceiverMobileOtp('bank_update', receiver.phone, otpCode);
     res.status(200).json({
       message: 'OTP sent to your mobile number',
       phoneMasked: maskPhone(receiver.phone),
       expiresInSec: 300,
     });
   } catch (err) {
+    if (err instanceof MessageCentralError) {
+      res.status(httpStatusForMessageCentral(err)).json({
+        message: err.message,
+        error: 'SEND_BANK_OTP_SMS_FAILED',
+        responseCode: err.responseCode,
+      });
+      return;
+    }
     const msg = err instanceof Error ? err.message : String(err);
     console.error('sendReceiverBankUpdateOtp error:', msg);
     res.status(500).json({ message: msg || 'Server error' });
@@ -2829,7 +2834,6 @@ export const verifyReceiverBankUpdateOtp = async (
   res: Response
 ): Promise<void> => {
   try {
-    const otpBypass = process.env.OTP_BYPASS?.toLowerCase() === 'true';
     if (req.accountKind !== 'receiver') {
       res.status(403).json({ message: 'Only receivers can update payment details' });
       return;
@@ -2847,16 +2851,31 @@ export const verifyReceiverBankUpdateOtp = async (
       res.status(404).json({ message: 'Receiver not found' });
       return;
     }
-    if (!receiver.otp || !receiver.otpExpiry || receiver.otpExpiry.getTime() < Date.now()) {
+    if (!receiver.otp || !receiver.otpExpiry) {
       res.status(400).json({ message: 'OTP expired. Request a new code' });
       return;
     }
-    const localBypass = /^\d{6}$/.test(otp);
-    if (!otpBypass && !localBypass && otpHash(otp) !== receiver.otp) {
-      res.status(400).json({ message: 'Incorrect OTP' });
-      return;
+
+    try {
+      await assertSmsOtpValid({
+        storedOtp: receiver.otp,
+        otpExpiry: receiver.otpExpiry,
+        submitted: otp,
+        allowStaticReceiver: true,
+      });
+    } catch (e) {
+      if (e instanceof MessageCentralError) {
+        res.status(httpStatusForMessageCentral(e)).json({
+          message: e.message,
+          error: 'VERIFY_BANK_OTP_INVALID',
+          responseCode: e.responseCode,
+        });
+        return;
+      }
+      throw e;
     }
-    if (!receiver.pendingNameAsPerAadhaar || !receiver.pendingAadhaarNumber) {
+
+    if (!receiver.pendingUpiId && !receiver.pendingBankAccountNumber) {
       res.status(400).json({ message: 'No pending payment details found. Start again' });
       return;
     }
@@ -2913,6 +2932,14 @@ export const verifyReceiverBankUpdateOtp = async (
       user: toApiReceiver(receiver),
     });
   } catch (err) {
+    if (err instanceof MessageCentralError) {
+      res.status(httpStatusForMessageCentral(err)).json({
+        message: err.message,
+        error: 'VERIFY_BANK_OTP_FAILED',
+        responseCode: err.responseCode,
+      });
+      return;
+    }
     const msg = err instanceof Error ? err.message : String(err);
     console.error('verifyReceiverBankUpdateOtp error:', msg);
     res.status(500).json({ message: msg || 'Server error' });

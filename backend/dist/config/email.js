@@ -67,7 +67,6 @@ const verifyEmailConfig = async () => {
     }
     try {
         await transporter.verify();
-        console.log('[email] SMTP (smtp.gmail.com:465) connection OK');
         return { ok: true };
     }
     catch (e) {

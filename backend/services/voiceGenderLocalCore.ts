@@ -71,7 +71,6 @@ async function getClassifier(): Promise<
         env.backends.onnx.wasm.numThreads = 1;
       }
       const dtype = localModelDtype();
-      console.log('[voice-gender-local] loading model', { model: LOCAL_MODEL_ID, dtype });
       const pipe = await pipeline('audio-classification', LOCAL_MODEL_ID, {
         dtype,
         device: 'cpu',

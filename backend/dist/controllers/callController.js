@@ -53,6 +53,7 @@ const receiverScore_1 = require("../services/receiverScore");
 const receiverEarningModel_1 = require("../services/receiverEarningModel");
 const callQueue_1 = require("../services/callQueue");
 const socketRegistry_1 = require("../socket/socketRegistry");
+const receiverPresence_1 = require("../services/receiverPresence");
 const callQueue_2 = require("../services/callQueue");
 function roundInr(n) {
     return Math.round(n * 100) / 100;
@@ -385,9 +386,21 @@ const getVoiceBootstrap = async (req, res) => {
         res.status(409).json({ message: 'Receiver is currently unavailable' });
         return;
     }
+    // Align with call:invite: Android may freeze the WebSocket while the app is still
+    // runnable. Allow bootstrap when discover-grace is live or Expo push can wake the app.
     if (!(0, socketRegistry_1.isReceiverSocketConnected)(receiverId)) {
-        res.status(409).json({ message: 'Receiver is offline right now' });
-        return;
+        const recvPresence = await Receiver_1.default.findById(receiverId)
+            .select('expoPushToken discoverGraceUntil isAvailable')
+            .lean();
+        const presenceLive = (0, receiverPresence_1.isReceiverDiscoverPresenceLive)(receiverId, recvPresence?.discoverGraceUntil ?? null, {
+            isAvailable: Boolean(recvPresence?.isAvailable ?? receiverDoc.isAvailable),
+            expoPushToken: recvPresence?.expoPushToken ?? null,
+        });
+        const pushToken = recvPresence?.expoPushToken?.trim();
+        if (!presenceLive && !pushToken) {
+            res.status(409).json({ message: 'Receiver is offline right now' });
+            return;
+        }
     }
     if (await ChatBlock_1.default.exists({ userId: callerUserId, receiverId })) {
         res.status(403).json({ message: 'This pair is blocked for communication' });

@@ -19,7 +19,7 @@ const walletCreditSchema = new Schema<IWalletCredit>(
     userId: { type: Schema.Types.ObjectId, ref: 'User', required: true, index: true },
     source: { type: String, enum: ['referral_reward'], required: true, index: true },
     amountInr: { type: Number, required: true, min: 0.01 },
-    referralId: { type: Schema.Types.ObjectId, ref: 'Referral', default: null, index: true },
+    referralId: { type: Schema.Types.ObjectId, ref: 'Referral', default: null },
     description: { type: String, required: true, trim: true, maxlength: 300 },
   },
   { timestamps: true }

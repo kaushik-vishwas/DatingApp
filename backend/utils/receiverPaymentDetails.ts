@@ -31,11 +31,10 @@ export function receiverHasValidBank(r: {
 }): boolean {
   const acct = normalizeBankAccountNumber(r.bankAccountNumber);
   const ifsc = String(r.bankIfsc ?? '').trim().toUpperCase();
-  const holder = String(r.bankAccountHolderName ?? r.nameAsPerAadhaar ?? '').trim();
-  return Boolean(acct.length >= 9 && isValidIfsc(ifsc) && holder);
+  return Boolean(acct.length >= 9 && isValidIfsc(ifsc));
 }
 
-/** Name + Aadhaar + (UPI or bank) required; PAN optional when provided must be valid. */
+/** UPI or bank required; Aadhaar name/number optional (if provided must be valid); PAN optional. */
 export function receiverPaymentDetailsComplete(r: {
   nameAsPerAadhaar?: string | null;
   upiId?: string | null;
@@ -46,10 +45,11 @@ export function receiverPaymentDetailsComplete(r: {
   bankAccountHolderName?: string | null;
 }): boolean {
   const aadhaarDigits = String(r.aadhaarNumber ?? '').replace(/\D/g, '');
+  const aadhaarOk = !aadhaarDigits || /^\d{12}$/.test(aadhaarDigits);
   const pan = String(r.panNumber ?? '').trim().toUpperCase();
   const panOk = !pan || isValidPanNumber(pan);
   const payoutMethod = receiverHasValidUpi(r) || receiverHasValidBank(r);
-  return Boolean(r.nameAsPerAadhaar?.trim() && /^\d{12}$/.test(aadhaarDigits) && panOk && payoutMethod);
+  return Boolean(aadhaarOk && panOk && payoutMethod);
 }
 
 export type ReceiverPaymentUpdateInput = {
@@ -64,8 +64,8 @@ export type ReceiverPaymentUpdateInput = {
 
 export type ParsedReceiverPaymentUpdate =
   | {
-      nameAsPerAadhaar: string;
-      aadhaarDigits: string;
+      nameAsPerAadhaar: string | null;
+      aadhaarDigits: string | null;
       pan: string | null;
       upiId: string | null;
       bankAccountNumber: string | null;
@@ -75,15 +75,14 @@ export type ParsedReceiverPaymentUpdate =
   | { error: string };
 
 export function parseReceiverPaymentUpdateBody(body: ReceiverPaymentUpdateInput): ParsedReceiverPaymentUpdate {
-  const nameAsPerAadhaar = String(body.nameAsPerAadhaar ?? '').trim();
-  if (!nameAsPerAadhaar) {
-    return { error: 'nameAsPerAadhaar is required' };
-  }
+  const nameAsPerAadhaarRaw = String(body.nameAsPerAadhaar ?? '').trim();
+  const nameAsPerAadhaar = nameAsPerAadhaarRaw || null;
 
-  const aadhaarDigits = String(body.aadhaarNumber ?? '').replace(/\D/g, '');
-  if (!/^\d{12}$/.test(aadhaarDigits)) {
+  const aadhaarDigitsRaw = String(body.aadhaarNumber ?? '').replace(/\D/g, '');
+  if (aadhaarDigitsRaw && !/^\d{12}$/.test(aadhaarDigitsRaw)) {
     return { error: 'Aadhaar number must be 12 digits' };
   }
+  const aadhaarDigits = aadhaarDigitsRaw || null;
 
   const panRaw = String(body.panNumber ?? '').trim().toUpperCase();
   const pan = panRaw || null;

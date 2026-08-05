@@ -9,8 +9,8 @@ exports.REFERRAL_REWARD_MATRIX_INR = {
         receiver: 100,
     },
     receiver: {
-        caller: 150,
-        receiver: 200,
+        caller: 50,
+        receiver: 100,
     },
 };
 function resolveReferralRewardInr(referrerRole, referredRole) {

@@ -18,7 +18,12 @@ function loadEnv() {
     const envPath = path_1.default.join(backendRoot, '.env');
     if (fs_1.default.existsSync(envPath)) {
         dotenv_1.default.config({ path: envPath, override: true });
-        return;
     }
-    dotenv_1.default.config({ override: true });
+    else {
+        dotenv_1.default.config({ override: true });
+    }
+    // Normalize flags that are often broken by Windows CRLF / trailing spaces in .env.
+    if (typeof process.env.OTP_BYPASS === 'string') {
+        process.env.OTP_BYPASS = process.env.OTP_BYPASS.trim();
+    }
 }

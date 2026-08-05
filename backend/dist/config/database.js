@@ -11,7 +11,6 @@ const connectDB = async () => {
             throw new Error('MONGODB_URI is not set in environment');
         }
         await mongoose_1.default.connect(uri);
-        console.log('MongoDB connected');
     }
     catch (err) {
         const msg = err instanceof Error ? err.message : String(err);

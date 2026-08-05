@@ -77,7 +77,6 @@ export const verifyEmailConfig = async (): Promise<{ ok: boolean; error?: string
   }
   try {
     await transporter.verify();
-    console.log('[email] SMTP (smtp.gmail.com:465) connection OK');
     return { ok: true };
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);

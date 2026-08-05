@@ -15,6 +15,16 @@ import {
   applyReferralRewardOnSignup,
   generateUniqueReferralCode,
 } from '../services/referralService';
+import {
+  httpStatusForMessageCentral,
+  MessageCentralError,
+} from '../services/messageCentral';
+import {
+  assertSmsOtpValid,
+  encodeStoredSmsOtp,
+  issueSmsOtp,
+} from '../services/smsOtp';
+import { otpBypassEnabled } from '../utils/otpBypass';
 
 const OTP_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
@@ -91,7 +101,10 @@ type SendOtpBody = {
 
 type PendingReceiverSignup = {
   phone: string;
-  otp: string;
+  /** Local OTP when Message Central is bypassed; otherwise null. */
+  otp: string | null;
+  /** Message Central verificationId when SMS provider is active. */
+  verificationId: string | null;
   otpExpiry: Date;
   name: string;
 };
@@ -99,7 +112,8 @@ const pendingReceiverSignups = new Map<string, PendingReceiverSignup>();
 
 type PendingMobileSignup = {
   phone: string;
-  otp: string;
+  otp: string | null;
+  verificationId: string | null;
   otpExpiry: Date;
 };
 
@@ -155,17 +169,35 @@ async function resolvePhoneAccountType(
   return null;
 }
 
-function generateOtpCode(): string {
-  return String(Math.floor(100000 + Math.random() * 900000));
+async function saveOtpOnDoc(doc: UserDocument | ReceiverDocument, label: string): Promise<void> {
+  const issued = await issueSmsOtp(String(doc.phone), label);
+  doc.otp = encodeStoredSmsOtp(issued);
+  doc.otpExpiry = issued.otpExpiry;
+  await doc.save();
 }
 
-async function saveOtpOnDoc(doc: UserDocument | ReceiverDocument, label: string): Promise<void> {
-  const otp = generateOtpCode();
-  const otpExpiry = new Date(Date.now() + OTP_TTL_MS);
-  doc.otp = otp;
-  doc.otpExpiry = otpExpiry;
-  await doc.save();
-  console.log(`[OTP TEST] ${label}:${doc.phone} → OTP: ${otp}`);
+async function assertOtpValid(opts: {
+  storedOtp: string | null | undefined;
+  verificationId?: string | null;
+  otpExpiry: Date | null | undefined;
+  submitted: string;
+  allowStaticReceiver?: boolean;
+}): Promise<void> {
+  await assertSmsOtpValid(opts);
+}
+
+function jsonMessageCentralError(
+  t: { json: (status: number, body: Record<string, unknown>) => void },
+  err: unknown,
+  fallbackError: string
+): boolean {
+  if (!(err instanceof MessageCentralError)) return false;
+  t.json(httpStatusForMessageCentral(err), {
+    message: err.message,
+    error: fallbackError,
+    responseCode: err.responseCode,
+  });
+  return true;
 }
 
 
@@ -407,7 +439,6 @@ export const forgotPassword = async (
   const genericMessage = 'If an account exists with this phone number, a reset code has been sent.';
   const t = beginApiTrace('POST /auth/forgot-password', req, res);
   try {
-    const otpBypass = process.env.OTP_BYPASS?.toLowerCase() === 'true';
     const { phone, accountType } = req.body;
     
     if (!phone) {
@@ -463,7 +494,7 @@ export const resetPassword = async (
 ): Promise<void> => {
   const t = beginApiTrace('POST /auth/reset-password', req, res);
   try {
-    const otpBypass = process.env.OTP_BYPASS?.toLowerCase() === 'true';
+    const otpBypass = otpBypassEnabled();
     const { phone, otp, newPassword, accountType } = req.body;
     
     if (!phone || !otp || !newPassword) {
@@ -649,12 +680,7 @@ export const sendOtp = async (
 
     // If this is login flow (no signup data) and account exists, send OTP for login
     if (doc && !signup) {
-      const otp = String(Math.floor(100000 + Math.random() * 900000));
-      const otpExpiry = new Date(Date.now() + OTP_TTL_MS);
-      doc.otp = otp;
-      doc.otpExpiry = otpExpiry;
-      await doc.save();
-      console.log(`[OTP TEST] ${accountType}:${phoneDigits} → OTP: ${otp}`);
+      await saveOtpOnDoc(doc, accountType);
       t.log('send_otp_ok_existing');
       t.json(200, { message: 'OTP sent', sent: true });
       return;
@@ -662,19 +688,17 @@ export const sendOtp = async (
 
     // For new receiver signup - store in memory (NOT database)
     if (accountType === 'receiver' && signup) {
-      const otp = String(Math.floor(100000 + Math.random() * 900000));
-      const otpExpiry = new Date(Date.now() + OTP_TTL_MS);
-
+      const issued = await issueSmsOtp(phoneDigits, 'pending-receiver');
       const resolvedName = signup.name?.trim() || `Member ${phoneDigits.slice(-4)}`;
-      
+
       pendingReceiverSignups.set(phoneDigits, {
         phone: phoneDigits,
-        otp,
-        otpExpiry,
+        otp: issued.otp,
+        verificationId: issued.verificationId,
+        otpExpiry: issued.otpExpiry,
         name: resolvedName,
       });
-      
-      console.log(`[OTP TEST] Pending receiver signup: ${phoneDigits} → OTP: ${otp}`);
+
       t.log('send_otp_ok_pending_signup');
       t.json(200, { message: 'OTP sent', sent: true });
       return;
@@ -683,6 +707,7 @@ export const sendOtp = async (
     t.warn('send_otp_account_not_found');
     t.json(404, { message: 'No account found', error: 'SEND_OTP_ACCOUNT_NOT_FOUND' });
   } catch (err) {
+    if (jsonMessageCentralError(t, err, 'SEND_OTP_SMS_FAILED')) return;
     const msg = err instanceof Error ? err.message : String(err);
     t.logFullError('send_otp_unhandled', err, { mongoCode: mongoErrCode(err) });
     t.json(500, { message: msg || 'Server error', error: 'SEND_OTP_FAILED' });
@@ -695,7 +720,7 @@ export const verifyOtp = async (
 ): Promise<void> => {
   const t = beginApiTrace('POST /auth/verify-otp', req, res);
   try {
-    const otpBypass = process.env.OTP_BYPASS?.toLowerCase() === 'true';
+    const otpBypass = otpBypassEnabled();
     const { phone, otp, accountType } = req.body;
     const phoneDigits = typeof phone === 'string' ? String(phone).trim() : '';
 
@@ -743,53 +768,23 @@ export const verifyOtp = async (
         return;
       }
       const trimmedOtp = String(otp).trim();
-      // ANY 6-digit number bypasses OTP
-      const isBypassOtp = /^\d{6}$/.test(trimmedOtp);
-      
-      if (otpBypass || isBypassOtp) {
-        doc.isVerified = true;
-        doc.otp = null;
-        doc.otpExpiry = null;
-    
-        if (accountType === 'receiver' && doc.accountStatus === 'pending_profile') {
-          const receiverDoc = doc as ReceiverDocument;
-          const hasName = receiverDoc.name && receiverDoc.name.trim();
-          const hasProfileImage = receiverDoc.profileImage && receiverDoc.profileImage.trim();
-          const hasUserAudio = receiverDoc.userAudio && receiverDoc.userAudio.trim();
-          if (hasName && hasProfileImage && hasUserAudio) {
-            doc.accountStatus = 'approved';
-          }
-        }
-        await doc.save();
-        await respondVerified(doc);
-        return;
-      }
-    
-      if (!doc.otp || !doc.otpExpiry) {
-        t.warn('verify_otp_no_otp_pending');
-        t.json(400, {
-          message: 'No OTP pending. Request a new code.',
-          error: 'VERIFY_OTP_NO_CODE_PENDING',
+
+      try {
+        await assertOtpValid({
+          storedOtp: doc.otp,
+          otpExpiry: doc.otpExpiry,
+          submitted: trimmedOtp,
+          allowStaticReceiver: accountType === 'receiver',
         });
-        return;
+      } catch (e) {
+        if (jsonMessageCentralError(t, e, 'VERIFY_OTP_INVALID_CODE')) return;
+        throw e;
       }
-    
-      if (new Date() > doc.otpExpiry) {
-        t.warn('verify_otp_expired');
-        t.json(400, { message: 'OTP expired. Request a new code.', error: 'VERIFY_OTP_CODE_EXPIRED' });
-        return;
-      }
-    
-      if (trimmedOtp !== doc.otp) {
-        t.warn('verify_otp_mismatch');
-        t.json(400, { message: 'Invalid OTP', error: 'VERIFY_OTP_INVALID_CODE' });
-        return;
-      }
-    
+
       doc.isVerified = true;
       doc.otp = null;
       doc.otpExpiry = null;
-    
+
       if (accountType === 'receiver' && doc.accountStatus === 'pending_profile') {
         const receiverDoc = doc as ReceiverDocument;
         const hasName = receiverDoc.name && receiverDoc.name.trim();
@@ -799,7 +794,7 @@ export const verifyOtp = async (
           doc.accountStatus = 'approved';
         }
       }
-    
+
       await doc.save();
       await respondVerified(doc);
     };
@@ -817,41 +812,43 @@ export const verifyOtp = async (
 
     // Receiver flow - check pending signup first (in memory), then existing account
     let doc = await Receiver.findOne({ phone: phoneDigits });
-    
+
     if (!doc) {
       clearExpiredPendingReceiverSignups();
       const pending = pendingReceiverSignups.get(phoneDigits);
-      
+
       if (!pending) {
         t.warn('verify_otp_receiver_not_found');
-        t.json(404, { message: 'No pending signup or account found', error: 'VERIFY_OTP_RECEIVER_NOT_FOUND' });
+        t.json(404, {
+          message: 'No pending signup or account found',
+          error: 'VERIFY_OTP_RECEIVER_NOT_FOUND',
+        });
         return;
       }
-      
-      const trimmedOtp = String(otp).trim();
-      const localBypass = /^\d{6}$/.test(trimmedOtp);
-      const shouldBypass = otpBypass || localBypass;
-      
-      if (new Date() > pending.otpExpiry && !shouldBypass) {
-        pendingReceiverSignups.delete(phoneDigits);
-        t.warn('verify_otp_pending_receiver_expired');
-        t.json(400, { message: 'OTP expired. Request a new code.', error: 'VERIFY_OTP_CODE_EXPIRED' });
-        return;
+
+      try {
+        await assertOtpValid({
+          storedOtp: pending.otp,
+          verificationId: pending.verificationId,
+          otpExpiry: pending.otpExpiry,
+          submitted: String(otp).trim(),
+          allowStaticReceiver: true,
+        });
+      } catch (e) {
+        if (e instanceof MessageCentralError && e.responseCode === 705) {
+          pendingReceiverSignups.delete(phoneDigits);
+        }
+        if (jsonMessageCentralError(t, e, 'VERIFY_OTP_INVALID_CODE')) return;
+        throw e;
       }
-      
-      if (!shouldBypass && trimmedOtp !== pending.otp) {
-        t.warn('verify_otp_pending_receiver_mismatch');
-        t.json(400, { message: 'Invalid OTP', error: 'VERIFY_OTP_INVALID_CODE' });
-        return;
-      }
-      
+
       if (await phoneTaken(phoneDigits)) {
         pendingReceiverSignups.delete(phoneDigits);
         t.warn('verify_otp_pending_receiver_phone_taken_race');
         t.json(409, { message: 'Mobile number already registered', error: 'REGISTER_PHONE_TAKEN' });
         return;
       }
-      
+
       // CREATE ACCOUNT ONLY NOW - after successful OTP verification
       doc = await Receiver.create({
         name: pending.name,
@@ -866,9 +863,10 @@ export const verifyOtp = async (
       await respondVerified(doc);
       return;
     }
-    
+
     await verifyDoc(doc);
   } catch (err) {
+    if (jsonMessageCentralError(t, err, 'VERIFY_OTP_FAILED')) return;
     const msg = err instanceof Error ? err.message : String(err);
     t.logFullError('verify_otp_unhandled', err, { mongoCode: mongoErrCode(err) });
     t.json(500, { message: msg || 'Server error', error: 'VERIFY_OTP_FAILED' });
@@ -947,12 +945,16 @@ export const sendOtpMobile = async (
       return;
     }
 
-    const otp = generateOtpCode();
-    const otpExpiry = new Date(Date.now() + OTP_TTL_MS);
-    pendingMobileSignups.set(canonicalPhone, { phone: canonicalPhone, otp, otpExpiry });
-    console.log(`[OTP TEST] new-mobile:${canonicalPhone} → OTP: ${otp}`);
+    const issued = await issueSmsOtp(canonicalPhone, 'new-mobile');
+    pendingMobileSignups.set(canonicalPhone, {
+      phone: canonicalPhone,
+      otp: issued.otp,
+      verificationId: issued.verificationId,
+      otpExpiry: issued.otpExpiry,
+    });
     t.json(200, { message: 'OTP sent', sent: true, accountType: null, isNewUser: true });
   } catch (err) {
+    if (jsonMessageCentralError(t, err, 'SEND_MOBILE_OTP_SMS_FAILED')) return;
     const msg = err instanceof Error ? err.message : String(err);
     t.logFullError('send_otp_mobile_unhandled', err, { mongoCode: mongoErrCode(err) });
     t.json(500, { message: msg || 'Server error', error: 'SEND_MOBILE_OTP_FAILED' });
@@ -968,7 +970,7 @@ export const verifyOtpMobile = async (
 ): Promise<void> => {
   const t = beginApiTrace('POST /auth/verify-otp-mobile', req, res);
   try {
-    const otpBypass = process.env.OTP_BYPASS?.toLowerCase() === 'true';
+    const otpBypass = otpBypassEnabled();
     const phoneDigits = typeof req.body.phone === 'string' ? String(req.body.phone).trim() : '';
     const otp = req.body.otp;
 
@@ -983,7 +985,6 @@ export const verifyOtpMobile = async (
     const canonicalPhone = normalizeIndianMobilePhone(phoneDigits);
     const accountType = await resolvePhoneAccountType(phoneDigits);
     const trimmedOtp = String(otp).trim();
-    const isBypassOtp = /^\d{6}$/.test(trimmedOtp);
 
     const finishLogin = async (
       doc: UserDocument | ReceiverDocument,
@@ -1019,28 +1020,16 @@ export const verifyOtpMobile = async (
       doc: UserDocument | ReceiverDocument,
       typ: 'user' | 'receiver'
     ): Promise<void> => {
-      if (otpBypass || isBypassOtp) {
-        doc.isVerified = true;
-        doc.otp = null;
-        doc.otpExpiry = null;
-        await doc.save();
-        await finishLogin(doc, typ);
-        return;
-      }
-      if (!doc.otp || !doc.otpExpiry) {
-        t.json(400, {
-          message: 'No OTP pending. Request a new code.',
-          error: 'VERIFY_OTP_NO_CODE_PENDING',
+      try {
+        await assertOtpValid({
+          storedOtp: doc.otp,
+          otpExpiry: doc.otpExpiry,
+          submitted: trimmedOtp,
+          allowStaticReceiver: typ === 'receiver',
         });
-        return;
-      }
-      if (new Date() > doc.otpExpiry) {
-        t.json(400, { message: 'OTP expired. Request a new code.', error: 'VERIFY_OTP_CODE_EXPIRED' });
-        return;
-      }
-      if (trimmedOtp !== doc.otp) {
-        t.json(400, { message: 'Invalid OTP', error: 'VERIFY_OTP_INVALID_CODE' });
-        return;
+      } catch (e) {
+        if (jsonMessageCentralError(t, e, 'VERIFY_OTP_INVALID_CODE')) return;
+        throw e;
       }
       doc.isVerified = true;
       doc.otp = null;
@@ -1078,15 +1067,19 @@ export const verifyOtpMobile = async (
       return;
     }
 
-    if (new Date() > pending.otpExpiry && !otpBypass && !isBypassOtp) {
-      pendingMobileSignups.delete(canonicalPhone);
-      t.json(400, { message: 'OTP expired. Request a new code.', error: 'VERIFY_OTP_CODE_EXPIRED' });
-      return;
-    }
-
-    if (!otpBypass && !isBypassOtp && trimmedOtp !== pending.otp) {
-      t.json(400, { message: 'Invalid OTP', error: 'VERIFY_OTP_INVALID_CODE' });
-      return;
+    try {
+      await assertOtpValid({
+        storedOtp: pending.otp,
+        verificationId: pending.verificationId,
+        otpExpiry: pending.otpExpiry,
+        submitted: trimmedOtp,
+      });
+    } catch (e) {
+      if (e instanceof MessageCentralError && e.responseCode === 705) {
+        pendingMobileSignups.delete(canonicalPhone);
+      }
+      if (jsonMessageCentralError(t, e, 'VERIFY_OTP_INVALID_CODE')) return;
+      throw e;
     }
 
     if (await phoneTaken(phoneDigits)) {
@@ -1106,6 +1099,7 @@ export const verifyOtpMobile = async (
       phone: canonicalPhone,
     });
   } catch (err) {
+    if (jsonMessageCentralError(t, err, 'VERIFY_MOBILE_OTP_FAILED')) return;
     const msg = err instanceof Error ? err.message : String(err);
     t.logFullError('verify_otp_mobile_unhandled', err, { mongoCode: mongoErrCode(err) });
     t.json(500, { message: msg || 'Server error', error: 'VERIFY_MOBILE_OTP_FAILED' });

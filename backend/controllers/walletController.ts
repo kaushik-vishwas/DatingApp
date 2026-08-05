@@ -210,14 +210,16 @@ export const createRazorpayWalletOrder = async (
       },
     });
 
+    const businessName = process.env.RAZORPAY_BUSINESS_NAME?.trim() || 'Nesthama';
+    const keyId = process.env.RAZORPAY_KEY_ID!.trim();
+    const currency = order.currency ?? 'INR';
+
     res.status(200).json({
       orderId: order.id,
       amount: amountPaise,
-      currency: order.currency ?? 'INR',
-      keyId: process.env.RAZORPAY_KEY_ID,
-      businessName: process.env.RAZORPAY_BUSINESS_NAME?.trim() || 'Nesthama',
-      prefillContact: authUser.phone ?? '',
-      prefillName: authUser.name ?? 'User',
+      currency,
+      keyId,
+      businessName,
     });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);

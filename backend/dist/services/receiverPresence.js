@@ -40,10 +40,19 @@ function isReceiverInDiscoverGrace(receiverId, discoverGraceUntil) {
         return true;
     return false;
 }
-/** Socket connected now, or within the 5-minute post-disconnect grace while Go Online is on. */
-function isReceiverDiscoverPresenceLive(receiverId, discoverGraceUntil) {
+/** Socket connected now, or within the 5-minute post-disconnect grace while Go Online is on.
+ *  Optional push reachability: while Go Online is on and an Expo push token exists, treat as
+ *  reachable for discover/calls even after Android freezes JS/WebSocket past the grace window.
+ */
+function isReceiverDiscoverPresenceLive(receiverId, discoverGraceUntil, reachability) {
     const rid = normalizeReceiverId(receiverId);
-    return (0, socketRegistry_1.isReceiverSocketConnected)(rid) || isReceiverInDiscoverGrace(rid, discoverGraceUntil);
+    if ((0, socketRegistry_1.isReceiverSocketConnected)(rid) || isReceiverInDiscoverGrace(rid, discoverGraceUntil)) {
+        return true;
+    }
+    if (reachability?.isAvailable && String(reachability.expoPushToken ?? '').trim()) {
+        return true;
+    }
+    return false;
 }
 function scheduleGraceExpiry(rid) {
     const prev = discoverGraceExpireTimers.get(rid);
@@ -102,19 +111,20 @@ async function touchReceiverForegroundPresence(receiverId) {
     await syncReceiverPresenceInDatabase(rid);
 }
 /**
- * DB `isOnline` reflects Go Online (`isAvailable`) plus live socket or 5-minute background grace.
- * Callers discover uses `isReceiverDiscoverPresenceLive` for the online badge.
+ * DB `isOnline` reflects Go Online (`isAvailable`) plus live socket, background grace,
+ * or a registered Expo push token (Android can freeze the socket while the app still runs).
  */
 async function syncReceiverPresenceInDatabase(receiverId) {
     const rid = normalizeReceiverId(receiverId);
     if (!rid)
         return;
-    const receiver = await Receiver_1.default.findById(rid).select('isAvailable onlineSince isOnline discoverGraceUntil');
+    const receiver = await Receiver_1.default.findById(rid).select('isAvailable onlineSince isOnline discoverGraceUntil expoPushToken');
     if (!receiver)
         return;
     const socketLive = (0, socketRegistry_1.isReceiverSocketConnected)(rid);
     const graceLive = isReceiverInDiscoverGrace(rid, receiver.discoverGraceUntil);
-    const presenceLive = socketLive || graceLive;
+    const pushReachable = Boolean(receiver.isAvailable) && Boolean(String(receiver.expoPushToken ?? '').trim());
+    const presenceLive = socketLive || graceLive || pushReachable;
     const shouldBeOnline = presenceLive && Boolean(receiver.isAvailable);
     const wasOnline = Boolean(receiver.isOnline);
     const onlineSince = receiver.onlineSince;

@@ -1,9 +1,42 @@
 "use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.resolveWithdrawal = exports.listWithdrawals = exports.resolveModerationReport = exports.listModerationReports = exports.rejectAppUser = exports.approveAppUser = exports.listPendingAppUsers = exports.rejectReceiver = exports.approveReceiver = exports.listPendingReceivers = exports.getKycStats = exports.listAllReceivers = exports.updateReceiver = exports.updateAppUser = exports.listAppUsers = exports.getOverviewDashboard = exports.getRevenueDashboard = exports.updateAdminRole = exports.updateAdminCallerNotification = exports.updateAdminReceiverWelcome = exports.updateAdminReceiverEarningModel = exports.updateAdminNotificationControls = exports.getAdminSettings = exports.adminConfirmEmailChange = exports.adminRequestEmailChange = exports.adminResetPassword = exports.adminForgotPassword = exports.adminMe = exports.adminLogin = void 0;
+exports.resolveWithdrawal = exports.listWithdrawals = exports.resolveModerationReport = exports.listModerationReports = exports.rejectAppUser = exports.approveAppUser = exports.listPendingAppUsers = exports.rejectReceiver = exports.approveReceiver = exports.listPendingReceivers = exports.getKycStats = exports.listAllReceivers = exports.deleteReceiverPermanently = exports.updateReceiver = exports.deleteAppUser = exports.updateAppUser = exports.listAppUsers = exports.getOverviewDashboard = exports.getRevenueDashboard = exports.updateAdminRole = exports.updateAdminCallerNotification = exports.updateAdminReceiverWelcome = exports.updateAdminReceiverEarningModel = exports.updateAdminNotificationControls = exports.getAdminSettings = exports.adminConfirmEmailChange = exports.adminRequestEmailChange = exports.adminResetPassword = exports.adminForgotPassword = exports.adminMe = exports.adminLogin = void 0;
 const bcryptjs_1 = __importDefault(require("bcryptjs"));
 const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
 const mongoose_1 = __importDefault(require("mongoose"));
@@ -26,6 +59,7 @@ const authController_1 = require("./authController");
 const email_1 = require("../config/email");
 const superAdminSync_1 = require("../services/superAdminSync");
 const razorpayXPayoutService_1 = require("../services/razorpayXPayoutService");
+const otpBypass_1 = require("../utils/otpBypass");
 const socketRegistry_1 = require("../socket/socketRegistry");
 const authSessionService_1 = require("../services/authSessionService");
 const phoneNormalize_1 = require("../utils/phoneNormalize");
@@ -120,7 +154,7 @@ exports.adminMe = adminMe;
 const adminForgotPassword = async (req, res) => {
     const genericMessage = 'If the admin account is configured, a reset code has been sent to the admin email.';
     try {
-        const otpBypass = process.env.OTP_BYPASS?.toLowerCase() === 'true';
+        const otpBypass = (0, otpBypass_1.otpBypassEnabled)();
         const configuredEmail = (0, superAdminSync_1.getConfiguredAdminEmail)();
         if (!configuredEmail) {
             res.status(503).json({ message: 'Admin is not configured: set ADMIN_EMAIL in the backend .env' });
@@ -178,7 +212,7 @@ exports.adminForgotPassword = adminForgotPassword;
  */
 const adminResetPassword = async (req, res) => {
     try {
-        const otpBypass = process.env.OTP_BYPASS?.toLowerCase() === 'true';
+        const otpBypass = (0, otpBypass_1.otpBypassEnabled)();
         const configuredEmail = (0, superAdminSync_1.getConfiguredAdminEmail)();
         if (!configuredEmail) {
             res.status(503).json({ message: 'Admin is not configured: set ADMIN_EMAIL in the backend .env' });
@@ -253,7 +287,7 @@ const adminRequestEmailChange = async (req, res) => {
             });
             return;
         }
-        const otpBypass = process.env.OTP_BYPASS?.toLowerCase() === 'true';
+        const otpBypass = (0, otpBypass_1.otpBypassEnabled)();
         const admin = req.admin;
         if (!admin) {
             res.status(401).json({ message: 'Not authorized' });
@@ -325,7 +359,7 @@ const adminConfirmEmailChange = async (req, res) => {
             });
             return;
         }
-        const otpBypass = process.env.OTP_BYPASS?.toLowerCase() === 'true';
+        const otpBypass = (0, otpBypass_1.otpBypassEnabled)();
         const admin = req.admin;
         if (!admin) {
             res.status(401).json({ message: 'Not authorized' });
@@ -940,6 +974,32 @@ const updateAppUser = async (req, res) => {
 };
 exports.updateAppUser = updateAppUser;
 /**
+ * DELETE /admin/users/:id — permanently delete caller + related chats/sessions/notifications/wallet rows.
+ */
+const deleteAppUser = async (req, res) => {
+    try {
+        const id = String(req.params.id ?? '').trim();
+        if (!mongoose_1.default.Types.ObjectId.isValid(id)) {
+            res.status(400).json({ message: 'Invalid user id' });
+            return;
+        }
+        const exists = await User_1.default.exists({ _id: id });
+        if (!exists) {
+            res.status(404).json({ message: 'User not found' });
+            return;
+        }
+        const { cascadeDeleteUserAccount } = await Promise.resolve().then(() => __importStar(require('../services/accountCascadeDelete')));
+        await cascadeDeleteUserAccount(id);
+        res.status(200).json({ message: 'User deleted', userId: id });
+    }
+    catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error('deleteAppUser error:', msg);
+        res.status(500).json({ message: msg || 'Server error' });
+    }
+};
+exports.deleteAppUser = deleteAppUser;
+/**
  * PATCH /admin/receivers/:id — partial receiver profile update (admin only).
  */
 const updateReceiver = async (req, res) => {
@@ -1082,6 +1142,32 @@ const updateReceiver = async (req, res) => {
     }
 };
 exports.updateReceiver = updateReceiver;
+/**
+ * DELETE /admin/receivers/:id — permanently delete receiver + related chats/sessions/scores/notifications.
+ */
+const deleteReceiverPermanently = async (req, res) => {
+    try {
+        const id = String(req.params.id ?? '').trim();
+        if (!mongoose_1.default.Types.ObjectId.isValid(id)) {
+            res.status(400).json({ message: 'Invalid receiver id' });
+            return;
+        }
+        const exists = await Receiver_1.default.exists({ _id: id });
+        if (!exists) {
+            res.status(404).json({ message: 'Receiver not found' });
+            return;
+        }
+        const { cascadeDeleteReceiverAccount } = await Promise.resolve().then(() => __importStar(require('../services/accountCascadeDelete')));
+        await cascadeDeleteReceiverAccount(id);
+        res.status(200).json({ message: 'Receiver deleted', receiverId: id });
+    }
+    catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error('deleteReceiverPermanently error:', msg);
+        res.status(500).json({ message: msg || 'Server error' });
+    }
+};
+exports.deleteReceiverPermanently = deleteReceiverPermanently;
 /**
  * GET /admin/receivers — all rows in `receivers` collection.
  */

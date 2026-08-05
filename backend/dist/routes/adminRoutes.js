@@ -27,12 +27,14 @@ router.get('/users/pending', adminAuth_1.adminProtect, adminController_1.listPen
 router.patch('/users/:id/approve', adminAuth_1.adminProtect, adminController_1.approveAppUser);
 router.patch('/users/:id/reject', adminAuth_1.adminProtect, adminController_1.rejectAppUser);
 router.patch('/users/:id', adminAuth_1.adminProtect, adminController_1.updateAppUser);
+router.delete('/users/:id', adminAuth_1.adminProtect, adminController_1.deleteAppUser);
 router.get('/receivers', adminAuth_1.adminProtect, adminController_1.listAllReceivers);
 router.get('/receivers/pending', adminAuth_1.adminProtect, adminController_1.listPendingReceivers);
 router.get('/kyc/stats', adminAuth_1.adminProtect, adminController_1.getKycStats);
 router.patch('/receivers/:id/approve', adminAuth_1.adminProtect, adminController_1.approveReceiver);
 router.patch('/receivers/:id/reject', adminAuth_1.adminProtect, adminController_1.rejectReceiver);
 router.patch('/receivers/:id', adminAuth_1.adminProtect, adminController_1.updateReceiver);
+router.delete('/receivers/:id', adminAuth_1.adminProtect, adminController_1.deleteReceiverPermanently);
 router.get('/reports', adminAuth_1.adminProtect, adminController_1.listModerationReports);
 router.patch('/reports/:id', adminAuth_1.adminProtect, adminController_1.resolveModerationReport);
 router.get('/caller-app-reviews', adminAuth_1.adminProtect, adminCallerAppReviewController_1.listCallerAppStoreReviews);

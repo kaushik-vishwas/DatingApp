@@ -674,9 +674,12 @@ function attachChatSocket(httpServer) {
                     }
                     if (!hasActiveSocketForAccount('r', targetId)) {
                         const recvPresence = await Receiver_1.default.findById(targetId)
-                            .select('expoPushToken discoverGraceUntil')
+                            .select('expoPushToken discoverGraceUntil isAvailable')
                             .lean();
-                        const presenceLive = (0, receiverPresence_1.isReceiverDiscoverPresenceLive)(targetId, recvPresence?.discoverGraceUntil ?? null);
+                        const presenceLive = (0, receiverPresence_1.isReceiverDiscoverPresenceLive)(targetId, recvPresence?.discoverGraceUntil ?? null, {
+                            isAvailable: Boolean(recvPresence?.isAvailable),
+                            expoPushToken: recvPresence?.expoPushToken ?? null,
+                        });
                         const pushToken = recvPresence?.expoPushToken?.trim();
                         if (!presenceLive && !pushToken) {
                             ack?.({ ok: false, error: 'Receiver is offline right now.' });

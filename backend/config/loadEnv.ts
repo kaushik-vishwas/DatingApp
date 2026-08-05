@@ -15,7 +15,12 @@ export function loadEnv(): void {
 
   if (fs.existsSync(envPath)) {
     dotenv.config({ path: envPath, override: true });
-    return;
+  } else {
+    dotenv.config({ override: true });
   }
-  dotenv.config({ override: true });
+
+  // Normalize flags that are often broken by Windows CRLF / trailing spaces in .env.
+  if (typeof process.env.OTP_BYPASS === 'string') {
+    process.env.OTP_BYPASS = process.env.OTP_BYPASS.trim();
+  }
 }

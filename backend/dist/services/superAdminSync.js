@@ -31,7 +31,6 @@ async function syncSuperAdminFromEnv() {
             existing.role = 'super_admin';
         }
         await existing.save();
-        console.log(`[admin] Super admin synced: ${email}`);
         return;
     }
     const defaultPassword = String(process.env.ADMIN_PASSWORD ?? 'Admin@123');
@@ -42,5 +41,4 @@ async function syncSuperAdminFromEnv() {
         name,
         role: 'super_admin',
     });
-    console.log(`[admin] Created super admin for ${email}. Default password is set (change it after login).`);
 }

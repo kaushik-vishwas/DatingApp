@@ -8,7 +8,6 @@ const connectDB = async (): Promise<void> => {
     }
 
     await mongoose.connect(uri);
-    console.log('MongoDB connected');
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error('MongoDB connection error:', msg);

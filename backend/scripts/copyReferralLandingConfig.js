@@ -12,4 +12,3 @@ if (!fs.existsSync(source)) {
 
 fs.mkdirSync(targetDir, { recursive: true });
 fs.copyFileSync(source, target);
-console.log('[copyReferralLandingConfig] Copied to', target);

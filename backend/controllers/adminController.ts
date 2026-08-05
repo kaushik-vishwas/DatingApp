@@ -31,6 +31,7 @@ import { toApiReceiver, toApiUser } from './authController';
 import { sendOtpEmail } from '../config/email';
 import { getConfiguredAdminEmail } from '../services/superAdminSync';
 import { trackAndFinalizeRazorpayXPayout } from '../services/razorpayXPayoutService';
+import { otpBypassEnabled } from '../utils/otpBypass';
 import {
   emitAuthSessionSuperseded,
   emitCallerApproved,
@@ -149,7 +150,7 @@ export const adminForgotPassword = async (
 ): Promise<void> => {
   const genericMessage = 'If the admin account is configured, a reset code has been sent to the admin email.';
   try {
-    const otpBypass = process.env.OTP_BYPASS?.toLowerCase() === 'true';
+    const otpBypass = otpBypassEnabled();
     const configuredEmail = getConfiguredAdminEmail();
     if (!configuredEmail) {
       res.status(503).json({ message: 'Admin is not configured: set ADMIN_EMAIL in the backend .env' });
@@ -218,7 +219,7 @@ export const adminResetPassword = async (
   res: Response
 ): Promise<void> => {
   try {
-    const otpBypass = process.env.OTP_BYPASS?.toLowerCase() === 'true';
+    const otpBypass = otpBypassEnabled();
     const configuredEmail = getConfiguredAdminEmail();
     if (!configuredEmail) {
       res.status(503).json({ message: 'Admin is not configured: set ADMIN_EMAIL in the backend .env' });
@@ -302,7 +303,7 @@ export const adminRequestEmailChange = async (
       });
       return;
     }
-    const otpBypass = process.env.OTP_BYPASS?.toLowerCase() === 'true';
+    const otpBypass = otpBypassEnabled();
     const admin = req.admin;
     if (!admin) {
       res.status(401).json({ message: 'Not authorized' });
@@ -388,7 +389,7 @@ export const adminConfirmEmailChange = async (
       });
       return;
     }
-    const otpBypass = process.env.OTP_BYPASS?.toLowerCase() === 'true';
+    const otpBypass = otpBypassEnabled();
     const admin = req.admin;
     if (!admin) {
       res.status(401).json({ message: 'Not authorized' });
@@ -1116,6 +1117,31 @@ export const updateAppUser = async (
   }
 };
 
+/**
+ * DELETE /admin/users/:id — permanently delete caller + related chats/sessions/notifications/wallet rows.
+ */
+export const deleteAppUser = async (req: Request<{ id: string }>, res: Response): Promise<void> => {
+  try {
+    const id = String(req.params.id ?? '').trim();
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      res.status(400).json({ message: 'Invalid user id' });
+      return;
+    }
+    const exists = await User.exists({ _id: id });
+    if (!exists) {
+      res.status(404).json({ message: 'User not found' });
+      return;
+    }
+    const { cascadeDeleteUserAccount } = await import('../services/accountCascadeDelete');
+    await cascadeDeleteUserAccount(id);
+    res.status(200).json({ message: 'User deleted', userId: id });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error('deleteAppUser error:', msg);
+    res.status(500).json({ message: msg || 'Server error' });
+  }
+};
+
 type AdminReceiverPatchBody = {
   name?: string;
   phone?: string;
@@ -1284,6 +1310,34 @@ export const updateReceiver = async (
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error('updateReceiver error:', msg);
+    res.status(500).json({ message: msg || 'Server error' });
+  }
+};
+
+/**
+ * DELETE /admin/receivers/:id — permanently delete receiver + related chats/sessions/scores/notifications.
+ */
+export const deleteReceiverPermanently = async (
+  req: Request<{ id: string }>,
+  res: Response
+): Promise<void> => {
+  try {
+    const id = String(req.params.id ?? '').trim();
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      res.status(400).json({ message: 'Invalid receiver id' });
+      return;
+    }
+    const exists = await Receiver.exists({ _id: id });
+    if (!exists) {
+      res.status(404).json({ message: 'Receiver not found' });
+      return;
+    }
+    const { cascadeDeleteReceiverAccount } = await import('../services/accountCascadeDelete');
+    await cascadeDeleteReceiverAccount(id);
+    res.status(200).json({ message: 'Receiver deleted', receiverId: id });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error('deleteReceiverPermanently error:', msg);
     res.status(500).json({ message: msg || 'Server error' });
   }
 };

@@ -38,7 +38,7 @@ const receiverWalletCreditSchema = new mongoose_1.Schema({
     receiverId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Receiver', required: true, index: true },
     source: { type: String, enum: ['referral_reward'], required: true, index: true },
     amountInr: { type: Number, required: true, min: 0.01 },
-    referralId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Referral', default: null, index: true },
+    referralId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Referral', default: null },
     description: { type: String, required: true, trim: true, maxlength: 300 },
 }, { timestamps: true });
 receiverWalletCreditSchema.index({ receiverId: 1, createdAt: -1 });

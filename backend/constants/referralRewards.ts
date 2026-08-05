@@ -7,8 +7,8 @@ export const REFERRAL_REWARD_MATRIX_INR: Record<ReferralPartyRole, Record<Referr
     receiver: 100,
   },
   receiver: {
-    caller: 150,
-    receiver: 200,
+    caller: 50,
+    receiver: 100,
   },
 };
 

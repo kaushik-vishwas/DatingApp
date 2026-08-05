@@ -29,7 +29,6 @@ export async function syncSuperAdminFromEnv(): Promise<void> {
       existing.role = 'super_admin';
     }
     await existing.save();
-    console.log(`[admin] Super admin synced: ${email}`);
     return;
   }
 
@@ -41,5 +40,4 @@ export async function syncSuperAdminFromEnv(): Promise<void> {
     name,
     role: 'super_admin',
   });
-  console.log(`[admin] Created super admin for ${email}. Default password is set (change it after login).`);
 }
