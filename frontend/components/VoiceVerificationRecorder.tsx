@@ -3,6 +3,8 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  Animated,
+  Easing,
   Platform,
   StyleSheet,
   Text,
@@ -27,6 +29,97 @@ type Props = {
   onUploadError?: (message: string) => void;
 };
 
+function useRecordingPulse(active: boolean): {
+  ring1: Animated.Value;
+  ring2: Animated.Value;
+  hintOpacity: Animated.Value;
+  breathe: Animated.Value;
+} {
+  const ring1 = useRef(new Animated.Value(0)).current;
+  const ring2 = useRef(new Animated.Value(0)).current;
+  const hintOpacity = useRef(new Animated.Value(1)).current;
+  const breathe = useRef(new Animated.Value(1)).current;
+  const loopsRef = useRef<Animated.CompositeAnimation[]>([]);
+
+  useEffect(() => {
+    loopsRef.current.forEach((a) => a.stop());
+    loopsRef.current = [];
+    ring1.setValue(0);
+    ring2.setValue(0);
+    hintOpacity.setValue(1);
+    breathe.setValue(1);
+
+    if (!active) return;
+
+    const makeRing = (value: Animated.Value, delayMs: number) =>
+      Animated.loop(
+        Animated.sequence([
+          Animated.delay(delayMs),
+          Animated.timing(value, {
+            toValue: 1,
+            duration: 1600,
+            easing: Easing.out(Easing.quad),
+            useNativeDriver: true,
+          }),
+          Animated.timing(value, {
+            toValue: 0,
+            duration: 0,
+            useNativeDriver: true,
+          }),
+        ])
+      );
+
+    const hintLoop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(hintOpacity, {
+          toValue: 0.35,
+          duration: 900,
+          easing: Easing.inOut(Easing.sin),
+          useNativeDriver: true,
+        }),
+        Animated.timing(hintOpacity, {
+          toValue: 1,
+          duration: 900,
+          easing: Easing.inOut(Easing.sin),
+          useNativeDriver: true,
+        }),
+      ])
+    );
+
+    const breatheLoop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(breathe, {
+          toValue: 1.04,
+          duration: 1100,
+          easing: Easing.inOut(Easing.sin),
+          useNativeDriver: true,
+        }),
+        Animated.timing(breathe, {
+          toValue: 1,
+          duration: 1100,
+          easing: Easing.inOut(Easing.sin),
+          useNativeDriver: true,
+        }),
+      ])
+    );
+
+    const a1 = makeRing(ring1, 0);
+    const a2 = makeRing(ring2, 550);
+    loopsRef.current = [a1, a2, hintLoop, breatheLoop];
+    a1.start();
+    a2.start();
+    hintLoop.start();
+    breatheLoop.start();
+
+    return () => {
+      loopsRef.current.forEach((a) => a.stop());
+      loopsRef.current = [];
+    };
+  }, [active, breathe, hintOpacity, ring1, ring2]);
+
+  return { ring1, ring2, hintOpacity, breathe };
+}
+
 export default function VoiceVerificationRecorder({
   scriptText,
   onUploadComplete,
@@ -38,6 +131,7 @@ export default function VoiceVerificationRecorder({
   const [isRecording, setIsRecording] = useState(false);
   const [busy, setBusy] = useState(false);
   const [statusLine, setStatusLine] = useState<string | null>(null);
+  const { ring1, ring2, hintOpacity, breathe } = useRecordingPulse(isRecording && !busy);
 
   useEffect(() => {
     return () => {
@@ -107,7 +201,7 @@ export default function VoiceVerificationRecorder({
         return;
       }
       const mimeType = inferMimeFromLocalRecording(uri);
-      setStatusLine('Uploading to Cloudinary…');
+      setStatusLine('Uploading…');
       const { secure_url } = await uploadToCloudinary(uri, {
         mimeType,
         resourceType: 'auto',
@@ -115,7 +209,7 @@ export default function VoiceVerificationRecorder({
         onDebug: onUploadDebug,
       });
       onUploadComplete(secure_url);
-      setStatusLine('Voice sample uploaded. You can continue.');
+      setStatusLine('Voice sample ready. Continue below.');
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Upload failed';
       onUploadError?.(msg);
@@ -135,6 +229,30 @@ export default function VoiceVerificationRecorder({
     }
   };
 
+  const ringStyle = (progress: Animated.Value) => ({
+    opacity: progress.interpolate({
+      inputRange: [0, 0.15, 1],
+      outputRange: [0.45, 0.28, 0],
+    }),
+    transform: [
+      {
+        scale: progress.interpolate({
+          inputRange: [0, 1],
+          outputRange: [1, 1.55],
+        }),
+      },
+    ],
+  });
+
+  const hint =
+    busy && isRecording
+      ? 'Saving…'
+      : isRecording
+        ? 'Tap to stop'
+        : busy
+          ? 'Please wait'
+          : 'Tap to record';
+
   return (
     <View>
       {!hideScript ? (
@@ -146,25 +264,51 @@ export default function VoiceVerificationRecorder({
       <View style={styles.micSection}>
         {isRecording ? (
           <>
-            <View style={[styles.pulseRing, styles.ringOuter]} />
-            <View style={[styles.pulseRing, styles.ringInner]} />
+            <Animated.View style={[styles.pulseRing, ringStyle(ring1)]} pointerEvents="none" />
+            <Animated.View style={[styles.pulseRing, ringStyle(ring2)]} pointerEvents="none" />
           </>
         ) : null}
-        <TouchableOpacity
-          style={[styles.micCircle, isRecording && styles.micCircleLive]}
-          onPress={onMicPress}
-          activeOpacity={0.9}
-          disabled={busy}
+
+        <Animated.View style={isRecording ? { transform: [{ scale: breathe }] } : undefined}>
+          <TouchableOpacity
+            style={[styles.micCircle, isRecording && styles.micCircleLive]}
+            onPress={onMicPress}
+            activeOpacity={0.85}
+            disabled={busy}
+            accessibilityRole="button"
+            accessibilityLabel={hint}
+          >
+            {busy ? (
+              <ActivityIndicator color="#fff" />
+            ) : isRecording ? (
+              <View style={styles.stopGlyph} />
+            ) : (
+              <View style={styles.micGlyph}>
+                <View style={styles.micHead} />
+                <View style={styles.micStem} />
+                <View style={styles.micBase} />
+              </View>
+            )}
+          </TouchableOpacity>
+        </Animated.View>
+
+        {isRecording && !busy ? (
+          <View style={styles.liveRow}>
+            <Animated.View style={[styles.liveDot, { opacity: hintOpacity }]} />
+            <Text style={styles.liveLabel}>Recording</Text>
+          </View>
+        ) : null}
+
+        <Animated.Text
+          style={[
+            styles.micHint,
+            isRecording && !busy ? { opacity: hintOpacity } : null,
+            isRecording ? styles.micHintLive : null,
+          ]}
         >
-          {busy && !isRecording ? (
-            <ActivityIndicator color="#fff" />
-          ) : (
-            <Text style={styles.micIcon}>🎤</Text>
-          )}
-        </TouchableOpacity>
-        <Text style={styles.micHint}>
-          {busy && isRecording ? 'Saving…' : isRecording ? 'Tap to stop & upload' : 'Tap to record'}
-        </Text>
+          {hint}
+        </Animated.Text>
+
         {statusLine ? <Text style={styles.status}>{statusLine}</Text> : null}
       </View>
     </View>
@@ -191,17 +335,16 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     marginTop: 8,
-    minHeight: 180,
+    minHeight: 200,
   },
   pulseRing: {
     position: 'absolute',
-    borderWidth: 2,
+    width: 88,
+    height: 88,
+    borderRadius: 44,
+    borderWidth: 1.5,
     borderColor: PURPLE,
-    borderRadius: 999,
-    opacity: 0.35,
   },
-  ringOuter: { width: 140, height: 140 },
-  ringInner: { width: 118, height: 118 },
   micCircle: {
     width: 88,
     height: 88,
@@ -210,18 +353,75 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  micCircleLive: { backgroundColor: '#6a24df' },
-  micIcon: { fontSize: 36 },
+  micCircleLive: {
+    backgroundColor: '#111',
+  },
+  /** Minimal mic icon (no emoji). */
+  micGlyph: {
+    width: 22,
+    height: 32,
+    alignItems: 'center',
+  },
+  micHead: {
+    width: 14,
+    height: 20,
+    borderRadius: 7,
+    backgroundColor: '#fff',
+  },
+  micStem: {
+    width: 2,
+    height: 6,
+    backgroundColor: '#fff',
+    marginTop: 1,
+  },
+  micBase: {
+    width: 12,
+    height: 2,
+    borderRadius: 1,
+    backgroundColor: '#fff',
+  },
+  /** Minimal stop square while recording. */
+  stopGlyph: {
+    width: 22,
+    height: 22,
+    borderRadius: 4,
+    backgroundColor: '#fff',
+  },
+  liveRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 18,
+  },
+  liveDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#ef4444',
+  },
+  liveLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    letterSpacing: 0.6,
+    textTransform: 'uppercase',
+    color: '#9ca3af',
+  },
   micHint: {
-    marginTop: 16,
+    marginTop: 10,
     fontSize: 14,
-    fontWeight: '700',
-    color: '#444',
+    fontWeight: '600',
+    color: '#6b7280',
+    letterSpacing: 0.2,
+  },
+  micHintLive: {
+    marginTop: 8,
+    color: '#111',
+    fontWeight: '500',
   },
   status: {
-    marginTop: 12,
+    marginTop: 14,
     fontSize: 13,
-    color: '#444',
+    color: '#6b7280',
     textAlign: 'center',
     paddingHorizontal: 12,
   },

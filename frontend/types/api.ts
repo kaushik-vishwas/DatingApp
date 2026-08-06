@@ -67,6 +67,8 @@ export type VerifyMobileOtpResponse = VerifyMobileOtpAuthenticated | VerifyMobil
 export interface CompleteMobileSignupPayload {
   phone: string;
   gender: 'male' | 'female';
+  /** Silent invite attribution — not shown on login UI. */
+  referralCode?: string;
 }
 
 export interface CompleteMobileSignupResponse {
@@ -121,8 +123,8 @@ export interface RazorpayOrderResponse {
   /** Public key id for Checkout */
   keyId: string;
   businessName: string;
-  prefillContact: string;
-  prefillName: string;
+  /** @deprecated Hosted web checkout — app uses native SDK now */
+  checkoutUrl?: string;
 }
 
 /** GET /wallet/topups */
@@ -541,9 +543,9 @@ export interface ReceiverEarningsBreakdownResponse {
 export interface CompleteProfilePayload {
   name: string;
   profileImage: string;
-  aadhaarFront: string;
-  aadhaarBack: string;
-  aadhaarNumber: string;
+  aadhaarFront?: string;
+  aadhaarBack?: string;
+  aadhaarNumber?: string;
   panNumber: string;
   panFront: string;
   languages: string[];
@@ -612,8 +614,8 @@ export interface DeleteReceiverAccountPayload {
 }
 
 export interface ReceiverBankDetailsPayload {
-  nameAsPerAadhaar: string;
-  aadhaarNumber: string;
+  nameAsPerAadhaar?: string;
+  aadhaarNumber?: string;
   payoutMethod?: 'upi' | 'bank';
   upiId?: string;
   panNumber?: string;

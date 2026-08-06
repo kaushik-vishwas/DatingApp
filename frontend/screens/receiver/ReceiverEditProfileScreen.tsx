@@ -139,16 +139,16 @@
       const pan = panNumber.trim().toUpperCase();
       
       if (isWithdrawKycMode) {
-        if (!/^\d{12}$/.test(aadhaarDigits)) {
-          Alert.alert('Validation', 'Please enter a valid 12-digit Aadhaar number.');
+        if (aadhaarDigits && !/^\d{12}$/.test(aadhaarDigits)) {
+          Alert.alert('Validation', 'Please enter a valid 12-digit Aadhaar number, or leave it blank.');
           return;
         }
         if (!/^[A-Z]{5}[0-9]{4}[A-Z]$/.test(pan)) {
           Alert.alert('Validation', 'Please enter a valid PAN (example: ABCDE1234F).');
           return;
         }
-        if (!aadhaarFront || !aadhaarBack || !panFront) {
-          Alert.alert('Validation', 'Please upload Aadhaar front, Aadhaar back, and PAN front.');
+        if (!panFront) {
+          Alert.alert('Validation', 'Please upload PAN front.');
           return;
         }
       } else {
@@ -203,7 +203,7 @@
           state: isWithdrawKycMode ? undefined : stateValue.trim(),
           languages: isWithdrawKycMode ? undefined : languages,
           interests: isWithdrawKycMode ? undefined : interests,
-          aadhaarNumber: isWithdrawKycMode ? aadhaarDigits : undefined,
+          aadhaarNumber: isWithdrawKycMode && aadhaarDigits ? aadhaarDigits : undefined,
           panNumber: isWithdrawKycMode ? pan : undefined,
           aadhaarFront: aadhaarFrontUrl,
           aadhaarBack: aadhaarBackUrl,
@@ -265,12 +265,11 @@
               /* KYC Mode Fields */
               <View style={styles.formSection}>
                 <Field
-                  label="Aadhaar Number"
+                  label="Aadhaar Number (optional)"
                   value={aadhaarNumber}
                   onChangeText={(v) => setAadhaarNumber(v.replace(/\D/g, '').slice(0, 12))}
                   keyboardType="numeric"
                   placeholder="Enter 12-digit Aadhaar number"
-                  required
                 />
                 <Field
                   label="PAN Number"
@@ -280,7 +279,7 @@
                   required
                 />
                 <UploadField
-                  label="Aadhaar (Front)"
+                  label="Aadhaar (Front) (optional)"
                   uri={aadhaarFront?.uri ?? null}
                   mimeType={aadhaarFront?.mimeType}
                   displayName={aadhaarFront?.name}
@@ -290,7 +289,7 @@
                   hint="PNG, JPG or PDF"
                 />
                 <UploadField
-                  label="Aadhaar (Back)"
+                  label="Aadhaar (Back) (optional)"
                   uri={aadhaarBack?.uri ?? null}
                   mimeType={aadhaarBack?.mimeType}
                   displayName={aadhaarBack?.name}

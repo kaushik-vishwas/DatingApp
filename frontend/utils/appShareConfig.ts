@@ -69,19 +69,11 @@ export function buildAppShareMessage(options?: {
     lines.push(`My invite code: ${code}`);
   }
   if (inviteUrl) {
+    lines.push('');
+    lines.push('Open this link to install and join:');
     lines.push(inviteUrl);
-  }
-
-  lines.push('');
-
-  if (config.distribution === 'store') {
-    lines.push('Download the app:');
-    lines.push(config.androidStoreUrl);
-    if (config.iosInstallUrl) lines.push(config.iosInstallUrl);
-  } else if (config.androidInstallUrl) {
-    lines.push('Install (Android beta testers):');
-    lines.push(config.androidInstallUrl);
-  } else {
+  } else if (config.distribution === 'testing' && !config.androidInstallUrl) {
+    lines.push('');
     lines.push(
       `${name} is in beta testing. Install link coming soon — use the invite code above when you sign up.`
     );

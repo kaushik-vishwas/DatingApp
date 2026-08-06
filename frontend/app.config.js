@@ -49,7 +49,7 @@ const referralLandingBaseUrl =
 const nameSuffix = appKind ? `-${appKind}` : '';
 const baseName = appJson.expo?.name || 'frontend';
 const baseSlug = appJson.expo?.slug || 'frontend';
-const baseAndroidPackage = appJson.expo?.android?.package || 'com.kaushikvishwas.frontend';
+const baseAndroidPackage = appJson.expo?.android?.package || 'com.selecto.app';
 
 module.exports = {
   expo: {
@@ -66,15 +66,25 @@ module.exports = {
         },
       ],
       package: appKind ? `${baseAndroidPackage}.${appKind}` : baseAndroidPackage,
-      permissions: [
-        'android.permission.RECORD_AUDIO',
-        'android.permission.CAMERA',
-        'android.permission.INTERNET',
-        'android.permission.ACCESS_NETWORK_STATE',
-        'android.permission.POST_NOTIFICATIONS',
-        'android.permission.VIBRATE',
-        'android.permission.READ_PHONE_STATE',
-      ],
+      // Merge app.json permissions with VoIP/call needs. Stream keep-alive FGS requires
+      // MICROPHONE + CAMERA + MEDIA_PLAYBACK (plugin may add a wrong MEDIA_PLAYBACK name).
+      permissions: Array.from(
+        new Set([
+          ...(appJson.expo.android?.permissions || []),
+          'android.permission.RECORD_AUDIO',
+          'android.permission.CAMERA',
+          'android.permission.INTERNET',
+          'android.permission.ACCESS_NETWORK_STATE',
+          'android.permission.POST_NOTIFICATIONS',
+          'android.permission.VIBRATE',
+          'android.permission.READ_PHONE_STATE',
+          'android.permission.FOREGROUND_SERVICE',
+          'android.permission.FOREGROUND_SERVICE_MICROPHONE',
+          'android.permission.FOREGROUND_SERVICE_CAMERA',
+          'android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK',
+          'android.permission.WAKE_LOCK',
+        ])
+      ),
       usesCleartextTraffic: true,
     },
     plugins: [
@@ -90,7 +100,12 @@ module.exports = {
         },
       ],
       '@react-native-community/datetimepicker',
-      '@stream-io/video-react-native-sdk',
+      [
+        '@stream-io/video-react-native-sdk',
+        {
+          androidKeepCallAlive: true,
+        },
+      ],
       [
         'expo-notifications',
         {

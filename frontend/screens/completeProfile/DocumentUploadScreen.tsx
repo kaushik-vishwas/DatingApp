@@ -77,9 +77,11 @@ export default function DocumentUploadScreen({ navigation }: Props): React.JSX.E
             subtitle="Step 2 of 3"
             navigation={navigation}
           />
-          <Text style={styles.lead}>Add Aadhaar and PAN details. Images or PDF supported.</Text>
+          <Text style={styles.lead}>
+            PAN is required. Aadhaar card and number are optional. Images or PDF supported.
+          </Text>
 
-          <Text style={styles.fieldLabel}>Aadhaar number *</Text>
+          <Text style={styles.fieldLabel}>Aadhaar number (optional)</Text>
           <TextInput
             style={styles.input}
             value={state.aadhaarNumber}
@@ -91,7 +93,7 @@ export default function DocumentUploadScreen({ navigation }: Props): React.JSX.E
           />
 
           <UploadField
-            label="Aadhaar — front *"
+            label="Aadhaar — front (optional)"
             uri={state.aadhaarFront?.uri ?? null}
             mimeType={state.aadhaarFront?.mimeType}
             displayName={state.aadhaarFront?.name}
@@ -102,7 +104,7 @@ export default function DocumentUploadScreen({ navigation }: Props): React.JSX.E
           />
 
           <UploadField
-            label="Aadhaar — back *"
+            label="Aadhaar — back (optional)"
             uri={state.aadhaarBack?.uri ?? null}
             mimeType={state.aadhaarBack?.mimeType}
             displayName={state.aadhaarBack?.name}

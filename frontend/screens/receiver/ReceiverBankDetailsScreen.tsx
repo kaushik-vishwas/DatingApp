@@ -140,8 +140,8 @@ export default function ReceiverBankDetailsScreen(): React.JSX.Element {
       Alert.alert(
         'Validation',
         payoutMethod === 'upi'
-          ? 'Enter name as per Aadhaar, 12-digit Aadhaar number, and a valid UPI ID. PAN is optional.'
-          : 'Enter name as per Aadhaar, 12-digit Aadhaar number, bank account number, and IFSC. PAN is optional.',
+          ? 'Enter a valid UPI ID. Name as per Aadhaar and Aadhaar number are optional. PAN is optional.'
+          : 'Enter bank account number and IFSC. Name as per Aadhaar and Aadhaar number are optional. PAN is optional.',
       );
       return;
     }
@@ -154,8 +154,8 @@ export default function ReceiverBankDetailsScreen(): React.JSX.Element {
     setPaymentBusy(true);
     try {
       await profileApi.sendReceiverBankUpdateOtp({
-        nameAsPerAadhaar: nameAsPerAadhaar.trim(),
-        aadhaarNumber: aadhaarDigits,
+        ...(nameAsPerAadhaar.trim() ? { nameAsPerAadhaar: nameAsPerAadhaar.trim() } : {}),
+        ...(aadhaarDigits ? { aadhaarNumber: aadhaarDigits } : {}),
         payoutMethod,
         ...(pan ? { panNumber: pan } : {}),
         ...(payoutMethod === 'upi' ? { upiId: upiId.trim().toLowerCase() } : {}),
@@ -277,18 +277,18 @@ export default function ReceiverBankDetailsScreen(): React.JSX.Element {
               <View style={styles.infoCard}>
                 <Icon name="info" size={18} color="#A855F7" />
                 <Text style={styles.infoText}>
-                  Name and Aadhaar number are required. PAN is optional.
+                  Name as per Aadhaar and Aadhaar number are optional. PAN is optional.
                 </Text>
               </View>
 
               <Field
-                label="Name as per Aadhaar *"
+                label="Name as per Aadhaar (optional)"
                 value={nameAsPerAadhaar}
                 onChangeText={setNameAsPerAadhaar}
                 placeholder="Enter name exactly as on Aadhaar"
               />
               <Field
-                label="Aadhaar number *"
+                label="Aadhaar number (optional)"
                 value={aadhaarNumber}
                 onChangeText={(v) => setAadhaarNumber(v.replace(/\D/g, '').slice(0, 12))}
                 keyboardType="numeric"

@@ -1,6 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Edit2, Eye, RefreshCw, Star } from 'lucide-react';
-import { fetchAllReceivers, type ReceiverRecord } from '../api/client';
+import { Edit2, Eye, RefreshCw, Star, Trash2 } from 'lucide-react';
+import {
+  deleteReceiverPermanently,
+  fetchAllReceivers,
+  type ReceiverRecord,
+} from '../api/client';
 import { ReceiverDetailModal } from '../components/ReceiverDetailModal';
 import { ReceiverEditModal } from '../components/ReceiverEditModal';
 import { formatINR, receiverIsLiveAvailable, receiverRatingDisplay, receiverCode } from '../utils/receiverDisplay';
@@ -22,6 +26,7 @@ export function ReceiversPage() {
   const [tab, setTab] = useState<Tab>('all');
   const [detail, setDetail] = useState<ReceiverRecord | null>(null);
   const [editReceiver, setEditReceiver] = useState<ReceiverRecord | null>(null);
+  const [busyId, setBusyId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -43,6 +48,32 @@ export function ReceiversPage() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  const onDeletePermanently = async (r: ReceiverRecord) => {
+    if (
+      !window.confirm(
+        `Permanently delete ${r.name}? This removes chats, call sessions, daily scores, ratings, notifications, withdrawals, and reports for this receiver. This cannot be undone.`
+      )
+    ) {
+      return;
+    }
+    setBusyId(r._id);
+    setError(null);
+    try {
+      await deleteReceiverPermanently(r._id);
+      if (detail?._id === r._id) setDetail(null);
+      if (editReceiver?._id === r._id) setEditReceiver(null);
+      await load();
+    } catch (err: unknown) {
+      const msg =
+        err && typeof err === 'object' && 'response' in err
+          ? String((err as { response?: { data?: { message?: string } } }).response?.data?.message)
+          : 'Delete failed';
+      setError(msg || 'Delete failed');
+    } finally {
+      setBusyId(null);
+    }
+  };
 
   const sorted = useMemo(() => {
     return [...rows].sort((a, b) => {
@@ -262,6 +293,15 @@ export function ReceiversPage() {
                             title="Edit"
                           >
                             <Edit2 className="h-5 w-5" />
+                          </button>
+                          <button
+                            type="button"
+                            disabled={busyId === r._id}
+                            onClick={() => void onDeletePermanently(r)}
+                            className="rounded-lg p-2 text-red-600 hover:bg-red-50 disabled:opacity-40"
+                            title="Delete permanently"
+                          >
+                            <Trash2 className="h-5 w-5" />
                           </button>
                         </div>
                       </td>

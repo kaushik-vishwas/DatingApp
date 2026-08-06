@@ -247,7 +247,7 @@ export default function WithdrawEarningsScreen(): React.JSX.Element {
             {/* <Text style={styles.actionIcon}>⚠️</Text> */}
             <Text style={styles.centeredTitle}>Action Required</Text>
             <Text style={styles.centeredSubtitle}>
-              Add your name as per Aadhaar, Aadhaar number, and either UPI ID or bank account with IFSC to withdraw.
+              Add your payout details to withdraw. Name as per Aadhaar and Aadhaar number are optional.
             </Text>
             <TouchableOpacity onPress={handleCompletePaymentDetails} activeOpacity={0.8}>
               <LinearGradient

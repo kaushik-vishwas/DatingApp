@@ -8,10 +8,19 @@ import { CallSignalProvider } from './context/CallSignalContext';
 import { ChatInboxProvider } from './context/ChatInboxContext';
 import AppNavigator from './navigation/AppNavigator';
 import { ensureIncomingCallNotificationInfrastructure } from './utils/incomingCallNotifications';
+import {
+  capturePendingReferralSilently,
+  subscribeReferralDeepLinks,
+} from './utils/pendingReferral';
 
 export default function App() {
   useEffect(() => {
     return ensureIncomingCallNotificationInfrastructure();
+  }, []);
+
+  useEffect(() => {
+    void capturePendingReferralSilently();
+    return subscribeReferralDeepLinks();
   }, []);
 
   useEffect(() => {
@@ -35,4 +44,3 @@ export default function App() {
     </SafeAreaProvider>
   );
 }
-

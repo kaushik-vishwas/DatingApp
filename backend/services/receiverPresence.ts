@@ -4,7 +4,7 @@ import { finalizeReceiverOnlineSession } from './receiverScore';
 import { syncReceiverQueueState } from './callQueue';
 
 /** Keep receivers visible as online on discover after background/minimize socket loss (all Android OEMs). */
-export const RECEIVER_DISCOVER_GRACE_MS = 5 * 60 * 1000;
+export const RECEIVER_DISCOVER_GRACE_MS = 20 * 60 * 1000;
 
 const discoverGraceUntilByReceiverId = new Map<string, number>();
 const discoverGraceExpireTimers = new Map<string, NodeJS.Timeout>();
@@ -32,7 +32,7 @@ export function isReceiverInDiscoverGrace(
   return false;
 }
 
-/** Socket connected now, or within the 5-minute post-disconnect grace while Go Online is on.
+/** Socket connected now, or within the 20-minute post-disconnect grace while Go Online is on.
  *  Optional push reachability: while Go Online is on and an Expo push token exists, treat as
  *  reachable for discover/calls even after Android freezes JS/WebSocket past the grace window.
  */

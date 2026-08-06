@@ -421,10 +421,24 @@ export async function updateAppUserProfile(userId: string, payload: AdminAppUser
   return data;
 }
 
+/** Permanently delete caller + related chats, sessions, notifications, wallet rows. */
+export async function deleteAppUserPermanently(userId: string) {
+  const { data } = await api.delete<{ message: string; userId: string }>(`/admin/users/${userId}`);
+  return data;
+}
+
 export async function updateReceiverProfile(receiverId: string, payload: AdminReceiverUpdatePayload) {
   const { data } = await api.patch<{ receiver: ReceiverRecord }>(
     `/admin/receivers/${receiverId}`,
     payload
+  );
+  return data;
+}
+
+/** Permanently delete receiver + related chats, sessions, scores, notifications. */
+export async function deleteReceiverPermanently(receiverId: string) {
+  const { data } = await api.delete<{ message: string; receiverId: string }>(
+    `/admin/receivers/${receiverId}`
   );
   return data;
 }

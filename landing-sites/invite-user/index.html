@@ -245,7 +245,8 @@
       <div class="card">
         <h1 id="title">You're invited</h1>
         <p class="subtitle" id="subtitle">
-          Install <span id="app-name">Selecto</span> and enter this code when you sign up.
+          Install <span id="app-name">Selecto</span> from Google Play. Your invite is applied
+          automatically when you sign up — no code entry needed.
         </p>
 
         <div class="code-block">
@@ -264,9 +265,9 @@
         <div class="steps">
           <h2>How it works</h2>
           <ol>
-            <li>Tap <strong>Get the app</strong> to install Selecto (Android beta).</li>
-            <li>Sign up with your mobile number.</li>
-            <li>Enter the invite code above — you and your friend can earn wallet rewards.</li>
+            <li>Tap <strong>Download on Google Play</strong> to install Selecto.</li>
+            <li>Open the app and sign up with your mobile number.</li>
+            <li>Your invite is applied automatically — you and your friend can earn wallet rewards.</li>
           </ol>
         </div>
       </div>
@@ -317,18 +318,41 @@
           }, 2200);
         }
 
-        function installUrl() {
+        function installUrl(inviteCode) {
+          var base = '';
           if (cfg.distribution === 'store' && cfg.androidStoreUrl) {
-            return cfg.androidStoreUrl;
+            base = cfg.androidStoreUrl;
+          } else if (cfg.androidInstallUrl) {
+            base = cfg.androidInstallUrl;
+          } else {
+            base = cfg.androidStoreUrl || '';
           }
-          if (cfg.androidInstallUrl) {
-            return cfg.androidInstallUrl;
+          if (!base) return '';
+          // Pass invite into Play Install Referrer so the app can credit the sharer
+          // without asking the user to type a code on login.
+          if (inviteCode && cfg.distribution === 'store') {
+            var sep = base.indexOf('?') >= 0 ? '&' : '?';
+            return (
+              base +
+              sep +
+              'referrer=' +
+              encodeURIComponent('utm_source=invite&utm_medium=share&ref=' + String(inviteCode).toUpperCase())
+            );
           }
-          return cfg.androidStoreUrl || '';
+          return base;
         }
 
         function deepLink(code) {
           return scheme + '://invite/' + encodeURIComponent(code);
+        }
+
+        function copyInviteCode(inviteCode) {
+          if (!inviteCode) return;
+          try {
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+              void navigator.clipboard.writeText(inviteCode);
+            }
+          } catch (e) {}
         }
 
         var code = parseCodeFromPath();
@@ -360,7 +384,7 @@
               var ok = _ref.ok;
               var body = _ref.body;
               if (ok && body.valid) {
-                statusEl.textContent = 'Valid invite — welcome bonus available when you sign up.';
+                statusEl.textContent = 'Valid invite — rewards apply automatically after you sign up.';
                 statusEl.className = 'status ok';
               } else {
                 statusEl.textContent = body.message || 'This invite code could not be verified.';
@@ -368,15 +392,17 @@
               }
             })
             .catch(function () {
-              statusEl.textContent = 'Could not verify code online — you can still try it in the app.';
+              statusEl.textContent = 'Could not verify code online — you can still install and sign up.';
               statusEl.className = 'status pending';
             });
         }
 
-        var url = installUrl();
+        var url = installUrl(code);
         if (url) {
           btnInstall.textContent = cfg.distribution === 'store' ? 'Download on Google Play' : 'Install Android beta';
           btnInstall.addEventListener('click', function () {
+            // Clipboard backup if Play Install Referrer is unavailable (sideload / delayed open).
+            copyInviteCode(code);
             window.location.href = url;
           });
         } else {

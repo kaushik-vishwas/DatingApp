@@ -5,7 +5,7 @@
     "scheme": "nestham",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/SelectoLogo.png",
+    "icon": "./assets/installed-logo.png",
     "userInterfaceStyle": "light",
     "newArchEnabled": true,
     "splash": {
@@ -22,12 +22,15 @@
       }
     },
     "android": {
-      "package": "com.kaushikvishwas.frontend",
+      "package": "com.selecto.app",
       "permissions": [
         "android.permission.RECORD_AUDIO",
         "android.permission.USE_FULL_SCREEN_INTENT",
         "android.permission.FOREGROUND_SERVICE",
         "android.permission.FOREGROUND_SERVICE_DATA_SYNC",
+        "android.permission.FOREGROUND_SERVICE_MICROPHONE",
+        "android.permission.FOREGROUND_SERVICE_CAMERA",
+        "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK",
         "android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS",
         "android.permission.WAKE_LOCK",
         "android.permission.BLUETOOTH_CONNECT"
@@ -52,8 +55,8 @@
         }
       ],
       "adaptiveIcon": {
-        "foregroundImage": "./assets/SelectoLogo.png",
-        "backgroundColor": "#ffffff"
+        "foregroundImage": "./assets/installed-logo-adaptive.png",
+        "backgroundColor": "#000000"
       },
       "edgeToEdgeEnabled": true
     },
@@ -85,9 +88,9 @@
       "cloudinaryUploadPreset": "dating_app_preset",
       "appShare": {
         "displayName": "Selecto",
-        "distribution": "testing",
+        "distribution": "store",
         "androidInstallUrl": "",
-        "androidStoreUrl": "https://play.google.com/store/apps/details?id=com.kaushikvishwas.frontend",
+        "androidStoreUrl": "https://play.google.com/store/apps/details?id=com.selecto.app",
         "iosInstallUrl": ""
       }
     }

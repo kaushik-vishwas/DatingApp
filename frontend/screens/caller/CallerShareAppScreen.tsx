@@ -77,8 +77,8 @@ export default function CallerShareAppScreen({ navigation }: Props): React.JSX.E
         <Text style={styles.emoji}>📤</Text>
         <Text style={styles.head}>Invite friends</Text>
         <Text style={styles.body}>
-          Share {shareConfig.displayName} with friends. They can use your invite link or code when
-          signing up so you earn referral rewards.
+          Share one invite link. Friends open it, install from Play Store, and sign up —
+          your invite is applied automatically so you earn referral rewards.
         </Text>
 
         {loadingReferral ? (

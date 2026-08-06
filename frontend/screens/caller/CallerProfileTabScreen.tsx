@@ -139,17 +139,17 @@ export default function CallerProfileTabScreen({ navigation }: Props): React.JSX
 
         <View style={styles.statsRow}>
           <View style={styles.statCard}>
-            <Feather name="phone-call" size={18} color="#666" style={styles.statIco} />
+            <Feather name="phone-call" size={18} color={PURPLE} style={styles.statIco} />
             <Text style={styles.statVal}>{calls}</Text>
             <Text style={styles.statLbl}>Calls</Text>
           </View>
           <View style={styles.statCard}>
-            <Feather name="clock" size={18} color="#666" style={styles.statIco} />
+            <Feather name="clock" size={18} color={PURPLE} style={styles.statIco} />
             <Text style={styles.statVal}>{mins}</Text>
             <Text style={styles.statLbl}>Mins</Text>
           </View>
           <View style={styles.statCard}>
-            <FontAwesome5 name="wallet" size={18} color="#666" style={styles.statIco} />
+            <FontAwesome5 name="wallet" size={18} color={PURPLE} style={styles.statIco} />
             <Text style={styles.statVal}>{formatWalletShort(wallet)}</Text>
             <Text style={styles.statLbl}>Wallet</Text>
           </View>
@@ -161,7 +161,7 @@ export default function CallerProfileTabScreen({ navigation }: Props): React.JSX
             onPress={() => navigation.navigate('CallerShareApp')}
             activeOpacity={0.88}
           >
-            <Feather name="share-2" size={26} color="#666" style={styles.actionCardIco} />
+            <Feather name="share-2" size={26} color={PURPLE} style={styles.actionCardIco} />
             <Text style={styles.actionCardTitle}>Refer & Earn</Text>
             <Text style={styles.actionCardSub}>Invite friends</Text>
           </TouchableOpacity>
@@ -170,21 +170,21 @@ export default function CallerProfileTabScreen({ navigation }: Props): React.JSX
             onPress={() => navigation.navigate('CallerFaq')}
             activeOpacity={0.88}
           >
-            <MaterialIcons name="help-outline" size={26} color="#666" style={styles.actionCardIco} />
+            <MaterialIcons name="help-outline" size={26} color={PURPLE} style={styles.actionCardIco} />
             <Text style={styles.actionCardTitle}>FAQ</Text>
             <Text style={styles.actionCardSub}>Common questions</Text>
           </TouchableOpacity>
         </View>
 
         <View style={styles.menuBlock}>
-          {menuRow(<Feather name="user" size={18} color="#222" />, 'Edit Profile', () => navigation.navigate('CallerEditProfile'))}
-          {menuRow(<MaterialIcons name="star-outline" size={18} color="#222" />, 'Rate Us', () => navigation.navigate('CallerRateUs'))}
-          {menuRow(<Feather name="message-circle" size={18} color="#222" />, 'Chats', () =>
+          {menuRow(<Feather name="user" size={18} color={PURPLE} />, 'Edit Profile', () => navigation.navigate('CallerEditProfile'))}
+          {menuRow(<MaterialIcons name="star-outline" size={18} color={PURPLE} />, 'Rate Us', () => navigation.navigate('CallerRateUs'))}
+          {menuRow(<Feather name="message-circle" size={18} color={PURPLE} />, 'Chats', () =>
             navigation.navigate('CallerMainTabs', { screen: 'CallerChatsTab' })
           )}
-          {menuRow(<Feather name="help-circle" size={18} color="#222" />, 'Help & Support', () => navigation.navigate('CallerHelp'))}
-          {menuRow(<Feather name="file-text" size={18} color="#222" />, 'Terms & Privacy', () => navigation.navigate('CallerTerms'))}
-          {menuRow(<Feather name="lock" size={18} color="#222" />, 'Privacy Policy', () => navigation.navigate('CallerPrivacyPolicy'))}
+          {menuRow(<Feather name="help-circle" size={18} color={PURPLE} />, 'Help & Support', () => navigation.navigate('CallerHelp'))}
+          {menuRow(<Feather name="file-text" size={18} color={PURPLE} />, 'Terms & Privacy', () => navigation.navigate('CallerTerms'))}
+          {menuRow(<Feather name="lock" size={18} color={PURPLE} />, 'Privacy Policy', () => navigation.navigate('CallerPrivacyPolicy'))}
           {menuRow(<MaterialIcons name="delete-outline" size={18} color="#dc2626" />, 'Delete Account', onDelete, { danger: true })}
           {menuRow(<MaterialIcons name="logout" size={18} color="#dc2626" />, 'Logout', () => setLogoutOpen(true), { danger: true })}
         </View>

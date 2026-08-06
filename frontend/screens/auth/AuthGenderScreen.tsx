@@ -9,6 +9,10 @@ import SignupGenderSelection, {
 import { useAuth } from '../../context/AuthContext';
 import type { RootStackParamList } from '../../navigation/RootStackParamList';
 import { authApi, getErrorMessage, saveJwt } from '../../services/api';
+import {
+  clearPendingReferralCode,
+  getPendingReferralCode,
+} from '../../utils/pendingReferral';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'AuthGender'>;
 
@@ -29,11 +33,17 @@ export default function AuthGenderScreen({ navigation, route }: Props): React.JS
 
     setLoading(true);
     try {
-      const { data } = await authApi.completeMobileSignup({ phone, gender: selected });
+      const referralCode = (await getPendingReferralCode()) ?? undefined;
+      const { data } = await authApi.completeMobileSignup({
+        phone,
+        gender: selected,
+        ...(referralCode ? { referralCode } : {}),
+      });
       if (!data?.token) {
         Alert.alert('Error', 'No token returned from server');
         return;
       }
+      await clearPendingReferralCode();
       await saveJwt(data.token);
       signIn(data.token, data.user);
     } catch (e) {

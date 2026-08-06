@@ -31,10 +31,9 @@ import SelectoLogo from '../../assets/SelectoLogo.png';
 
 
 // Add these imports with your existing ones
-import BannerImage1 from '../../assets/LoginPic/loginPic1.png';
-import BannerImage2 from '../../assets/LoginPic/loginPic2.png';
-import BannerImage3 from '../../assets/LoginPic/loginPic3.png';
-import BannerImage4 from '../../assets/LoginPic/loginPic4.png';
+import BannerImage1 from '../../assets/LoginPic/loginPic1.jpg';
+import BannerImage3 from '../../assets/LoginPic/loginPic3.jpg';
+import BannerImage4 from '../../assets/LoginPic/loginPic4.jpg';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'MobileLogin'>;
 
@@ -72,7 +71,6 @@ const countryCodes: CountryCode[] = [
 
 const bannerImages = [
   { id: '1', image: BannerImage1, title: '' },
-  { id: '2', image: BannerImage2, title: '' },
   { id: '3', image: BannerImage3, title: '' },
   { id: '4', image: BannerImage4, title: '' },
 ];
@@ -401,6 +399,7 @@ export default function MobileLoginScreen({ navigation }: Props): React.JSX.Elem
                     onChangeText={setOtp}
                     onFocus={scrollToFocusedInput}
                   />
+                  <Text style={styles.otpHint}>We sent an SMS OTP to +91 {getPhoneForApi()}</Text>
                   <TouchableOpacity
                     onPress={resetToMobileStep}
                     style={styles.changeNumber}
@@ -640,9 +639,15 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 14,
     fontSize: 14,
-    marginBottom: 14,
+    marginBottom: 8,
     backgroundColor: '#fff',
     textAlign: 'center',
+  },
+  otpHint: {
+    fontSize: 12,
+    color: '#777',
+    textAlign: 'center',
+    marginBottom: 14,
   },
   countryDropdown: {
     position: 'absolute',

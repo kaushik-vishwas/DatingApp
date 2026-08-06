@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Check, ChevronLeft, ChevronRight, Download, Edit2, RefreshCw, Search, X } from 'lucide-react';
+import { Check, ChevronLeft, ChevronRight, Download, Edit2, RefreshCw, Search, Trash2, X } from 'lucide-react';
 import {
   approveAppUser,
+  deleteAppUserPermanently,
   fetchAppUsers,
   updateAppUserSuspension,
   type AppUserRange,
@@ -162,6 +163,32 @@ export function AppUsersPage() {
             ? 'Suspend failed'
             : 'Restore failed';
       setError(msg || 'Request failed');
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const onDeletePermanently = async (u: AppUserRecord) => {
+    if (
+      !window.confirm(
+        `Permanently delete ${u.name}? This removes chats, call sessions, notifications, wallet topups/credits, and reports for this caller. This cannot be undone.`
+      )
+    ) {
+      return;
+    }
+    setBusyId(u._id);
+    setError(null);
+    try {
+      await deleteAppUserPermanently(u._id);
+      if (detail?._id === u._id) setDetail(null);
+      if (editUser?._id === u._id) setEditUser(null);
+      await load();
+    } catch (err: unknown) {
+      const msg =
+        err && typeof err === 'object' && 'response' in err
+          ? String((err as { response?: { data?: { message?: string } } }).response?.data?.message)
+          : 'Delete failed';
+      setError(msg || 'Delete failed');
     } finally {
       setBusyId(null);
     }
@@ -351,6 +378,15 @@ export function AppUsersPage() {
                             title={crossTitle}
                           >
                             <X className="h-5 w-5 stroke-[2.5]" />
+                          </button>
+                          <button
+                            type="button"
+                            disabled={busyId === u._id}
+                            onClick={() => void onDeletePermanently(u)}
+                            className="inline-flex h-10 w-10 items-center justify-center rounded-full border-2 border-neutral-300 bg-neutral-50 text-neutral-700 shadow-sm hover:bg-neutral-100 disabled:cursor-not-allowed disabled:opacity-40"
+                            title="Delete permanently"
+                          >
+                            <Trash2 className="h-4 w-4" />
                           </button>
                         </div>
                       </td>

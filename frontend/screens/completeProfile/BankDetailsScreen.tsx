@@ -38,7 +38,7 @@ export default function BankDetailsScreen({ navigation }: Props): React.JSX.Elem
       Alert.alert('Validation', err);
       return;
     }
-    if (!state.profileImageUri || !state.aadhaarFront || !state.aadhaarBack || !state.panFront) {
+    if (!state.profileImageUri || !state.panFront) {
       Alert.alert('Validation', 'Missing required files');
       return;
     }
@@ -55,29 +55,34 @@ export default function BankDetailsScreen({ navigation }: Props): React.JSX.Elem
             })
           ).secure_url;
 
-      const frontRes = await uploadToCloudinary(state.aadhaarFront.uri, {
-        mimeType: state.aadhaarFront.mimeType,
-        resourceType: inferResourceType(state.aadhaarFront.mimeType),
-        fileName: state.aadhaarFront.name,
-      });
+      const frontRes = state.aadhaarFront
+        ? await uploadToCloudinary(state.aadhaarFront.uri, {
+            mimeType: state.aadhaarFront.mimeType,
+            resourceType: inferResourceType(state.aadhaarFront.mimeType),
+            fileName: state.aadhaarFront.name,
+          })
+        : null;
 
-      const backRes = await uploadToCloudinary(state.aadhaarBack.uri, {
-        mimeType: state.aadhaarBack.mimeType,
-        resourceType: inferResourceType(state.aadhaarBack.mimeType),
-        fileName: state.aadhaarBack.name,
-      });
+      const backRes = state.aadhaarBack
+        ? await uploadToCloudinary(state.aadhaarBack.uri, {
+            mimeType: state.aadhaarBack.mimeType,
+            resourceType: inferResourceType(state.aadhaarBack.mimeType),
+            fileName: state.aadhaarBack.name,
+          })
+        : null;
       const panFrontRes = await uploadToCloudinary(state.panFront.uri, {
         mimeType: state.panFront.mimeType,
         resourceType: inferResourceType(state.panFront.mimeType),
         fileName: state.panFront.name,
       });
 
+      const aadhaarDigits = state.aadhaarNumber.trim();
       const { data } = await profileApi.complete({
         name: state.displayName.trim(),
         profileImage: profileImageUrl,
-        aadhaarFront: frontRes.secure_url,
-        aadhaarBack: backRes.secure_url,
-        aadhaarNumber: state.aadhaarNumber.trim(),
+        ...(frontRes ? { aadhaarFront: frontRes.secure_url } : {}),
+        ...(backRes ? { aadhaarBack: backRes.secure_url } : {}),
+        ...(aadhaarDigits ? { aadhaarNumber: aadhaarDigits } : {}),
         panNumber: state.panNumber.trim().toUpperCase(),
         panFront: panFrontRes.secure_url,
         languages: state.languages,

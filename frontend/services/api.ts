@@ -212,11 +212,27 @@ api.interceptors.request.use(async (config) => {
 /** Error handler */
 export const getErrorMessage = (error: unknown): string => {
   if (axios.isAxiosError(error)) {
-    const err = error as AxiosError<{ message?: unknown }>;
-    const msg = err.response?.data?.message;
+    const err = error as AxiosError<{ message?: unknown; responseCode?: unknown }>;
+    const data = err.response?.data;
+    const msg = data?.message;
 
-    if (typeof msg === 'string') return msg;
+    if (typeof msg === 'string' && msg.trim()) return msg;
     if (Array.isArray(msg)) return msg.join(', ');
+
+    const code = data?.responseCode;
+    if (typeof code === 'number' || (typeof code === 'string' && code)) {
+      const map: Record<string, string> = {
+        '702': 'Wrong OTP. Please try again.',
+        '705': 'OTP expired. Request a new code.',
+        '800': 'Maximum OTP attempts reached. Try again later.',
+        '409': 'A verification request already exists. Wait and try again.',
+        '506': 'Request already exists. Wait before requesting another OTP.',
+        '505': 'Invalid or expired verification. Request a new OTP.',
+      };
+      const mapped = map[String(code)];
+      if (mapped) return mapped;
+    }
+
     if (!err.response) return 'Network error. Check backend connection';
 
     return err.message || 'Request failed';

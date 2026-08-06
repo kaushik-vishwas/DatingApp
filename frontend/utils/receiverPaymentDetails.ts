@@ -37,16 +37,16 @@ export function receiverHasValidBank(user: {
 }): boolean {
   const acct = normalizeBankAccountNumber(String(user.bankAccountNumber ?? ''));
   const ifsc = String(user.bankIfsc ?? '').trim();
-  const holder = String(user.bankAccountHolderName ?? user.nameAsPerAadhaar ?? '').trim();
-  return Boolean(acct.length >= 9 && isValidIfsc(ifsc) && holder);
+  return Boolean(acct.length >= 9 && isValidIfsc(ifsc));
 }
 
 export function receiverPaymentDetailsComplete(user: User | null | undefined): boolean {
   if (!user) return false;
   const pan = String(user.panNumber ?? '').trim();
+  const aadhaarRaw = String(user.aadhaarNumber ?? '').replace(/\D/g, '');
+  const aadhaarOk = !aadhaarRaw || isValidAadhaarNumber(aadhaarRaw);
   return Boolean(
-    user.nameAsPerAadhaar?.trim() &&
-      isValidAadhaarNumber(String(user.aadhaarNumber ?? '')) &&
+    aadhaarOk &&
       isValidPanNumber(pan) &&
       (receiverHasValidUpi(user) || receiverHasValidBank(user)),
   );
@@ -63,12 +63,12 @@ export type ReceiverPaymentFormInput = {
   bankIfsc: string;
 };
 
-function receiverIdentityFieldsValid(input: Pick<ReceiverPaymentFormInput, 'nameAsPerAadhaar' | 'aadhaarNumber' | 'panNumber'>): boolean {
-  return Boolean(
-    input.nameAsPerAadhaar.trim() &&
-      isValidAadhaarNumber(input.aadhaarNumber) &&
-      isValidPanNumber(input.panNumber),
-  );
+function receiverIdentityFieldsValid(
+  input: Pick<ReceiverPaymentFormInput, 'nameAsPerAadhaar' | 'aadhaarNumber' | 'panNumber'>,
+): boolean {
+  const aadhaarRaw = input.aadhaarNumber.replace(/\D/g, '');
+  const aadhaarOk = !aadhaarRaw || isValidAadhaarNumber(aadhaarRaw);
+  return Boolean(aadhaarOk && isValidPanNumber(input.panNumber));
 }
 
 export function receiverPaymentFormValid(
@@ -93,11 +93,8 @@ export function receiverPaymentFormValidEither(input: ReceiverPaymentFormInput):
   const acct = normalizeBankAccountNumber(input.bankAccountNumber);
   const ifsc = input.bankIfsc.trim();
   const hasBank = Boolean(acct.length >= 9 && isValidIfsc(ifsc));
+  const aadhaarRaw = input.aadhaarNumber.replace(/\D/g, '');
+  const aadhaarOk = !aadhaarRaw || isValidAadhaarNumber(aadhaarRaw);
 
-  return Boolean(
-    input.nameAsPerAadhaar.trim() &&
-      isValidAadhaarNumber(input.aadhaarNumber) &&
-      isValidPanNumber(pan) &&
-      (hasUpi || hasBank),
-  );
+  return Boolean(aadhaarOk && isValidPanNumber(pan) && (hasUpi || hasBank));
 }
