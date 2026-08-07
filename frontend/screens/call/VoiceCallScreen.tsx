@@ -47,7 +47,6 @@ import { AndroidCellularHoldMonitor } from '../../components/call/AndroidCellula
 import InCallTalktimeRechargeModal from '../../components/call/InCallTalktimeRechargeModal';
 import type { StreamMicControl } from '../../components/call/StreamCallAvatarExtras';
 import {
-  clearVoiceSessionStartInflight,
   getVoiceSessionStartPromise,
 } from '../../utils/voiceCallSessionStart';
 import {
@@ -1626,8 +1625,8 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
         if (!micGranted) {
           throw new Error('Microphone permission is required for voice calls');
         }
-        // Audio mode + Stream join in parallel — shaves the post-accept gap on both sides.
-        const audioModeReady = applyVoiceCallAudioMode(true).catch((e) => {
+        // Do not block Stream join on audio-mode setup (runs in parallel / background).
+        void applyVoiceCallAudioMode(true).catch((e) => {
           callDiag.error('voice_audio_mode_failed', {
             message: e instanceof Error ? e.message : String(e),
           });
@@ -1652,8 +1651,14 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
         > & { setDisconnectionTimeout?: (timeoutSeconds: number) => void };
         activeCallRef.current = nextCall;
 
-        // Join Stream first for media; session/start runs after without blocking setReady.
-        await Promise.all([audioModeReady, nextCall.join({ create: true })]);
+        // Start session/start alongside Stream join. Server only sets talkStartedAt when
+        // BOTH sides have started — UI still needs streamBothConnected for "Call Active".
+        const sessionStartPromise = getVoiceSessionStartPromise(
+          boot.callId,
+          boot.peerAccountId
+        );
+
+        await nextCall.join({ create: true });
         if (cancelled || attemptId !== streamJoinAttemptRef.current) {
           return;
         }
@@ -1672,8 +1677,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
         setReady(true);
         setError(null);
 
-        // Do not await session/start — Stream is already live; billing/timing catch up async.
-        void getVoiceSessionStartPromise(boot.callId, boot.peerAccountId)
+        void sessionStartPromise
           .then((data) => {
             if (cancelled || attemptId !== streamJoinAttemptRef.current || endingRef.current) {
               return;
@@ -1902,17 +1906,19 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
     if (endingRef.current || talkActiveRef.current) return;
     const boot = getVoiceBootstrap(callParams);
     if (!boot) return;
-    clearVoiceSessionStartInflight(boot.callId);
     try {
-      const [startData, syncRes] = await Promise.all([
-        getVoiceSessionStartPromise(boot.callId, boot.peerAccountId),
-        instrumentedSessionSync(boot.callId, 'kick_talk_timer_sync_initial', { light: true }),
-      ]);
+      // Reuse in-flight session/start from join — clearing it would restart and add delay.
+      const startData = await getVoiceSessionStartPromise(boot.callId, boot.peerAccountId);
       applyTalkTimingFromServer(startData);
+      applySessionBillingFromServer(startData);
+      if (talkActiveRef.current) return;
+
+      const syncRes = await instrumentedSessionSync(boot.callId, 'kick_talk_timer_sync_initial', {
+        light: true,
+      });
       if (!talkActiveRef.current && syncRes.data) {
         applyTalkTimingFromServer(syncRes.data);
       }
-      applySessionBillingFromServer(startData);
       if (syncRes.data) {
         applySessionBillingFromServer(syncRes.data);
       }

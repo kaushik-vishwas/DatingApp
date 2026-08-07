@@ -465,20 +465,45 @@ export function StreamLocalHoldMicBridge({
   peerOnHold?: boolean;
   userChosenMuteRef: React.MutableRefObject<boolean>;
 }): null {
-  const { useMicrophoneState } = useCallStateHooks();
+  const call = useCall();
+  const { useMicrophoneState, useLocalParticipant } = useCallStateHooks();
   const { microphone } = useMicrophoneState();
+  const localParticipant = useLocalParticipant();
+  // Mute local publish while WE are on an external call (so peer cannot hear us).
   const pauseMic = systemOnHold;
   const pauseMicRef = useRef(pauseMic);
   pauseMicRef.current = pauseMic;
+  const localParticipantRef = useRef(localParticipant);
+  localParticipantRef.current = localParticipant;
 
   useEffect(() => {
     const applyMic = (): void => {
       if (pauseMicRef.current) {
         void microphone.disable().catch(() => {});
+        const stream = localParticipantRef.current?.audioStream;
+        if (stream) {
+          for (const track of stream.getAudioTracks()) {
+            try {
+              track.enabled = false;
+            } catch {
+              // ignore
+            }
+          }
+        }
         return;
       }
       if (!userChosenMuteRef.current) {
         void microphone.enable().catch(() => {});
+        const stream = localParticipantRef.current?.audioStream;
+        if (stream) {
+          for (const track of stream.getAudioTracks()) {
+            try {
+              track.enabled = true;
+            } catch {
+              // ignore
+            }
+          }
+        }
       }
     };
 
@@ -489,9 +514,19 @@ export function StreamLocalHoldMicBridge({
       clearInterval(intervalId);
       if (!pauseMicRef.current && !userChosenMuteRef.current) {
         void microphone.enable().catch(() => {});
+        const stream = localParticipantRef.current?.audioStream;
+        if (stream) {
+          for (const track of stream.getAudioTracks()) {
+            try {
+              track.enabled = true;
+            } catch {
+              // ignore
+            }
+          }
+        }
       }
     };
-  }, [pauseMic, microphone, userChosenMuteRef]);
+  }, [pauseMic, microphone, userChosenMuteRef, call]);
 
   return null;
 }
@@ -521,6 +556,7 @@ export function StreamHoldAudioBridge({
 
   const wasPausedRef = useRef(false);
 
+  /** Either side on hold → neither should hear the other. */
   const shouldPauseRemote = (): boolean =>
     peerOnHoldRef.current || systemOnHoldRef.current;
 
@@ -538,11 +574,30 @@ export function StreamHoldAudioBridge({
       }
     };
 
-    const silenceRemote = (): void => setRemoteVolume(0);
+    const setRemoteTracksEnabled = (enabled: boolean): void => {
+      for (const participant of remoteParticipantsRef.current) {
+        if (!participant || participant.isLocalParticipant) continue;
+        const stream = participant.audioStream;
+        if (!stream) continue;
+        for (const track of stream.getAudioTracks()) {
+          try {
+            track.enabled = enabled;
+          } catch {
+            // ignore
+          }
+        }
+      }
+    };
+
+    const silenceRemote = (): void => {
+      setRemoteVolume(0);
+      setRemoteTracksEnabled(false);
+    };
 
     const restoreRemote = (): void => {
       // RN often ignores `undefined` — use full volume after hold ends.
       setRemoteVolume(1);
+      setRemoteTracksEnabled(true);
     };
 
     let restoreTimers: ReturnType<typeof setTimeout>[] = [];
@@ -566,7 +621,8 @@ export function StreamHoldAudioBridge({
     };
 
     tick();
-    const intervalId = setInterval(tick, 50);
+    // Faster while on hold so OEM/GSM cannot briefly re-enable remote audio tracks.
+    const intervalId = setInterval(tick, shouldPauseRemote() ? 40 : 80);
 
     return () => {
       clearInterval(intervalId);
