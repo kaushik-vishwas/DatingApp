@@ -428,16 +428,22 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
       void Promise.all([
         import('../../utils/incomingCallNativeBridge'),
         import('../../utils/androidCellularCallHold'),
-      ]).then(([bridge, cellular]) => {
+        import('../../utils/voiceCallPermissions'),
+      ]).then(([bridge, cellular, perms]) => {
         callDiag.info('cellular_hold_native_probe', {
           nativeAvailable: bridge.isIncomingCallNativeAvailable(),
         });
-        void cellular.ensureAndroidReadPhoneStatePermission().then((granted) => {
+        // Prefer already-granted phone-state; request only if still ringing (pre-connect).
+        void (async () => {
+          let granted = await cellular.ensureAndroidReadPhoneStatePermission();
+          if (!granted && outgoingCallerPhase === 'ringing') {
+            granted = (await perms.ensureVoiceCallPermissions()).readPhoneState;
+          }
           callDiag.info('cellular_hold_permission_on_mount', { granted });
           if (granted) {
             cellular.refreshAndroidCellularCallHoldWatch();
           }
-        });
+        })();
       });
     }
     if (outgoingCallerPhase === 'ringing') {
@@ -1456,6 +1462,23 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
     stopIncomingRingtone,
   ]);
 
+  // In-session incoming: pre-ask call permissions while ringing (same as IncomingCallScreen).
+  useEffect(() => {
+    if (!receiverAvailabilitySession || receiverSessionPhase !== 'incoming') return;
+    void (async () => {
+      try {
+        const { ensureVoiceCallPermissions } = await import('../../utils/voiceCallPermissions');
+        const perm = await ensureVoiceCallPermissions();
+        if (Platform.OS === 'android' && perm.readPhoneState) {
+          const cellular = await import('../../utils/androidCellularCallHold');
+          cellular.refreshAndroidCellularCallHoldWatch();
+        }
+      } catch {
+        // Join still verifies mic.
+      }
+    })();
+  }, [receiverAvailabilitySession, receiverSessionPhase]);
+
   const onAcceptIncomingOnSession = () => {
     if (!incomingReq || incomingResponding) return;
     setIncomingResponding(true);
@@ -1540,8 +1563,9 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
 
     void (async () => {
       try {
-        const perm = await Audio.getPermissionsAsync();
-        if (perm.status !== 'granted') return;
+        const { ensureVoiceCallPermissions } = await import('../../utils/voiceCallPermissions');
+        const perm = await ensureVoiceCallPermissions();
+        if (!perm.microphone) return;
         streamSdk.StreamVideoClient.getOrCreateInstance({
           apiKey: boot.apiKey,
           user: {
@@ -1616,11 +1640,14 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
         }
         setSdk((prev) => prev ?? streamSdk);
 
-        const existingMic = await Audio.getPermissionsAsync();
-        let micGranted = existingMic.status === 'granted';
+        // Permissions are pre-asked before dial/ring/accept. Only verify mic here — no dialogs.
+        const { hasVoiceCallMicrophonePermission, ensureVoiceCallPermissions } = await import(
+          '../../utils/voiceCallPermissions'
+        );
+        let micGranted = await hasVoiceCallMicrophonePermission();
         if (!micGranted) {
-          const mic = await Audio.requestPermissionsAsync();
-          micGranted = mic.status === 'granted';
+          // Fallback if user skipped ring preflight (should be rare).
+          micGranted = (await ensureVoiceCallPermissions()).microphone;
         }
         if (!micGranted) {
           throw new Error('Microphone permission is required for voice calls');
@@ -1632,6 +1659,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
           });
         });
 
+        // Client warm during ring makes this a reuse; keep join critical path short.
         const nextClient = streamSdk.StreamVideoClient.getOrCreateInstance({
           apiKey: boot.apiKey,
           user: {

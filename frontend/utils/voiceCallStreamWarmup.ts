@@ -1,7 +1,7 @@
 import Constants from 'expo-constants';
-import { Audio } from 'expo-av';
 import type { VoiceBootstrapResponse } from '../types/api';
 import { profileImageUrlForStreamOrNetwork } from './avatarSource';
+import { ensureVoiceCallPermissions } from './voiceCallPermissions';
 
 type StreamSdkModule = {
   StreamVideoClient: {
@@ -41,8 +41,8 @@ export async function warmVoiceCallStreamClient(
   if (!streamSdk) return;
 
   try {
-    const perm = await Audio.getPermissionsAsync();
-    if (perm.status !== 'granted') return;
+    const perm = await ensureVoiceCallPermissions();
+    if (!perm.microphone) return;
 
     streamSdk.StreamVideoClient.getOrCreateInstance({
       apiKey: boot.apiKey,
