@@ -7,7 +7,6 @@ import { AvatarSoundWaveRings } from './AvatarVoiceWaves';
 import {
   ANDROID_TALK_GSM_SUSPECT_DEBOUNCE_MS,
   callDiag,
-  getCallDiagnosticsSnapshot,
   HOLD_REMOTE_LEFT_DEBOUNCE_MS,
   isCallHoldGuardActive,
   isTalkActiveForGsmGuard,
@@ -250,13 +249,17 @@ export function StreamRemotePeerLeftBridge({
 
   const armGsmSuspectGuard = (reason: 'local_left' | 'remote_empty'): void => {
     if (gsmSuspectArmedRef.current) return;
-    if (!isTalkActiveForGsmGuard()) {
-      callDiag.info('stream_gsm_suspect_skipped', { reason, talkActive: isTalkActiveForGsmGuard() });
+    const talkActive = isTalkActiveForGsmGuard();
+    // Android: Stream often drops before talkActive/hold catch up on the *first* cellular
+    // interrupt. Arm for both local LEFT and remote_empty so the short 2–4s debounce cannot
+    // hang up the other side once.
+    if (!talkActive && Platform.OS !== 'android') {
+      callDiag.info('stream_gsm_suspect_skipped', { reason, talkActive });
       return;
     }
     gsmSuspectArmedRef.current = true;
     setGsmInterruptPending(true, `stream_gsm_suspect_${reason}`);
-    callDiag.info('stream_gsm_suspect', { reason });
+    callDiag.info('stream_gsm_suspect', { reason, talkActive });
     if (reason === 'local_left') {
       onLocalGsmSuspectRef.current?.();
       return;
@@ -268,7 +271,8 @@ export function StreamRemotePeerLeftBridge({
     if (isCallHoldGuardActive()) {
       return HOLD_REMOTE_LEFT_DEBOUNCE_MS;
     }
-    if (Platform.OS === 'android' && getCallDiagnosticsSnapshot().talkActive) {
+    // Use live reader — diagnostics snapshot can lag one tick and pick the short debounce.
+    if (Platform.OS === 'android' && isTalkActiveForGsmGuard()) {
       return ANDROID_TALK_GSM_SUSPECT_DEBOUNCE_MS;
     }
     return NORMAL_REMOTE_LEFT_DEBOUNCE_MS;
@@ -456,44 +460,24 @@ export function StreamParticipantMutedIndicator({
 }
 
 type HoldAudioTrack = {
-  enabled: boolean;
-  _enabled?: boolean;
   _setVolume?: (volume: number) => void;
 };
 
-function forceTrackEnabledLatch(track: HoldAudioTrack, enabled: boolean): void {
+/** Playback gain only — do not flip track.enabled (that can tear down WebRTC during GSM). */
+function setRemoteTrackGain(track: HoldAudioTrack, volume: number): void {
   try {
-    // MediaStreamTrack.enabled early-returns when JS already matches, even if native
-    // re-toggled the same track object during GSM — clear that latch first.
-    if (typeof track._enabled === 'boolean') {
-      track._enabled = !enabled;
-    }
-    track.enabled = enabled;
+    track._setVolume?.(volume);
   } catch {
     // ignore
   }
 }
 
-function forceRemoteTrackSilent(track: HoldAudioTrack): void {
-  try {
-    // Always drive native gain — survives OEM/GSM ducking better than enabled alone.
-    track._setVolume?.(0);
-  } catch {
-    // ignore
-  }
-  forceTrackEnabledLatch(track, false);
-}
-
-function forceRemoteTrackAudible(track: HoldAudioTrack): void {
-  try {
-    track._setVolume?.(1);
-  } catch {
-    // ignore
-  }
-  forceTrackEnabledLatch(track, true);
-}
-
-/** Force mic off during GSM hold (peer must not hear us). No mute badge — hold UI only. */
+/**
+ * Mute local publish via Stream mic API while either side is on cellular hold
+ * (so neither hears the other). No mute badge — hold UI only. Respects userChosenMuteRef
+ * on resume so normal mute/unmute is unchanged.
+ * Do not touch native MediaStreamTrack.enabled — that can drop the call mid-GSM.
+ */
 export function StreamLocalHoldMicBridge({
   systemOnHold = false,
   peerOnHold = false,
@@ -503,62 +487,41 @@ export function StreamLocalHoldMicBridge({
   peerOnHold?: boolean;
   userChosenMuteRef: React.MutableRefObject<boolean>;
 }): null {
-  const call = useCall();
-  const { useMicrophoneState, useLocalParticipant } = useCallStateHooks();
+  const { useMicrophoneState } = useCallStateHooks();
   const { microphone } = useMicrophoneState();
-  const localParticipant = useLocalParticipant();
-  // Mute local publish while WE are on an external call (so peer cannot hear us).
-  const pauseMic = systemOnHold;
+  // Either side on hold → stop publishing (internal silence, no mute badge).
+  const pauseMic = systemOnHold || peerOnHold;
   const pauseMicRef = useRef(pauseMic);
   pauseMicRef.current = pauseMic;
-  const localParticipantRef = useRef(localParticipant);
-  localParticipantRef.current = localParticipant;
 
   useEffect(() => {
     const applyMic = (): void => {
       if (pauseMicRef.current) {
         void microphone.disable().catch(() => {});
-        const stream = localParticipantRef.current?.audioStream;
-        if (stream) {
-          for (const track of stream.getAudioTracks()) {
-            forceTrackEnabledLatch(track as unknown as HoldAudioTrack, false);
-          }
-        }
         return;
       }
       if (!userChosenMuteRef.current) {
         void microphone.enable().catch(() => {});
-        const stream = localParticipantRef.current?.audioStream;
-        if (stream) {
-          for (const track of stream.getAudioTracks()) {
-            forceTrackEnabledLatch(track as unknown as HoldAudioTrack, true);
-          }
-        }
       }
     };
 
     applyMic();
     if (!pauseMic) return;
-    const intervalId = setInterval(applyMic, 80);
+    const intervalId = setInterval(applyMic, 200);
     return () => {
       clearInterval(intervalId);
       if (!pauseMicRef.current && !userChosenMuteRef.current) {
         void microphone.enable().catch(() => {});
-        const stream = localParticipantRef.current?.audioStream;
-        if (stream) {
-          for (const track of stream.getAudioTracks()) {
-            forceTrackEnabledLatch(track as unknown as HoldAudioTrack, true);
-          }
-        }
       }
     };
-  }, [pauseMic, microphone, userChosenMuteRef, call]);
+  }, [pauseMic, microphone, userChosenMuteRef]);
 
   return null;
 }
 
 /**
  * Pause remote participant audio during GSM / peer hold only.
+ * Uses volume/gain only (no track.enabled flips) so the Stream session stays alive.
  * Does not emit call:mute — hold UI stays on "On hold" with no mute badge.
  */
 export function StreamHoldAudioBridge({
@@ -618,11 +581,11 @@ export function StreamHoldAudioBridge({
           // ignore
         }
       }
+      forEachRemoteAudioTrack((track) => setRemoteTrackGain(track, level));
     };
 
     const silenceRemote = (): void => {
       setRemoteVolume(0);
-      forEachRemoteAudioTrack(forceRemoteTrackSilent);
     };
 
     const restoreRemote = (): void => {
@@ -633,7 +596,6 @@ export function StreamHoldAudioBridge({
       }
       // RN often ignores `undefined` — use full volume after hold ends.
       setRemoteVolume(1);
-      forEachRemoteAudioTrack(forceRemoteTrackAudible);
     };
 
     let restoreTimers: ReturnType<typeof setTimeout>[] = [];
@@ -666,10 +628,9 @@ export function StreamHoldAudioBridge({
     };
 
     tick();
-    // Keep forcing silence — GSM/Stream often rebinds tracks at ducked volume.
-    const intervalId = setInterval(tick, shouldPauseRemote() ? 25 : 120);
+    const intervalId = setInterval(tick, shouldPauseRemote() ? 80 : 160);
 
-    // Re-silence immediately when Stream swaps remote audio tracks mid-hold.
+    // Re-silence when Stream rebinds remote audio mid-hold (without tearing down the effect).
     const subscription = call.state.remoteParticipants$?.subscribe?.(() => {
       if (shouldPauseRemote()) {
         silenceRemote();
@@ -684,15 +645,12 @@ export function StreamHoldAudioBridge({
       } catch {
         // ignore
       }
-      // Only restore on teardown if hold already ended. Previously this restored on every
-      // remoteParticipants identity change while still on hold — that leaked ducked audio.
+      // Only restore on teardown if hold already ended — never mid-hold.
       if (wasPausedRef.current && !shouldPauseRemote()) {
         scheduleRestoreRetries();
         wasPausedRef.current = false;
       }
     };
-    // remoteParticipants intentionally omitted — kept via ref so hold silence is not
-    // torn down/restored on every Stream participant emit.
   }, [call, peerOnHold, systemOnHold]);
 
   return null;

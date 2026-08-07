@@ -43,6 +43,7 @@ import {
   ensureVoiceCallPermissions,
   hasVoiceCallMicrophonePermission,
 } from '../utils/voiceCallPermissions';
+import { getVoiceSessionStartPromise } from '../utils/voiceCallSessionStart';
 
 let outgoingNavigateGeneration = 0;
 
@@ -188,6 +189,8 @@ type CallSignalContextValue = {
   startIncomingRingtone: () => Promise<void>;
   /** Accept invite and return Stream bootstrap without leaving the current VoiceCall screen. */
   acceptIncomingCallStayOnScreen: (req: IncomingCallRequest) => Promise<VoiceBootstrapResponse>;
+  /** Prefetch Stream bootstrap + warm client while ringing (Accept → join is faster). */
+  prefetchIncomingBootstrap: (req: IncomingCallRequest) => void;
 };
 
 const CallSignalContext = createContext<CallSignalContextValue | null>(null);
@@ -839,6 +842,52 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     socketRef.current?.emit('call:response', { callId: req.callId, accepted: false });
   }, []);
 
+  const emitAcceptAndResolveBootstrap = useCallback(
+    async (
+      req: IncomingCallRequest,
+      failReason: string
+    ): Promise<{ bootstrapped: VoiceBootstrapResponse; socket: Socket }> => {
+      // Bootstrap + mic + socket in parallel — emit accept as soon as mic+socket are ready
+      // so the caller can join Stream without waiting on remaining bootstrap I/O.
+      const bootstrapPromise = ensureIncomingBootstrapPromise(req);
+      const micPromise = hasVoiceCallMicrophonePermission();
+      const socketPromise = socketRef.current?.connected
+        ? Promise.resolve(socketRef.current)
+        : ensureCallSocketReady(socketRef);
+
+      const [micGranted, socket] = await Promise.all([micPromise, socketPromise]);
+      let micOk = micGranted;
+      if (!micOk) {
+        micOk = (await ensureVoiceCallPermissions()).microphone;
+      }
+      if (!micOk) {
+        throw new Error('Microphone permission is required for voice calls');
+      }
+
+      socket.emit('call:response', { callId: req.callId, accepted: true });
+
+      // Start session/start as soon as bootstrap is known (often already cached from ring).
+      void bootstrapPromise
+        .then((boot) => getVoiceSessionStartPromise(boot.callId, boot.peerAccountId))
+        .catch(() => {});
+
+      let bootstrapped: VoiceBootstrapResponse;
+      try {
+        bootstrapped = await bootstrapPromise;
+      } catch (e) {
+        if (socket.connected) {
+          instrumentedEmitCallEnd(socket, req.callId, failReason, 'main_call_socket');
+        }
+        throw e;
+      }
+
+      incomingBootstrapByCallIdRef.current.delete(req.callId);
+      incomingBootstrapPromiseByCallIdRef.current.delete(req.callId);
+      return { bootstrapped, socket };
+    },
+    [ensureIncomingBootstrapPromise]
+  );
+
   const acceptIncomingCallStayOnScreen = useCallback(
     async (req: IncomingCallRequest): Promise<VoiceBootstrapResponse> => {
       void markIncomingCallHandled(req.callId);
@@ -850,47 +899,13 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       }
       void stopIncomingRingtonePlayback();
 
-      // Mic should already be granted while ringing; only prompt if still missing (pre-connect).
-      let micOk = await hasVoiceCallMicrophonePermission();
-      if (!micOk) {
-        micOk = (await ensureVoiceCallPermissions()).microphone;
-      }
-      if (!micOk) {
-        throw new Error('Microphone permission is required for voice calls');
-      }
-
-      const bootstrapPromise = ensureIncomingBootstrapPromise(req);
-      let socket: Socket;
-      try {
-        socket = socketRef.current?.connected
-          ? socketRef.current
-          : await ensureCallSocketReady(socketRef);
-      } catch (e) {
-        throw e;
-      }
-      // Tell caller immediately so both sides can join Stream without waiting on bootstrap I/O.
-      socket.emit('call:response', { callId: req.callId, accepted: true });
-
-      let bootstrapped: VoiceBootstrapResponse;
-      try {
-        bootstrapped = await bootstrapPromise;
-      } catch (e) {
-        if (socket.connected) {
-          instrumentedEmitCallEnd(
-            socket,
-            req.callId,
-            'accept_stay_on_screen_bootstrap_failed',
-            'main_call_socket'
-          );
-        }
-        throw e;
-      }
-
-      incomingBootstrapByCallIdRef.current.delete(req.callId);
-      incomingBootstrapPromiseByCallIdRef.current.delete(req.callId);
+      const { bootstrapped } = await emitAcceptAndResolveBootstrap(
+        req,
+        'accept_stay_on_screen_bootstrap_failed'
+      );
       return bootstrapped;
     },
-    [ensureIncomingBootstrapPromise]
+    [emitAcceptAndResolveBootstrap]
   );
 
   const acceptIncomingCall = useCallback(
@@ -903,46 +918,20 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       }
       void stopIncomingRingtonePlayback();
 
-      let micOk = await hasVoiceCallMicrophonePermission();
-      if (!micOk) {
-        micOk = (await ensureVoiceCallPermissions()).microphone;
-      }
-      if (!micOk) {
-        throw new Error('Microphone permission is required for voice calls');
-      }
-
-      const bootstrapPromise = ensureIncomingBootstrapPromise(req);
-      let socket: Socket;
-      try {
-        socket = socketRef.current?.connected
-          ? socketRef.current
-          : await ensureCallSocketReady(socketRef);
-      } catch (e) {
-        throw e;
-      }
-      // Tell caller immediately so both sides can join Stream without waiting on bootstrap I/O.
-      socket.emit('call:response', { callId: req.callId, accepted: true });
-
-      let bootstrapped: VoiceBootstrapResponse;
-      try {
-        bootstrapped = await bootstrapPromise;
-      } catch (e) {
-        if (socket.connected) {
-          instrumentedEmitCallEnd(
-            socket,
-            req.callId,
-            'accept_incoming_bootstrap_failed',
-            'main_call_socket'
-          );
-        }
-        throw e;
-      }
-
-      incomingBootstrapByCallIdRef.current.delete(req.callId);
-      incomingBootstrapPromiseByCallIdRef.current.delete(req.callId);
+      const { bootstrapped } = await emitAcceptAndResolveBootstrap(
+        req,
+        'accept_incoming_bootstrap_failed'
+      );
       openVoiceCall(bootstrapped, req.peerName, req.peerImage ?? null);
     },
-    [ensureIncomingBootstrapPromise, openVoiceCall]
+    [emitAcceptAndResolveBootstrap, openVoiceCall]
+  );
+
+  const prefetchIncomingBootstrap = useCallback(
+    (req: IncomingCallRequest) => {
+      void ensureIncomingBootstrapPromise(req);
+    },
+    [ensureIncomingBootstrapPromise]
   );
 
   const stopIncomingRingtone = useCallback(() => stopIncomingRingtonePlayback(), []);
@@ -1682,6 +1671,7 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       stopIncomingRingtone,
       startIncomingRingtone: startIncomingRingtoneCtx,
       acceptIncomingCallStayOnScreen,
+      prefetchIncomingBootstrap,
     }),
     [
       registerPeer,
@@ -1706,6 +1696,7 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       stopIncomingRingtone,
       startIncomingRingtoneCtx,
       acceptIncomingCallStayOnScreen,
+      prefetchIncomingBootstrap,
       clearReceiverIncomingCallUi,
     ]
   );

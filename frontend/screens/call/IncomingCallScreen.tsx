@@ -17,8 +17,13 @@ const AUTO_ACCEPT_MS = 5_000;
 export default function IncomingCallScreen({ navigation, route }: Props): React.JSX.Element {
   const insets = useSafeAreaInsets();
   const { callId, fromType, fromId, peerName, peerImage } = route.params;
-  const { acceptIncomingCall, rejectIncomingCall, stopIncomingRingtone, startIncomingRingtone } =
-    useCallSignals();
+  const {
+    acceptIncomingCall,
+    rejectIncomingCall,
+    stopIncomingRingtone,
+    startIncomingRingtone,
+    prefetchIncomingBootstrap,
+  } = useCallSignals();
 
   const req: IncomingCallRequest = useMemo(
     () => ({ callId, fromType, fromId, peerName, peerImage: peerImage ?? null }),
@@ -48,8 +53,9 @@ export default function IncomingCallScreen({ navigation, route }: Props): React.
     })();
   }, [startIncomingRingtone]);
 
-  // Pre-ask mic + Android phone/BT while ringing so Accept → join has no permission dialogs.
+  // Prefetch bootstrap + Stream warm + permissions while ringing so Accept → audio is short.
   useEffect(() => {
+    prefetchIncomingBootstrap(req);
     void (async () => {
       try {
         const { ensureVoiceCallPermissions } = await import('../../utils/voiceCallPermissions');
@@ -58,7 +64,7 @@ export default function IncomingCallScreen({ navigation, route }: Props): React.
         // Join path still verifies microphone.
       }
     })();
-  }, []);
+  }, [prefetchIncomingBootstrap, req]);
 
   // "Ringtone-like" pulsing rings behind the avatar.
   const pulse = useRef(new Animated.Value(0)).current;

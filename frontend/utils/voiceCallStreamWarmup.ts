@@ -1,7 +1,7 @@
 import Constants from 'expo-constants';
 import type { VoiceBootstrapResponse } from '../types/api';
 import { profileImageUrlForStreamOrNetwork } from './avatarSource';
-import { ensureVoiceCallPermissions } from './voiceCallPermissions';
+import { hasVoiceCallMicrophonePermission } from './voiceCallPermissions';
 
 type StreamSdkModule = {
   StreamVideoClient: {
@@ -41,8 +41,9 @@ export async function warmVoiceCallStreamClient(
   if (!streamSdk) return;
 
   try {
-    const perm = await ensureVoiceCallPermissions();
-    if (!perm.microphone) return;
+    // Mic-only — do not wait on phone/BT dialogs or full preflight (those run on ring separately).
+    const micOk = await hasVoiceCallMicrophonePermission();
+    if (!micOk) return;
 
     streamSdk.StreamVideoClient.getOrCreateInstance({
       apiKey: boot.apiKey,
