@@ -1,4 +1,4 @@
-import axios, { type AxiosError } from 'axios';
+import axios, { AxiosError } from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
 import Constants from 'expo-constants';
@@ -189,6 +189,103 @@ const api = axios.create({
   },
 });
 
+type AxiosConfigWithFetchFlag = {
+  __fetchRetried?: boolean;
+  baseURL?: string;
+  url?: string;
+  method?: string;
+  data?: unknown;
+  headers?: Record<string, unknown>;
+  timeout?: number;
+};
+
+function buildAbsoluteUrl(baseURL: string | undefined, url: string | undefined): string {
+  const path = typeof url === 'string' ? url : '';
+  if (/^https?:\/\//i.test(path)) return path;
+  const base = (baseURL || getBaseURL()).replace(/\/+$/, '');
+  return `${base}${path.startsWith('/') ? '' : '/'}${path}`;
+}
+
+/**
+ * Some Android OEMs (notably OnePlus/OxygenOS) fail Axios→XHR→OkHttp with ERR_NETWORK
+ * while the same host works in Chrome and older APKs. Retry once via fetch().
+ */
+async function axiosConfigViaFetch(config: AxiosConfigWithFetchFlag) {
+  const method = String(config.method || 'get').toUpperCase();
+  const absoluteUrl = buildAbsoluteUrl(config.baseURL, config.url);
+  const headers: Record<string, string> = {
+    Accept: 'application/json',
+    'Content-Type': 'application/json',
+  };
+  const rawHeaders = config.headers as {
+    get?: (name: string) => unknown;
+    Authorization?: string;
+    authorization?: string;
+  } | undefined;
+  let auth: unknown =
+    rawHeaders && typeof rawHeaders.get === 'function'
+      ? rawHeaders.get('Authorization')
+      : rawHeaders?.Authorization || rawHeaders?.authorization;
+  if (typeof auth === 'string' && auth) {
+    headers.Authorization = auth;
+  }
+
+  const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+  const timeoutMs = typeof config.timeout === 'number' ? config.timeout : 20000;
+  const timer =
+    controller && timeoutMs > 0
+      ? setTimeout(() => controller.abort(), timeoutMs)
+      : null;
+
+  let body: string | undefined;
+  if (config.data != null && method !== 'GET' && method !== 'HEAD') {
+    body = typeof config.data === 'string' ? config.data : JSON.stringify(config.data);
+  }
+
+  try {
+    const res = await fetch(absoluteUrl, {
+      method,
+      headers,
+      body,
+      signal: controller?.signal,
+    });
+    const text = await res.text();
+    let data: unknown = text;
+    if (text) {
+      try {
+        data = JSON.parse(text);
+      } catch {
+        data = text;
+      }
+    } else {
+      data = null;
+    }
+
+    const axiosLike = {
+      data,
+      status: res.status,
+      statusText: res.statusText,
+      headers: Object.fromEntries(res.headers.entries()),
+      config,
+      request: {},
+    };
+
+    if (!res.ok) {
+      const err = new AxiosError(
+        `Request failed with status code ${res.status}`,
+        String(res.status),
+        config as any,
+        {},
+        axiosLike as any
+      );
+      return Promise.reject(err);
+    }
+    return axiosLike;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 /** Attach baseURL + token */
 api.interceptors.request.use(async (config) => {
   const base = getBaseURL();
@@ -208,6 +305,31 @@ api.interceptors.request.use(async (config) => {
 
   return config;
 });
+
+/** On pure transport failures, retry once with fetch (bypasses Axios XHR on broken OEMs). */
+api.interceptors.response.use(
+  (response) => response,
+  async (error: AxiosError) => {
+    const cfg = error.config as AxiosConfigWithFetchFlag | undefined;
+    if (!cfg || cfg.__fetchRetried || error.response) {
+      return Promise.reject(error);
+    }
+    const code = String(error.code || '');
+    const isTransportFailure =
+      code === 'ERR_NETWORK' ||
+      code === 'ECONNABORTED' ||
+      /network error/i.test(error.message || '');
+    if (!isTransportFailure) {
+      return Promise.reject(error);
+    }
+    cfg.__fetchRetried = true;
+    try {
+      return await axiosConfigViaFetch(cfg);
+    } catch (fetchErr) {
+      return Promise.reject(fetchErr);
+    }
+  }
+);
 
 /** Error handler */
 export const getErrorMessage = (error: unknown): string => {
@@ -234,12 +356,12 @@ export const getErrorMessage = (error: unknown): string => {
     }
 
     if (!err.response) {
-      const code = String(err.code || '');
-      if (code === 'ECONNABORTED' || /timeout/i.test(err.message || '')) {
-        return 'Request timed out. Check your internet connection and try again.';
+      const errCode = String(err.code || '');
+      if (errCode === 'ECONNABORTED' || /timeout|aborted/i.test(err.message || '')) {
+        return 'Connection timed out. Please check your internet and try again.';
       }
-      // ERR_NETWORK / no response: DNS, TLS, offline, VPN, Private DNS, OEM blockers, etc.
-      return 'No network response. Check internet, VPN/Private DNS, and try mobile data.';
+      // Same live API works in old APKs; this is usually OEM Axios/XHR transport, not "backend down".
+      return 'Could not reach the server. Please check your internet connection and try again.';
     }
 
     return err.message || 'Request failed';
