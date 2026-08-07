@@ -233,7 +233,14 @@ export const getErrorMessage = (error: unknown): string => {
       if (mapped) return mapped;
     }
 
-    if (!err.response) return 'Network error. Check backend connection';
+    if (!err.response) {
+      const code = String(err.code || '');
+      if (code === 'ECONNABORTED' || /timeout/i.test(err.message || '')) {
+        return 'Request timed out. Check your internet connection and try again.';
+      }
+      // ERR_NETWORK / no response: DNS, TLS, offline, VPN, Private DNS, OEM blockers, etc.
+      return 'No network response. Check internet, VPN/Private DNS, and try mobile data.';
+    }
 
     return err.message || 'Request failed';
   }
