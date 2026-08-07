@@ -7,6 +7,7 @@ import { AvatarSoundWaveRings } from './AvatarVoiceWaves';
 import {
   ANDROID_TALK_GSM_SUSPECT_DEBOUNCE_MS,
   callDiag,
+  getCallDiagnosticsSnapshot,
   HOLD_REMOTE_LEFT_DEBOUNCE_MS,
   isCallHoldGuardActive,
   isTalkActiveForGsmGuard,
@@ -249,17 +250,13 @@ export function StreamRemotePeerLeftBridge({
 
   const armGsmSuspectGuard = (reason: 'local_left' | 'remote_empty'): void => {
     if (gsmSuspectArmedRef.current) return;
-    const talkActive = isTalkActiveForGsmGuard();
-    // Android: Stream often drops before talkActive/hold catch up on the *first* cellular
-    // interrupt. Arm for both local LEFT and remote_empty so the short 2–4s debounce cannot
-    // hang up the other side once.
-    if (!talkActive && Platform.OS !== 'android') {
-      callDiag.info('stream_gsm_suspect_skipped', { reason, talkActive });
+    if (!isTalkActiveForGsmGuard()) {
+      callDiag.info('stream_gsm_suspect_skipped', { reason, talkActive: isTalkActiveForGsmGuard() });
       return;
     }
     gsmSuspectArmedRef.current = true;
     setGsmInterruptPending(true, `stream_gsm_suspect_${reason}`);
-    callDiag.info('stream_gsm_suspect', { reason, talkActive });
+    callDiag.info('stream_gsm_suspect', { reason });
     if (reason === 'local_left') {
       onLocalGsmSuspectRef.current?.();
       return;
@@ -271,8 +268,7 @@ export function StreamRemotePeerLeftBridge({
     if (isCallHoldGuardActive()) {
       return HOLD_REMOTE_LEFT_DEBOUNCE_MS;
     }
-    // Use live reader — diagnostics snapshot can lag one tick and pick the short debounce.
-    if (Platform.OS === 'android' && isTalkActiveForGsmGuard()) {
+    if (Platform.OS === 'android' && getCallDiagnosticsSnapshot().talkActive) {
       return ANDROID_TALK_GSM_SUSPECT_DEBOUNCE_MS;
     }
     return NORMAL_REMOTE_LEFT_DEBOUNCE_MS;
@@ -459,25 +455,7 @@ export function StreamParticipantMutedIndicator({
   );
 }
 
-type HoldAudioTrack = {
-  _setVolume?: (volume: number) => void;
-};
-
-/** Playback gain only — do not flip track.enabled (that can tear down WebRTC during GSM). */
-function setRemoteTrackGain(track: HoldAudioTrack, volume: number): void {
-  try {
-    track._setVolume?.(volume);
-  } catch {
-    // ignore
-  }
-}
-
-/**
- * Mute local publish via Stream mic API while either side is on cellular hold
- * (so neither hears the other). No mute badge — hold UI only. Respects userChosenMuteRef
- * on resume so normal mute/unmute is unchanged.
- * Do not touch native MediaStreamTrack.enabled — that can drop the call mid-GSM.
- */
+/** Force mic off during GSM or while peer is on hold. */
 export function StreamLocalHoldMicBridge({
   systemOnHold = false,
   peerOnHold = false,
@@ -489,8 +467,7 @@ export function StreamLocalHoldMicBridge({
 }): null {
   const { useMicrophoneState } = useCallStateHooks();
   const { microphone } = useMicrophoneState();
-  // Either side on hold → stop publishing (internal silence, no mute badge).
-  const pauseMic = systemOnHold || peerOnHold;
+  const pauseMic = systemOnHold;
   const pauseMicRef = useRef(pauseMic);
   pauseMicRef.current = pauseMic;
 
@@ -507,7 +484,7 @@ export function StreamLocalHoldMicBridge({
 
     applyMic();
     if (!pauseMic) return;
-    const intervalId = setInterval(applyMic, 200);
+    const intervalId = setInterval(applyMic, 100);
     return () => {
       clearInterval(intervalId);
       if (!pauseMicRef.current && !userChosenMuteRef.current) {
@@ -521,8 +498,8 @@ export function StreamLocalHoldMicBridge({
 
 /**
  * Pause remote participant audio during GSM / peer hold only.
- * Uses volume/gain only (no track.enabled flips) so the Stream session stays alive.
- * Does not emit call:mute — hold UI stays on "On hold" with no mute badge.
+ * Peer mute is handled by Stream mic publish state — RN setParticipantVolume(0) often
+ * does not restore after undefined, which breaks audio after mute → unmute or hold end.
  */
 export function StreamHoldAudioBridge({
   peerOnHold = false,
@@ -544,36 +521,14 @@ export function StreamHoldAudioBridge({
 
   const wasPausedRef = useRef(false);
 
-  /** Either side on hold → neither should hear the other. */
   const shouldPauseRemote = (): boolean =>
     peerOnHoldRef.current || systemOnHoldRef.current;
 
   useEffect(() => {
     if (!call) return;
 
-    const listRemotes = (): StreamVideoParticipant[] => {
-      const fromState = call.state?.remoteParticipants;
-      if (Array.isArray(fromState) && fromState.length > 0) {
-        return fromState;
-      }
-      return remoteParticipantsRef.current ?? [];
-    };
-
-    const forEachRemoteAudioTrack = (fn: (track: HoldAudioTrack) => void): void => {
-      for (const participant of listRemotes()) {
-        if (!participant || participant.isLocalParticipant) continue;
-        const streams = [participant.audioStream, participant.screenShareAudioStream];
-        for (const stream of streams) {
-          if (!stream) continue;
-          for (const track of stream.getAudioTracks()) {
-            fn(track as unknown as HoldAudioTrack);
-          }
-        }
-      }
-    };
-
-    const setRemoteVolume = (level: number): void => {
-      for (const participant of listRemotes()) {
+    const setRemoteVolume = (level: number | undefined): void => {
+      for (const participant of remoteParticipantsRef.current) {
         if (!participant?.sessionId || participant.isLocalParticipant) continue;
         try {
           call.speaker.setParticipantVolume(participant.sessionId, level);
@@ -581,34 +536,18 @@ export function StreamHoldAudioBridge({
           // ignore
         }
       }
-      forEachRemoteAudioTrack((track) => setRemoteTrackGain(track, level));
     };
 
-    const silenceRemote = (): void => {
-      setRemoteVolume(0);
-    };
+    const silenceRemote = (): void => setRemoteVolume(0);
 
     const restoreRemote = (): void => {
-      // Never restore while hold is still active (delayed retries / effect churn).
-      if (shouldPauseRemote()) {
-        silenceRemote();
-        return;
-      }
       // RN often ignores `undefined` — use full volume after hold ends.
       setRemoteVolume(1);
     };
 
     let restoreTimers: ReturnType<typeof setTimeout>[] = [];
 
-    const clearRestoreTimers = (): void => {
-      for (const timerId of restoreTimers) {
-        clearTimeout(timerId);
-      }
-      restoreTimers = [];
-    };
-
     const scheduleRestoreRetries = (): void => {
-      clearRestoreTimers();
       restoreRemote();
       restoreTimers = [100, 400, 1000].map((ms) => setTimeout(restoreRemote, ms));
     };
@@ -616,7 +555,6 @@ export function StreamHoldAudioBridge({
     const tick = (): void => {
       const pause = shouldPauseRemote();
       if (pause) {
-        clearRestoreTimers();
         silenceRemote();
         wasPausedRef.current = true;
         return;
@@ -628,30 +566,19 @@ export function StreamHoldAudioBridge({
     };
 
     tick();
-    const intervalId = setInterval(tick, shouldPauseRemote() ? 80 : 160);
-
-    // Re-silence when Stream rebinds remote audio mid-hold (without tearing down the effect).
-    const subscription = call.state.remoteParticipants$?.subscribe?.(() => {
-      if (shouldPauseRemote()) {
-        silenceRemote();
-      }
-    });
+    const intervalId = setInterval(tick, 50);
 
     return () => {
       clearInterval(intervalId);
-      clearRestoreTimers();
-      try {
-        subscription?.unsubscribe?.();
-      } catch {
-        // ignore
+      for (const timerId of restoreTimers) {
+        clearTimeout(timerId);
       }
-      // Only restore on teardown if hold already ended — never mid-hold.
-      if (wasPausedRef.current && !shouldPauseRemote()) {
+      if (wasPausedRef.current) {
         scheduleRestoreRetries();
         wasPausedRef.current = false;
       }
     };
-  }, [call, peerOnHold, systemOnHold]);
+  }, [call, peerOnHold, systemOnHold, remoteParticipants]);
 
   return null;
 }

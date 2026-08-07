@@ -77,8 +77,7 @@ export function AndroidCellularHoldMonitor({
     holdActiveRef.current = false;
     callDiag.holdEnded('local_system', details);
     callDiag.info('cellular_hold_monitor_off', details ?? {});
-    // Do not clear gsmInterruptPending here — recovery (clearSystemHoldAfterGsmRecovery)
-    // keeps the hold guard armed until Stream rejoin finishes (avoids first-resume hangup).
+    setGsmInterruptPending(false);
     markGsmTimeline('T6_gsm_ended');
     onSystemHoldChangeRef.current(false);
   };

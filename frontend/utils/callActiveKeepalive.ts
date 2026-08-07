@@ -139,11 +139,3 @@ export function teardownCallKeepalive(): void {
   setCallKeepaliveActive('', false);
   registrations = [];
 }
-
-/** Immediate heartbeat (e.g. AppState → active after GSM) — do not wait for next interval. */
-export function pulseCallKeepalive(): void {
-  if (Platform.OS !== 'android') return;
-  if (!callActive || !activeCallId) return;
-  restartIntervalIfNeeded();
-  emitKeepaliveTick();
-}

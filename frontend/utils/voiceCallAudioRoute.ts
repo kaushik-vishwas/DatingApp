@@ -17,15 +17,13 @@ function getIncomingCallAndroidModule(): IncomingCallAndroidModule | null {
   return nativeModule;
 }
 
-/** Check only — BT is requested in ensureVoiceCallPermissions before connect. */
-async function hasBluetoothConnectPermission(): Promise<boolean> {
+async function ensureBluetoothConnectPermission(): Promise<boolean> {
   if (Platform.OS !== 'android' || Platform.Version < 31) return true;
   const permission = PermissionsAndroid.PERMISSIONS.BLUETOOTH_CONNECT;
-  try {
-    return await PermissionsAndroid.check(permission);
-  } catch {
-    return false;
-  }
+  const alreadyGranted = await PermissionsAndroid.check(permission);
+  if (alreadyGranted) return true;
+  const result = await PermissionsAndroid.request(permission);
+  return result === PermissionsAndroid.RESULTS.GRANTED;
 }
 
 export async function applyVoiceCallOutputRoute(route: VoiceCallOutputRoute): Promise<void> {
@@ -45,7 +43,7 @@ export async function applyVoiceCallOutputRoute(route: VoiceCallOutputRoute): Pr
   if (!mod) return;
 
   if (route === 'bluetooth') {
-    const granted = await hasBluetoothConnectPermission();
+    const granted = await ensureBluetoothConnectPermission();
     if (!granted) {
       throw new Error('Bluetooth permission is required to route call audio');
     }

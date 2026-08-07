@@ -1,6 +1,7 @@
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Animated, AppState, Image, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Audio } from 'expo-av';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -17,13 +18,8 @@ const AUTO_ACCEPT_MS = 5_000;
 export default function IncomingCallScreen({ navigation, route }: Props): React.JSX.Element {
   const insets = useSafeAreaInsets();
   const { callId, fromType, fromId, peerName, peerImage } = route.params;
-  const {
-    acceptIncomingCall,
-    rejectIncomingCall,
-    stopIncomingRingtone,
-    startIncomingRingtone,
-    prefetchIncomingBootstrap,
-  } = useCallSignals();
+  const { acceptIncomingCall, rejectIncomingCall, stopIncomingRingtone, startIncomingRingtone } =
+    useCallSignals();
 
   const req: IncomingCallRequest = useMemo(
     () => ({ callId, fromType, fromId, peerName, peerImage: peerImage ?? null }),
@@ -53,18 +49,19 @@ export default function IncomingCallScreen({ navigation, route }: Props): React.
     })();
   }, [startIncomingRingtone]);
 
-  // Prefetch bootstrap + Stream warm + permissions while ringing so Accept → audio is short.
+  // Warm mic while ringing so Accept → Stream join does not wait on the permission prompt.
   useEffect(() => {
-    prefetchIncomingBootstrap(req);
     void (async () => {
       try {
-        const { ensureVoiceCallPermissions } = await import('../../utils/voiceCallPermissions');
-        await ensureVoiceCallPermissions();
+        const existing = await Audio.getPermissionsAsync();
+        if (existing.status !== 'granted') {
+          await Audio.requestPermissionsAsync();
+        }
       } catch {
-        // Join path still verifies microphone.
+        // Join path will request again if needed.
       }
     })();
-  }, [prefetchIncomingBootstrap, req]);
+  }, []);
 
   // "Ringtone-like" pulsing rings behind the avatar.
   const pulse = useRef(new Animated.Value(0)).current;
