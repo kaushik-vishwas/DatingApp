@@ -39,6 +39,10 @@ import {
 } from '../utils/incomingCallNotifications';
 import { registerIncomingCallBootstrapPrefetch } from '../utils/incomingCallBootstrapPrefetch';
 import { clearVoiceCallStreamWarmup, warmVoiceCallStreamClient } from '../utils/voiceCallStreamWarmup';
+import {
+  ensureVoiceCallPermissions,
+  hasVoiceCallMicrophonePermission,
+} from '../utils/voiceCallPermissions';
 
 let outgoingNavigateGeneration = 0;
 
@@ -301,9 +305,8 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         return inFlight;
       }
       const promise = callApi.bootstrap(req.fromId, req.callId).then(({ data }) => {
-        if (activeIncomingCallUiCallIdRef.current === req.callId) {
-          incomingBootstrapByCallIdRef.current.set(req.callId, data);
-        }
+        // Always cache — accept may clear the active UI id before bootstrap resolves.
+        incomingBootstrapByCallIdRef.current.set(req.callId, data);
         onIncomingBootstrapReady(data);
         return data;
       });
@@ -607,6 +610,12 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       }
       registerPeer(id, name, peerImage);
 
+      // All call permissions before ring UI / connect — avoids mid-call system dialogs.
+      const perms = await ensureVoiceCallPermissions();
+      if (!perms.microphone) {
+        throw new Error('Microphone permission is required for voice calls');
+      }
+
       const abort = new AbortController();
       outgoingInviteAbortRef.current = abort;
       const navGen = outgoingNavigateGeneration;
@@ -841,11 +850,22 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       void stopIncomingRingtonePlayback();
 
       const bootstrapPromise = ensureIncomingBootstrapPromise(req);
+
+      // Mic check + socket ready in parallel (mic usually already granted while ringing).
       let socket: Socket;
       try {
-        socket = socketRef.current?.connected
-          ? socketRef.current
-          : await ensureCallSocketReady(socketRef);
+        const [micOk, readySocket] = await Promise.all([
+          hasVoiceCallMicrophonePermission().then(async (ok) =>
+            ok ? true : (await ensureVoiceCallPermissions()).microphone
+          ),
+          socketRef.current?.connected
+            ? Promise.resolve(socketRef.current)
+            : ensureCallSocketReady(socketRef),
+        ]);
+        if (!micOk) {
+          throw new Error('Microphone permission is required for voice calls');
+        }
+        socket = readySocket;
       } catch (e) {
         throw e;
       }
@@ -885,11 +905,21 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       void stopIncomingRingtonePlayback();
 
       const bootstrapPromise = ensureIncomingBootstrapPromise(req);
+
       let socket: Socket;
       try {
-        socket = socketRef.current?.connected
-          ? socketRef.current
-          : await ensureCallSocketReady(socketRef);
+        const [micOk, readySocket] = await Promise.all([
+          hasVoiceCallMicrophonePermission().then(async (ok) =>
+            ok ? true : (await ensureVoiceCallPermissions()).microphone
+          ),
+          socketRef.current?.connected
+            ? Promise.resolve(socketRef.current)
+            : ensureCallSocketReady(socketRef),
+        ]);
+        if (!micOk) {
+          throw new Error('Microphone permission is required for voice calls');
+        }
+        socket = readySocket;
       } catch (e) {
         throw e;
       }

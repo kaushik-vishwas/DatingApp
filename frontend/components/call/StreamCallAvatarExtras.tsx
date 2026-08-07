@@ -7,7 +7,6 @@ import { AvatarSoundWaveRings } from './AvatarVoiceWaves';
 import {
   ANDROID_TALK_GSM_SUSPECT_DEBOUNCE_MS,
   callDiag,
-  getCallDiagnosticsSnapshot,
   HOLD_REMOTE_LEFT_DEBOUNCE_MS,
   isCallHoldGuardActive,
   isTalkActiveForGsmGuard,
@@ -101,14 +100,9 @@ export function StreamMicControlBridge({
   forceMicOffRef.current = forceMicOff;
 
   useEffect(() => {
-    const enforceOff = (): void => {
-      if (!forceMicOffRef.current) return;
-      void microphone.disable().catch(() => {});
-    };
-    enforceOff();
     if (!forceMicOff) return;
-    const intervalId = setInterval(enforceOff, 100);
-    return () => clearInterval(intervalId);
+    // One-shot disable — looping while cellular owns AudioRecord can crash OEMs.
+    void microphone.disable().catch(() => {});
   }, [forceMicOff, microphone]);
 
   useEffect(() => {
@@ -250,13 +244,16 @@ export function StreamRemotePeerLeftBridge({
 
   const armGsmSuspectGuard = (reason: 'local_left' | 'remote_empty'): void => {
     if (gsmSuspectArmedRef.current) return;
-    if (!isTalkActiveForGsmGuard()) {
-      callDiag.info('stream_gsm_suspect_skipped', { reason, talkActive: isTalkActiveForGsmGuard() });
+    const talkActive = isTalkActiveForGsmGuard();
+    // Android: Stream often drops on first cellular answer before talkActive/hold catch up.
+    // Still arm the guard so the short debounce cannot hang up the other side.
+    if (!talkActive && Platform.OS !== 'android') {
+      callDiag.info('stream_gsm_suspect_skipped', { reason, talkActive });
       return;
     }
     gsmSuspectArmedRef.current = true;
     setGsmInterruptPending(true, `stream_gsm_suspect_${reason}`);
-    callDiag.info('stream_gsm_suspect', { reason });
+    callDiag.info('stream_gsm_suspect', { reason, talkActive });
     if (reason === 'local_left') {
       onLocalGsmSuspectRef.current?.();
       return;
@@ -268,7 +265,8 @@ export function StreamRemotePeerLeftBridge({
     if (isCallHoldGuardActive()) {
       return HOLD_REMOTE_LEFT_DEBOUNCE_MS;
     }
-    if (Platform.OS === 'android' && getCallDiagnosticsSnapshot().talkActive) {
+    // Use live reader — diagnostics snapshot can lag one tick and pick the short debounce.
+    if (Platform.OS === 'android' && isTalkActiveForGsmGuard()) {
       return ANDROID_TALK_GSM_SUSPECT_DEBOUNCE_MS;
     }
     return NORMAL_REMOTE_LEFT_DEBOUNCE_MS;
@@ -455,7 +453,7 @@ export function StreamParticipantMutedIndicator({
   );
 }
 
-/** Force mic off during GSM or while peer is on hold. */
+/** Force mic off once during GSM hold — do not spam disable while cellular owns the mic. */
 export function StreamLocalHoldMicBridge({
   systemOnHold = false,
   peerOnHold = false,
@@ -468,29 +466,16 @@ export function StreamLocalHoldMicBridge({
   const { useMicrophoneState } = useCallStateHooks();
   const { microphone } = useMicrophoneState();
   const pauseMic = systemOnHold;
-  const pauseMicRef = useRef(pauseMic);
-  pauseMicRef.current = pauseMic;
 
   useEffect(() => {
-    const applyMic = (): void => {
-      if (pauseMicRef.current) {
-        void microphone.disable().catch(() => {});
-        return;
-      }
-      if (!userChosenMuteRef.current) {
-        void microphone.enable().catch(() => {});
-      }
-    };
-
-    applyMic();
-    if (!pauseMic) return;
-    const intervalId = setInterval(applyMic, 100);
-    return () => {
-      clearInterval(intervalId);
-      if (!pauseMicRef.current && !userChosenMuteRef.current) {
-        void microphone.enable().catch(() => {});
-      }
-    };
+    if (pauseMic) {
+      // Single disable on enter — looping disable during OFFHOOK can crash WebRTC/AudioRecord.
+      void microphone.disable().catch(() => {});
+      return;
+    }
+    if (!userChosenMuteRef.current) {
+      void microphone.enable().catch(() => {});
+    }
   }, [pauseMic, microphone, userChosenMuteRef]);
 
   return null;
@@ -566,19 +551,21 @@ export function StreamHoldAudioBridge({
     };
 
     tick();
-    const intervalId = setInterval(tick, 50);
+    // Soft volume mute only — slower tick avoids thrashing WebRTC during cellular audio.
+    const intervalId = setInterval(tick, 200);
 
     return () => {
       clearInterval(intervalId);
       for (const timerId of restoreTimers) {
         clearTimeout(timerId);
       }
-      if (wasPausedRef.current) {
+      // Only restore if hold actually ended — not when remoteParticipants churn mid-hold.
+      if (wasPausedRef.current && !shouldPauseRemote()) {
         scheduleRestoreRetries();
         wasPausedRef.current = false;
       }
     };
-  }, [call, peerOnHold, systemOnHold, remoteParticipants]);
+  }, [call, peerOnHold, systemOnHold]);
 
   return null;
 }

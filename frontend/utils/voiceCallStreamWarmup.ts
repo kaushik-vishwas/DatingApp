@@ -1,7 +1,7 @@
 import Constants from 'expo-constants';
-import { Audio } from 'expo-av';
 import type { VoiceBootstrapResponse } from '../types/api';
 import { profileImageUrlForStreamOrNetwork } from './avatarSource';
+import { hasVoiceCallMicrophonePermission } from './voiceCallPermissions';
 
 type StreamSdkModule = {
   StreamVideoClient: {
@@ -41,8 +41,8 @@ export async function warmVoiceCallStreamClient(
   if (!streamSdk) return;
 
   try {
-    const perm = await Audio.getPermissionsAsync();
-    if (perm.status !== 'granted') return;
+    // Never prompt here — permissions are asked while ringing / before dial.
+    if (!(await hasVoiceCallMicrophonePermission())) return;
 
     streamSdk.StreamVideoClient.getOrCreateInstance({
       apiKey: boot.apiKey,
