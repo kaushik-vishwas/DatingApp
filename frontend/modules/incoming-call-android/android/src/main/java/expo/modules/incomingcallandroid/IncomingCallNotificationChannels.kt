@@ -20,10 +20,16 @@ object IncomingCallNotificationChannels {
 
     val appContext = context.applicationContext
     val nm = appContext.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-    val soundUri = resolveRingtoneUri(appContext) ?: return
+    val soundUri = resolveRingtoneUri(appContext)
 
     val existing = nm.getNotificationChannel(CHANNEL_ID)
-    if (existing != null && existing.sound == soundUri) return
+    if (
+      existing != null &&
+        existing.importance >= NotificationManager.IMPORTANCE_HIGH &&
+        (soundUri == null || existing.sound == soundUri)
+    ) {
+      return
+    }
 
     if (existing != null) {
       nm.deleteNotificationChannel(CHANNEL_ID)
@@ -33,18 +39,21 @@ object IncomingCallNotificationChannels {
       NotificationChannel(CHANNEL_ID, "Incoming calls", NotificationManager.IMPORTANCE_MAX).apply {
         description = "Incoming voice call alerts"
         enableVibration(true)
-        vibrationPattern = longArrayOf(0, 280, 200, 280)
+        vibrationPattern = longArrayOf(0, 280, 200, 280, 200, 280)
         enableLights(true)
         lightColor = android.graphics.Color.parseColor("#7c3aed")
         setBypassDnd(true)
         lockscreenVisibility = android.app.Notification.VISIBILITY_PUBLIC
-        val attrs =
-          AudioAttributes.Builder()
-            .setUsage(AudioAttributes.USAGE_NOTIFICATION_RINGTONE)
-            .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-            .setFlags(AudioAttributes.FLAG_AUDIBILITY_ENFORCED)
-            .build()
-        setSound(soundUri, attrs)
+        setShowBadge(true)
+        if (soundUri != null) {
+          val attrs =
+            AudioAttributes.Builder()
+              .setUsage(AudioAttributes.USAGE_NOTIFICATION_RINGTONE)
+              .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+              .setFlags(AudioAttributes.FLAG_AUDIBILITY_ENFORCED)
+              .build()
+          setSound(soundUri, attrs)
+        }
       }
     nm.createNotificationChannel(channel)
   }

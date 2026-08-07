@@ -44,6 +44,7 @@ import EarningsCardBg from '../assets/earnBg.png';
 import InstructionsCardBg from '../assets/instructionBg.png';
 import NoticeBg from '../assets/noticeBg.png'
 import { useReceiverTabBarBottomInset } from '../utils/receiverTabBarInset';
+import { ensureReceiverBatteryUnrestrictedOnce } from '../utils/receiverBatteryOptimization';
 import { CHAT_RECEIVER_EARN_LABEL } from '../constants/chatPricing';
 
 const INSTRUCTIONS_GRADIENT_START = '#A855F7';
@@ -294,6 +295,7 @@ export default function ReceiverHomeDashboard(): React.JSX.Element {
     useCallback(() => {
       if (!receiverId || !available) return;
       void setQueueMode(true).catch(() => { });
+      void ensureReceiverBatteryUnrestrictedOnce();
     }, [receiverId, available, setQueueMode])
   );
 
@@ -306,6 +308,9 @@ export default function ReceiverHomeDashboard(): React.JSX.Element {
         await setQueueMode(next);
       } catch {
         // Queue sync is best-effort if the call socket is still connecting.
+      }
+      if (next) {
+        void ensureReceiverBatteryUnrestrictedOnce();
       }
       void refreshUser();
     } catch (e) {

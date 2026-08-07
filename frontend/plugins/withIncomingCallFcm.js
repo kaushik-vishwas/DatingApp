@@ -102,6 +102,31 @@ function withIncomingCallFcm(config) {
       },
     });
 
+    if (!app.receiver) {
+      app.receiver = [];
+    }
+    app.receiver = app.receiver.filter((entry) => {
+      const name = entry.$?.['android:name'] ?? '';
+      return !name.includes('IncomingCallDeclineReceiver');
+    });
+    app.receiver.push({
+      $: {
+        'android:name': `${APP_PACKAGE}.fcm.IncomingCallDeclineReceiver`,
+        'android:exported': 'false',
+      },
+      'intent-filter': [
+        {
+          action: [
+            {
+              $: {
+                'android:name': 'com.selecto.app.fcm.ACTION_DECLINE_INCOMING_CALL',
+              },
+            },
+          ],
+        },
+      ],
+    });
+
     return config;
   });
 
@@ -126,6 +151,7 @@ function withIncomingCallFcm(config) {
         'NesthamFirebaseMessagingService.kt',
         'IncomingCallFcmPresenter.kt',
         'IncomingCallNotificationChannels.kt',
+        'IncomingCallDeclineReceiver.kt',
       ]) {
         fs.copyFileSync(path.join(sourceDir, file), path.join(targetDir, file));
       }

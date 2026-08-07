@@ -1,5 +1,10 @@
 package expo.modules.incomingcallandroid
 
+import android.content.Intent
+import android.net.Uri
+import android.os.Build
+import android.os.PowerManager
+import android.provider.Settings
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
 
@@ -23,6 +28,34 @@ class IncomingCallAndroidModule : Module() {
         ?: return@AsyncFunction mapOf("ensured" to false)
       IncomingCallNotificationChannels.ensureIncomingCallChannel(context)
       mapOf("ensured" to true)
+    }
+
+    /** Prompt once-friendly: open system dialog to ignore battery optimizations. */
+    AsyncFunction("requestIgnoreBatteryOptimizationsAsync") {
+      val context = appContext.reactContext
+        ?: return@AsyncFunction mapOf("ok" to false, "reason" to "no_context")
+      val pm = context.getSystemService(PowerManager::class.java)
+      val pkg = context.packageName
+      if (pm != null && pm.isIgnoringBatteryOptimizations(pkg)) {
+        return@AsyncFunction mapOf("ok" to true, "alreadyIgnoring" to true)
+      }
+      return@AsyncFunction try {
+        val intent =
+          Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+            data = Uri.parse("package:$pkg")
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+          }
+        context.startActivity(intent)
+        mapOf("ok" to true, "alreadyIgnoring" to false, "sdkInt" to Build.VERSION.SDK_INT)
+      } catch (e: Exception) {
+        mapOf("ok" to false, "reason" to (e.message ?: "start_failed"))
+      }
+    }
+
+    Function("isIgnoringBatteryOptimizations") {
+      val context = appContext.reactContext ?: return@Function false
+      val pm = context.getSystemService(PowerManager::class.java) ?: return@Function false
+      pm.isIgnoringBatteryOptimizations(context.packageName)
     }
 
     AsyncFunction("applyFullScreenIntentAsync") { identifier: String, debugEnabled: Boolean ->

@@ -758,7 +758,7 @@ function attachChatSocket(httpServer) {
                         fromType: invite.targetType,
                         fromId: invite.targetId,
                     });
-                }, 30000);
+                }, 45000);
                 activeCallInvites.set(callId, {
                     callId,
                     inviterId: myId,

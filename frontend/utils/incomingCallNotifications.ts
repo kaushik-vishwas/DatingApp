@@ -785,14 +785,15 @@ async function playIncomingRingtoneForBackgroundAlert(): Promise<boolean> {
 }
 
 /**
- * Receiver minimized/background: looping in-app ring + tray notification.
- * When in-app ring is active the tray is visual-only (no channel ding).
+ * Receiver minimized/background: tray must always use the ringing channel.
+ * OEM freezes often kill in-app audio; visual-only trays are easy to miss.
+ * In-app ringtone is best-effort only and must not silence the system tray.
  */
 export async function alertReceiverIncomingCallInBackground(
   incoming: IncomingCallNotificationPayload
 ): Promise<void> {
-  const inAppRinging = await playIncomingRingtoneForBackgroundAlert();
-  await showIncomingCallNotification(incoming, { visualOnly: inAppRinging });
+  void playIncomingRingtoneForBackgroundAlert();
+  await showIncomingCallNotification(incoming, { visualOnly: false });
 }
 
 /** Shows a high-priority local notification (Android background / minimized app). */

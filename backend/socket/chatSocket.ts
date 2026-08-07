@@ -857,7 +857,7 @@ export function attachChatSocket(httpServer: HTTPServer): Server {
             fromType: invite.targetType,
             fromId: invite.targetId,
           });
-        }, 30000);
+        }, 45_000);
 
         activeCallInvites.set(callId, {
           callId,

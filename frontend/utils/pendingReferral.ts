@@ -1,6 +1,4 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import * as Application from 'expo-application';
-import * as Clipboard from 'expo-clipboard';
 import { Linking, Platform } from 'react-native';
 
 const PENDING_KEY = '@selecto/pending_referral_code_v1';
@@ -95,7 +93,7 @@ export function parseReferralCodeFromInstallReferrer(referrer: string | null | u
 
 /**
  * Silently capture invite code from deep link / Play install referrer / clipboard.
- * Does not change login UI.
+ * Native modules are loaded lazily so a missing module never crashes app start.
  */
 export async function capturePendingReferralSilently(): Promise<void> {
   try {
@@ -113,10 +111,16 @@ export async function capturePendingReferralSilently(): Promise<void> {
       // ignore
     }
 
-    const alreadyTried = (await AsyncStorage.getItem(CAPTURE_DONE_KEY)) === '1';
+    let alreadyTried = false;
+    try {
+      alreadyTried = (await AsyncStorage.getItem(CAPTURE_DONE_KEY)) === '1';
+    } catch {
+      alreadyTried = false;
+    }
 
     if (Platform.OS === 'android') {
       try {
+        const Application = await import('expo-application');
         const referrer = await Application.getInstallReferrerAsync();
         const fromReferrer = parseReferralCodeFromInstallReferrer(referrer);
         if (fromReferrer) {
@@ -125,12 +129,13 @@ export async function capturePendingReferralSilently(): Promise<void> {
           return;
         }
       } catch {
-        // Sideloaded APK / no Play Store — expected
+        // Sideloaded APK / emulator / no Play Store — expected
       }
     }
 
     if (!alreadyTried) {
       try {
+        const Clipboard = await import('expo-clipboard');
         const clip = await Clipboard.getStringAsync();
         const fromClip = normalizeReferralCode(clip);
         if (fromClip) {
@@ -151,9 +156,19 @@ export async function capturePendingReferralSilently(): Promise<void> {
 }
 
 export function subscribeReferralDeepLinks(): () => void {
-  const sub = Linking.addEventListener('url', (event) => {
-    const code = parseReferralCodeFromUrl(event.url);
-    if (code) void setPendingReferralCode(code);
-  });
-  return () => sub.remove();
+  try {
+    const sub = Linking.addEventListener('url', (event) => {
+      const code = parseReferralCodeFromUrl(event.url);
+      if (code) void setPendingReferralCode(code);
+    });
+    return () => {
+      try {
+        sub.remove();
+      } catch {
+        // ignore
+      }
+    };
+  } catch {
+    return () => {};
+  }
 }

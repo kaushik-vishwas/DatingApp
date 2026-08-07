@@ -350,6 +350,8 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
   const [error, setError] = useState<string | null>(null);
   const [elapsedSec, setElapsedSec] = useState(0);
   const [talkActive, setTalkActive] = useState(false);
+  /** True when Stream reports JOINED + remote participant (media path actually up). */
+  const [streamBothConnected, setStreamBothConnected] = useState(false);
   const [systemCallHold, setSystemCallHold] = useState(false);
   const [peerCallHold, setPeerCallHold] = useState(false);
   const [peerCallMuted, setPeerCallMuted] = useState(false);
@@ -1092,6 +1094,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
     endingStartedAtRef.current = Date.now();
     talkActiveRef.current = false;
     setTalkActive(false);
+    setStreamBothConnected(false);
     void leaveMediaRef.current();
     void ensureSessionEndedRef.current();
     if (receiverAvailabilitySessionRef.current && userAvailableRef.current) {
@@ -1181,6 +1184,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
     if (role === 'caller') {
       talkActiveRef.current = false;
       setTalkActive(false);
+      setStreamBothConnected(false);
       void finishCallerCallEndRef.current();
       return;
     }
@@ -1215,6 +1219,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
     setClient(null);
     setCall(null);
     setTalkActive(false);
+    setStreamBothConnected(false);
     talkActiveRef.current = false;
     talkAnchorMsRef.current = null;
     remainingTalkBudgetSecRef.current = null;
@@ -1303,6 +1308,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
     setCall(null);
     setReady(false);
     setTalkActive(false);
+    setStreamBothConnected(false);
   };
 
   const ensureSessionEndedRef = useRef(ensureSessionEnded);
@@ -1639,13 +1645,9 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
         > & { setDisconnectionTimeout?: (timeoutSeconds: number) => void };
         activeCallRef.current = nextCall;
 
-        await Promise.all([
-          nextCall.join({ create: true }),
-          getVoiceSessionStartPromise(boot.callId, boot.peerAccountId).then((data) => {
-            applyTalkTimingFromServer(data);
-            applySessionBillingFromServer(data);
-          }),
-        ]);
+        // Join Stream first, then register session/start. Parallel session/start made the
+        // caller show "Call Active" (talkStartedAt) while the receiver was still joining.
+        await nextCall.join({ create: true });
         if (cancelled || attemptId !== streamJoinAttemptRef.current) {
           return;
         }
@@ -1663,6 +1665,17 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
         setCall(nextCall);
         setReady(true);
         setError(null);
+
+        try {
+          const data = await getVoiceSessionStartPromise(boot.callId, boot.peerAccountId);
+          if (cancelled || attemptId !== streamJoinAttemptRef.current) {
+            return;
+          }
+          applyTalkTimingFromServer(data);
+          applySessionBillingFromServer(data);
+        } catch {
+          // Stream is live; syncTalkTimingUntilBothJoined / talk_started will recover billing.
+        }
         void syncTalkTimingUntilBothJoined();
       } catch (e: unknown) {
         const msg = e instanceof Error ? e.message : 'Failed to join call';
@@ -2152,6 +2165,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
     endingStartedAtRef.current = Date.now();
     talkActiveRef.current = false;
     setTalkActive(false);
+    setStreamBothConnected(false);
     deferredEndDuringGsmRef.current = null;
     clearCallHoldStateForTeardown();
 
@@ -2349,7 +2363,9 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
         ? `${peerDisplayName} is on hold`
       : outgoingCallerPhase === 'ringing'
       ? 'Calling…'
-      : 'Connecting';
+      : talkActive && streamBothConnected
+        ? 'Call Active'
+        : 'Connecting';
   const shellHangupLabel =
     receiverAvailabilitySession && receiverSessionPhase === 'incoming'
       ? 'Decline'
@@ -2756,6 +2772,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
           {streamAvatarExtras ? (
             <streamAvatarExtras.StreamTalkTimingBridge
               onBothConnected={() => {
+                setStreamBothConnected(true);
                 void kickTalkTimerSyncRef.current();
               }}
             />
@@ -2795,7 +2812,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
                   ? 'Your call is on hold'
                   : peerCallHold
                     ? `${peerDisplayName} is on hold`
-                    : talkActive
+                    : talkActive && streamBothConnected
                       ? 'Call Active'
                       : 'Connecting…'}
               </Text>

@@ -94,8 +94,8 @@ module.exports = {
         {
           android: {
             minSdkVersion: 24,
-            // Real devices only (e.g. Samsung M31). Skips x86 emulator ABIs — faster builds, ~90MB APK.
-            buildArchs: ['arm64-v8a'],
+            // arm64 = real devices; x86_64 = Android Studio emulators (arm64-only APKs crash on x86 AVDs).
+            buildArchs: ['arm64-v8a', 'x86_64'],
           },
         },
       ],

@@ -19,8 +19,16 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    void capturePendingReferralSilently();
-    return subscribeReferralDeepLinks();
+    try {
+      void capturePendingReferralSilently();
+    } catch {
+      // never block startup
+    }
+    try {
+      return subscribeReferralDeepLinks();
+    } catch {
+      return undefined;
+    }
   }, []);
 
   useEffect(() => {

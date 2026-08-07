@@ -31,6 +31,13 @@ export type SamsungCallCompatProfile = {
 
 export type IncomingCallAndroidModule = {
   ensureIncomingCallChannelAsync(): Promise<{ ensured?: boolean }>;
+  requestIgnoreBatteryOptimizationsAsync(): Promise<{
+    ok?: boolean;
+    alreadyIgnoring?: boolean;
+    reason?: string;
+    sdkInt?: number;
+  }>;
+  isIgnoringBatteryOptimizations(): boolean;
   applyFullScreenIntentAsync(
     identifier: string,
     debugEnabled: boolean
@@ -66,11 +73,12 @@ export function getIncomingCallAndroidNativeModule(): IncomingCallAndroidModule 
 function unavailableMethod(name: string): (...args: unknown[]) => unknown {
   return (..._args: unknown[]) => {
     if (name === 'isBluetoothVoiceOutputAvailable') return false;
+    if (name === 'isIgnoringBatteryOptimizations') return false;
     if (name.startsWith('start')) return false;
     if (name === 'stopCellularCallHoldWatch' || name === 'releaseVoiceCallAudioRoute') return undefined;
     if (name === 'releaseVoiceCallAudioRoute') return undefined;
     if (name.endsWith('Async')) {
-      return Promise.resolve({ applied: false, unavailable: true });
+      return Promise.resolve({ applied: false, unavailable: true, ok: false });
     }
     return undefined;
   };

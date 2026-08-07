@@ -11,7 +11,8 @@ import { resolveProfileImageSource } from '../../utils/avatarSource';
 type Props = NativeStackScreenProps<ReceiverStackParamList, 'IncomingCall'>;
 
 const INCOMING_CALL_UI_TIMEOUT_MS = 35_000;
-const AUTO_ACCEPT_MS = 5_000;
+/** Short delay so ringtone/UI mount; long delays made callers look connected before receiver joined. */
+const AUTO_ACCEPT_MS = 400;
 
 export default function IncomingCallScreen({ navigation, route }: Props): React.JSX.Element {
   const insets = useSafeAreaInsets();

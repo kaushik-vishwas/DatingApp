@@ -1254,6 +1254,8 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         return;
       }
       activeIncomingCallUiCallIdRef.current = req.callId;
+      pendingIncomingCallRequestRef.current = req;
+      void ensureIncomingBootstrapPromise(req);
       void ensureIncomingRingtonePlaying();
       openIncomingCallRef.current(req);
     });
@@ -1261,7 +1263,7 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       setIncomingCallNavigationGuard(null);
       unbind();
     };
-  }, [isSignedIn, user?.role]);
+  }, [ensureIncomingBootstrapPromise, isSignedIn, user?.role]);
 
   const setQueueMode = useCallback(async (active: boolean): Promise<void> => {
     queueModeRef.current = active;
