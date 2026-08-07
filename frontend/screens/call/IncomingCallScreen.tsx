@@ -1,6 +1,7 @@
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Animated, AppState, Image, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Audio } from 'expo-av';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -11,8 +12,8 @@ import { resolveProfileImageSource } from '../../utils/avatarSource';
 type Props = NativeStackScreenProps<ReceiverStackParamList, 'IncomingCall'>;
 
 const INCOMING_CALL_UI_TIMEOUT_MS = 35_000;
-/** Short delay so ringtone/UI mount; long delays made callers look connected before receiver joined. */
-const AUTO_ACCEPT_MS = 400;
+/** Receiver can tap Accept anytime; auto-accept after 5s if still ringing and app is active. */
+const AUTO_ACCEPT_MS = 5_000;
 
 export default function IncomingCallScreen({ navigation, route }: Props): React.JSX.Element {
   const insets = useSafeAreaInsets();
@@ -47,6 +48,20 @@ export default function IncomingCallScreen({ navigation, route }: Props): React.
       }
     })();
   }, [startIncomingRingtone]);
+
+  // Warm mic while ringing so Accept → Stream join does not wait on the permission prompt.
+  useEffect(() => {
+    void (async () => {
+      try {
+        const existing = await Audio.getPermissionsAsync();
+        if (existing.status !== 'granted') {
+          await Audio.requestPermissionsAsync();
+        }
+      } catch {
+        // Join path will request again if needed.
+      }
+    })();
+  }, []);
 
   // "Ringtone-like" pulsing rings behind the avatar.
   const pulse = useRef(new Animated.Value(0)).current;

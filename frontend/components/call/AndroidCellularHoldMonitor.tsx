@@ -16,21 +16,34 @@ const AUDIO_MODE_IN_CALL = 2;
 const AUDIO_MODE_IN_COMMUNICATION = 3;
 
 /** Hold only after cellular call is answered — not on ring or audio-mode hints alone. */
-function isAnsweredCellularHold(active: boolean, source?: string): boolean {
+function isAnsweredCellularHold(
+  active: boolean,
+  source?: string,
+  audioMode?: number | null
+): boolean {
   if (!active) return false;
   const s = (source ?? '').toLowerCase();
   if (s === 'preemptive_ring' || s === 'telephony_ringing' || s === 'poll' || s === 'start') {
     return false;
   }
-  return (
+  // Definite answered signals from TelephonyManager / PHONE_STATE.
+  if (
     s === 'telephony_offhook' ||
     s === 'telephony_state' ||
-    s === 'audio_mode' ||
-    s === 'audio_focus_loss' ||
     s === 'phone_state_broadcast' ||
     s === 'telephony_callback' ||
     s === 'telephony_legacy'
-  );
+  ) {
+    return true;
+  }
+  // No phone-state permission: MODE_IN_CALL means answered; MODE_RINGTONE is ring-only.
+  if (
+    (s === 'audio_mode' || s === 'audio_focus_loss') &&
+    audioMode === AUDIO_MODE_IN_CALL
+  ) {
+    return true;
+  }
+  return false;
 }
 
 /**
@@ -102,7 +115,7 @@ export function AndroidCellularHoldMonitor({
       const details = { audioMode, modeLabel, source, samsung, path: 'native_cellular' };
 
       if (active) {
-        if (!isAnsweredCellularHold(true, source)) {
+        if (!isAnsweredCellularHold(true, source, audioMode)) {
           callDiag.info('cellular_hold_ignored_pre_answer', details);
           return;
         }

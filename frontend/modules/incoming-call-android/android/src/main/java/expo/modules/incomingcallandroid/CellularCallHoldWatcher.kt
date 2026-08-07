@@ -165,13 +165,17 @@ object CellularCallHoldWatcher {
 
     TelephonyDiagnosticsWatcher.recordAudioModeFromWatcher(mode, source)
 
-    // Hold only after the cellular call is answered (OFFHOOK / MODE_IN_CALL), not while ringing.
-    val active = cellularMode || telephonyOffhook || (audioFocusLost && telephonyOffhook)
+    // Hold only after the cellular call is answered (OFFHOOK). Never while RINGING.
+    // Without READ_PHONE_STATE, MODE_IN_CALL (not ringtone) is the best-effort answered signal.
+    val active =
+      telephonyOffhook ||
+        (cellularMode && !telephonyRinging) ||
+        (audioFocusLost && telephonyOffhook)
     val resolvedSource =
       when {
-        cellularMode -> "audio_mode"
         telephonyOffhook -> "telephony_offhook"
-        audioFocusLost -> "audio_focus_loss"
+        cellularMode && !telephonyRinging -> "audio_mode"
+        audioFocusLost && telephonyOffhook -> "audio_focus_loss"
         telephonyRinging -> "telephony_ringing"
         else -> source
       }

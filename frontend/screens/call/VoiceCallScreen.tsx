@@ -378,6 +378,8 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
   const autoEndByBalanceRef = useRef(false);
   const activeCallRef = useRef<{
     leave: () => Promise<void>;
+    join?: (opts?: { create?: boolean }) => Promise<void>;
+    state?: { callingState?: string | number };
   } | null>(null);
   const streamMicControlRef = useRef<StreamMicControl | null>(null);
   const activeClientRef = useRef<{
@@ -1624,7 +1626,12 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
         if (!micGranted) {
           throw new Error('Microphone permission is required for voice calls');
         }
-        await applyVoiceCallAudioMode(true);
+        // Audio mode + Stream join in parallel — shaves the post-accept gap on both sides.
+        const audioModeReady = applyVoiceCallAudioMode(true).catch((e) => {
+          callDiag.error('voice_audio_mode_failed', {
+            message: e instanceof Error ? e.message : String(e),
+          });
+        });
 
         const nextClient = streamSdk.StreamVideoClient.getOrCreateInstance({
           apiKey: boot.apiKey,
@@ -1645,9 +1652,8 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
         > & { setDisconnectionTimeout?: (timeoutSeconds: number) => void };
         activeCallRef.current = nextCall;
 
-        // Join Stream first, then register session/start. Parallel session/start made the
-        // caller show "Call Active" (talkStartedAt) while the receiver was still joining.
-        await nextCall.join({ create: true });
+        // Join Stream first for media; session/start runs after without blocking setReady.
+        await Promise.all([audioModeReady, nextCall.join({ create: true })]);
         if (cancelled || attemptId !== streamJoinAttemptRef.current) {
           return;
         }
@@ -1666,17 +1672,23 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
         setReady(true);
         setError(null);
 
-        try {
-          const data = await getVoiceSessionStartPromise(boot.callId, boot.peerAccountId);
-          if (cancelled || attemptId !== streamJoinAttemptRef.current) {
-            return;
-          }
-          applyTalkTimingFromServer(data);
-          applySessionBillingFromServer(data);
-        } catch {
-          // Stream is live; syncTalkTimingUntilBothJoined / talk_started will recover billing.
-        }
-        void syncTalkTimingUntilBothJoined();
+        // Do not await session/start — Stream is already live; billing/timing catch up async.
+        void getVoiceSessionStartPromise(boot.callId, boot.peerAccountId)
+          .then((data) => {
+            if (cancelled || attemptId !== streamJoinAttemptRef.current || endingRef.current) {
+              return;
+            }
+            applyTalkTimingFromServer(data);
+            applySessionBillingFromServer(data);
+          })
+          .catch(() => {
+            // syncTalkTimingUntilBothJoined / talk_started will recover.
+          })
+          .finally(() => {
+            if (!cancelled && attemptId === streamJoinAttemptRef.current) {
+              void syncTalkTimingUntilBothJoined();
+            }
+          });
       } catch (e: unknown) {
         const msg = e instanceof Error ? e.message : 'Failed to join call';
         if (cancelled || attemptId !== streamJoinAttemptRef.current) {
@@ -2000,7 +2012,9 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
   }, [remainingTalkSec, ready, showRemainingTalkCountdown, user?.role]);
 
   const recoverAfterGsmHold = useCallback(async (): Promise<void> => {
-    setGsmInterruptPending(false, 'gsm_recovery');
+    // Keep gsmInterruptPending / system hold until Stream is back so peer does not
+    // treat a transient LEFT/empty remote as hangup (stream_remote_empty).
+    setGsmInterruptPending(true, 'gsm_recovery_pending');
     const pendingEnd = deferredEndDuringGsmRef.current;
     deferredEndDuringGsmRef.current = null;
     callDiag.gsmRecoveryStart({
@@ -2009,6 +2023,37 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
       pendingEndSource: pendingEnd?.source ?? null,
     });
     let recoveryOk = true;
+
+    const streamCall = activeCallRef.current;
+    const callingStateRaw = streamCall?.state?.callingState;
+    const callingState = String(callingStateRaw ?? '').toLowerCase();
+    const alreadyJoined = callingState === 'joined' || callingState.endsWith('.joined');
+    if (streamCall?.join && !alreadyJoined) {
+      callDiag.info('gsm_rejoin_start', { callingState: callingState || String(callingStateRaw) });
+      try {
+        await Promise.race([
+          streamCall.join({ create: true }),
+          new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error('gsm_rejoin_timeout')), 12_000)
+          ),
+        ]);
+        callDiag.success('gsm_rejoin_ok', {
+          callingState: String(streamCall.state?.callingState ?? ''),
+        });
+      } catch (e) {
+        recoveryOk = false;
+        callDiag.error('gsm_rejoin_failed', {
+          message: e instanceof Error ? e.message : String(e),
+          callingState: callingState || String(callingStateRaw),
+        });
+      }
+    } else {
+      callDiag.info('gsm_rejoin_skipped', {
+        reason: alreadyJoined ? 'already_joined' : 'no_join_api',
+        callingState: callingState || String(callingStateRaw),
+      });
+    }
+
     try {
       await applyVoiceCallAudioMode(speakerOnRef.current, bluetoothOnRef.current);
       callDiag.success('gsm_audio_mode_restored');
@@ -2018,17 +2063,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
         message: e instanceof Error ? e.message : String(e),
       });
     }
-    if (!userChosenMuteRef.current && !peerCallHoldRef.current && !systemCallHoldRef.current) {
-      try {
-        await streamMicControlRef.current?.setEnabled(true);
-        callDiag.success('gsm_mic_restored');
-      } catch (e) {
-        recoveryOk = false;
-        callDiag.error('gsm_mic_restore_failed', {
-          message: e instanceof Error ? e.message : String(e),
-        });
-      }
-    }
+
     const callId = callIdRef.current.trim();
     if (!callId) {
       callDiag.gsmRecoveryEnd(recoveryOk, { reason: 'no_call_id' });
@@ -2054,6 +2089,23 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
       });
     }
   }, []);
+
+  const clearSystemHoldAfterGsmRecovery = useCallback(async (): Promise<void> => {
+    await recoverAfterGsmHold();
+    if (endingRef.current) return;
+    // Clear hold + tell peer only after rejoin/audio recovery so they keep the hold guard.
+    applySystemCallHoldRef.current(false);
+    if (!userChosenMuteRef.current && !peerCallHoldRef.current && !systemCallHoldRef.current) {
+      try {
+        await streamMicControlRef.current?.setEnabled(true);
+        callDiag.success('gsm_mic_restored');
+      } catch (e) {
+        callDiag.error('gsm_mic_restore_failed', {
+          message: e instanceof Error ? e.message : String(e),
+        });
+      }
+    }
+  }, [recoverAfterGsmHold]);
 
   const recoverAfterPeerHoldClear = useCallback(async (): Promise<void> => {
     callDiag.info('peer_hold_recovery_start', { role: userRoleRef.current });
@@ -2312,10 +2364,10 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
         }
         return;
       }
-      applySystemCallHold(false);
-      void recoverAfterGsmHold();
+      // Do not clear hold / notify peer until Stream rejoin + audio recovery finish.
+      void clearSystemHoldAfterGsmRecovery();
     },
-    [applySystemCallHold, recoverAfterGsmHold, setEnding]
+    [applySystemCallHold, clearSystemHoldAfterGsmRecovery, setEnding]
   );
 
   const showStreamChrome = ready && Boolean(client) && Boolean(call) && Boolean(sdk);
@@ -2378,11 +2430,12 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
 
   const handlePeerGsmSuspect = useCallback(() => {
     if (endingRef.current || peerCallHoldRef.current) return;
-    if (!isCallHoldGuardActive()) return;
     if (Date.now() - lastPeerHoldClearAtRef.current < 2000) return;
-    applyPeerHoldFromRemote(true);
-    callDiag.info('peer_gsm_suspect_hold_applied', { immediate: true });
-  }, [applyPeerHoldFromRemote]);
+    // Guard against false hangup only — do not show "on hold" until peer's call:hold
+    // arrives after they actually answer the cellular call.
+    setGsmInterruptPending(true, 'peer_gsm_suspect');
+    callDiag.info('peer_gsm_suspect_guard_only', { showHoldUi: false });
+  }, []);
   const handlePeerGsmSuspectRef = useRef(handlePeerGsmSuspect);
   handlePeerGsmSuspectRef.current = handlePeerGsmSuspect;
 
@@ -2780,8 +2833,11 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
           {streamAvatarExtras ? (
             <streamAvatarExtras.StreamRemotePeerLeftBridge
               onLocalGsmSuspect={() => {
-                if (endingRef.current) return;
-                applySystemCallHoldRef.current(true);
+                if (endingRef.current || systemCallHoldRef.current) return;
+                // Stream LEFT can happen before telephony OFFHOOK — keep end-guard only.
+                // Hold UI + peer notify wait for AndroidCellularHoldMonitor (answered call).
+                setGsmInterruptPending(true, 'local_gsm_suspect');
+                callDiag.info('local_gsm_suspect_guard_only', { showHoldUi: false });
               }}
               onPeerGsmSuspect={() => {
                 handlePeerGsmSuspectRef.current();

@@ -1,7 +1,10 @@
 import { Platform } from 'react-native';
 import type { Socket } from 'socket.io-client';
 import { callDiag } from './callDiagnostics';
-import { ANDROID_KEEPALIVE_INTERVAL_MS } from './androidCallNetwork';
+import {
+  ANDROID_KEEPALIVE_HOLD_INTERVAL_MS,
+  ANDROID_KEEPALIVE_INTERVAL_MS,
+} from './androidCallNetwork';
 import { recordAppKeepaliveAck, recordAppKeepaliveSent } from './gsmDisconnectProbe';
 
 type KeepaliveRegistration = {
@@ -16,6 +19,7 @@ let intervalRef: ReturnType<typeof setInterval> | null = null;
 let callActive = false;
 let activeCallId = '';
 let holdStateReader: (() => boolean) | null = null;
+let lastHoldForInterval = false;
 
 export function registerCallHoldKeepaliveReader(reader: (() => boolean) | null): void {
   holdStateReader = reader;
@@ -46,9 +50,24 @@ function ensureListeners(socket: Socket): void {
   });
 }
 
+function desiredKeepaliveIntervalMs(): number {
+  return holdStateReader?.() === true
+    ? ANDROID_KEEPALIVE_HOLD_INTERVAL_MS
+    : ANDROID_KEEPALIVE_INTERVAL_MS;
+}
+
+function stopInterval(): void {
+  if (!intervalRef) return;
+  clearInterval(intervalRef);
+  intervalRef = null;
+}
+
 function emitKeepaliveTick(): void {
   if (!callActive || !activeCallId) return;
   const onHold = holdStateReader?.() === true;
+  if (onHold !== lastHoldForInterval) {
+    restartIntervalIfNeeded();
+  }
   for (const reg of registrations) {
     if (!reg.socket.connected) continue;
     try {
@@ -64,10 +83,15 @@ function emitKeepaliveTick(): void {
   }
 }
 
-function stopInterval(): void {
-  if (!intervalRef) return;
-  clearInterval(intervalRef);
-  intervalRef = null;
+function restartIntervalIfNeeded(): void {
+  if (!callActive) return;
+  const onHold = holdStateReader?.() === true;
+  const intervalMs = desiredKeepaliveIntervalMs();
+  if (intervalRef && onHold === lastHoldForInterval) return;
+  stopInterval();
+  lastHoldForInterval = onHold;
+  intervalRef = setInterval(emitKeepaliveTick, intervalMs);
+  callDiag.info('call_keepalive_interval', { intervalMs, onHold });
 }
 
 /** Register a call signaling socket for active-call keepalive (Android only). */
@@ -87,7 +111,7 @@ export function unregisterCallKeepaliveSocket(id: string): void {
   }
 }
 
-/** Start/stop 8s peer keepalive while a voice call is active (Android only). */
+/** Start/stop peer keepalive while a voice call is active (Android only). */
 export function setCallKeepaliveActive(callId: string, active: boolean): void {
   if (Platform.OS !== 'android') return;
 
@@ -97,15 +121,17 @@ export function setCallKeepaliveActive(callId: string, active: boolean): void {
 
   if (!callActive) {
     stopInterval();
+    lastHoldForInterval = false;
     callDiag.info('call_keepalive_stopped', { callId: normalized || null });
     return;
   }
 
-  if (!intervalRef) {
-    intervalRef = setInterval(emitKeepaliveTick, ANDROID_KEEPALIVE_INTERVAL_MS);
-    emitKeepaliveTick();
-    callDiag.info('call_keepalive_started', { callId: normalized });
-  }
+  restartIntervalIfNeeded();
+  emitKeepaliveTick();
+  callDiag.info('call_keepalive_started', {
+    callId: normalized,
+    intervalMs: desiredKeepaliveIntervalMs(),
+  });
 }
 
 export function teardownCallKeepalive(): void {

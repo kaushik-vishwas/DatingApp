@@ -4,6 +4,7 @@ import * as Device from 'expo-device';
 import {
   getAndroidTalkGsmSuspectDebounceMs,
   getHoldRemoteLeftDebounceMs,
+  getHoldTailGraceMs,
   getNormalRemoteLeftDebounceMs,
 } from './samsungCallCompat';
 import { isIncomingCallNativeAvailable } from './incomingCallNativeBridge';
@@ -20,9 +21,6 @@ const MAX_ENTRIES = 800;
 
 /** Preserve this window before call termination (also persisted). */
 const FINAL_WINDOW_MS = 60_000;
-
-/** After hold ends, keep guarding Stream remote-left for WebRTC recovery. */
-const HOLD_TAIL_GRACE_MS = 12_000;
 
 const PERSIST_DEBOUNCE_MS = 400;
 const PERSIST_INTERVAL_MS = 2_000;
@@ -695,7 +693,8 @@ function touchHoldGrace(holdOn: boolean): void {
     holdGraceUntilMs = now + 5 * 60_000;
     return;
   }
-  holdGraceUntilMs = Math.max(holdGraceUntilMs, now + HOLD_TAIL_GRACE_MS);
+  // Android 36 needs a longer post-hold window while heartbeats / Stream recover.
+  holdGraceUntilMs = Math.max(holdGraceUntilMs, now + getHoldTailGraceMs());
 }
 
 export function setGsmInterruptPending(pending: boolean, reason = 'setGsmInterruptPending'): void {

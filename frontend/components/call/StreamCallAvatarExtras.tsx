@@ -14,6 +14,7 @@ import {
   NORMAL_REMOTE_LEFT_DEBOUNCE_MS,
   setGsmInterruptPending,
 } from '../../utils/callDiagnostics';
+import { isAndroidApi36OrNewer } from '../../utils/samsungCallCompat';
 
 const SPEAK_AUDIO_LEVEL_THRESHOLD = 0.035;
 
@@ -212,7 +213,7 @@ export function StreamTalkTimingBridge({
   return null;
 }
 
-const LOCAL_LEFT_CONFIRM_MS = 2_500;
+const LOCAL_LEFT_CONFIRM_MS = isAndroidApi36OrNewer() ? 8_000 : 2_500;
 
 /**
  * Fires when the remote participant leaves the Stream call (WebRTC path — works if socket `call:ended` is missed).
@@ -291,6 +292,19 @@ export function StreamRemotePeerLeftBridge({
     onRemotePeerLeftRef.current(reason);
   };
 
+  const holdGuardWasActiveRef = useRef(isCallHoldGuardActive());
+
+  /** After GSM/peer hold ends, start remote-empty / local-left timers fresh — do not inherit GSM-era gaps. */
+  const resetLeftTimersAfterHoldClear = (): void => {
+    emptySinceRef.current = null;
+    localLeftSinceRef.current = null;
+    gsmSuspectArmedRef.current = false;
+    callDiag.info('hold_guard_cleared_reset_left_timers', {
+      callingState: String(callingStateRef.current),
+      remoteCount: remoteParticipantsRef.current.length,
+    });
+  };
+
   useEffect(() => {
     const remoteCount = remoteParticipants.length;
     callDiag.remoteParticipantCountChanged(
@@ -302,29 +316,48 @@ export function StreamRemotePeerLeftBridge({
     callDiag.updateLive({ remoteParticipantCount: remoteCount });
 
     if (callingState !== CallingState.JOINED) {
-      if (callingState === CallingState.LEFT) {
+      const tickLeft = (): void => {
+        const guardActive = isCallHoldGuardActive();
+        if (holdGuardWasActiveRef.current && !guardActive) {
+          resetLeftTimersAfterHoldClear();
+        }
+        holdGuardWasActiveRef.current = guardActive;
+
+        if (callingStateRef.current !== CallingState.LEFT) {
+          localLeftSinceRef.current = null;
+          return;
+        }
         const now = Date.now();
         if (localLeftSinceRef.current === null) {
           localLeftSinceRef.current = now;
           armGsmSuspectGuard('local_left');
           callDiag.streamStateChange('LEFT', { phase: 'local_left_pending' });
-        } else if (now - localLeftSinceRef.current >= LOCAL_LEFT_CONFIRM_MS) {
+          return;
+        }
+        if (now - localLeftSinceRef.current >= LOCAL_LEFT_CONFIRM_MS) {
           tryEndCall('local_left', { callingState: 'LEFT' });
         }
-      } else {
-        localLeftSinceRef.current = null;
-      }
+      };
       if (callingState !== CallingState.LEFT) {
         hadRemoteRef.current = false;
         emptySinceRef.current = null;
         gsmSuspectArmedRef.current = false;
+        localLeftSinceRef.current = null;
       }
-      return;
+      tickLeft();
+      const leftIntervalId = setInterval(tickLeft, 250);
+      return () => clearInterval(leftIntervalId);
     }
 
     localLeftSinceRef.current = null;
 
     const evaluate = (): void => {
+      const guardActive = isCallHoldGuardActive();
+      if (holdGuardWasActiveRef.current && !guardActive) {
+        resetLeftTimersAfterHoldClear();
+      }
+      holdGuardWasActiveRef.current = guardActive;
+
       if (callingStateRef.current === CallingState.LEFT) {
         const now = Date.now();
         if (localLeftSinceRef.current === null) {

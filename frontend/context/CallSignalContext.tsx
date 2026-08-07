@@ -842,17 +842,23 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
       const bootstrapPromise = ensureIncomingBootstrapPromise(req);
       let socket: Socket;
+      try {
+        socket = socketRef.current?.connected
+          ? socketRef.current
+          : await ensureCallSocketReady(socketRef);
+      } catch (e) {
+        throw e;
+      }
+      // Tell caller immediately so both sides can join Stream without waiting on bootstrap I/O.
+      socket.emit('call:response', { callId: req.callId, accepted: true });
+
       let bootstrapped: VoiceBootstrapResponse;
       try {
-        [socket, bootstrapped] = await Promise.all([
-          ensureCallSocketReady(socketRef),
-          bootstrapPromise,
-        ]);
+        bootstrapped = await bootstrapPromise;
       } catch (e) {
-        const s = socketRef.current;
-        if (s?.connected) {
+        if (socket.connected) {
           instrumentedEmitCallEnd(
-            s,
+            socket,
             req.callId,
             'accept_stay_on_screen_bootstrap_failed',
             'main_call_socket'
@@ -860,7 +866,6 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         }
         throw e;
       }
-      socket.emit('call:response', { callId: req.callId, accepted: true });
 
       incomingBootstrapByCallIdRef.current.delete(req.callId);
       incomingBootstrapPromiseByCallIdRef.current.delete(req.callId);
@@ -881,17 +886,23 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
       const bootstrapPromise = ensureIncomingBootstrapPromise(req);
       let socket: Socket;
+      try {
+        socket = socketRef.current?.connected
+          ? socketRef.current
+          : await ensureCallSocketReady(socketRef);
+      } catch (e) {
+        throw e;
+      }
+      // Tell caller immediately so both sides can join Stream without waiting on bootstrap I/O.
+      socket.emit('call:response', { callId: req.callId, accepted: true });
+
       let bootstrapped: VoiceBootstrapResponse;
       try {
-        [socket, bootstrapped] = await Promise.all([
-          ensureCallSocketReady(socketRef),
-          bootstrapPromise,
-        ]);
+        bootstrapped = await bootstrapPromise;
       } catch (e) {
-        const s = socketRef.current;
-        if (s?.connected) {
+        if (socket.connected) {
           instrumentedEmitCallEnd(
-            s,
+            socket,
             req.callId,
             'accept_incoming_bootstrap_failed',
             'main_call_socket'
@@ -899,7 +910,6 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         }
         throw e;
       }
-      socket.emit('call:response', { callId: req.callId, accepted: true });
 
       incomingBootstrapByCallIdRef.current.delete(req.callId);
       incomingBootstrapPromiseByCallIdRef.current.delete(req.callId);

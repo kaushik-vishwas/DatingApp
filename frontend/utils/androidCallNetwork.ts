@@ -10,8 +10,11 @@ export const ANDROID_CONNECTION_TIMEOUT_RECONNECTING_MS = 60_000;
 /** Application-level call keepalive interval between participants. */
 export const ANDROID_KEEPALIVE_INTERVAL_MS = 8_000;
 
+/** Faster peer heartbeats while one side is on a cellular interrupt (Android 35/36). */
+export const ANDROID_KEEPALIVE_HOLD_INTERVAL_MS = 4_000;
+
 /** Stream call.setDisconnectionTimeout (seconds) during active calls. */
-export const ANDROID_STREAM_DISCONNECTION_TIMEOUT_SEC = 60;
+export const ANDROID_STREAM_DISCONNECTION_TIMEOUT_SEC = 90;
 
 export function isAndroidPlatform(): boolean {
   return Platform.OS === 'android';
