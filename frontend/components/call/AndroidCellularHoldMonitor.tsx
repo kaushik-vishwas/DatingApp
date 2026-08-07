@@ -77,7 +77,8 @@ export function AndroidCellularHoldMonitor({
     holdActiveRef.current = false;
     callDiag.holdEnded('local_system', details);
     callDiag.info('cellular_hold_monitor_off', details ?? {});
-    setGsmInterruptPending(false);
+    // Keep gsmInterruptPending armed until VoiceCallScreen recovery finishes — clearing
+    // here opened a window where Stream LEFT ended the call (other side dropped).
     markGsmTimeline('T6_gsm_ended');
     onSystemHoldChangeRef.current(false);
   };

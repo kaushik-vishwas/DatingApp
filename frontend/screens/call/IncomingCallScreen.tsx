@@ -1,7 +1,6 @@
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Animated, AppState, Image, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { Audio } from 'expo-av';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -49,16 +48,14 @@ export default function IncomingCallScreen({ navigation, route }: Props): React.
     })();
   }, [startIncomingRingtone]);
 
-  // Warm mic while ringing so Accept → Stream join does not wait on the permission prompt.
+  // Pre-ask mic + Android phone/BT while ringing so Accept → join has no permission dialogs.
   useEffect(() => {
     void (async () => {
       try {
-        const existing = await Audio.getPermissionsAsync();
-        if (existing.status !== 'granted') {
-          await Audio.requestPermissionsAsync();
-        }
+        const { ensureVoiceCallPermissions } = await import('../../utils/voiceCallPermissions');
+        await ensureVoiceCallPermissions();
       } catch {
-        // Join path will request again if needed.
+        // Join path still verifies microphone.
       }
     })();
   }, []);
