@@ -65,7 +65,7 @@ const LOCAL_API_PORT = Number(process.env.EXPO_PUBLIC_API_LOCAL_PORT) || 5000;
 
 let loggedDevApiChoice = false;
 
-/** Normalize URL */
+/** Normalize URL  */
 function normalizeApiOrigin(raw: string): string {
   let u = raw.trim().replace(/\/+$/, '');
   if (u.endsWith('/auth')) {
