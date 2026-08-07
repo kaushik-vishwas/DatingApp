@@ -39,7 +39,6 @@ import {
 } from '../utils/incomingCallNotifications';
 import { registerIncomingCallBootstrapPrefetch } from '../utils/incomingCallBootstrapPrefetch';
 import { clearVoiceCallStreamWarmup, warmVoiceCallStreamClient } from '../utils/voiceCallStreamWarmup';
-import { ensureVoiceCallPermissions } from '../utils/voiceCallPermissions';
 
 let outgoingNavigateGeneration = 0;
 
@@ -607,12 +606,6 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         throw new Error('Missing peer information for call invite.');
       }
       registerPeer(id, name, peerImage);
-
-      // All call permissions before ring / connect — avoids mid-call system dialogs.
-      const perms = await ensureVoiceCallPermissions();
-      if (!perms.microphone) {
-        throw new Error('Microphone permission is required for voice calls');
-      }
 
       const abort = new AbortController();
       outgoingInviteAbortRef.current = abort;

@@ -33,30 +33,38 @@ object CellularCallHoldWatcher {
   private var gsmPreemptive = false
   private var telephonyOffhook = false
   private var telephonyRinging = false
+  private var audioFocusLost = false
   private var lastMode = AudioManager.MODE_INVALID
 
   private var modeChangedListener: AudioManager.OnModeChangedListener? = null
   private var telephonyCallback31: TelephonyCallback? = null
   private var phoneStateListenerLegacy: PhoneStateListener? = null
   private var phoneStateReceiver: PhoneStateBroadcastReceiver? = null
+  private var audioFocusHeld = false
 
-  /** True while an answered cellular call is interrupting the app call (for audio-route guards). */
-  @Volatile
-  var cellularHoldActive: Boolean = false
-    private set
+  @Suppress("DEPRECATION")
+  private val audioFocusListener =
+    AudioManager.OnAudioFocusChangeListener { focusChange ->
+      when (focusChange) {
+        AudioManager.AUDIOFOCUS_LOSS,
+        AudioManager.AUDIOFOCUS_LOSS_TRANSIENT,
+        AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> {
+          audioFocusLost = true
+          mainHandler.post { evaluateAndEmit("audio_focus_loss") }
+        }
+        AudioManager.AUDIOFOCUS_GAIN -> {
+          audioFocusLost = false
+          mainHandler.post { evaluateAndEmit("audio_focus_gain") }
+        }
+      }
+    }
 
   private val pollRunnable =
     object : Runnable {
       override fun run() {
         if (!polling) return
         evaluateAndEmit("poll")
-        // Slow down while cellular is active — fighting AudioManager at 40ms can crash OEMs.
-        val delay =
-          when {
-            lastEmitted -> 400L
-            SamsungCallCompat.isSamsungOneUi6OrNewer() -> POLL_MS_SAMSUNG
-            else -> POLL_MS_DEFAULT
-          }
+        val delay = if (SamsungCallCompat.isSamsungOneUi6OrNewer()) POLL_MS_SAMSUNG else POLL_MS_DEFAULT
         mainHandler.postDelayed(this, delay)
       }
     }
@@ -72,8 +80,7 @@ object CellularCallHoldWatcher {
     registerModeChangedListener()
     registerTelephonyListenerIfPermitted()
     registerPhoneStateBroadcastReceiver()
-    // Do NOT request AudioFocus here — competing with the phone app for STREAM_VOICE_CALL
-    // (AUDIOFOCUS_GAIN) while answering cellular is a common process-kill / crash vector.
+    acquireVoipAudioFocus(audioManager)
     if (hasReadPhoneStatePermission()) {
       try {
         when (telephonyManager?.callState) {
@@ -100,6 +107,7 @@ object CellularCallHoldWatcher {
   fun stop() {
     polling = false
     mainHandler.removeCallbacks(pollRunnable)
+    releaseVoipAudioFocus(audioManager)
     unregisterModeChangedListener()
     unregisterTelephonyListener()
     unregisterPhoneStateBroadcastReceiver()
@@ -108,10 +116,10 @@ object CellularCallHoldWatcher {
     appContext = null
     onChange = null
     lastEmitted = false
-    cellularHoldActive = false
     gsmPreemptive = false
     telephonyOffhook = false
     telephonyRinging = false
+    audioFocusLost = false
     lastMode = AudioManager.MODE_INVALID
   }
 
@@ -130,6 +138,11 @@ object CellularCallHoldWatcher {
       else -> false
     }
 
+  private fun systemMicMutedDuringVoip(am: AudioManager, mode: Int): Boolean =
+    Build.VERSION.SDK_INT >= Build.VERSION_CODES.M &&
+      mode == AudioManager.MODE_IN_COMMUNICATION &&
+      am.isMicrophoneMute
+
   private fun evaluateAndEmit(source: String) {
     val am = audioManager ?: return
     val mode = am.mode
@@ -145,7 +158,7 @@ object CellularCallHoldWatcher {
     } else if (cellularMode) {
       gsmPreemptive = true
     } else if (gsmPreemptive && !cellularMode && mode == AudioManager.MODE_IN_COMMUNICATION) {
-      if (!telephonyOffhook) {
+      if (!telephonyOffhook && !audioFocusLost) {
         gsmPreemptive = false
       }
     }
@@ -156,11 +169,13 @@ object CellularCallHoldWatcher {
     // Without READ_PHONE_STATE, MODE_IN_CALL (not ringtone) is the best-effort answered signal.
     val active =
       telephonyOffhook ||
-        (cellularMode && !telephonyRinging)
+        (cellularMode && !telephonyRinging) ||
+        (audioFocusLost && telephonyOffhook)
     val resolvedSource =
       when {
         telephonyOffhook -> "telephony_offhook"
         cellularMode && !telephonyRinging -> "audio_mode"
+        audioFocusLost && telephonyOffhook -> "audio_focus_loss"
         telephonyRinging -> "telephony_ringing"
         else -> source
       }
@@ -170,18 +185,11 @@ object CellularCallHoldWatcher {
   private fun emitIfChanged(active: Boolean, mode: Int, source: String) {
     if (active == lastEmitted) return
     lastEmitted = active
-    cellularHoldActive = active
     if (!active) {
       gsmPreemptive = false
     }
     TelephonyDiagnosticsWatcher.notifyAppGsmActive(active)
-    mainHandler.post {
-      try {
-        onChange?.invoke(active, mode, source)
-      } catch (_: Exception) {
-        // Never let a JS/bridge failure kill the process during cellular interrupt.
-      }
-    }
+    mainHandler.post { onChange?.invoke(active, mode, source) }
   }
 
   private fun onTelephonyCallStateChanged(state: Int) {
@@ -202,10 +210,30 @@ object CellularCallHoldWatcher {
       TelephonyManager.CALL_STATE_IDLE -> {
         telephonyRinging = false
         telephonyOffhook = false
+        audioFocusLost = false
         gsmPreemptive = false
         evaluateAndEmit("telephony_idle")
       }
     }
+  }
+
+  @Suppress("DEPRECATION")
+  private fun acquireVoipAudioFocus(am: AudioManager?) {
+    if (am == null || audioFocusHeld) return
+    val result =
+      am.requestAudioFocus(
+        audioFocusListener,
+        AudioManager.STREAM_VOICE_CALL,
+        AudioManager.AUDIOFOCUS_GAIN
+      )
+    audioFocusHeld = result == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
+  }
+
+  @Suppress("DEPRECATION")
+  private fun releaseVoipAudioFocus(am: AudioManager?) {
+    if (am == null || !audioFocusHeld) return
+    am.abandonAudioFocus(audioFocusListener)
+    audioFocusHeld = false
   }
 
   private fun registerPhoneStateBroadcastReceiver() {

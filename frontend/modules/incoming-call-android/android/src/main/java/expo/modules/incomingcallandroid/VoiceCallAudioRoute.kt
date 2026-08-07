@@ -32,15 +32,6 @@ object VoiceCallAudioRoute {
 
   fun setRoute(context: Context, route: String): Map<String, Any?> {
     val am = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
-    // Never steal audio mode from an active cellular/ringtone call — that crashes many OEMs.
-    if (
-      CellularCallHoldWatcher.cellularHoldActive ||
-      am.mode == AudioManager.MODE_IN_CALL ||
-      am.mode == AudioManager.MODE_RINGTONE
-    ) {
-      Log.w(TAG, "setRoute skipped during cellular/ringtone mode=${am.mode} route=$route")
-      return mapOf("applied" to false, "route" to route, "reason" to "cellular_active")
-    }
     am.mode = AudioManager.MODE_IN_COMMUNICATION
     return when (route) {
       "bluetooth" -> {
@@ -82,14 +73,7 @@ object VoiceCallAudioRoute {
       am.stopBluetoothSco()
       @Suppress("DEPRECATION")
       am.isSpeakerphoneOn = false
-      // Do not force MODE_NORMAL over an active cellular call.
-      if (
-        !CellularCallHoldWatcher.cellularHoldActive &&
-        am.mode != AudioManager.MODE_IN_CALL &&
-        am.mode != AudioManager.MODE_RINGTONE
-      ) {
-        am.mode = AudioManager.MODE_NORMAL
-      }
+      am.mode = AudioManager.MODE_NORMAL
     } catch (e: Exception) {
       Log.w(TAG, "release failed", e)
     }

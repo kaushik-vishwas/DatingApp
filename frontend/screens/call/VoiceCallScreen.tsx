@@ -39,10 +39,6 @@ import {
   isBluetoothVoiceOutputAvailable,
   releaseVoiceCallOutputRoute,
 } from '../../utils/voiceCallAudioRoute';
-import {
-  ensureVoiceCallPermissions,
-  hasVoiceCallMicrophonePermission,
-} from '../../utils/voiceCallPermissions';
 import { profileImageUrlForStreamOrNetwork, resolveProfileImageSource } from '../../utils/avatarSource';
 import { AvatarSoundWaveRings } from '../../components/call/AvatarVoiceWaves';
 import { useCallScreenCaptureProtection } from '../../utils/callScreenCaptureProtection';
@@ -586,6 +582,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
   const peerCallHoldRef = useRef(false);
   const lastPeerHoldClearAtRef = useRef(0);
   const recoverAfterPeerHoldClearRef = useRef<() => Promise<void>>(async () => {});
+  const gsmHoldMutedPeerRef = useRef(false);
   const receiverAvailabilitySessionRef = useRef(receiverAvailabilitySession);
   const userAvailableRef = useRef(Boolean(user?.isAvailable));
   useEffect(() => {
@@ -713,10 +710,11 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
       if (onHold && systemCallHoldRef.current === onHold) {
         setGsmInterruptPending(true, 'system_hold_reannounce');
         emitPeerCallHold(true);
-        // Internal mic off only — no call:mute (hold UI, not mute badge).
         if (!userChosenMuteRef.current) {
           holdForcedMicOffRef.current = true;
+          gsmHoldMutedPeerRef.current = true;
           void streamMicControlRef.current?.setEnabled(false).catch(() => {});
+          emitPeerCallMute(true);
         }
         return;
       }
@@ -727,18 +725,23 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
       updateCallDiagnosticsLiveState({ systemCallHold: onHold });
       emitPeerCallHold(onHold);
       if (onHold) {
-        // Silence via Stream mic + hold audio bridge; never emit call:mute.
         if (!userChosenMuteRef.current) {
           holdForcedMicOffRef.current = true;
+          gsmHoldMutedPeerRef.current = true;
           void streamMicControlRef.current?.setEnabled(false).catch(() => {});
+          emitPeerCallMute(true);
+        }
+      } else if (gsmHoldMutedPeerRef.current) {
+        gsmHoldMutedPeerRef.current = false;
+        if (!userChosenMuteRef.current) {
+          emitPeerCallMute(false);
         }
       }
-      // Mic restore after hold: clearSystemHoldAfterGsmRecovery / LocalHoldMicBridge + userChosenMuteRef.
       callDiag.info(onHold ? 'system_hold_applied' : 'system_hold_cleared', {
         samsung: isSamsungOneUi6OrNewer(),
       });
     },
-    [emitPeerCallHold]
+    [emitPeerCallHold, emitPeerCallMute]
   );
   applySystemCallHoldRef.current = applySystemCallHold;
 
@@ -759,18 +762,21 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
     systemCallHoldRef.current = systemCallHold;
   }, [systemCallHold]);
 
-  // Re-broadcast hold while on a cellular call so the peer catches missed socket events.
+  // Re-broadcast hold + mute while on a cellular call so the peer catches missed socket events.
   useEffect(() => {
     if (!systemCallHold) return;
     const announceHold = (): void => {
       if (!systemCallHoldRef.current) return;
       if (endingRef.current && !isCallHoldGuardActive()) return;
       emitPeerCallHold(true);
+      if (gsmHoldMutedPeerRef.current) {
+        emitPeerCallMute(true);
+      }
     };
     announceHold();
     const intervalId = setInterval(announceHold, 4000);
     return () => clearInterval(intervalId);
-  }, [systemCallHold, emitPeerCallHold]);
+  }, [systemCallHold, emitPeerCallHold, emitPeerCallMute]);
 
   useEffect(() => {
     if (!receiverAvailabilitySession || !user?.isAvailable) return;
@@ -795,23 +801,13 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
       // Hold is only for external phone calls (mic stolen) — not generic background.
       if (interrupted) {
         callDiag.audioInterruption({ appState: nextState, ready: readyRef.current });
-        return;
-      }
-      // Never force VoIP audio mode while cellular hold is active — MODE_IN_COMMUNICATION
-      // over MODE_IN_CALL crashes / kills the process on many OEMs.
-      if (
-        endingRef.current ||
-        !readyRef.current ||
-        systemCallHoldRef.current ||
-        isCallHoldGuardActive()
-      ) {
-        return;
-      }
-      void applyVoiceCallAudioMode(speakerOn, bluetoothOn).catch((e) => {
-        callDiag.error('audio_mode_restore_failed', {
-          message: e instanceof Error ? e.message : String(e),
+      } else if (!endingRef.current && readyRef.current) {
+        void applyVoiceCallAudioMode(speakerOn, bluetoothOn).catch((e) => {
+          callDiag.error('audio_mode_restore_failed', {
+            message: e instanceof Error ? e.message : String(e),
+          });
         });
-      });
+      }
     });
     return () => sub.remove();
   }, [speakerOn, bluetoothOn]);
@@ -1124,16 +1120,11 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
 
   const shouldDeferEndDuringGsm = useCallback((source: string): boolean => {
     if (source === 'user_hangup') return false;
-    // During local/peer GSM hold (or Stream GSM suspect), defer ALL ends — including
-    // socket_/session_sync. False "call ended" mid-cellular was tearing down the other side
-    // (looked like both left the app). Real hangups apply after hold recovery + session check.
-    if (
-      systemCallHoldRef.current ||
-      peerCallHoldRef.current ||
-      isCallHoldGuardActive()
-    ) {
-      return true;
-    }
+    // Socket + server sync are authoritative when the peer hung up.
+    if (source.startsWith('socket_') || source === 'session_sync_completed') return false;
+    if (systemCallHoldRef.current && source.startsWith('stream_')) return true;
+    if (peerCallHoldRef.current && source.startsWith('stream_')) return true;
+    if (isCallHoldGuardActive() && source.startsWith('stream_')) return true;
     return false;
   }, []);
 
@@ -1466,20 +1457,6 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
     stopIncomingRingtone,
   ]);
 
-  // In-session incoming: pre-ask call permissions while ringing (same as IncomingCallScreen).
-  useEffect(() => {
-    if (!receiverAvailabilitySession || receiverSessionPhase !== 'incoming') return;
-    void ensureVoiceCallPermissions()
-      .then((perm) => {
-        if (Platform.OS === 'android' && perm.readPhoneState) {
-          void import('../../utils/androidCellularCallHold').then((cellular) => {
-            cellular.refreshAndroidCellularCallHoldWatch();
-          });
-        }
-      })
-      .catch(() => {});
-  }, [receiverAvailabilitySession, receiverSessionPhase]);
-
   const onAcceptIncomingOnSession = () => {
     if (!incomingReq || incomingResponding) return;
     setIncomingResponding(true);
@@ -1564,9 +1541,8 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
 
     void (async () => {
       try {
-        // Permissions already asked before dial; check only so warm is not blocked on dialogs.
-        const micOk = await hasVoiceCallMicrophonePermission();
-        if (!micOk) return;
+        const perm = await Audio.getPermissionsAsync();
+        if (perm.status !== 'granted') return;
         streamSdk.StreamVideoClient.getOrCreateInstance({
           apiKey: boot.apiKey,
           user: {
@@ -1641,10 +1617,11 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
         }
         setSdk((prev) => prev ?? streamSdk);
 
-        // Pre-asked before dial/ring/accept. Fast check only — avoid mid-connect dialogs.
-        let micGranted = await hasVoiceCallMicrophonePermission();
+        const existingMic = await Audio.getPermissionsAsync();
+        let micGranted = existingMic.status === 'granted';
         if (!micGranted) {
-          micGranted = (await ensureVoiceCallPermissions()).microphone;
+          const mic = await Audio.requestPermissionsAsync();
+          micGranted = mic.status === 'granted';
         }
         if (!micGranted) {
           throw new Error('Microphone permission is required for voice calls');
@@ -2016,14 +1993,6 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
     const sub = AppState.addEventListener('change', (state) => {
       if (state !== 'active' && state !== 'background' && state !== 'inactive') return;
       if (!callIdRef.current || endingRef.current) return;
-      // Skip while GSM hold — false session "completed" mid-cellular was ending both sides.
-      if (
-        systemCallHoldRef.current ||
-        peerCallHoldRef.current ||
-        isCallHoldGuardActive()
-      ) {
-        return;
-      }
       void checkPeerEndedViaServerRef.current();
     });
     return () => sub.remove();
@@ -2157,6 +2126,12 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
       setSystemCallHold(false);
       emitPeerCallHold(false);
     }
+    if (gsmHoldMutedPeerRef.current) {
+      gsmHoldMutedPeerRef.current = false;
+      if (!userChosenMuteRef.current) {
+        emitPeerCallMute(false);
+      }
+    }
     if (peerCallHoldRef.current) {
       peerCallHoldRef.current = false;
       setPeerCallHold(false);
@@ -2164,7 +2139,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
       lastPeerHoldClearAtRef.current = Date.now();
     }
     setGsmInterruptPending(false, 'teardown');
-  }, [emitPeerCallHold]);
+  }, [emitPeerCallHold, emitPeerCallMute]);
 
   const hangup = async () => {
     const hangupStartedAt = Date.now();
@@ -2338,8 +2313,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
   }, []);
 
   useEffect(() => {
-    const holdActive = systemCallHold || peerCallHold;
-    if (!holdActive) {
+    if (!systemCallHold) {
       if (holdForcedMicOffRef.current) {
         holdForcedMicOffRef.current = false;
         if (!userChosenMuteRef.current) {
@@ -2358,15 +2332,14 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
         });
       }
     }
-  }, [systemCallHold, peerCallHold, setStreamMicEnabled]);
+  }, [systemCallHold, setStreamMicEnabled]);
 
   const toggleMute = async () => {
     if (!streamMicControlRef.current) {
       Alert.alert('Mute', 'Call audio is still connecting. Try again in a moment.');
       return;
     }
-    // During cellular hold, silence is internal — mute button stays locked off.
-    if ((systemCallHoldRef.current || peerCallHoldRef.current) && !mutedRef.current) return;
+    if (systemCallHoldRef.current && !mutedRef.current) return;
     try {
       await streamMicControlRef.current.toggle();
     } catch (e) {
@@ -2846,7 +2819,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
               onMutedChange={setMuted}
               onUserMuteToggled={emitPeerCallMute}
               userChosenMuteRef={userChosenMuteRef}
-              forceMicOff={systemCallHold || peerCallHold}
+              forceMicOff={systemCallHold}
             />
           ) : null}
           {streamAvatarExtras ? (
@@ -2879,7 +2852,6 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
           {streamAvatarExtras ? (
             <streamAvatarExtras.StreamLocalHoldMicBridge
               systemOnHold={systemCallHold}
-              peerOnHold={peerCallHold}
               userChosenMuteRef={userChosenMuteRef}
             />
           ) : null}
