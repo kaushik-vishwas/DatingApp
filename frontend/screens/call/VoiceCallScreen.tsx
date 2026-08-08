@@ -1133,13 +1133,18 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
 
   const shouldDeferEndDuringGsm = useCallback((source: string): boolean => {
     if (source === 'user_hangup') return false;
-    // During local/peer GSM hold (or Stream GSM suspect), defer ALL ends — including
-    // socket_/session_sync. False "call ended" mid-cellular was tearing down both sides
-    // (looked like both left the app). Real hangups apply after hold recovery + session check.
+    // Peer Hang Up / server session end are authoritative — never defer these.
+    // Deferring socket_/session_sync under hold-grace left the other side stuck in-call
+    // for minutes after a normal Disconnect (hold grace can stay armed without real GSM).
+    if (source.startsWith('socket_') || source === 'session_sync_completed') {
+      return false;
+    }
+    // Only defer Stream-side false ends (LEFT / remote_empty) during GSM / hold grace.
     if (
-      systemCallHoldRef.current ||
-      peerCallHoldRef.current ||
-      isCallHoldGuardActive()
+      source.startsWith('stream_') &&
+      (systemCallHoldRef.current ||
+        peerCallHoldRef.current ||
+        isCallHoldGuardActive())
     ) {
       return true;
     }
@@ -2504,6 +2509,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
     const peerInitial = (shellPeerName || 'U').trim().charAt(0).toUpperCase();
     const showPeerPulse =
       !peerCallHold &&
+      !systemCallHold &&
       receiverAvailabilitySession &&
       (receiverSessionPhase === 'incoming' || Boolean(streamBootstrap));
 
@@ -2938,7 +2944,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
                   {streamAvatarExtras ? (
                     <streamAvatarExtras.StreamParticipantVoiceWaves
                       side="remote"
-                      onHold={peerCallHold}
+                      onHold={peerCallHold || systemCallHold}
                     />
                   ) : null}
                   <View style={styles.avatarWrap}>
@@ -2979,7 +2985,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
                     <streamAvatarExtras.StreamParticipantVoiceWaves
                       side="local"
                       microphoneMuted={muted || systemCallHold}
-                      onHold={systemCallHold}
+                      onHold={systemCallHold || peerCallHold}
                     />
                   ) : null}
                   <View style={styles.avatarWrap}>

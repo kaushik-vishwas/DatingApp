@@ -197,7 +197,12 @@ type AxiosConfigWithFetchFlag = {
   data?: unknown;
   headers?: Record<string, unknown>;
   timeout?: number;
+  params?: Record<string, unknown>;
 };
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 function buildAbsoluteUrl(baseURL: string | undefined, url: string | undefined): string {
   const path = typeof url === 'string' ? url : '';
@@ -206,13 +211,61 @@ function buildAbsoluteUrl(baseURL: string | undefined, url: string | undefined):
   return `${base}${path.startsWith('/') ? '' : '/'}${path}`;
 }
 
+function appendQueryParams(absoluteUrl: string, params: unknown): string {
+  if (!params || typeof params !== 'object') return absoluteUrl;
+  const entries = Object.entries(params as Record<string, unknown>).filter(
+    ([, v]) => v !== undefined && v !== null
+  );
+  if (!entries.length) return absoluteUrl;
+  const qs = entries
+    .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(String(v))}`)
+    .join('&');
+  return absoluteUrl.includes('?') ? `${absoluteUrl}&${qs}` : `${absoluteUrl}?${qs}`;
+}
+
+function isTransportFailureMessage(message: string | undefined, code?: string): boolean {
+  const c = String(code || '');
+  if (c === 'ERR_NETWORK' || c === 'ECONNABORTED') return true;
+  return /network error|network request failed|failed to fetch|aborted/i.test(message || '');
+}
+
+/** RN Headers.entries() is missing on some Android builds — never assume it exists. */
+function responseHeadersToObject(headers: Headers | undefined): Record<string, string> {
+  const out: Record<string, string> = {};
+  if (!headers) return out;
+  try {
+    if (typeof (headers as Headers & { entries?: () => IterableIterator<[string, string]> }).entries === 'function') {
+      for (const [k, v] of (headers as Headers).entries()) {
+        out[k] = v;
+      }
+      return out;
+    }
+  } catch {
+    // fall through
+  }
+  try {
+    if (typeof headers.forEach === 'function') {
+      headers.forEach((v, k) => {
+        out[k] = v;
+      });
+    }
+  } catch {
+    // ignore
+  }
+  return out;
+}
+
 /**
- * Some Android OEMs (notably OnePlus/OxygenOS) fail Axios→XHR→OkHttp with ERR_NETWORK
- * while the same host works in Chrome and older APKs. Retry once via fetch().
+ * Fallback transport via RN fetch when Axios→XHR→OkHttp fails (some OEMs / builds).
+ * Must not throw on successful responses — that was mis-reported as "network failed".
  */
 async function axiosConfigViaFetch(config: AxiosConfigWithFetchFlag) {
   const method = String(config.method || 'get').toUpperCase();
-  const absoluteUrl = buildAbsoluteUrl(config.baseURL, config.url);
+  // Axios usually already serializes params into config.url before the adapter/interceptor.
+  // Only append if the URL still has no query and params remain.
+  const baseUrl = buildAbsoluteUrl(config.baseURL, config.url);
+  const absoluteUrl =
+    baseUrl.includes('?') || !config.params ? baseUrl : appendQueryParams(baseUrl, config.params);
   const headers: Record<string, string> = {
     Accept: 'application/json',
     'Content-Type': 'application/json',
@@ -265,7 +318,7 @@ async function axiosConfigViaFetch(config: AxiosConfigWithFetchFlag) {
       data,
       status: res.status,
       statusText: res.statusText,
-      headers: Object.fromEntries(res.headers.entries()),
+      headers: responseHeadersToObject(res.headers),
       config,
       request: {},
     };
@@ -281,9 +334,39 @@ async function axiosConfigViaFetch(config: AxiosConfigWithFetchFlag) {
       return Promise.reject(err);
     }
     return axiosLike;
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    if (isTransportFailureMessage(message) || /aborted/i.test(message)) {
+      throw new AxiosError(
+        message || 'Network Error',
+        /aborted|timeout/i.test(message) ? 'ECONNABORTED' : 'ERR_NETWORK',
+        config as any
+      );
+    }
+    throw e;
   } finally {
     if (timer) clearTimeout(timer);
   }
+}
+
+/** Retry fetch a few times — covers cold-start radio and brief transport blips. */
+async function fetchWithTransportRetries(config: AxiosConfigWithFetchFlag) {
+  const delaysMs = Platform.OS === 'android' ? [0, 350, 900] : [0, 500];
+  let lastErr: unknown;
+  for (const delay of delaysMs) {
+    if (delay > 0) await sleep(delay);
+    try {
+      return await axiosConfigViaFetch(config);
+    } catch (e) {
+      lastErr = e;
+      if (axios.isAxiosError(e) && e.response) {
+        throw e;
+      }
+    }
+  }
+  throw lastErr instanceof Error
+    ? lastErr
+    : new AxiosError('Network Error', 'ERR_NETWORK', config as any);
 }
 
 /** Attach baseURL + token */
@@ -306,7 +389,10 @@ api.interceptors.request.use(async (config) => {
   return config;
 });
 
-/** On pure transport failures, retry once with fetch (bypasses Axios XHR on broken OEMs). */
+/**
+ * Keep Axios as primary (same as builds that worked).
+ * Only on pure transport failure, retry via fetch with backoff.
+ */
 api.interceptors.response.use(
   (response) => response,
   async (error: AxiosError) => {
@@ -314,17 +400,12 @@ api.interceptors.response.use(
     if (!cfg || cfg.__fetchRetried || error.response) {
       return Promise.reject(error);
     }
-    const code = String(error.code || '');
-    const isTransportFailure =
-      code === 'ERR_NETWORK' ||
-      code === 'ECONNABORTED' ||
-      /network error/i.test(error.message || '');
-    if (!isTransportFailure) {
+    if (!isTransportFailureMessage(error.message, error.code)) {
       return Promise.reject(error);
     }
     cfg.__fetchRetried = true;
     try {
-      return await axiosConfigViaFetch(cfg);
+      return await fetchWithTransportRetries(cfg);
     } catch (fetchErr) {
       return Promise.reject(fetchErr);
     }
@@ -360,14 +441,19 @@ export const getErrorMessage = (error: unknown): string => {
       if (errCode === 'ECONNABORTED' || /timeout|aborted/i.test(err.message || '')) {
         return 'Connection timed out. Please check your internet and try again.';
       }
-      // Same live API works in old APKs; this is usually OEM Axios/XHR transport, not "backend down".
+      // OEM / DNS / cold-start transport failures — not necessarily "backend down".
       return 'Could not reach the server. Please check your internet connection and try again.';
     }
 
     return err.message || 'Request failed';
   }
 
-  if (error instanceof Error) return error.message;
+  if (error instanceof Error) {
+    if (isTransportFailureMessage(error.message)) {
+      return 'Could not reach the server. Please check your internet connection and try again.';
+    }
+    return error.message;
+  }
   return 'Something went wrong';
 };
 
