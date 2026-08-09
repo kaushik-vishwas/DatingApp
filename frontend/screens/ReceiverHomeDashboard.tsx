@@ -41,20 +41,16 @@ import { CallDiagnosticsTopBarButton } from '../components/call/CallDiagnosticsT
 // import { LastCallDebugFab } from '../components/call/LastCallDebugFab';
 import { PresenceDiagnosticsTopBarButton } from '../components/call/PresenceDiagnosticsTopBarButton';
 import EarningsCardBg from '../assets/earnBg.png';
-import InstructionsCardBg from '../assets/instructionBg.png';
-import NoticeBg from '../assets/noticeBg.png'
+import NoticeBg from '../assets/noticeBg.png';
+import EarnCoinsImg from '../assets/earn-coins.png';
+import EarnGiftImg from '../assets/earn-gift.png';
 import { useReceiverTabBarBottomInset } from '../utils/receiverTabBarInset';
 import { ensureReceiverBatteryUnrestrictedOnce } from '../utils/receiverBatteryOptimization';
 import { CHAT_RECEIVER_EARN_LABEL } from '../constants/chatPricing';
 
-const INSTRUCTIONS_GRADIENT_START = '#A855F7';
-const INSTRUCTIONS_GRADIENT_END = '#F4C430';
-
-
-
-const MAROON = 'purple'
-const GREEN1 = '#4ade80'
-const GREEN2 = '#059669'
+const MAROON = 'purple';
+const GREEN1 = '#4ade80';
+const GREEN2 = '#059669';
 const PURPLE = '#7b2cff';
 const PINK = '#ff72d2';
 const PURPLE2 = '#9a5cff';
@@ -63,6 +59,8 @@ const SKY_BLUE_START = '#3B82F6';
 const SKY_BLUE_END = '#8E2DE2';
 const DEEP_PURPLE_START = '#8E2DE2';
 const DEEP_PURPLE_END = '#4A00E0';
+const CALL_EARN_GRADIENT = ['#FF8A3D', '#FF5C6A'] as const;
+const CHAT_EARN_GRADIENT = ['#A855F7', '#EC4899'] as const;
 
 function formatInr(n: number): string {
   const v = Math.round(n * 100) / 100;
@@ -380,6 +378,29 @@ export default function ReceiverHomeDashboard(): React.JSX.Element {
     receiverWelcome.enabled !== false &&
     Boolean(receiverWelcome.title?.trim() || receiverWelcome.body?.trim());
 
+  const receiverInstructionsContent = (
+    <View style={styles.guidelinesList}>
+      <View style={styles.guidelineRow}>
+        <View style={styles.guideIconBadge}>
+          <MaterialCommunityIcons name="clock-check-outline" size={14} color="white" />
+        </View>
+        <Text style={styles.guidelineText}>Stay online at least 8 hours per day.</Text>
+      </View>
+      <View style={styles.guidelineRow}>
+        <View style={styles.guideIconBadge}>
+          <MaterialCommunityIcons name="shield-lock-outline" size={14} color="white" />
+        </View>
+        <Text style={styles.guidelineText}>Don't share phone, UPI, or personal IDs.</Text>
+      </View>
+      <View style={styles.guidelineRow}>
+        <View style={styles.guideIconBadge}>
+          <MaterialCommunityIcons name="phone-cancel-outline" size={14} color="white" />
+        </View>
+        <Text style={styles.guidelineText}>Block rude or inappropriate callers.</Text>
+      </View>
+    </View>
+  );
+
   const totalEarningsLifetime = useMemo(() => {
     if (!walletSummary) return 0;
     if (
@@ -673,42 +694,52 @@ export default function ReceiverHomeDashboard(): React.JSX.Element {
               {summaryError ? <Text style={styles.summaryErrInline}>{summaryError}</Text> : null}
               <View style={styles.smallEarningsRow}>
                 <LinearGradient
-                  colors={[PURPLE, PINK]}
+                  colors={[...CALL_EARN_GRADIENT]}
                   start={{ x: 0, y: 0 }}
                   end={{ x: 1, y: 1 }}
                   style={styles.smallEarningsCard}
                 >
+                  <View style={styles.earnSparkleDot} />
+                  <View style={[styles.earnSparkleDot, styles.earnSparkleDot2]} />
                   <View style={styles.smallEarningsHeader}>
-                    <Ionicons name="call-outline" size={14} color="#fff" style={styles.smallEarningsIcon} />
-                    <Text style={styles.smallEarningsLabel}>Earned today by calls</Text>
+                    <Ionicons name="call" size={16} color="#fff" />
+                    <Text style={styles.smallEarningsLabel} numberOfLines={2}>
+                      Earned today by calls
+                    </Text>
                   </View>
                   <Text style={styles.smallEarningsText}>
                     {walletSummary
                       ? formatInr(
-                        typeof walletSummary.callEarningsToday === 'number'
-                          ? walletSummary.callEarningsToday
-                          : 0
-                      )
+                          typeof walletSummary.callEarningsToday === 'number'
+                            ? walletSummary.callEarningsToday
+                            : 0
+                        )
                       : '₹0'}
                   </Text>
+                  <Image source={EarnCoinsImg} style={styles.earnCardDeco} resizeMode="contain" />
                 </LinearGradient>
                 <LinearGradient
-                  colors={[PURPLE, PINK]}
+                  colors={[...CHAT_EARN_GRADIENT]}
                   start={{ x: 0, y: 0 }}
                   end={{ x: 1, y: 1 }}
                   style={styles.smallEarningsCard}
                 >
+                  <View style={styles.earnSparkleDot} />
+                  <View style={[styles.earnSparkleDot, styles.earnSparkleDot2]} />
                   <View style={styles.smallEarningsHeader}>
-                    <Ionicons name="chatbubbles-outline" size={14} color="#fff" style={styles.smallEarningsIcon} />
-                    <Text style={styles.smallEarningsLabel}>Earned today by chats</Text>
+                    <Ionicons name="chatbubble-ellipses" size={16} color="#fff" />
+                    <Text style={styles.smallEarningsLabel} numberOfLines={2}>
+                      Earned today by chats
+                    </Text>
                   </View>
                   <Text style={styles.smallEarningsText}>
                     {walletSummary
                       ? formatInr(
-                        typeof walletSummary.chatToday === 'number' ? walletSummary.chatToday : 0
-                      )
+                          typeof walletSummary.chatToday === 'number' ? walletSummary.chatToday : 0
+                        )
                       : '₹0'}
                   </Text>
+                  <Image source={EarnGiftImg} style={styles.earnCardDeco} resizeMode="contain" />
                 </LinearGradient>
               </View>
             </View>
@@ -750,40 +781,6 @@ export default function ReceiverHomeDashboard(): React.JSX.Element {
               </View>
             </CompactInfoCard>
 
-
-
-
-
-
-            <CompactInfoCard
-              colors={[INSTRUCTIONS_GRADIENT_START, INSTRUCTIONS_GRADIENT_END]}
-              bgImage={InstructionsCardBg}
-              title="Instructions"
-              subtitle="Stay safe & professional"
-            >
-              <View style={styles.guidelinesList}>
-                <View style={styles.guidelineRow}>
-                  <View style={styles.guideIconBadge}>
-                    <MaterialCommunityIcons name="clock-check-outline" size={14} color="white" />
-                  </View>
-                  <Text style={styles.guidelineText}>Stay online at least 8 hours per day.</Text>
-                </View>
-                <View style={styles.guidelineRow}>
-                  <View style={styles.guideIconBadge}>
-                    <MaterialCommunityIcons name="shield-lock-outline" size={14} color="white" />
-                  </View>
-                  <Text style={styles.guidelineText}>Don't share phone, UPI, or personal IDs.</Text>
-                </View>
-                <View style={styles.guidelineRow}>
-                  <View style={styles.guideIconBadge}>
-                    <MaterialCommunityIcons name="phone-cancel-outline" size={14} color="white" />
-                  </View>
-                  <Text style={styles.guidelineText}>Block rude or inappropriate callers.</Text>
-                </View>
-              </View>
-            </CompactInfoCard>
-
-
           </>
         ) : (
           <Text style={styles.muted}>Could not load profile.</Text>
@@ -793,14 +790,17 @@ export default function ReceiverHomeDashboard(): React.JSX.Element {
           <CompactInfoCard
             colors={[GREEN1, SKY_BLUE_START]}
             bgImage={NoticeBg}
-            bgImageStyle={styles.welcomeCardBgImage}  // ← ADD THIS
+            bgImageStyle={styles.welcomeCardBgImage}
             title={receiverWelcome.title?.trim() || 'Notice Board'}
             subtitle=""
           >
             <View style={styles.welcomeCardContent}>
               {receiverWelcome.body?.trim() ? (
                 <Text style={styles.welcomeCardBody}>{receiverWelcome.body.trim()}</Text>
-              ) : null}
+              ) : (
+                // Admin left description empty — show the same default as Instructions.
+                receiverInstructionsContent
+              )}
             </View>
           </CompactInfoCard>
         ) : null}
@@ -1236,14 +1236,41 @@ const styles = StyleSheet.create({
   },
   smallEarningsCard: {
     flex: 1,
-    borderRadius: 12,
-    padding: 12,
+    aspectRatio: 1,
+    borderRadius: 18,
+    paddingTop: 14,
+    paddingHorizontal: 14,
+    paddingBottom: 16,
     overflow: 'hidden',
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.16,
+    shadowRadius: 6,
+    elevation: 4,
+  },
+  earnSparkleDot: {
+    position: 'absolute',
+    top: 14,
+    right: 36,
+    width: 5,
+    height: 5,
+    borderRadius: 2.5,
+    backgroundColor: 'rgba(255,255,255,0.75)',
+  },
+  earnSparkleDot2: {
+    top: 28,
+    right: 18,
+    width: 3.5,
+    height: 3.5,
+    borderRadius: 2,
+    backgroundColor: 'rgba(255,255,255,0.55)',
+  },
+  earnCardDeco: {
+    position: 'absolute',
+    right: -4,
+    bottom: -6,
+    width: 104,
+    height: 104,
   },
   plusIconWrapper: {
     alignItems: 'center',
@@ -1254,7 +1281,7 @@ const styles = StyleSheet.create({
     width: 25,
     height: 25,
     borderRadius: 14,
-    backgroundColor: '#00a2ff', // Bluish color
+    backgroundColor: '#00a2ff',
     alignItems: 'center',
     justifyContent: 'center',
     shadowColor: '#00a2ff',
@@ -1265,23 +1292,25 @@ const styles = StyleSheet.create({
   },
   smallEarningsHeader: {
     flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    marginBottom: 6,
-  },
-  smallEarningsIcon: {
-    opacity: 0.9,
+    alignItems: 'flex-start',
+    gap: 8,
+    marginBottom: 10,
+    paddingRight: 56,
+    zIndex: 1,
   },
   smallEarningsLabel: {
-    fontSize: 12,
-    fontWeight: '600',
+    flex: 1,
+    fontSize: 15,
+    fontWeight: '700',
     color: '#fff',
-    opacity: 0.9,
+    lineHeight: 19,
   },
   smallEarningsText: {
     color: '#fff',
-    fontSize: 18,
+    fontSize: 36,
     fontWeight: '800',
+    letterSpacing: 0.2,
+    zIndex: 1,
   },
   summaryErrInline: {
     color: '#b91c1c',
