@@ -9,8 +9,8 @@ version = '1.0.0'
 android {
   namespace "expo.modules.incomingcallandroid"
   defaultConfig {
-    versionCode 9
-    versionName "1.0.9"
+    versionCode 12
+    versionName "1.0.12"
   }
 }
 
