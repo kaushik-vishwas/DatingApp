@@ -9,6 +9,7 @@ const CallSession_1 = __importDefault(require("../models/CallSession"));
 const CallerOnlineNotification_1 = __importDefault(require("../models/CallerOnlineNotification"));
 const Receiver_1 = __importDefault(require("../models/Receiver"));
 const User_1 = __importDefault(require("../models/User"));
+const expoPush_1 = require("./expoPush");
 const socketRegistry_1 = require("../socket/socketRegistry");
 const RECENT_CALL_WINDOW_DAYS = 14;
 const RECEIVER_CALLER_COOLDOWN_MS = 30 * 60 * 1000;
@@ -53,6 +54,26 @@ async function flushReceiverBatch(receiverId) {
         subtitle: created.subtitle,
         at: created.createdAt.toISOString(),
     });
+    try {
+        const receiver = await Receiver_1.default.findById(receiverId)
+            .select('expoPushToken')
+            .lean();
+        const token = receiver?.expoPushToken?.trim() ?? '';
+        if (!token)
+            return;
+        void (0, expoPush_1.sendOnlinePresencePush)({
+            expoPushToken: token,
+            title: created.title,
+            body: created.subtitle,
+            data: {
+                type: 'caller_online',
+            },
+        });
+    }
+    catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        console.error('caller online presence push error:', msg);
+    }
 }
 function enqueueForReceiver(receiverId, callerId, callerName) {
     const existing = pendingByReceiverId.get(receiverId);

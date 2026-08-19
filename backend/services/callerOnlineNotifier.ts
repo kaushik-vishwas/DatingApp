@@ -3,6 +3,7 @@ import CallSession from '../models/CallSession';
 import CallerOnlineNotification from '../models/CallerOnlineNotification';
 import Receiver from '../models/Receiver';
 import User from '../models/User';
+import { sendOnlinePresencePush } from './expoPush';
 import { emitCallerOnlineToReceiver } from '../socket/socketRegistry';
 
 const RECENT_CALL_WINDOW_DAYS = 14;
@@ -56,6 +57,25 @@ async function flushReceiverBatch(receiverId: string): Promise<void> {
     subtitle: created.subtitle,
     at: created.createdAt.toISOString(),
   });
+
+  try {
+    const receiver = await Receiver.findById(receiverId)
+      .select('expoPushToken')
+      .lean<{ expoPushToken?: string | null } | null>();
+    const token = receiver?.expoPushToken?.trim() ?? '';
+    if (!token) return;
+    void sendOnlinePresencePush({
+      expoPushToken: token,
+      title: created.title,
+      body: created.subtitle,
+      data: {
+        type: 'caller_online',
+      },
+    });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    console.error('caller online presence push error:', msg);
+  }
 }
 
 function enqueueForReceiver(receiverId: string, callerId: string, callerName: string): void {

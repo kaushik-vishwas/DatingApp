@@ -1,11 +1,18 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.resolveWithdrawalAccountHolderName = resolveWithdrawalAccountHolderName;
 exports.inferReceiverPayoutMethod = inferReceiverPayoutMethod;
 exports.resolveBankPayoutMode = resolveBankPayoutMode;
 exports.resolveReceiverPayoutDestination = resolveReceiverPayoutDestination;
 const receiverPaymentDetails_1 = require("./receiverPaymentDetails");
 function safeTrim(s) {
     return typeof s === 'string' ? s.trim() : '';
+}
+/** Snapshot name stored on WithdrawalRequest. Never empty when Receiver.name exists. */
+function resolveWithdrawalAccountHolderName(receiver) {
+    return (safeTrim(receiver.nameAsPerAadhaar) ||
+        safeTrim(receiver.bankAccountHolderName) ||
+        safeTrim(receiver.name));
 }
 /** Prefer UPI when both are on file unless a withdrawal snapshot says otherwise. */
 function inferReceiverPayoutMethod(receiver) {
@@ -24,9 +31,7 @@ function resolveBankPayoutMode() {
 }
 function resolveReceiverPayoutDestination(options) {
     const { receiver, contactEmail, preferredMethod } = options;
-    const payeeName = safeTrim(receiver.nameAsPerAadhaar) ||
-        safeTrim(receiver.bankAccountHolderName) ||
-        safeTrim(receiver.name);
+    const payeeName = resolveWithdrawalAccountHolderName(receiver);
     const phone = safeTrim(receiver.phone);
     if (!payeeName || !phone)
         return null;

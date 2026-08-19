@@ -54,7 +54,10 @@ import {
 } from '../constants/receiverWithdrawalFees';
 import { beginApiTrace, mongoErrCode, reuseOrCreateApiTrace } from '../utils/apiTraceLog';
 import { CALLER_MESSAGE_MIN_DURATION_SEC } from '../utils/callerMessageEligibility';
-import { inferReceiverPayoutMethod } from '../utils/receiverPayoutDestination';
+import {
+  inferReceiverPayoutMethod,
+  resolveWithdrawalAccountHolderName,
+} from '../utils/receiverPayoutDestination';
 import {
   parseReceiverPaymentUpdateBody,
   receiverPaymentDetailsComplete,
@@ -1469,7 +1472,7 @@ export const getReceiverWithdrawalOverview = async (req: Request, res: Response)
 
     const rid = String(req.receiver!._id);
     const receiver = await Receiver.findById(rid).select(
-      'walletBalance phone nameAsPerAadhaar upiId aadhaarNumber panNumber bankAccountNumber bankIfsc bankAccountHolderName'
+      'walletBalance phone name nameAsPerAadhaar upiId aadhaarNumber panNumber bankAccountNumber bankIfsc bankAccountHolderName'
     );
     if (!receiver) {
       res.status(404).json({ message: 'Receiver not found' });
@@ -1516,7 +1519,7 @@ export const getReceiverWithdrawalOverview = async (req: Request, res: Response)
       },
       bank: {
         bankName: receiver.upiId ? 'UPI' : receiver.bankIfsc ? 'Bank' : '',
-        accountHolderName: receiver.nameAsPerAadhaar ?? receiver.bankAccountHolderName ?? '',
+        accountHolderName: resolveWithdrawalAccountHolderName(receiver),
         accountMasked: receiver.upiId
           ? maskUpiId(receiver.upiId)
           : receiver.bankAccountNumber
@@ -1568,7 +1571,7 @@ export const sendReceiverWithdrawalOtp = async (
 
     const rid = String(req.receiver!._id);
     const receiver = await Receiver.findById(rid).select(
-      'phone walletBalance nameAsPerAadhaar upiId aadhaarNumber panNumber bankAccountNumber bankIfsc bankAccountHolderName'
+      'phone name walletBalance nameAsPerAadhaar upiId aadhaarNumber panNumber bankAccountNumber bankIfsc bankAccountHolderName'
     );
     if (!receiver) {
       res.status(404).json({ message: 'Receiver not found' });
@@ -1586,6 +1589,18 @@ export const sendReceiverWithdrawalOtp = async (
 
     const payoutMethod = inferReceiverPayoutMethod(receiver);
     if (!payoutMethod) {
+      res.status(400).json({ message: 'Please complete payment details before requesting a withdrawal' });
+      return;
+    }
+
+    const accountHolderName = resolveWithdrawalAccountHolderName(receiver);
+    const accountMasked =
+      payoutMethod === 'upi' && receiver.upiId
+        ? maskUpiId(receiver.upiId)
+        : receiver.bankAccountNumber
+          ? maskAccountNumber(receiver.bankAccountNumber)
+          : '';
+    if (!accountHolderName || !accountMasked) {
       res.status(400).json({ message: 'Please complete payment details before requesting a withdrawal' });
       return;
     }
@@ -1613,16 +1628,11 @@ export const sendReceiverWithdrawalOtp = async (
           reviewedByAdminId: null,
           adminNote: null,
           bankName: payoutMethod === 'upi' ? 'UPI' : 'Bank',
-          accountHolderName: receiver.nameAsPerAadhaar ?? receiver.bankAccountHolderName ?? '',
-          accountMasked:
-            payoutMethod === 'upi' && receiver.upiId
-              ? maskUpiId(receiver.upiId)
-              : receiver.bankAccountNumber
-                ? maskAccountNumber(receiver.bankAccountNumber)
-                : '',
+          accountHolderName,
+          accountMasked,
         },
       },
-      { upsert: true, new: true, setDefaultsOnInsert: true }
+      { upsert: true, new: true, setDefaultsOnInsert: true, runValidators: true }
     );
 
     res.status(200).json({
@@ -1667,7 +1677,9 @@ export const verifyReceiverWithdrawalOtpAndCreate = async (
 
     const rid = String(req.receiver!._id);
     const [receiver, pendingVerification] = await Promise.all([
-      Receiver.findById(rid).select('walletBalance'),
+      Receiver.findById(rid).select(
+        'walletBalance name nameAsPerAadhaar bankAccountHolderName upiId bankAccountNumber'
+      ),
       WithdrawalRequest.findOne({ receiverId: rid, status: 'verification_pending' }),
     ]);
     if (!receiver) {
@@ -1713,6 +1725,25 @@ export const verifyReceiverWithdrawalOtpAndCreate = async (
     const withdrawable = await computeReceiverWithdrawableSnapshot(rid, receiver.walletBalance ?? 0);
     if (pendingVerification.amount > withdrawable.withdrawableBalance) {
       res.status(400).json({ message: 'Insufficient wallet balance. Please reduce amount and retry' });
+      return;
+    }
+
+    if (!pendingVerification.accountHolderName?.trim()) {
+      pendingVerification.accountHolderName = resolveWithdrawalAccountHolderName(receiver);
+    }
+    if (!pendingVerification.bankName?.trim()) {
+      pendingVerification.bankName = pendingVerification.payoutMethod === 'upi' ? 'UPI' : 'Bank';
+    }
+    if (!pendingVerification.accountMasked?.trim()) {
+      pendingVerification.accountMasked =
+        pendingVerification.payoutMethod === 'upi' && receiver.upiId
+          ? maskUpiId(receiver.upiId)
+          : receiver.bankAccountNumber
+            ? maskAccountNumber(receiver.bankAccountNumber)
+            : pendingVerification.accountMasked;
+    }
+    if (!pendingVerification.accountHolderName?.trim() || !pendingVerification.accountMasked?.trim()) {
+      res.status(400).json({ message: 'Please complete payment details before requesting a withdrawal' });
       return;
     }
 
@@ -2524,6 +2555,31 @@ export const updateReceiverExpoPushToken = async (req: Request, res: Response): 
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error('updateReceiverExpoPushToken error:', msg);
+    res.status(500).json({ message: msg || 'Server error' });
+  }
+};
+
+/**
+ * PATCH /profile/caller/push-token — store Expo push token for receiver-online alerts.
+ */
+export const updateCallerExpoPushToken = async (req: Request, res: Response): Promise<void> => {
+  try {
+    if (req.accountKind !== 'user') {
+      res.status(403).json({ message: 'This endpoint is only for caller accounts' });
+      return;
+    }
+    const token =
+      typeof req.body.expoPushToken === 'string' ? req.body.expoPushToken.trim() : '';
+    if (!token || !token.startsWith('ExponentPushToken')) {
+      res.status(400).json({ message: 'A valid expoPushToken is required' });
+      return;
+    }
+    const userId = String((req.user as UserDocument)._id);
+    await User.updateOne({ _id: userId }, { $set: { expoPushToken: token } });
+    res.status(200).json({ ok: true });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error('updateCallerExpoPushToken error:', msg);
     res.status(500).json({ message: msg || 'Server error' });
   }
 };

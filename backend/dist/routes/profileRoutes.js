@@ -27,6 +27,7 @@ router.patch('/receiver', auth_1.protect, profileController_1.updateReceiverProf
 router.post('/receiver/presence/background', auth_1.protect, profileController_1.receiverBackgroundPresence);
 router.post('/receiver/presence/foreground', auth_1.protect, profileController_1.receiverForegroundPresence);
 router.patch('/receiver/push-token', auth_1.protect, profileController_1.updateReceiverExpoPushToken);
+router.patch('/caller/push-token', auth_1.protect, profileController_1.updateCallerExpoPushToken);
 router.post('/receiver/complete-audio-onboarding', auth_1.protect, profileController_1.completeReceiverAudioOnboarding);
 router.post('/receiver/reopen-kyc', auth_1.protect, profileController_1.reopenRejectedReceiverKyc);
 router.delete('/receiver', auth_1.protect, profileController_1.deleteReceiverAccount);

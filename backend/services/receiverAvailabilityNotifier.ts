@@ -3,6 +3,7 @@ import CallSession from '../models/CallSession';
 import Receiver from '../models/Receiver';
 import ReceiverAvailabilityNotification from '../models/ReceiverAvailabilityNotification';
 import User from '../models/User';
+import { sendOnlinePresencePush } from './expoPush';
 import { isReceiverSocketConnected } from '../socket/socketRegistry';
 
 const RECENT_CALL_WINDOW_DAYS = 14;
@@ -39,12 +40,42 @@ async function flushUserBatch(userId: string): Promise<void> {
   if (receiverIds.length === 0) return;
   const names = [...pending.receiverNamesById.values()];
 
+  const title = receiverOnlineTitle(names);
+  const subtitle = receiverOnlineSubtitle(names);
   await ReceiverAvailabilityNotification.create({
     userId: new mongoose.Types.ObjectId(userId),
     receiverIds: receiverIds.map((id) => new mongoose.Types.ObjectId(id)),
-    title: receiverOnlineTitle(names),
-    subtitle: receiverOnlineSubtitle(names),
+    title,
+    subtitle,
   });
+
+  try {
+    const [caller, primaryReceiver] = await Promise.all([
+      User.findById(userId).select('expoPushToken').lean<{ expoPushToken?: string | null } | null>(),
+      Receiver.findById(receiverIds[0])
+        .select('name profileImage')
+        .lean<{ name?: string; profileImage?: string | null } | null>(),
+    ]);
+    const token = caller?.expoPushToken?.trim() ?? '';
+    if (!token) return;
+    const receiverId = receiverIds[0] ?? '';
+    const receiverName = names[0] || primaryReceiver?.name?.trim() || 'A receiver';
+    const receiverImage = primaryReceiver?.profileImage?.trim() ?? '';
+    void sendOnlinePresencePush({
+      expoPushToken: token,
+      title,
+      body: subtitle,
+      data: {
+        type: 'receiver_online',
+        receiverId,
+        receiverName,
+        receiverImage,
+      },
+    });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    console.error('receiver online presence push error:', msg);
+  }
 }
 
 function enqueueForUser(userId: string, receiverId: string, receiverName: string): void {

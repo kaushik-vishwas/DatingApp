@@ -57,7 +57,134 @@ function basicAuthHeader(keyId: string, keySecret: string): string {
   return `Basic ${Buffer.from(raw, 'utf8').toString('base64')}`;
 }
 
+function razorpayXAuthHeader(): string {
+  const keyId = process.env.RAZORPAYX_KEY_ID?.trim() || process.env.RAZORPAY_KEY_ID?.trim();
+  const keySecret = process.env.RAZORPAYX_KEY_SECRET?.trim() || process.env.RAZORPAY_KEY_SECRET?.trim();
+  if (!keyId || !keySecret) {
+    throw new Error('Missing RAZORPAY_KEY_ID / RAZORPAY_KEY_SECRET');
+  }
+  return basicAuthHeader(keyId, keySecret);
+}
+
+function razorpayXAccountNumber(): string {
+  return (process.env.RAZORPAYX_ACCOUNT_NUMBER ?? '')
+    .trim()
+    .replace(/^["']|["']$/g, '')
+    .replace(/\s+/g, '');
+}
+
+function isRazorpayXMerchantId(value: string): boolean {
+  return Boolean(value) && !/^\d{9,22}$/.test(value);
+}
+
+function isRazorpayUrlNotFound(text: string): boolean {
+  return /requested URL was not found on the server/i.test(text);
+}
+
+function isRazorpayAccessDenied(text: string): boolean {
+  return /"description"\s*:\s*"Access Denied"/i.test(text);
+}
+
+function humanizePayoutCreateError(raw: string): string {
+  if (isRazorpayAccessDenied(raw)) {
+    return 'RazorpayX blocked this server IP. Allowlist the public IP 49.37.177.223 (not 192.168.x.x) under Settings → Developer Controls → Share IP Addresses.';
+  }
+  if (isRazorpayUrlNotFound(raw)) {
+    return 'RazorpayX Payouts API is not enabled on this merchant. Dashboard login is not enough — ask Razorpay support to enable Live Payouts API.';
+  }
+  return raw.length > 500 ? `${raw.slice(0, 500)}…` : raw;
+}
+
 type RazorpayFundAccount = import('../utils/receiverPayoutDestination').RazorpayPayoutFundAccount;
+
+type RazorpayEntityCreateResponse = {
+  id?: string;
+};
+
+async function razorpayPostJson<T>(path: string, body: unknown, idempotencyKey?: string): Promise<{
+  ok: boolean;
+  status: number;
+  json: T | null;
+  text: string;
+}> {
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    Authorization: razorpayXAuthHeader(),
+  };
+  if (idempotencyKey) headers['X-Payout-Idempotency'] = idempotencyKey;
+
+  const res = await fetch(`https://api.razorpay.com${path}`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(body),
+  });
+  const text = await res.text().catch(() => '');
+  let json: T | null = null;
+  if (text) {
+    try {
+      json = JSON.parse(text) as T;
+    } catch {
+      json = null;
+    }
+  }
+  return { ok: res.ok, status: res.status, json, text };
+}
+
+async function razorpayCreateFundAccountId(fundAccount: RazorpayFundAccount): Promise<string> {
+  const contactRes = await razorpayPostJson<RazorpayEntityCreateResponse>('/v1/contacts', {
+    name: fundAccount.contact.name,
+    email: fundAccount.contact.email,
+    contact: fundAccount.contact.contact,
+    type: fundAccount.contact.type,
+    reference_id: fundAccount.contact.reference_id,
+  });
+  const contactId = safeTrim(contactRes.json?.id);
+  if (!contactRes.ok || !contactId) {
+    throw new Error(
+      `RazorpayX contact create failed (${contactRes.status}): ${contactRes.text || 'unknown error'}`
+    );
+  }
+
+  const fundBody =
+    fundAccount.account_type === 'vpa'
+      ? { contact_id: contactId, account_type: 'vpa', vpa: fundAccount.vpa }
+      : { contact_id: contactId, account_type: 'bank_account', bank_account: fundAccount.bank_account };
+
+  const fundRes = await razorpayPostJson<RazorpayEntityCreateResponse>('/v1/fund_accounts', fundBody);
+  const fundAccountId = safeTrim(fundRes.json?.id);
+  if (!fundRes.ok || !fundAccountId) {
+    throw new Error(
+      `RazorpayX fund account create failed (${fundRes.status}): ${fundRes.text || 'unknown error'}`
+    );
+  }
+  return fundAccountId;
+}
+
+function payoutCreatePayload(params: {
+  accountNumber: string;
+  amountPaise: number;
+  currency: 'INR';
+  mode: 'IMPS' | 'NEFT' | 'RTGS' | 'UPI';
+  purpose: string;
+  referenceId: string;
+  narration: string;
+  fundAccount?: RazorpayFundAccount;
+  fundAccountId?: string;
+}): Record<string, unknown> {
+  return {
+    account_number: params.accountNumber,
+    amount: params.amountPaise,
+    currency: params.currency,
+    mode: params.mode,
+    purpose: params.purpose,
+    queue_if_low_balance: true,
+    reference_id: params.referenceId,
+    narration: params.narration,
+    ...(params.fundAccountId
+      ? { fund_account_id: params.fundAccountId }
+      : { fund_account: params.fundAccount }),
+  };
+}
 
 async function razorpayCreatePayout(params: {
   accountNumber: string;
@@ -70,54 +197,37 @@ async function razorpayCreatePayout(params: {
   narration: string;
   idempotencyKey: string;
 }): Promise<RazorpayPayoutCreateResponse> {
-  const keyId = process.env.RAZORPAY_KEY_ID?.trim();
-  const keySecret = process.env.RAZORPAY_KEY_SECRET?.trim();
-  if (!keyId || !keySecret) {
-    throw new Error('Missing RAZORPAY_KEY_ID / RAZORPAY_KEY_SECRET');
+  const composite = await razorpayPostJson<RazorpayPayoutCreateResponse>(
+    '/v1/payouts',
+    payoutCreatePayload({ ...params, fundAccount: params.fundAccount }),
+    params.idempotencyKey
+  );
+  if (composite.ok && composite.json) return composite.json;
+
+  if (composite.status === 400 && isRazorpayUrlNotFound(composite.text)) {
+    const fundAccountId = await razorpayCreateFundAccountId(params.fundAccount);
+    const viaFundAccount = await razorpayPostJson<RazorpayPayoutCreateResponse>(
+      '/v1/payouts',
+      payoutCreatePayload({ ...params, fundAccountId }),
+      `${params.idempotencyKey}-fa`.slice(0, 80)
+    );
+    if (viaFundAccount.ok && viaFundAccount.json) return viaFundAccount.json;
+    throw new Error(
+      `RazorpayX payout create failed (${viaFundAccount.status}): ${viaFundAccount.text || 'unknown error'}`
+    );
   }
 
-  const apiUrl = 'https://api.razorpay.com/v1/payouts';
-
-  const res = await fetch(apiUrl, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: basicAuthHeader(keyId, keySecret),
-      'X-Payout-Idempotency': params.idempotencyKey,
-    },
-    body: JSON.stringify({
-      account_number: params.accountNumber,
-      amount: params.amountPaise,
-      currency: params.currency,
-      mode: params.mode,
-      purpose: params.purpose,
-      fund_account: params.fundAccount,
-      queue_if_low_balance: true,
-      reference_id: params.referenceId,
-      narration: params.narration,
-    }),
-  });
-
-  if (!res.ok) {
-    const text = await res.text().catch(() => '');
-    throw new Error(`RazorpayX payout create failed (${res.status}): ${text || 'unknown error'}`);
-  }
-
-  return (await res.json()) as RazorpayPayoutCreateResponse;
+  throw new Error(
+    `RazorpayX payout create failed (${composite.status}): ${composite.text || 'unknown error'}`
+  );
 }
 
 async function razorpayFetchPayout(payoutId: string): Promise<RazorpayPayoutFetchResponse> {
-  const keyId = process.env.RAZORPAY_KEY_ID?.trim();
-  const keySecret = process.env.RAZORPAY_KEY_SECRET?.trim();
-  if (!keyId || !keySecret) {
-    throw new Error('Missing RAZORPAY_KEY_ID / RAZORPAY_KEY_SECRET');
-  }
-
   const apiUrl = `https://api.razorpay.com/v1/payouts/${encodeURIComponent(payoutId)}`;
   const res = await fetch(apiUrl, {
     method: 'GET',
     headers: {
-      Authorization: basicAuthHeader(keyId, keySecret),
+      Authorization: razorpayXAuthHeader(),
     },
   });
 
@@ -213,6 +323,7 @@ export async function trackAndFinalizeRazorpayXPayout(withdrawalId: string): Pro
         : withdrawal.payoutMethod === 'upi'
           ? 'UPI ID missing for this withdrawal'
           : 'Receiver payment/contact details missing';
+    console.error('razorpayX receiver payout skipped:', withdrawalId, payoutError);
     await WithdrawalRequest.findByIdAndUpdate(withdrawalId, {
       status: 'rejected',
       payoutStatus: 'failed',
@@ -227,16 +338,19 @@ export async function trackAndFinalizeRazorpayXPayout(withdrawalId: string): Pro
     return;
   }
 
-  const payoutAccountNumber = process.env.RAZORPAYX_ACCOUNT_NUMBER?.trim();
+  const payoutAccountNumber = razorpayXAccountNumber();
   const mode = destination.mode;
   const purpose = process.env.RAZORPAYX_PAYOUT_PURPOSE?.trim() || 'payout';
   const narration = safeTrim(process.env.RAZORPAYX_PAYOUT_NARRATION) || 'DatingApp Payout';
 
-  if (!payoutAccountNumber) {
+  if (!payoutAccountNumber || isRazorpayXMerchantId(payoutAccountNumber)) {
+    const payoutError =
+      'RAZORPAYX_ACCOUNT_NUMBER must be the numeric Current Account / Lite customer identifier from RazorpayX Settings → Banking. The Merchant ID from the profile menu is not valid here.';
+    console.error('razorpayX receiver payout skipped:', withdrawalId, payoutError);
     await WithdrawalRequest.findByIdAndUpdate(withdrawalId, {
       status: 'rejected',
       payoutStatus: 'failed',
-      payoutError: 'RAZORPAYX_ACCOUNT_NUMBER is not set',
+      payoutError,
     });
     emitReceiverWithdrawalUpdate(String(withdrawal.receiverId), {
       withdrawalId,
@@ -285,6 +399,7 @@ export async function trackAndFinalizeRazorpayXPayout(withdrawalId: string): Pro
       payoutId = createdPayoutId;
 
       if (payoutStatus === 'failed') {
+        console.error('razorpayX receiver payout declined:', withdrawalId, payoutError);
         emitReceiverWithdrawalUpdate(String(withdrawal.receiverId), {
           withdrawalId,
           amount: payoutInr,
@@ -358,12 +473,17 @@ export async function trackAndFinalizeRazorpayXPayout(withdrawalId: string): Pro
     }
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
+    const payoutError = humanizePayoutCreateError(msg);
+    console.error('razorpayX receiver payout failed:', withdrawalId, payoutError);
+    if (payoutError !== msg) {
+      console.error('razorpayX receiver payout raw:', withdrawalId, msg.slice(0, 800));
+    }
     // If we never managed to create a payoutId, mark as failed (wallet is unchanged).
     if (!payoutId) {
       await WithdrawalRequest.findByIdAndUpdate(withdrawalId, {
         status: 'rejected',
         payoutStatus: 'failed',
-        payoutError: msg,
+        payoutError,
       });
       emitReceiverWithdrawalUpdate(String(withdrawal.receiverId), {
         withdrawalId,
@@ -420,7 +540,7 @@ export async function trackAndFinalizeAdminRazorpayXPayout(withdrawalId: string)
     return;
   }
 
-  const payoutAccountNumber = process.env.RAZORPAYX_ACCOUNT_NUMBER?.trim();
+  const payoutAccountNumber = razorpayXAccountNumber();
   const purpose = process.env.RAZORPAYX_PAYOUT_PURPOSE?.trim() || 'payout';
   const narration = safeTrim(process.env.RAZORPAYX_PAYOUT_NARRATION) || 'Selecto Admin Payout';
 

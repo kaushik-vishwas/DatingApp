@@ -1,6 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.sendReceiverIncomingCallPush = sendReceiverIncomingCallPush;
+exports.sendOnlinePresencePush = sendOnlinePresencePush;
 /** Sends a high-priority Expo push so receivers get incoming calls when the app is backgrounded. */
 async function sendReceiverIncomingCallPush(payload) {
     const token = payload.expoPushToken.trim();
@@ -54,5 +55,45 @@ async function sendReceiverIncomingCallPush(payload) {
     catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
         console.error('expo push send error:', msg);
+    }
+}
+const ONLINE_PRESENCE_CHANNEL_ID = 'online_presence';
+/** Visible tray notification for caller/receiver "is online" alerts (foreground + background). */
+async function sendOnlinePresencePush(payload) {
+    const token = payload.expoPushToken.trim();
+    if (!token.startsWith('ExponentPushToken'))
+        return;
+    const headers = {
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+    };
+    const accessToken = process.env.EXPO_ACCESS_TOKEN?.trim();
+    if (accessToken) {
+        headers.Authorization = `Bearer ${accessToken}`;
+    }
+    const body = {
+        to: token,
+        title: payload.title,
+        body: payload.body,
+        sound: 'default',
+        priority: 'high',
+        ttl: 3600,
+        channelId: ONLINE_PRESENCE_CHANNEL_ID,
+        data: payload.data,
+    };
+    try {
+        const res = await fetch('https://exp.host/--/api/v2/push/send', {
+            method: 'POST',
+            headers,
+            body: JSON.stringify(body),
+        });
+        if (!res.ok) {
+            const text = await res.text();
+            console.error('online presence push send failed:', res.status, text);
+        }
+    }
+    catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        console.error('online presence push send error:', msg);
     }
 }

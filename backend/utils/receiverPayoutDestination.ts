@@ -38,6 +38,19 @@ function safeTrim(s: unknown): string {
   return typeof s === 'string' ? s.trim() : '';
 }
 
+/** Snapshot name stored on WithdrawalRequest. Never empty when Receiver.name exists. */
+export function resolveWithdrawalAccountHolderName(receiver: {
+  name?: string | null;
+  nameAsPerAadhaar?: string | null;
+  bankAccountHolderName?: string | null;
+}): string {
+  return (
+    safeTrim(receiver.nameAsPerAadhaar) ||
+    safeTrim(receiver.bankAccountHolderName) ||
+    safeTrim(receiver.name)
+  );
+}
+
 /** Prefer UPI when both are on file unless a withdrawal snapshot says otherwise. */
 export function inferReceiverPayoutMethod(receiver: {
   upiId?: string | null;
@@ -74,10 +87,7 @@ export function resolveReceiverPayoutDestination(options: {
   preferredMethod?: ReceiverPayoutMethod | null;
 }): ResolvedReceiverPayoutDestination | null {
   const { receiver, contactEmail, preferredMethod } = options;
-  const payeeName =
-    safeTrim(receiver.nameAsPerAadhaar) ||
-    safeTrim(receiver.bankAccountHolderName) ||
-    safeTrim(receiver.name);
+  const payeeName = resolveWithdrawalAccountHolderName(receiver);
   const phone = safeTrim(receiver.phone);
   if (!payeeName || !phone) return null;
 

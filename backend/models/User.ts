@@ -31,6 +31,8 @@ export interface IUser {
   authSessionVersion: number;
   /** Unique share code for referral invites. */
   referralCode: string | null;
+  /** Expo push token for online-presence alerts (callers). */
+  expoPushToken: string | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -62,6 +64,7 @@ const userSchema = new Schema<IUser>(
     userAudio: { type: String, default: null },
     authSessionVersion: { type: Number, default: 0, min: 0 },
     referralCode: { type: String, default: null, trim: true, uppercase: true, sparse: true, unique: true },
+    expoPushToken: { type: String, default: null },
   },
   { timestamps: true }
 );

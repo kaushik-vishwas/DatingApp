@@ -58,6 +58,7 @@ const userSchema = new mongoose_1.Schema({
     userAudio: { type: String, default: null },
     authSessionVersion: { type: Number, default: 0, min: 0 },
     referralCode: { type: String, default: null, trim: true, uppercase: true, sparse: true, unique: true },
+    expoPushToken: { type: String, default: null },
 }, { timestamps: true });
 const User = mongoose_1.default.model('User', userSchema);
 exports.default = User;

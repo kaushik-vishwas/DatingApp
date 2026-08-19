@@ -36,7 +36,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getCallerNotifications = exports.getReceiverCallerOnlineNotifications = exports.getCallerMessageEligibleReceivers = exports.deleteReceiverCallHistory = exports.deleteCallerCallHistory = exports.getCallerCallHistory = exports.getReceiverEarningsBreakdown = exports.verifyReceiverBankUpdateOtp = exports.sendReceiverBankUpdateOtp = exports.deleteReceiverAccount = exports.reopenRejectedReceiverKyc = exports.completeReceiverAudioOnboarding = exports.updateReceiverExpoPushToken = exports.receiverForegroundPresence = exports.receiverBackgroundPresence = exports.updateReceiverProfile = exports.notifyReceiverRecentUser = exports.getReceiverNotifyCandidates = exports.getCallerNotificationMessage = exports.getReceiverWelcomeMessage = exports.getReceiverCallInsights = exports.verifyReceiverWithdrawalOtpAndCreate = exports.sendReceiverWithdrawalOtp = exports.getReceiverWithdrawalOverview = exports.getReceiverWalletSummary = exports.updateCallerProfile = exports.completeCallerProfile = exports.saveReceiverUserAudio = exports.saveCallerUserAudio = exports.saveReceiverKycBankFinalize = exports.saveReceiverKycDocuments = exports.saveReceiverKycProfileInfo = exports.completeProfile = void 0;
+exports.getCallerNotifications = exports.getReceiverCallerOnlineNotifications = exports.getCallerMessageEligibleReceivers = exports.deleteReceiverCallHistory = exports.deleteCallerCallHistory = exports.getCallerCallHistory = exports.getReceiverEarningsBreakdown = exports.verifyReceiverBankUpdateOtp = exports.sendReceiverBankUpdateOtp = exports.deleteReceiverAccount = exports.reopenRejectedReceiverKyc = exports.completeReceiverAudioOnboarding = exports.updateCallerExpoPushToken = exports.updateReceiverExpoPushToken = exports.receiverForegroundPresence = exports.receiverBackgroundPresence = exports.updateReceiverProfile = exports.notifyReceiverRecentUser = exports.getReceiverNotifyCandidates = exports.getCallerNotificationMessage = exports.getReceiverWelcomeMessage = exports.getReceiverCallInsights = exports.verifyReceiverWithdrawalOtpAndCreate = exports.sendReceiverWithdrawalOtp = exports.getReceiverWithdrawalOverview = exports.getReceiverWalletSummary = exports.updateCallerProfile = exports.completeCallerProfile = exports.saveReceiverUserAudio = exports.saveCallerUserAudio = exports.saveReceiverKycBankFinalize = exports.saveReceiverKycDocuments = exports.saveReceiverKycProfileInfo = exports.completeProfile = void 0;
 const mongoose_1 = __importDefault(require("mongoose"));
 const User_1 = __importDefault(require("../models/User"));
 const Receiver_1 = __importStar(require("../models/Receiver"));
@@ -1184,7 +1184,7 @@ const getReceiverWithdrawalOverview = async (req, res) => {
         if ((0, accountAccess_1.blockReceiverUntilApproved)(req, res))
             return;
         const rid = String(req.receiver._id);
-        const receiver = await Receiver_1.default.findById(rid).select('walletBalance phone nameAsPerAadhaar upiId aadhaarNumber panNumber bankAccountNumber bankIfsc bankAccountHolderName');
+        const receiver = await Receiver_1.default.findById(rid).select('walletBalance phone name nameAsPerAadhaar upiId aadhaarNumber panNumber bankAccountNumber bankIfsc bankAccountHolderName');
         if (!receiver) {
             res.status(404).json({ message: 'Receiver not found' });
             return;
@@ -1215,7 +1215,7 @@ const getReceiverWithdrawalOverview = async (req, res) => {
             },
             bank: {
                 bankName: receiver.upiId ? 'UPI' : receiver.bankIfsc ? 'Bank' : '',
-                accountHolderName: receiver.nameAsPerAadhaar ?? receiver.bankAccountHolderName ?? '',
+                accountHolderName: (0, receiverPayoutDestination_1.resolveWithdrawalAccountHolderName)(receiver),
                 accountMasked: receiver.upiId
                     ? maskUpiId(receiver.upiId)
                     : receiver.bankAccountNumber
@@ -1263,7 +1263,7 @@ const sendReceiverWithdrawalOtp = async (req, res) => {
             return;
         }
         const rid = String(req.receiver._id);
-        const receiver = await Receiver_1.default.findById(rid).select('phone walletBalance nameAsPerAadhaar upiId aadhaarNumber panNumber bankAccountNumber bankIfsc bankAccountHolderName');
+        const receiver = await Receiver_1.default.findById(rid).select('phone name walletBalance nameAsPerAadhaar upiId aadhaarNumber panNumber bankAccountNumber bankIfsc bankAccountHolderName');
         if (!receiver) {
             res.status(404).json({ message: 'Receiver not found' });
             return;
@@ -1279,6 +1279,16 @@ const sendReceiverWithdrawalOtp = async (req, res) => {
         }
         const payoutMethod = (0, receiverPayoutDestination_1.inferReceiverPayoutMethod)(receiver);
         if (!payoutMethod) {
+            res.status(400).json({ message: 'Please complete payment details before requesting a withdrawal' });
+            return;
+        }
+        const accountHolderName = (0, receiverPayoutDestination_1.resolveWithdrawalAccountHolderName)(receiver);
+        const accountMasked = payoutMethod === 'upi' && receiver.upiId
+            ? maskUpiId(receiver.upiId)
+            : receiver.bankAccountNumber
+                ? maskAccountNumber(receiver.bankAccountNumber)
+                : '';
+        if (!accountHolderName || !accountMasked) {
             res.status(400).json({ message: 'Please complete payment details before requesting a withdrawal' });
             return;
         }
@@ -1301,14 +1311,10 @@ const sendReceiverWithdrawalOtp = async (req, res) => {
                 reviewedByAdminId: null,
                 adminNote: null,
                 bankName: payoutMethod === 'upi' ? 'UPI' : 'Bank',
-                accountHolderName: receiver.nameAsPerAadhaar ?? receiver.bankAccountHolderName ?? '',
-                accountMasked: payoutMethod === 'upi' && receiver.upiId
-                    ? maskUpiId(receiver.upiId)
-                    : receiver.bankAccountNumber
-                        ? maskAccountNumber(receiver.bankAccountNumber)
-                        : '',
+                accountHolderName,
+                accountMasked,
             },
-        }, { upsert: true, new: true, setDefaultsOnInsert: true });
+        }, { upsert: true, new: true, setDefaultsOnInsert: true, runValidators: true });
         res.status(200).json({
             message: 'OTP sent to your mobile number',
             phoneMasked: maskPhone(receiver.phone),
@@ -1348,7 +1354,7 @@ const verifyReceiverWithdrawalOtpAndCreate = async (req, res) => {
         }
         const rid = String(req.receiver._id);
         const [receiver, pendingVerification] = await Promise.all([
-            Receiver_1.default.findById(rid).select('walletBalance'),
+            Receiver_1.default.findById(rid).select('walletBalance name nameAsPerAadhaar bankAccountHolderName upiId bankAccountNumber'),
             WithdrawalRequest_1.default.findOne({ receiverId: rid, status: 'verification_pending' }),
         ]);
         if (!receiver) {
@@ -1390,6 +1396,24 @@ const verifyReceiverWithdrawalOtpAndCreate = async (req, res) => {
         const withdrawable = await computeReceiverWithdrawableSnapshot(rid, receiver.walletBalance ?? 0);
         if (pendingVerification.amount > withdrawable.withdrawableBalance) {
             res.status(400).json({ message: 'Insufficient wallet balance. Please reduce amount and retry' });
+            return;
+        }
+        if (!pendingVerification.accountHolderName?.trim()) {
+            pendingVerification.accountHolderName = (0, receiverPayoutDestination_1.resolveWithdrawalAccountHolderName)(receiver);
+        }
+        if (!pendingVerification.bankName?.trim()) {
+            pendingVerification.bankName = pendingVerification.payoutMethod === 'upi' ? 'UPI' : 'Bank';
+        }
+        if (!pendingVerification.accountMasked?.trim()) {
+            pendingVerification.accountMasked =
+                pendingVerification.payoutMethod === 'upi' && receiver.upiId
+                    ? maskUpiId(receiver.upiId)
+                    : receiver.bankAccountNumber
+                        ? maskAccountNumber(receiver.bankAccountNumber)
+                        : pendingVerification.accountMasked;
+        }
+        if (!pendingVerification.accountHolderName?.trim() || !pendingVerification.accountMasked?.trim()) {
+            res.status(400).json({ message: 'Please complete payment details before requesting a withdrawal' });
             return;
         }
         pendingVerification.status = 'pending';
@@ -2104,6 +2128,31 @@ const updateReceiverExpoPushToken = async (req, res) => {
     }
 };
 exports.updateReceiverExpoPushToken = updateReceiverExpoPushToken;
+/**
+ * PATCH /profile/caller/push-token — store Expo push token for receiver-online alerts.
+ */
+const updateCallerExpoPushToken = async (req, res) => {
+    try {
+        if (req.accountKind !== 'user') {
+            res.status(403).json({ message: 'This endpoint is only for caller accounts' });
+            return;
+        }
+        const token = typeof req.body.expoPushToken === 'string' ? req.body.expoPushToken.trim() : '';
+        if (!token || !token.startsWith('ExponentPushToken')) {
+            res.status(400).json({ message: 'A valid expoPushToken is required' });
+            return;
+        }
+        const userId = String(req.user._id);
+        await User_1.default.updateOne({ _id: userId }, { $set: { expoPushToken: token } });
+        res.status(200).json({ ok: true });
+    }
+    catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error('updateCallerExpoPushToken error:', msg);
+        res.status(500).json({ message: msg || 'Server error' });
+    }
+};
+exports.updateCallerExpoPushToken = updateCallerExpoPushToken;
 /**
  * POST /profile/receiver/complete-audio-onboarding
  * Saves voice URL (from body if provided), runs gender verification, then approves.

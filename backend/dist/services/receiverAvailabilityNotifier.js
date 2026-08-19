@@ -9,6 +9,7 @@ const CallSession_1 = __importDefault(require("../models/CallSession"));
 const Receiver_1 = __importDefault(require("../models/Receiver"));
 const ReceiverAvailabilityNotification_1 = __importDefault(require("../models/ReceiverAvailabilityNotification"));
 const User_1 = __importDefault(require("../models/User"));
+const expoPush_1 = require("./expoPush");
 const socketRegistry_1 = require("../socket/socketRegistry");
 const RECENT_CALL_WINDOW_DAYS = 14;
 const USER_RECEIVER_COOLDOWN_MS = 30 * 60 * 1000;
@@ -37,12 +38,43 @@ async function flushUserBatch(userId) {
     if (receiverIds.length === 0)
         return;
     const names = [...pending.receiverNamesById.values()];
+    const title = receiverOnlineTitle(names);
+    const subtitle = receiverOnlineSubtitle(names);
     await ReceiverAvailabilityNotification_1.default.create({
         userId: new mongoose_1.default.Types.ObjectId(userId),
         receiverIds: receiverIds.map((id) => new mongoose_1.default.Types.ObjectId(id)),
-        title: receiverOnlineTitle(names),
-        subtitle: receiverOnlineSubtitle(names),
+        title,
+        subtitle,
     });
+    try {
+        const [caller, primaryReceiver] = await Promise.all([
+            User_1.default.findById(userId).select('expoPushToken').lean(),
+            Receiver_1.default.findById(receiverIds[0])
+                .select('name profileImage')
+                .lean(),
+        ]);
+        const token = caller?.expoPushToken?.trim() ?? '';
+        if (!token)
+            return;
+        const receiverId = receiverIds[0] ?? '';
+        const receiverName = names[0] || primaryReceiver?.name?.trim() || 'A receiver';
+        const receiverImage = primaryReceiver?.profileImage?.trim() ?? '';
+        void (0, expoPush_1.sendOnlinePresencePush)({
+            expoPushToken: token,
+            title,
+            body: subtitle,
+            data: {
+                type: 'receiver_online',
+                receiverId,
+                receiverName,
+                receiverImage,
+            },
+        });
+    }
+    catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        console.error('receiver online presence push error:', msg);
+    }
 }
 function enqueueForUser(userId, receiverId, receiverName) {
     const existing = pendingByUserId.get(userId);
