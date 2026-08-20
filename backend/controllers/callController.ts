@@ -26,8 +26,9 @@ import {
   isReceiverSocketConnected,
 } from '../socket/socketRegistry';
 import {
-  isReceiverDiscoverPresenceLive,
+  isReceiverLoggedInAndAvailable,
 } from '../services/receiverPresence';
+import { getLivePendingIncomingCall } from '../services/pendingIncomingCall';
 import {
   releaseReceiverReservation,
   syncReceiverQueueState,
@@ -455,38 +456,26 @@ export const getVoiceBootstrap = async (req: Request, res: Response): Promise<vo
     res.status(409).json({ message: 'Receiver is currently unavailable' });
     return;
   }
-  // Align with call:invite: Android may freeze the WebSocket while the app is still
-  // runnable. Allow bootstrap when discover-grace is live or Expo push can wake the app.
+  // Align with discover: bootstrap only if Go Online is on and they are logged in (socket or grace).
   if (!isReceiverSocketConnected(receiverId)) {
     const recvPresence = await Receiver.findById(receiverId)
-      .select('expoPushToken fcmDeviceToken discoverGraceUntil isAvailable')
+      .select('discoverGraceUntil isAvailable')
       .lean<{
-        expoPushToken?: string | null;
-        fcmDeviceToken?: string | null;
         discoverGraceUntil?: Date | null;
         isAvailable?: boolean;
       } | null>();
-    const presenceLive = isReceiverDiscoverPresenceLive(
+    const presenceLive = isReceiverLoggedInAndAvailable({
       receiverId,
-      recvPresence?.discoverGraceUntil ?? null,
-      {
-        isAvailable: Boolean(recvPresence?.isAvailable ?? receiverDoc.isAvailable),
-        expoPushToken: recvPresence?.expoPushToken ?? null,
-        fcmDeviceToken: recvPresence?.fcmDeviceToken ?? null,
-      }
-    );
-    const pushToken = recvPresence?.expoPushToken?.trim();
-    const fcmToken = recvPresence?.fcmDeviceToken?.trim();
-    if (!presenceLive && !pushToken && !fcmToken) {
+      isAvailable: Boolean(recvPresence?.isAvailable ?? receiverDoc.isAvailable),
+      discoverGraceUntil: recvPresence?.discoverGraceUntil ?? null,
+    });
+    if (!presenceLive) {
       res.status(409).json({
         message: 'Receiver is offline right now',
         debug: {
           receiverSocket: false,
           presenceLive: false,
-          hasExpoPush: false,
-          hasFcm: false,
           graceUntil: recvPresence?.discoverGraceUntil ?? null,
-          isAvailable: Boolean(recvPresence?.isAvailable ?? receiverDoc.isAvailable),
         },
       });
       return;
@@ -900,6 +889,35 @@ export const reportVoiceSessionIssue = async (
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error('reportVoiceSessionIssue error:', msg);
+    res.status(500).json({ message: msg || 'Server error' });
+  }
+};
+
+/**
+ * GET /calls/incoming-pending — receiver keep-alive poll when JS/FCM is frozen.
+ */
+export const getIncomingPending = async (req: Request, res: Response): Promise<void> => {
+  try {
+    if (req.accountKind !== 'receiver' || !req.receiver?._id) {
+      res.status(403).json({ message: 'Receiver account required' });
+      return;
+    }
+    const incoming = await getLivePendingIncomingCall(String(req.receiver._id));
+    res.status(200).json({
+      incoming: incoming
+        ? {
+            callId: incoming.callId,
+            fromId: incoming.fromId,
+            fromType: incoming.fromType,
+            fromName: incoming.fromName,
+            fromImage: incoming.fromImage,
+            expiresAt: incoming.expiresAt.toISOString(),
+          }
+        : null,
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error('getIncomingPending error:', msg);
     res.status(500).json({ message: msg || 'Server error' });
   }
 };

@@ -28,6 +28,8 @@ import { CHAT_TEXT_CHARGE_INR } from '../constants/chatPricing';
 import { normalizeReceiverWelcome } from '../services/receiverWelcome';
 import { normalizeCallerNotification } from '../services/callerNotification';
 import { toApiReceiver, toApiUser } from './authController';
+import { isReceiverLoggedInAndAvailable } from '../services/receiverPresence';
+import { getBusyReceiverIdSet } from '../services/callQueue';
 import { sendOtpEmail } from '../config/email';
 import { getConfiguredAdminEmail } from '../services/superAdminSync';
 import { trackAndFinalizeRazorpayXPayout } from '../services/razorpayXPayoutService';
@@ -1383,22 +1385,30 @@ export const listAllReceivers = async (_req: Request, res: Response): Promise<vo
       ])
     );
 
+    const busyByReceiverId = await getBusyReceiverIdSet(receivers.map((r) => String(r._id)));
+
     const list = receivers.map((r) => {
       const base = toApiReceiver(r as ReceiverDocument);
       const id = String(r._id);
       const rating = ratingByReceiverId.get(id);
       const earnings = earningsByReceiver.get(id);
       const isAvailable = Boolean(base.isAvailable);
-      const isOnline = Boolean(base.isOnline);
+      const isOnline = isReceiverLoggedInAndAvailable({
+        receiverId: id,
+        isAvailable,
+        discoverGraceUntil: (r as ReceiverDocument).discoverGraceUntil ?? null,
+      });
       return {
         ...base,
+        isOnline,
+        isBusyOnCall: busyByReceiverId.has(id),
         ratingAvg: rating && rating.count > 0 ? rating.avg : null,
         ratingCount: rating?.count ?? 0,
         totalCalls: earnings?.lifetime.calls ?? 0,
         callsToday: earnings?.today.calls ?? 0,
         earningsToday: earnings?.today.earnings ?? 0,
         totalEarnings: earnings?.lifetime.earnings ?? 0,
-        isLiveAvailable: isAvailable && isOnline,
+        isLiveAvailable: isOnline,
       };
     });
 

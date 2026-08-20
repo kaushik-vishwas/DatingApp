@@ -8,6 +8,10 @@ export interface IWalletOffer {
   popular?: boolean;
   active: boolean;
   offerBannerDataUrl?: string | null; // admin uploads; used by caller for popup
+  /** Single-select: this pack is the caller home-screen offer popup. */
+  homePopup: boolean;
+  /** Two visual layouts matching the caller home offer popup. */
+  homePopupKind: 'social' | 'spotlight';
 }
 
 const walletOfferSchema = new Schema<IWalletOffer>(
@@ -17,6 +21,8 @@ const walletOfferSchema = new Schema<IWalletOffer>(
     popular: { type: Boolean, default: false },
     active: { type: Boolean, default: true, index: true },
     offerBannerDataUrl: { type: String, default: null },
+    homePopup: { type: Boolean, default: false, index: true },
+    homePopupKind: { type: String, enum: ['social', 'spotlight'], default: 'social' },
   },
   { timestamps: true }
 );

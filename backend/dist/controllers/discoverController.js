@@ -68,14 +68,11 @@ function toCard(r, ratingByReceiverId, busyByReceiverId) {
     const rating = ratingByReceiverId.get(String(r._id));
     const id = String(r._id);
     const switchOn = Boolean(o.isAvailable);
-    const discoverAvailable = switchOn;
-    /** Online when Go Online is on and (socket live, background grace, or push-reachable). */
-    const discoverOnline = switchOn &&
-        (0, receiverPresence_1.isReceiverDiscoverPresenceLive)(id, o.discoverGraceUntil ?? null, {
-            isAvailable: switchOn,
-            expoPushToken: o.expoPushToken ?? null,
-            fcmDeviceToken: o.fcmDeviceToken ?? null,
-        });
+    const discoverOnline = (0, receiverPresence_1.isReceiverLoggedInAndAvailable)({
+        receiverId: id,
+        isAvailable: switchOn,
+        discoverGraceUntil: o.discoverGraceUntil ?? null,
+    });
     return {
         _id: id,
         name: o.name,
@@ -87,7 +84,7 @@ function toCard(r, ratingByReceiverId, busyByReceiverId) {
         audioCallRate: Receiver_1.RECEIVER_AUDIO_CALL_RATE_INR_PER_MIN,
         updatedAt: iso(o.updatedAt),
         gender: o.gender === 'male' || o.gender === 'female' || o.gender === 'other' ? o.gender : null,
-        isAvailable: discoverAvailable,
+        isAvailable: switchOn,
         isOnline: discoverOnline,
         isBusyOnCall: busyByReceiverId.has(id),
         ratingAvg: rating ? Math.round(rating.avg * 10) / 10 : 0,
@@ -150,7 +147,7 @@ const listReceiversForCaller = async (req, res) => {
                 },
             ]);
         const ratingByReceiverId = new Map(ratingRows.map((row) => [String(row.receiverId), { avg: row.avg, count: row.count }]));
-        const busyByReceiverId = new Set(receivers.map((r) => String(r._id)).filter((id) => (0, callQueue_1.isReceiverBusy)(id)));
+        const busyByReceiverId = await (0, callQueue_1.getBusyReceiverIdSet)(receivers.map((r) => String(r._id)));
         res.status(200).json({
             receivers: receivers.map((r) => toCard(r, ratingByReceiverId, busyByReceiverId)),
         });

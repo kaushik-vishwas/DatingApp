@@ -40,6 +40,8 @@ const walletOfferSchema = new mongoose_1.Schema({
     popular: { type: Boolean, default: false },
     active: { type: Boolean, default: true, index: true },
     offerBannerDataUrl: { type: String, default: null },
+    homePopup: { type: Boolean, default: false, index: true },
+    homePopupKind: { type: String, enum: ['social', 'spotlight'], default: 'social' },
 }, { timestamps: true });
 // One unique amount/bonus pair at a time.
 walletOfferSchema.index({ amount: 1, bonusPercent: 1 }, { unique: true });

@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { protect } from '../middleware/auth';
 import {
   endVoiceSession,
+  getIncomingPending,
   getRandomQueuedReceiver,
   getVoiceBootstrap,
   rateVoiceSession,
@@ -13,6 +14,7 @@ import {
 const router = Router();
 
 router.get('/bootstrap', protect, getVoiceBootstrap);
+router.get('/incoming-pending', protect, getIncomingPending);
 router.get('/random-receiver', protect, getRandomQueuedReceiver);
 router.post('/session/start', protect, startVoiceSession);
 router.post('/session/sync', protect, syncVoiceSession);

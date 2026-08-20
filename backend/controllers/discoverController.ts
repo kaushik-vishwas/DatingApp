@@ -8,8 +8,8 @@ import Receiver, {
 import ChatBlock from '../models/ChatBlock';
 import ReceiverRating from '../models/ReceiverRating';
 import { blockCallerUntilApproved } from '../utils/accountAccess';
-import { isReceiverBusy } from '../services/callQueue';
-import { isReceiverDiscoverPresenceLive } from '../services/receiverPresence';
+import { getBusyReceiverIdSet } from '../services/callQueue';
+import { isReceiverLoggedInAndAvailable } from '../services/receiverPresence';
 
 function iso(d: Date): string {
   return d.toISOString();
@@ -56,15 +56,11 @@ function toCard(
   const rating = ratingByReceiverId.get(String(r._id));
   const id = String(r._id);
   const switchOn = Boolean(o.isAvailable);
-  const discoverAvailable = switchOn;
-  /** Online when Go Online is on and (socket live, background grace, or push-reachable). */
-  const discoverOnline =
-    switchOn &&
-    isReceiverDiscoverPresenceLive(id, o.discoverGraceUntil ?? null, {
-      isAvailable: switchOn,
-      expoPushToken: o.expoPushToken ?? null,
-      fcmDeviceToken: o.fcmDeviceToken ?? null,
-    });
+  const discoverOnline = isReceiverLoggedInAndAvailable({
+    receiverId: id,
+    isAvailable: switchOn,
+    discoverGraceUntil: o.discoverGraceUntil ?? null,
+  });
   return {
     _id: id,
     name: o.name,
@@ -77,7 +73,7 @@ function toCard(
     updatedAt: iso(o.updatedAt),
     gender:
       o.gender === 'male' || o.gender === 'female' || o.gender === 'other' ? o.gender : null,
-    isAvailable: discoverAvailable,
+    isAvailable: switchOn,
     isOnline: discoverOnline,
     isBusyOnCall: busyByReceiverId.has(id),
     ratingAvg: rating ? Math.round(rating.avg * 10) / 10 : 0,
@@ -156,9 +152,7 @@ export const listReceiversForCaller = async (req: Request, res: Response): Promi
     const ratingByReceiverId = new Map(
       ratingRows.map((row) => [String(row.receiverId), { avg: row.avg, count: row.count }])
     );
-    const busyByReceiverId = new Set(
-      receivers.map((r) => String(r._id)).filter((id) => isReceiverBusy(id))
-    );
+    const busyByReceiverId = await getBusyReceiverIdSet(receivers.map((r) => String(r._id)));
     res.status(200).json({
       receivers: receivers.map((r) =>
         toCard(r as ReceiverDocument, ratingByReceiverId, busyByReceiverId)

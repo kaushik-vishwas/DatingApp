@@ -84,6 +84,15 @@ export interface IReceiver {
   expoPushToken: string | null;
   /** Native FCM device token for high-priority data-only incoming-call wake. */
   fcmDeviceToken: string | null;
+  /** Ringing invite the keep-alive service can poll when JS/FCM is frozen. */
+  pendingIncomingCall: {
+    callId: string;
+    fromId: string;
+    fromType: 'u' | 'r';
+    fromName: string;
+    fromImage: string | null;
+    expiresAt: Date;
+  } | null;
   /** Unique share code for referral invites. */
   referralCode: string | null;
   createdAt: Date;
@@ -153,6 +162,17 @@ const receiverSchema = new Schema<IReceiver>(
     authSessionVersion: { type: Number, default: 0, min: 0 },
     expoPushToken: { type: String, default: null },
     fcmDeviceToken: { type: String, default: null, trim: true },
+    pendingIncomingCall: {
+      type: {
+        callId: { type: String, required: true, trim: true },
+        fromId: { type: String, required: true, trim: true },
+        fromType: { type: String, enum: ['u', 'r'], default: 'u' },
+        fromName: { type: String, default: 'Caller', trim: true },
+        fromImage: { type: String, default: null },
+        expiresAt: { type: Date, required: true },
+      },
+      default: null,
+    },
     referralCode: { type: String, default: null, trim: true, uppercase: true, sparse: true, unique: true },
   },
   { timestamps: true }

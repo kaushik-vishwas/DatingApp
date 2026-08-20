@@ -96,6 +96,17 @@ const receiverSchema = new mongoose_1.Schema({
     authSessionVersion: { type: Number, default: 0, min: 0 },
     expoPushToken: { type: String, default: null },
     fcmDeviceToken: { type: String, default: null, trim: true },
+    pendingIncomingCall: {
+        type: {
+            callId: { type: String, required: true, trim: true },
+            fromId: { type: String, required: true, trim: true },
+            fromType: { type: String, enum: ['u', 'r'], default: 'u' },
+            fromName: { type: String, default: 'Caller', trim: true },
+            fromImage: { type: String, default: null },
+            expiresAt: { type: Date, required: true },
+        },
+        default: null,
+    },
     referralCode: { type: String, default: null, trim: true, uppercase: true, sparse: true, unique: true },
 }, { timestamps: true });
 const Receiver = mongoose_1.default.model('Receiver', receiverSchema);

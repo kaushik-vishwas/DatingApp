@@ -56,6 +56,8 @@ const chatPricing_1 = require("../constants/chatPricing");
 const receiverWelcome_1 = require("../services/receiverWelcome");
 const callerNotification_1 = require("../services/callerNotification");
 const authController_1 = require("./authController");
+const receiverPresence_1 = require("../services/receiverPresence");
+const callQueue_1 = require("../services/callQueue");
 const email_1 = require("../config/email");
 const superAdminSync_1 = require("../services/superAdminSync");
 const razorpayXPayoutService_1 = require("../services/razorpayXPayoutService");
@@ -1203,22 +1205,29 @@ const listAllReceivers = async (_req, res) => {
                 count: row.count ?? 0,
             },
         ]));
+        const busyByReceiverId = await (0, callQueue_1.getBusyReceiverIdSet)(receivers.map((r) => String(r._id)));
         const list = receivers.map((r) => {
             const base = (0, authController_1.toApiReceiver)(r);
             const id = String(r._id);
             const rating = ratingByReceiverId.get(id);
             const earnings = earningsByReceiver.get(id);
             const isAvailable = Boolean(base.isAvailable);
-            const isOnline = Boolean(base.isOnline);
+            const isOnline = (0, receiverPresence_1.isReceiverLoggedInAndAvailable)({
+                receiverId: id,
+                isAvailable,
+                discoverGraceUntil: r.discoverGraceUntil ?? null,
+            });
             return {
                 ...base,
+                isOnline,
+                isBusyOnCall: busyByReceiverId.has(id),
                 ratingAvg: rating && rating.count > 0 ? rating.avg : null,
                 ratingCount: rating?.count ?? 0,
                 totalCalls: earnings?.lifetime.calls ?? 0,
                 callsToday: earnings?.today.calls ?? 0,
                 earningsToday: earnings?.today.earnings ?? 0,
                 totalEarnings: earnings?.lifetime.earnings ?? 0,
-                isLiveAvailable: isAvailable && isOnline,
+                isLiveAvailable: isOnline,
             };
         });
         res.status(200).json({ receivers: list });

@@ -18,6 +18,27 @@ export function isReceiverBusy(receiverId: string): boolean {
   return busyReceiverIds.has(normalizeId(receiverId));
 }
 
+/** In-memory invite/reservation, plus an actual ongoing voice session. */
+export async function getBusyReceiverIdSet(receiverIds: string[]): Promise<Set<string>> {
+  const set = new Set<string>();
+  const oids: mongoose.Types.ObjectId[] = [];
+  for (const raw of receiverIds) {
+    const id = normalizeId(raw);
+    if (!id) continue;
+    if (busyReceiverIds.has(id) || hasPendingCallInviteForReceiver(id)) set.add(id);
+    if (mongoose.Types.ObjectId.isValid(id)) oids.push(new mongoose.Types.ObjectId(id));
+  }
+  if (oids.length === 0) return set;
+  const ongoing = await CallSession.find({
+    receiverId: { $in: oids },
+    status: 'ongoing',
+  })
+    .select('receiverId')
+    .lean<{ receiverId: mongoose.Types.ObjectId }[]>();
+  for (const row of ongoing) set.add(String(row.receiverId));
+  return set;
+}
+
 export function tryReserveReceiver(receiverId: string): boolean {
   const rid = normalizeId(receiverId);
   if (!rid || busyReceiverIds.has(rid)) return false;

@@ -6,6 +6,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.RECEIVER_DISCOVER_GRACE_MS = void 0;
 exports.isReceiverInDiscoverGrace = isReceiverInDiscoverGrace;
 exports.isReceiverDiscoverPresenceLive = isReceiverDiscoverPresenceLive;
+exports.isReceiverLoggedInAndAvailable = isReceiverLoggedInAndAvailable;
 exports.armReceiverDiscoverGraceImmediate = armReceiverDiscoverGraceImmediate;
 exports.clearReceiverDiscoverGrace = clearReceiverDiscoverGrace;
 exports.armReceiverDiscoverGrace = armReceiverDiscoverGrace;
@@ -40,21 +41,16 @@ function isReceiverInDiscoverGrace(receiverId, discoverGraceUntil) {
         return true;
     return false;
 }
-/** Socket connected now, or within the 20-minute post-disconnect grace while Go Online is on.
- *  Optional push reachability: while Go Online is on and an Expo push token exists, treat as
- *  reachable for discover/calls even after Android freezes JS/WebSocket past the grace window.
- */
-function isReceiverDiscoverPresenceLive(receiverId, discoverGraceUntil, reachability) {
+/** Socket connected now, or within the 20-minute post-disconnect grace while Go Online is on. */
+function isReceiverDiscoverPresenceLive(receiverId, discoverGraceUntil, _reachability) {
     const rid = normalizeReceiverId(receiverId);
-    if ((0, socketRegistry_1.isReceiverSocketConnected)(rid) || isReceiverInDiscoverGrace(rid, discoverGraceUntil)) {
-        return true;
-    }
-    const hasPush = Boolean(String(reachability?.expoPushToken ?? '').trim()) ||
-        Boolean(String(reachability?.fcmDeviceToken ?? '').trim());
-    if (reachability?.isAvailable && hasPush) {
-        return true;
-    }
-    return false;
+    return (0, socketRegistry_1.isReceiverSocketConnected)(rid) || isReceiverInDiscoverGrace(rid, discoverGraceUntil);
+}
+/** Shown as online to callers and admin: Go Online switch on AND logged-in (socket or minimize grace). */
+function isReceiverLoggedInAndAvailable(opts) {
+    if (!opts.isAvailable)
+        return false;
+    return isReceiverDiscoverPresenceLive(opts.receiverId, opts.discoverGraceUntil);
 }
 function scheduleGraceExpiry(rid) {
     const prev = discoverGraceExpireTimers.get(rid);
@@ -113,23 +109,19 @@ async function touchReceiverForegroundPresence(receiverId) {
     await syncReceiverPresenceInDatabase(rid);
 }
 /**
- * DB `isOnline` reflects Go Online (`isAvailable`) plus live socket, background grace,
- * or a registered Expo push token (Android can freeze the socket while the app still runs).
+ * DB `isOnline` is Go Online (`isAvailable`) plus live socket or background grace.
+ * Push tokens wake a ringing phone; they do not count as logged in for discover/admin.
  */
 async function syncReceiverPresenceInDatabase(receiverId) {
     const rid = normalizeReceiverId(receiverId);
     if (!rid)
         return;
-    const receiver = await Receiver_1.default.findById(rid).select('isAvailable onlineSince isOnline discoverGraceUntil expoPushToken fcmDeviceToken');
+    const receiver = await Receiver_1.default.findById(rid).select('isAvailable onlineSince isOnline discoverGraceUntil');
     if (!receiver)
         return;
     const socketLive = (0, socketRegistry_1.isReceiverSocketConnected)(rid);
     const graceLive = isReceiverInDiscoverGrace(rid, receiver.discoverGraceUntil);
-    const pushReachable = Boolean(receiver.isAvailable) &&
-        (Boolean(String(receiver.expoPushToken ?? '').trim()) ||
-            Boolean(String(receiver.fcmDeviceToken ?? '').trim()));
-    const presenceLive = socketLive || graceLive || pushReachable;
-    const shouldBeOnline = presenceLive && Boolean(receiver.isAvailable);
+    const shouldBeOnline = Boolean(receiver.isAvailable) && (socketLive || graceLive);
     const wasOnline = Boolean(receiver.isOnline);
     const onlineSince = receiver.onlineSince;
     if (shouldBeOnline && !wasOnline) {

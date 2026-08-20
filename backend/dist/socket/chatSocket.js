@@ -21,10 +21,15 @@ const receiverScore_1 = require("../services/receiverScore");
 const callerOnlineNotifier_1 = require("../services/callerOnlineNotifier");
 const receiverAvailabilityNotifier_1 = require("../services/receiverAvailabilityNotifier");
 const callInviteRegistry_1 = require("../services/callInviteRegistry");
+const pendingIncomingCall_1 = require("../services/pendingIncomingCall");
 const callController_1 = require("../controllers/callController");
 const callQueue_1 = require("../services/callQueue");
 const expoPush_1 = require("../services/expoPush");
 const receiverPresence_1 = require("../services/receiverPresence");
+/** Open receiver app: skip to next caller target after this if they do not accept. */
+const RING_NO_ANSWER_FOREGROUND_MS = 5_000;
+/** Minimized / frozen receiver: wait this long for a notification tap. */
+const RING_NO_ANSWER_BACKGROUND_MS = 15_000;
 function inviteCallerId(invite) {
     return invite.inviterType === 'u' ? invite.inviterId : invite.targetId;
 }
@@ -103,9 +108,45 @@ function attachChatSocket(httpServer) {
         }
         finally {
             (0, callInviteRegistry_1.unregisterPendingCallInvite)(receiverId);
+            void (0, pendingIncomingCall_1.clearPendingIncomingCall)(receiverId);
             (0, callQueue_1.releaseReceiverReservation)(receiverId);
             await (0, callQueue_1.syncReceiverQueueState)(receiverId);
         }
+    };
+    const expireInviteNoAnswer = (callId) => {
+        const invite = activeCallInvites.get(callId);
+        if (!invite)
+            return;
+        if (invite.timeoutHandle) {
+            clearTimeout(invite.timeoutHandle);
+            invite.timeoutHandle = null;
+        }
+        activeCallInvites.delete(callId);
+        void settleAndReleaseCall(callId, invite.receiverId, inviteCallerId(invite), invite.invitedAt);
+        io.to(accountRoom(invite.inviterType, invite.inviterId)).emit('call:response', {
+            callId,
+            accepted: false,
+            fromType: invite.targetType,
+            fromId: invite.targetId,
+            reason: 'no_answer',
+        });
+        io.to(accountRoom(invite.inviterType, invite.inviterId)).emit('call:ended', {
+            callId,
+            fromType: invite.targetType,
+            fromId: invite.targetId,
+        });
+        io.to(accountRoom(invite.targetType, invite.targetId)).emit('call:ended', {
+            callId,
+            fromType: invite.targetType,
+            fromId: invite.targetId,
+        });
+    };
+    const armInviteNoAnswerTimeout = (invite, waitMs) => {
+        if (invite.timeoutHandle) {
+            clearTimeout(invite.timeoutHandle);
+            invite.timeoutHandle = null;
+        }
+        invite.timeoutHandle = setTimeout(() => expireInviteNoAnswer(invite.callId), Math.max(0, waitMs));
     };
     const cancelPendingInvitesFor = (typ, accountId) => {
         for (const [callId, invite] of activeCallInvites) {
@@ -685,10 +726,10 @@ function attachChatSocket(httpServer) {
                     const recvPresence = await Receiver_1.default.findById(targetId)
                         .select('expoPushToken fcmDeviceToken discoverGraceUntil isAvailable')
                         .lean();
-                    const presenceLive = (0, receiverPresence_1.isReceiverDiscoverPresenceLive)(targetId, recvPresence?.discoverGraceUntil ?? null, {
+                    const presenceLive = (0, receiverPresence_1.isReceiverLoggedInAndAvailable)({
+                        receiverId: targetId,
                         isAvailable: Boolean(recvPresence?.isAvailable),
-                        expoPushToken: recvPresence?.expoPushToken ?? null,
-                        fcmDeviceToken: recvPresence?.fcmDeviceToken ?? null,
+                        discoverGraceUntil: recvPresence?.discoverGraceUntil ?? null,
                     });
                     const pushToken = recvPresence?.expoPushToken?.trim();
                     const fcmToken = recvPresence?.fcmDeviceToken?.trim();
@@ -702,7 +743,7 @@ function attachChatSocket(httpServer) {
                         graceUntil: recvPresence?.discoverGraceUntil ?? null,
                         isAvailable: Boolean(recvPresence?.isAvailable),
                     };
-                    if (!receiverSocket && !presenceLive && !pushToken && !fcmToken) {
+                    if (!presenceLive) {
                         ack?.({ ok: false, error: 'Receiver is offline right now.', debug: inviteDebug });
                         return;
                     }
@@ -766,20 +807,7 @@ function attachChatSocket(httpServer) {
                 (0, callInviteRegistry_1.registerPendingCallInvite)(receiverForInviteId);
                 (0, callQueue_1.removeReceiverFromQueue)(receiverForInviteId);
                 const invitedAt = new Date();
-                const timeoutHandle = setTimeout(() => {
-                    const invite = activeCallInvites.get(callId);
-                    if (!invite)
-                        return;
-                    activeCallInvites.delete(callId);
-                    void settleAndReleaseCall(callId, invite.receiverId, inviteCallerId(invite), invite.invitedAt);
-                    io.to(accountRoom(invite.inviterType, invite.inviterId)).emit('call:response', {
-                        callId,
-                        accepted: false,
-                        fromType: invite.targetType,
-                        fromId: invite.targetId,
-                    });
-                }, 45_000);
-                activeCallInvites.set(callId, {
+                const invite = {
                     callId,
                     inviterId: myId,
                     inviterType: typ,
@@ -787,8 +815,11 @@ function attachChatSocket(httpServer) {
                     targetType,
                     receiverId: receiverForInviteId,
                     invitedAt,
-                    timeoutHandle,
-                });
+                    timeoutHandle: null,
+                    ringSeen: 'unknown',
+                };
+                activeCallInvites.set(callId, invite);
+                armInviteNoAnswerTimeout(invite, RING_NO_ANSWER_BACKGROUND_MS);
                 let fromName = '';
                 let fromImage = null;
                 if (typ === 'u') {
@@ -809,6 +840,13 @@ function attachChatSocket(httpServer) {
                     fromImage,
                 });
                 if (targetType === 'r') {
+                    void (0, pendingIncomingCall_1.setPendingIncomingCall)(targetId, {
+                        callId,
+                        fromId: myId,
+                        fromType: typ,
+                        fromName,
+                        fromImage,
+                    });
                     void (async () => {
                         try {
                             const recv = await Receiver_1.default.findById(targetId)
@@ -837,6 +875,30 @@ function attachChatSocket(httpServer) {
                 }
                 ack?.({ ok: true, debug: inviteDebug });
             })();
+        });
+        socket.on('call:incoming-seen', (payload, ack) => {
+            const callId = typeof payload?.callId === 'string' ? payload.callId.trim() : '';
+            const invite = callId ? activeCallInvites.get(callId) : undefined;
+            if (!invite) {
+                ack?.({ ok: false, error: 'Unknown call invite' });
+                return;
+            }
+            const seenById = String(socket.data.accountId);
+            const seenByType = socket.data.typ;
+            if (seenById !== invite.targetId || seenByType !== invite.targetType) {
+                ack?.({ ok: false, error: 'Forbidden' });
+                return;
+            }
+            if (invite.ringSeen !== 'unknown') {
+                ack?.({ ok: true });
+                return;
+            }
+            const foreground = payload?.appState === 'active' || payload?.appState === 'foreground';
+            invite.ringSeen = foreground ? 'foreground' : 'background';
+            const budgetMs = foreground ? RING_NO_ANSWER_FOREGROUND_MS : RING_NO_ANSWER_BACKGROUND_MS;
+            const elapsed = Date.now() - invite.invitedAt.getTime();
+            armInviteNoAnswerTimeout(invite, budgetMs - elapsed);
+            ack?.({ ok: true });
         });
         socket.on('call:response', (payload, ack) => {
             const callId = typeof payload?.callId === 'string' ? payload.callId.trim() : '';
@@ -875,6 +937,7 @@ function attachChatSocket(httpServer) {
             });
             if (!accepted) {
                 activeCallInvites.delete(callId);
+                void (0, pendingIncomingCall_1.clearPendingIncomingCall)(invite.receiverId, callId);
                 void settleAndReleaseCall(callId, invite.receiverId, inviteCallerId(invite), invite.invitedAt);
             }
             ack?.({ ok: true });
@@ -1094,6 +1157,7 @@ function attachChatSocket(httpServer) {
                     fromId: endedById,
                 });
                 activeCallInvites.delete(callId);
+                void (0, pendingIncomingCall_1.clearPendingIncomingCall)(invite.receiverId, callId);
                 void settleAndReleaseCall(callId, invite.receiverId, inviteCallerId(invite), invite.invitedAt);
                 ack?.({ ok: true });
                 return;

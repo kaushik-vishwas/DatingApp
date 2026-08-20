@@ -5,6 +5,7 @@ const auth_1 = require("../middleware/auth");
 const callController_1 = require("../controllers/callController");
 const router = (0, express_1.Router)();
 router.get('/bootstrap', auth_1.protect, callController_1.getVoiceBootstrap);
+router.get('/incoming-pending', auth_1.protect, callController_1.getIncomingPending);
 router.get('/random-receiver', auth_1.protect, callController_1.getRandomQueuedReceiver);
 router.post('/session/start', auth_1.protect, callController_1.startVoiceSession);
 router.post('/session/sync', auth_1.protect, callController_1.syncVoiceSession);

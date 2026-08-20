@@ -4,6 +4,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.isReceiverBusy = isReceiverBusy;
+exports.getBusyReceiverIdSet = getBusyReceiverIdSet;
 exports.tryReserveReceiver = tryReserveReceiver;
 exports.releaseReceiverReservation = releaseReceiverReservation;
 exports.releaseIfStaleReceiverBusy = releaseIfStaleReceiverBusy;
@@ -28,6 +29,31 @@ function normalizeId(id) {
 }
 function isReceiverBusy(receiverId) {
     return busyReceiverIds.has(normalizeId(receiverId));
+}
+/** In-memory invite/reservation, plus an actual ongoing voice session. */
+async function getBusyReceiverIdSet(receiverIds) {
+    const set = new Set();
+    const oids = [];
+    for (const raw of receiverIds) {
+        const id = normalizeId(raw);
+        if (!id)
+            continue;
+        if (busyReceiverIds.has(id) || (0, callInviteRegistry_1.hasPendingCallInviteForReceiver)(id))
+            set.add(id);
+        if (mongoose_1.default.Types.ObjectId.isValid(id))
+            oids.push(new mongoose_1.default.Types.ObjectId(id));
+    }
+    if (oids.length === 0)
+        return set;
+    const ongoing = await CallSession_1.default.find({
+        receiverId: { $in: oids },
+        status: 'ongoing',
+    })
+        .select('receiverId')
+        .lean();
+    for (const row of ongoing)
+        set.add(String(row.receiverId));
+    return set;
 }
 function tryReserveReceiver(receiverId) {
     const rid = normalizeId(receiverId);

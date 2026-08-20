@@ -4,6 +4,8 @@ import { blockCallerUntilApproved } from '../utils/accountAccess';
 
 const GST_PERCENTAGE = 28;
 
+type HomePopupKind = 'social' | 'spotlight';
+
 type WalletOfferRow = {
   id: string;
   amount: number;
@@ -11,7 +13,13 @@ type WalletOfferRow = {
   popular: boolean;
   active: boolean;
   offerBannerDataUrl?: string | null;
+  homePopup: boolean;
+  homePopupKind: HomePopupKind;
 };
+
+function toHomePopupKind(v: unknown): HomePopupKind {
+  return v === 'spotlight' ? 'spotlight' : 'social';
+}
 
 function toWalletOfferRow(o: any): WalletOfferRow {
   return {
@@ -21,6 +29,8 @@ function toWalletOfferRow(o: any): WalletOfferRow {
     popular: Boolean(o.popular),
     active: Boolean(o.active),
     offerBannerDataUrl: o.offerBannerDataUrl ?? null,
+    homePopup: Boolean(o.homePopup),
+    homePopupKind: toHomePopupKind(o.homePopupKind),
   };
 }
 
@@ -49,13 +59,22 @@ export async function listWalletOffers(req: Request, res: Response): Promise<voi
 
     // Return empty array if no offers - no fallback to static offers
     if (activeOffers.length === 0) {
-      res.status(200).json({ offers: [], banner: null });
+      res.status(200).json({ offers: [], banner: null, popup: null });
       return;
     }
 
     const offers = activeOffers.map(toWalletOfferRow);
+    const homePopupOffer = offers.find((o) => o.homePopup) ?? null;
+    const popup = homePopupOffer
+      ? {
+          offerId: homePopupOffer.id,
+          amount: homePopupOffer.amount,
+          bonusPercent: homePopupOffer.bonusPercent,
+          kind: homePopupOffer.homePopupKind,
+        }
+      : null;
 
-    // Pick a single banner for the popup: prefer popular, then first that has banner.
+    // Pick a single banner for the wallet screen: prefer popular, then first that has banner.
     const bannerCandidates = offers.filter((o) => Boolean(o.offerBannerDataUrl));
     const popularCandidate =
       bannerCandidates.find((o) => o.popular) ?? bannerCandidates[0] ?? null;
@@ -68,7 +87,7 @@ export async function listWalletOffers(req: Request, res: Response): Promise<voi
           }
         : null;
 
-    res.status(200).json({ offers, banner });
+        res.status(200).json({ offers, banner, popup });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     res.status(500).json({ message: msg || 'Server error' });
@@ -100,17 +119,26 @@ export async function createAdminWalletOffer(
     const offerBannerDataUrlRaw = (req.body as any)?.offerBannerDataUrl;
     const offerBannerDataUrl = typeof offerBannerDataUrlRaw === 'string' ? offerBannerDataUrlRaw : null;
 
+    const homePopup = Boolean((req.body as any)?.homePopup ?? false);
+    const homePopupKind = toHomePopupKind((req.body as any)?.homePopupKind);
+
     if (!Number.isFinite(amount) || !Number.isFinite(bonusPercent)) {
       res.status(400).json({ message: 'amount and bonusPercent must be numbers' });
       return;
+    }
+
+    if (homePopup) {
+      await WalletOffer.updateMany({}, { $set: { homePopup: false } });
     }
 
     await WalletOffer.create({
       amount,
       bonusPercent,
       popular,
-      active,
+      active: homePopup ? true : active,
       offerBannerDataUrl,
+      homePopup,
+      homePopupKind,
     });
 
     const offers = await WalletOffer.find({}).lean().then((rows) => rows.map(toWalletOfferRow));
@@ -137,10 +165,25 @@ export async function updateAdminWalletOffer(
     if (typeof req.body.amount !== 'undefined') patch.amount = normalizeIntAmount(req.body.amount);
     if (typeof req.body.bonusPercent !== 'undefined') patch.bonusPercent = normalizeIntPercent(req.body.bonusPercent);
     if (typeof req.body.popular !== 'undefined') patch.popular = Boolean(req.body.popular);
-    if (typeof req.body.active !== 'undefined') patch.active = Boolean(req.body.active);
     if (typeof req.body.offerBannerDataUrl !== 'undefined') {
       patch.offerBannerDataUrl =
         typeof req.body.offerBannerDataUrl === 'string' ? req.body.offerBannerDataUrl : null;
+    }
+    if (typeof req.body.homePopupKind !== 'undefined') {
+      patch.homePopupKind = toHomePopupKind(req.body.homePopupKind);
+    }
+    if (typeof req.body.active !== 'undefined') {
+      patch.active = Boolean(req.body.active);
+      if (patch.active === false) patch.homePopup = false;
+    }
+    if (typeof req.body.homePopup !== 'undefined') {
+      if (Boolean(req.body.homePopup)) {
+        await WalletOffer.updateMany({ _id: { $ne: id } }, { $set: { homePopup: false } });
+        patch.homePopup = true;
+        patch.active = true;
+      } else {
+        patch.homePopup = false;
+      }
     }
 
     await WalletOffer.findByIdAndUpdate(id, patch, { new: false });

@@ -36,7 +36,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.reportVoiceSessionIssue = exports.rateVoiceSession = exports.syncVoiceSession = exports.endVoiceSession = exports.startVoiceSession = exports.getVoiceBootstrap = exports.getRandomQueuedReceiver = exports.MISSED_OR_INCOMPLETE_MAX_SEC = void 0;
+exports.getIncomingPending = exports.reportVoiceSessionIssue = exports.rateVoiceSession = exports.syncVoiceSession = exports.endVoiceSession = exports.startVoiceSession = exports.getVoiceBootstrap = exports.getRandomQueuedReceiver = exports.MISSED_OR_INCOMPLETE_MAX_SEC = void 0;
 exports.callTalkStartedAt = callTalkStartedAt;
 exports.callTalkDurationSec = callTalkDurationSec;
 exports.ensureCallEndedAndSettled = ensureCallEndedAndSettled;
@@ -54,6 +54,7 @@ const receiverEarningModel_1 = require("../services/receiverEarningModel");
 const callQueue_1 = require("../services/callQueue");
 const socketRegistry_1 = require("../socket/socketRegistry");
 const receiverPresence_1 = require("../services/receiverPresence");
+const pendingIncomingCall_1 = require("../services/pendingIncomingCall");
 const callQueue_2 = require("../services/callQueue");
 function roundInr(n) {
     return Math.round(n * 100) / 100;
@@ -386,29 +387,23 @@ const getVoiceBootstrap = async (req, res) => {
         res.status(409).json({ message: 'Receiver is currently unavailable' });
         return;
     }
-    // Align with call:invite: Android may freeze the WebSocket while the app is still
-    // runnable. Allow bootstrap when discover-grace is live or Expo push can wake the app.
+    // Align with discover: bootstrap only if Go Online is on and they are logged in (socket or grace).
     if (!(0, socketRegistry_1.isReceiverSocketConnected)(receiverId)) {
         const recvPresence = await Receiver_1.default.findById(receiverId)
-            .select('expoPushToken fcmDeviceToken discoverGraceUntil isAvailable')
+            .select('discoverGraceUntil isAvailable')
             .lean();
-        const presenceLive = (0, receiverPresence_1.isReceiverDiscoverPresenceLive)(receiverId, recvPresence?.discoverGraceUntil ?? null, {
+        const presenceLive = (0, receiverPresence_1.isReceiverLoggedInAndAvailable)({
+            receiverId,
             isAvailable: Boolean(recvPresence?.isAvailable ?? receiverDoc.isAvailable),
-            expoPushToken: recvPresence?.expoPushToken ?? null,
-            fcmDeviceToken: recvPresence?.fcmDeviceToken ?? null,
+            discoverGraceUntil: recvPresence?.discoverGraceUntil ?? null,
         });
-        const pushToken = recvPresence?.expoPushToken?.trim();
-        const fcmToken = recvPresence?.fcmDeviceToken?.trim();
-        if (!presenceLive && !pushToken && !fcmToken) {
+        if (!presenceLive) {
             res.status(409).json({
                 message: 'Receiver is offline right now',
                 debug: {
                     receiverSocket: false,
                     presenceLive: false,
-                    hasExpoPush: false,
-                    hasFcm: false,
                     graceUntil: recvPresence?.discoverGraceUntil ?? null,
-                    isAvailable: Boolean(recvPresence?.isAvailable ?? receiverDoc.isAvailable),
                 },
             });
             return;
@@ -767,3 +762,33 @@ const reportVoiceSessionIssue = async (req, res) => {
     }
 };
 exports.reportVoiceSessionIssue = reportVoiceSessionIssue;
+/**
+ * GET /calls/incoming-pending — receiver keep-alive poll when JS/FCM is frozen.
+ */
+const getIncomingPending = async (req, res) => {
+    try {
+        if (req.accountKind !== 'receiver' || !req.receiver?._id) {
+            res.status(403).json({ message: 'Receiver account required' });
+            return;
+        }
+        const incoming = await (0, pendingIncomingCall_1.getLivePendingIncomingCall)(String(req.receiver._id));
+        res.status(200).json({
+            incoming: incoming
+                ? {
+                    callId: incoming.callId,
+                    fromId: incoming.fromId,
+                    fromType: incoming.fromType,
+                    fromName: incoming.fromName,
+                    fromImage: incoming.fromImage,
+                    expiresAt: incoming.expiresAt.toISOString(),
+                }
+                : null,
+        });
+    }
+    catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error('getIncomingPending error:', msg);
+        res.status(500).json({ message: msg || 'Server error' });
+    }
+};
+exports.getIncomingPending = getIncomingPending;
