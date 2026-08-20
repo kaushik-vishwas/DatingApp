@@ -2104,7 +2104,7 @@ const receiverForegroundPresence = async (req, res) => {
 };
 exports.receiverForegroundPresence = receiverForegroundPresence;
 /**
- * PATCH /profile/receiver/push-token — store Expo push token for incoming-call notifications.
+ * PATCH /profile/receiver/push-token — store Expo and/or native FCM tokens for incoming-call wake.
  */
 const updateReceiverExpoPushToken = async (req, res) => {
     try {
@@ -2112,13 +2112,27 @@ const updateReceiverExpoPushToken = async (req, res) => {
             res.status(403).json({ message: 'This endpoint is only for receiver accounts' });
             return;
         }
-        const token = typeof req.body.expoPushToken === 'string' ? req.body.expoPushToken.trim() : '';
-        if (!token || !token.startsWith('ExponentPushToken')) {
+        const expoPushToken = typeof req.body.expoPushToken === 'string' ? req.body.expoPushToken.trim() : '';
+        const fcmDeviceToken = typeof req.body.fcmDeviceToken === 'string' ? req.body.fcmDeviceToken.trim() : '';
+        if (expoPushToken && !expoPushToken.startsWith('ExponentPushToken')) {
             res.status(400).json({ message: 'A valid expoPushToken is required' });
             return;
         }
+        if (fcmDeviceToken && (fcmDeviceToken.length < 20 || fcmDeviceToken.startsWith('ExponentPushToken'))) {
+            res.status(400).json({ message: 'A valid fcmDeviceToken is required' });
+            return;
+        }
+        if (!expoPushToken && !fcmDeviceToken) {
+            res.status(400).json({ message: 'expoPushToken or fcmDeviceToken is required' });
+            return;
+        }
         const receiverId = String(req.receiver._id);
-        await Receiver_1.default.updateOne({ _id: receiverId }, { $set: { expoPushToken: token } });
+        const $set = {};
+        if (expoPushToken)
+            $set.expoPushToken = expoPushToken;
+        if (fcmDeviceToken)
+            $set.fcmDeviceToken = fcmDeviceToken;
+        await Receiver_1.default.updateOne({ _id: receiverId }, { $set });
         res.status(200).json({ ok: true });
     }
     catch (err) {

@@ -1,7 +1,101 @@
 "use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.sendReceiverIncomingCallWake = sendReceiverIncomingCallWake;
 exports.sendReceiverIncomingCallPush = sendReceiverIncomingCallPush;
 exports.sendOnlinePresencePush = sendOnlinePresencePush;
+/** Prefer high-priority FCM v1; fall back to Expo if FCM is missing or fails. */
+async function sendReceiverIncomingCallWake(payload) {
+    const fcmToken = payload.fcmDeviceToken?.trim() ?? '';
+    let fcmOk = false;
+    let fcmError;
+    let fcmStatus;
+    if (fcmToken) {
+        const { sendFcmV1IncomingCallPush } = await Promise.resolve().then(() => __importStar(require('./fcmV1IncomingCall')));
+        const result = await sendFcmV1IncomingCallPush({
+            deviceToken: fcmToken,
+            callId: payload.callId,
+            fromId: payload.fromId,
+            fromName: payload.fromName,
+            fromImage: payload.fromImage,
+        });
+        fcmOk = result.ok;
+        fcmError = result.error;
+        fcmStatus = result.status;
+        console.info('incoming call fcm v1:', {
+            callId: payload.callId,
+            ok: result.ok,
+            status: result.status ?? null,
+            error: result.error ?? null,
+        });
+    }
+    else {
+        console.info('incoming call fcm v1 skipped: no device token', { callId: payload.callId });
+    }
+    if (fcmOk) {
+        return { fcmAttempted: Boolean(fcmToken), fcmOk: true, expoAttempted: false, expoOk: false };
+    }
+    const expoToken = payload.expoPushToken?.trim() ?? '';
+    if (!expoToken) {
+        console.error('incoming call push skipped: no fcm or expo token', { callId: payload.callId });
+        return {
+            fcmAttempted: Boolean(fcmToken),
+            fcmOk: false,
+            fcmError,
+            fcmStatus,
+            expoAttempted: false,
+            expoOk: false,
+            skippedReason: fcmToken ? 'fcm_failed_no_expo_token' : 'no_fcm_or_expo_token',
+        };
+    }
+    await sendReceiverIncomingCallPush({
+        expoPushToken: expoToken,
+        callId: payload.callId,
+        fromId: payload.fromId,
+        fromName: payload.fromName,
+        fromImage: payload.fromImage,
+    });
+    return {
+        fcmAttempted: Boolean(fcmToken),
+        fcmOk: false,
+        fcmError,
+        fcmStatus,
+        expoAttempted: true,
+        expoOk: true,
+    };
+}
 /** Sends a high-priority Expo push so receivers get incoming calls when the app is backgrounded. */
 async function sendReceiverIncomingCallPush(payload) {
     const token = payload.expoPushToken.trim();

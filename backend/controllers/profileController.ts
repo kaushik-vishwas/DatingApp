@@ -2535,7 +2535,7 @@ export const receiverForegroundPresence = async (req: Request, res: Response): P
 };
 
 /**
- * PATCH /profile/receiver/push-token — store Expo push token for incoming-call notifications.
+ * PATCH /profile/receiver/push-token — store Expo and/or native FCM tokens for incoming-call wake.
  */
 export const updateReceiverExpoPushToken = async (req: Request, res: Response): Promise<void> => {
   try {
@@ -2543,14 +2543,27 @@ export const updateReceiverExpoPushToken = async (req: Request, res: Response): 
       res.status(403).json({ message: 'This endpoint is only for receiver accounts' });
       return;
     }
-    const token =
+    const expoPushToken =
       typeof req.body.expoPushToken === 'string' ? req.body.expoPushToken.trim() : '';
-    if (!token || !token.startsWith('ExponentPushToken')) {
+    const fcmDeviceToken =
+      typeof req.body.fcmDeviceToken === 'string' ? req.body.fcmDeviceToken.trim() : '';
+    if (expoPushToken && !expoPushToken.startsWith('ExponentPushToken')) {
       res.status(400).json({ message: 'A valid expoPushToken is required' });
       return;
     }
+    if (fcmDeviceToken && (fcmDeviceToken.length < 20 || fcmDeviceToken.startsWith('ExponentPushToken'))) {
+      res.status(400).json({ message: 'A valid fcmDeviceToken is required' });
+      return;
+    }
+    if (!expoPushToken && !fcmDeviceToken) {
+      res.status(400).json({ message: 'expoPushToken or fcmDeviceToken is required' });
+      return;
+    }
     const receiverId = String(req.receiver!._id);
-    await Receiver.updateOne({ _id: receiverId }, { $set: { expoPushToken: token } });
+    const $set: { expoPushToken?: string; fcmDeviceToken?: string } = {};
+    if (expoPushToken) $set.expoPushToken = expoPushToken;
+    if (fcmDeviceToken) $set.fcmDeviceToken = fcmDeviceToken;
+    await Receiver.updateOne({ _id: receiverId }, { $set });
     res.status(200).json({ ok: true });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);

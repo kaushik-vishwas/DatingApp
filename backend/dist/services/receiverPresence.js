@@ -49,7 +49,9 @@ function isReceiverDiscoverPresenceLive(receiverId, discoverGraceUntil, reachabi
     if ((0, socketRegistry_1.isReceiverSocketConnected)(rid) || isReceiverInDiscoverGrace(rid, discoverGraceUntil)) {
         return true;
     }
-    if (reachability?.isAvailable && String(reachability.expoPushToken ?? '').trim()) {
+    const hasPush = Boolean(String(reachability?.expoPushToken ?? '').trim()) ||
+        Boolean(String(reachability?.fcmDeviceToken ?? '').trim());
+    if (reachability?.isAvailable && hasPush) {
         return true;
     }
     return false;
@@ -118,12 +120,14 @@ async function syncReceiverPresenceInDatabase(receiverId) {
     const rid = normalizeReceiverId(receiverId);
     if (!rid)
         return;
-    const receiver = await Receiver_1.default.findById(rid).select('isAvailable onlineSince isOnline discoverGraceUntil expoPushToken');
+    const receiver = await Receiver_1.default.findById(rid).select('isAvailable onlineSince isOnline discoverGraceUntil expoPushToken fcmDeviceToken');
     if (!receiver)
         return;
     const socketLive = (0, socketRegistry_1.isReceiverSocketConnected)(rid);
     const graceLive = isReceiverInDiscoverGrace(rid, receiver.discoverGraceUntil);
-    const pushReachable = Boolean(receiver.isAvailable) && Boolean(String(receiver.expoPushToken ?? '').trim());
+    const pushReachable = Boolean(receiver.isAvailable) &&
+        (Boolean(String(receiver.expoPushToken ?? '').trim()) ||
+            Boolean(String(receiver.fcmDeviceToken ?? '').trim()));
     const presenceLive = socketLive || graceLive || pushReachable;
     const shouldBeOnline = presenceLive && Boolean(receiver.isAvailable);
     const wasOnline = Boolean(receiver.isOnline);

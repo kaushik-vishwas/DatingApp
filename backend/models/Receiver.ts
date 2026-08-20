@@ -82,6 +82,8 @@ export interface IReceiver {
   authSessionVersion: number;
   /** Expo push token for incoming-call alerts when the app is backgrounded. */
   expoPushToken: string | null;
+  /** Native FCM device token for high-priority data-only incoming-call wake. */
+  fcmDeviceToken: string | null;
   /** Unique share code for referral invites. */
   referralCode: string | null;
   createdAt: Date;
@@ -150,6 +152,7 @@ const receiverSchema = new Schema<IReceiver>(
     onlineSince: { type: Date, default: null },
     authSessionVersion: { type: Number, default: 0, min: 0 },
     expoPushToken: { type: String, default: null },
+    fcmDeviceToken: { type: String, default: null, trim: true },
     referralCode: { type: String, default: null, trim: true, uppercase: true, sparse: true, unique: true },
   },
   { timestamps: true }

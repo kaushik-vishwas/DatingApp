@@ -63,6 +63,7 @@ function toCard(
     isReceiverDiscoverPresenceLive(id, o.discoverGraceUntil ?? null, {
       isAvailable: switchOn,
       expoPushToken: o.expoPushToken ?? null,
+      fcmDeviceToken: o.fcmDeviceToken ?? null,
     });
   return {
     _id: id,
@@ -120,7 +121,7 @@ export const listReceiversForCaller = async (req: Request, res: Response): Promi
 
     const receivers = await Receiver.find({ ...filter, ...blockClause })
       .select(
-        'name age state interests languages profileImage audioCallRate updatedAt gender isAvailable isOnline discoverGraceUntil expoPushToken'
+        'name age state interests languages profileImage audioCallRate updatedAt gender isAvailable isOnline discoverGraceUntil expoPushToken fcmDeviceToken'
       )
       .sort({ updatedAt: -1 })
       .limit(limit)

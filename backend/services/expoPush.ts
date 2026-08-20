@@ -6,6 +6,87 @@ type IncomingCallPushPayload = {
   fromImage: string | null;
 };
 
+export type IncomingCallWakePayload = {
+  expoPushToken?: string | null;
+  fcmDeviceToken?: string | null;
+  callId: string;
+  fromId: string;
+  fromName: string;
+  fromImage: string | null;
+};
+
+/** Prefer high-priority FCM v1; fall back to Expo if FCM is missing or fails. */
+export async function sendReceiverIncomingCallWake(
+  payload: IncomingCallWakePayload
+): Promise<{
+  fcmAttempted: boolean;
+  fcmOk: boolean;
+  fcmError?: string;
+  fcmStatus?: number;
+  expoAttempted: boolean;
+  expoOk: boolean;
+  skippedReason?: string;
+}> {
+  const fcmToken = payload.fcmDeviceToken?.trim() ?? '';
+  let fcmOk = false;
+  let fcmError: string | undefined;
+  let fcmStatus: number | undefined;
+  if (fcmToken) {
+    const { sendFcmV1IncomingCallPush } = await import('./fcmV1IncomingCall');
+    const result = await sendFcmV1IncomingCallPush({
+      deviceToken: fcmToken,
+      callId: payload.callId,
+      fromId: payload.fromId,
+      fromName: payload.fromName,
+      fromImage: payload.fromImage,
+    });
+    fcmOk = result.ok;
+    fcmError = result.error;
+    fcmStatus = result.status;
+    console.info('incoming call fcm v1:', {
+      callId: payload.callId,
+      ok: result.ok,
+      status: result.status ?? null,
+      error: result.error ?? null,
+    });
+  } else {
+    console.info('incoming call fcm v1 skipped: no device token', { callId: payload.callId });
+  }
+
+  if (fcmOk) {
+    return { fcmAttempted: Boolean(fcmToken), fcmOk: true, expoAttempted: false, expoOk: false };
+  }
+
+  const expoToken = payload.expoPushToken?.trim() ?? '';
+  if (!expoToken) {
+    console.error('incoming call push skipped: no fcm or expo token', { callId: payload.callId });
+    return {
+      fcmAttempted: Boolean(fcmToken),
+      fcmOk: false,
+      fcmError,
+      fcmStatus,
+      expoAttempted: false,
+      expoOk: false,
+      skippedReason: fcmToken ? 'fcm_failed_no_expo_token' : 'no_fcm_or_expo_token',
+    };
+  }
+  await sendReceiverIncomingCallPush({
+    expoPushToken: expoToken,
+    callId: payload.callId,
+    fromId: payload.fromId,
+    fromName: payload.fromName,
+    fromImage: payload.fromImage,
+  });
+  return {
+    fcmAttempted: Boolean(fcmToken),
+    fcmOk: false,
+    fcmError,
+    fcmStatus,
+    expoAttempted: true,
+    expoOk: true,
+  };
+}
+
 /** Sends a high-priority Expo push so receivers get incoming calls when the app is backgrounded. */
 export async function sendReceiverIncomingCallPush(
   payload: IncomingCallPushPayload

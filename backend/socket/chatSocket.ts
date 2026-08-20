@@ -28,7 +28,7 @@ import {
   syncReceiverQueueState,
   tryReserveReceiver,
 } from '../services/callQueue';
-import { sendReceiverIncomingCallPush } from '../services/expoPush';
+import { sendReceiverIncomingCallWake } from '../services/expoPush';
 import {
   armReceiverDiscoverGraceImmediate,
   clearReceiverDiscoverGrace,
@@ -713,6 +713,7 @@ export function attachChatSocket(httpServer: HTTPServer): Server {
         const myId = String(socket.data.accountId);
         const callId = typeof payload?.callId === 'string' ? payload.callId.trim() : '';
         const targetId = typeof payload?.targetId === 'string' ? payload.targetId.trim() : '';
+        let inviteDebug: Record<string, unknown> | undefined;
         if (!callId) {
           ack?.({ ok: false, error: 'callId is required' });
           return;
@@ -748,30 +749,50 @@ export function attachChatSocket(httpServer: HTTPServer): Server {
             recv.suspended ||
             !recv.isAvailable
           ) {
-            ack?.({ ok: false, error: 'Cannot call this receiver right now.' });
+            ack?.({
+              ok: false,
+              error: 'Cannot call this receiver right now.',
+              debug: {
+                approved: recv?.accountStatus === 'approved',
+                suspended: Boolean(recv?.suspended),
+                isAvailable: Boolean(recv?.isAvailable),
+              },
+            });
             return;
           }
-          if (!hasActiveSocketForAccount('r', targetId)) {
-            const recvPresence = await Receiver.findById(targetId)
-              .select('expoPushToken discoverGraceUntil isAvailable')
-              .lean<{
-                expoPushToken?: string | null;
-                discoverGraceUntil?: Date | null;
-                isAvailable?: boolean;
-              } | null>();
-            const presenceLive = isReceiverDiscoverPresenceLive(
-              targetId,
-              recvPresence?.discoverGraceUntil ?? null,
-              {
-                isAvailable: Boolean(recvPresence?.isAvailable),
-                expoPushToken: recvPresence?.expoPushToken ?? null,
-              }
-            );
-            const pushToken = recvPresence?.expoPushToken?.trim();
-            if (!presenceLive && !pushToken) {
-              ack?.({ ok: false, error: 'Receiver is offline right now.' });
-              return;
+          const receiverSocket = hasActiveSocketForAccount('r', targetId);
+          const recvPresence = await Receiver.findById(targetId)
+            .select('expoPushToken fcmDeviceToken discoverGraceUntil isAvailable')
+            .lean<{
+              expoPushToken?: string | null;
+              fcmDeviceToken?: string | null;
+              discoverGraceUntil?: Date | null;
+              isAvailable?: boolean;
+            } | null>();
+          const presenceLive = isReceiverDiscoverPresenceLive(
+            targetId,
+            recvPresence?.discoverGraceUntil ?? null,
+            {
+              isAvailable: Boolean(recvPresence?.isAvailable),
+              expoPushToken: recvPresence?.expoPushToken ?? null,
+              fcmDeviceToken: recvPresence?.fcmDeviceToken ?? null,
             }
+          );
+          const pushToken = recvPresence?.expoPushToken?.trim();
+          const fcmToken = recvPresence?.fcmDeviceToken?.trim();
+          inviteDebug = {
+            receiverSocket,
+            presenceLive,
+            hasExpoPush: Boolean(pushToken),
+            hasFcm: Boolean(fcmToken),
+            expoLen: pushToken?.length ?? 0,
+            fcmLen: fcmToken?.length ?? 0,
+            graceUntil: recvPresence?.discoverGraceUntil ?? null,
+            isAvailable: Boolean(recvPresence?.isAvailable),
+          };
+          if (!receiverSocket && !presenceLive && !pushToken && !fcmToken) {
+            ack?.({ ok: false, error: 'Receiver is offline right now.', debug: inviteDebug });
+            return;
           }
           receiverForInviteId = targetId;
           await releaseIfStaleReceiverBusy(receiverForInviteId);
@@ -899,17 +920,24 @@ export function attachChatSocket(httpServer: HTTPServer): Server {
           void (async () => {
             try {
               const recv = await Receiver.findById(targetId)
-                .select('expoPushToken isAvailable')
-                .lean<{ expoPushToken?: string | null; isAvailable?: boolean } | null>();
-              const pushToken = recv?.expoPushToken?.trim();
-              if (recv?.isAvailable && pushToken) {
-                await sendReceiverIncomingCallPush({
-                  expoPushToken: pushToken,
+                .select('expoPushToken fcmDeviceToken isAvailable')
+                .lean<{
+                  expoPushToken?: string | null;
+                  fcmDeviceToken?: string | null;
+                  isAvailable?: boolean;
+                } | null>();
+              if (recv?.isAvailable) {
+                const wake = await sendReceiverIncomingCallWake({
+                  expoPushToken: recv.expoPushToken,
+                  fcmDeviceToken: recv.fcmDeviceToken,
                   callId,
                   fromId: myId,
                   fromName,
                   fromImage,
                 });
+                console.info('incoming call wake:', { callId, ...wake });
+              } else {
+                console.info('incoming call wake skipped: receiver not available', { callId });
               }
             } catch (e) {
               const msg = e instanceof Error ? e.message : String(e);
@@ -917,7 +945,7 @@ export function attachChatSocket(httpServer: HTTPServer): Server {
             }
           })();
         }
-        ack?.({ ok: true });
+        ack?.({ ok: true, debug: inviteDebug });
       })();
     });
 

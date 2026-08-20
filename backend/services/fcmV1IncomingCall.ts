@@ -43,7 +43,7 @@ export function buildFcmV1IncomingCallMessage(payload: IncomingCallFcmPayload): 
   message: {
     token: string;
     data: Record<string, string>;
-    android: { priority: 'HIGH' };
+    android: { priority: 'HIGH'; ttl: string };
     apns: {
       headers: { 'apns-priority': string; 'apns-push-type': string };
       payload: { aps: { 'content-available': number } };
@@ -54,7 +54,7 @@ export function buildFcmV1IncomingCallMessage(payload: IncomingCallFcmPayload): 
     message: {
       token: payload.deviceToken.trim(),
       data: buildIncomingCallData(payload),
-      android: { priority: 'HIGH' },
+      android: { priority: 'HIGH', ttl: '55s' },
       apns: {
         headers: {
           'apns-priority': '10',
@@ -112,14 +112,26 @@ async function getGoogleAccessToken(): Promise<string | null> {
   return json.access_token?.trim() ?? null;
 }
 
-/** Send data-only incoming call via FCM HTTP v1 (optional; app uses Expo push by default). */
-export async function sendFcmV1IncomingCallPush(payload: IncomingCallFcmPayload): Promise<void> {
+export type FcmV1SendResult = {
+  ok: boolean;
+  status?: number;
+  error?: string;
+};
+
+/** Send data-only incoming call via FCM HTTP v1. Requires FCM_PROJECT_ID + service account. */
+export async function sendFcmV1IncomingCallPush(
+  payload: IncomingCallFcmPayload
+): Promise<FcmV1SendResult> {
   const projectId = process.env.FCM_PROJECT_ID?.trim();
   const token = payload.deviceToken.trim();
-  if (!projectId || !token) return;
+  if (!projectId || !token) {
+    return { ok: false, error: 'missing_project_or_token' };
+  }
 
   const accessToken = await getGoogleAccessToken();
-  if (!accessToken) return;
+  if (!accessToken) {
+    return { ok: false, error: 'oauth_failed' };
+  }
 
   const body = buildFcmV1IncomingCallMessage(payload);
   try {
@@ -135,10 +147,14 @@ export async function sendFcmV1IncomingCallPush(payload: IncomingCallFcmPayload)
       }
     );
     if (!res.ok) {
-      console.error('fcm v1 send failed:', res.status, await res.text());
+      const text = await res.text();
+      console.error('fcm v1 send failed:', res.status, text);
+      return { ok: false, status: res.status, error: text.slice(0, 400) };
     }
+    return { ok: true, status: res.status };
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     console.error('fcm v1 send error:', msg);
+    return { ok: false, error: msg };
   }
 }

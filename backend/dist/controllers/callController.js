@@ -390,15 +390,27 @@ const getVoiceBootstrap = async (req, res) => {
     // runnable. Allow bootstrap when discover-grace is live or Expo push can wake the app.
     if (!(0, socketRegistry_1.isReceiverSocketConnected)(receiverId)) {
         const recvPresence = await Receiver_1.default.findById(receiverId)
-            .select('expoPushToken discoverGraceUntil isAvailable')
+            .select('expoPushToken fcmDeviceToken discoverGraceUntil isAvailable')
             .lean();
         const presenceLive = (0, receiverPresence_1.isReceiverDiscoverPresenceLive)(receiverId, recvPresence?.discoverGraceUntil ?? null, {
             isAvailable: Boolean(recvPresence?.isAvailable ?? receiverDoc.isAvailable),
             expoPushToken: recvPresence?.expoPushToken ?? null,
+            fcmDeviceToken: recvPresence?.fcmDeviceToken ?? null,
         });
         const pushToken = recvPresence?.expoPushToken?.trim();
-        if (!presenceLive && !pushToken) {
-            res.status(409).json({ message: 'Receiver is offline right now' });
+        const fcmToken = recvPresence?.fcmDeviceToken?.trim();
+        if (!presenceLive && !pushToken && !fcmToken) {
+            res.status(409).json({
+                message: 'Receiver is offline right now',
+                debug: {
+                    receiverSocket: false,
+                    presenceLive: false,
+                    hasExpoPush: false,
+                    hasFcm: false,
+                    graceUntil: recvPresence?.discoverGraceUntil ?? null,
+                    isAvailable: Boolean(recvPresence?.isAvailable ?? receiverDoc.isAvailable),
+                },
+            });
             return;
         }
     }
