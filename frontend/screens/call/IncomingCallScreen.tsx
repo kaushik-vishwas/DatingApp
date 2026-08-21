@@ -10,10 +10,8 @@ import { resolveProfileImageSource } from '../../utils/avatarSource';
 
 type Props = NativeStackScreenProps<ReceiverStackParamList, 'IncomingCall'>;
 
-/** Auto-answer when the receiver is looking at the incoming UI. */
+/** Auto-answer once when the receiver is looking at the incoming UI. */
 const AUTO_ACCEPT_MS = 5_000;
-/** Failsafe decline if accept never completes (aligned with server foreground budget). */
-const FAILSAFE_DECLINE_MS = 12_000;
 
 export default function IncomingCallScreen({ navigation, route }: Props): React.JSX.Element {
   const insets = useSafeAreaInsets();
@@ -35,6 +33,8 @@ export default function IncomingCallScreen({ navigation, route }: Props): React.
 
   const [responding, setResponding] = useState(false);
   const respondedRef = useRef(false);
+  const acceptRef = useRef<() => void>(() => {});
+  const rejectRef = useRef<() => void>(() => {});
 
   useEffect(() => {
     confirmIncomingCallSeenOnScreen(callId);
@@ -109,30 +109,27 @@ export default function IncomingCallScreen({ navigation, route }: Props): React.
       void stopIncomingRingtone();
       await acceptIncomingCall(req);
     } catch {
+      // Keep respondedRef true so auto-pick / taps do not double-fire and thrash the invite.
       setResponding(false);
-      respondedRef.current = false;
     }
   }, [acceptIncomingCall, req, stopIncomingRingtone]);
 
-  // Auto-pick (accept) after 5s while this screen is visible.
+  acceptRef.current = () => {
+    void onAccept();
+  };
+  rejectRef.current = () => {
+    void onReject();
+  };
+
+  // Stable one-shot auto-pick: do not re-arm when callback identities change.
   useEffect(() => {
     const timeout = setTimeout(() => {
       if (!respondedRef.current) {
-        void onAccept();
+        acceptRef.current();
       }
     }, AUTO_ACCEPT_MS);
     return () => clearTimeout(timeout);
-  }, [onAccept]);
-
-  // Failsafe decline if accept never lands (server also expires ~12s).
-  useEffect(() => {
-    const timeout = setTimeout(() => {
-      if (!respondedRef.current) {
-        void onReject();
-      }
-    }, FAILSAFE_DECLINE_MS);
-    return () => clearTimeout(timeout);
-  }, [onReject]);
+  }, [callId]);
 
   const peerInitial = (peerName || 'U').trim().charAt(0).toUpperCase();
 

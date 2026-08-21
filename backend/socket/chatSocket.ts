@@ -60,8 +60,8 @@ type ActiveCallInvite = {
   ringSeen: 'unknown' | 'foreground' | 'background';
 };
 
-/** Open receiver app: give time for 5s auto-accept + Stream join before skip. */
-const RING_NO_ANSWER_FOREGROUND_MS = 12_000;
+/** Open receiver app: allow 5s auto-accept + Stream join before no-answer skip. */
+const RING_NO_ANSWER_FOREGROUND_MS = 20_000;
 /** Minimized / frozen receiver: wait this long for a notification tap. */
 const RING_NO_ANSWER_BACKGROUND_MS = 15_000;
 
@@ -996,6 +996,10 @@ export function attachChatSocket(httpServer: HTTPServer): Server {
           ack?.({ ok: false, error: 'Forbidden' });
           return;
         }
+        const foreground =
+          payload?.appState === 'active' ||
+          payload?.appState === 'foreground' ||
+          payload?.appState === 'inactive';
         if (invite.ringSeen !== 'unknown') {
           // Upgrade minimized → on-screen budget when the receiver opens the call UI.
           if (invite.ringSeen === 'background' && foreground) {
@@ -1006,7 +1010,6 @@ export function attachChatSocket(httpServer: HTTPServer): Server {
           ack?.({ ok: true });
           return;
         }
-        const foreground = payload?.appState === 'active' || payload?.appState === 'foreground' || payload?.appState === 'inactive';
         invite.ringSeen = foreground ? 'foreground' : 'background';
         const budgetMs = foreground ? RING_NO_ANSWER_FOREGROUND_MS : RING_NO_ANSWER_BACKGROUND_MS;
         const elapsed = Date.now() - invite.invitedAt.getTime();

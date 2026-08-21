@@ -709,7 +709,7 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
           const timeout = setTimeout(() => {
             pendingInviteOutcomeRef.current.delete(data.callId);
             resolve({ accepted: false, reason: 'timeout' });
-          }, 18_000);
+          }, 22_000);
           pendingInviteOutcomeRef.current.set(data.callId, { resolve, timeout });
         });
         if (!outcome.accepted) {

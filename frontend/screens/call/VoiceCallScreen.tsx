@@ -1519,23 +1519,24 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
     })();
   };
 
-  // Auto-pick after 5s while on-screen incoming UI is visible; failsafe decline at 12s.
+  const acceptIncomingOnSessionRef = useRef(onAcceptIncomingOnSession);
+  acceptIncomingOnSessionRef.current = onAcceptIncomingOnSession;
+
+  // Stable one-shot auto-pick while on-screen incoming UI is visible (no failsafe reject race).
   useEffect(() => {
     if (!receiverAvailabilitySession || receiverSessionPhase !== 'incoming' || !incomingReq) return;
-    confirmIncomingCallSeenOnScreen(incomingReq.callId);
+    const callId = incomingReq.callId;
+    confirmIncomingCallSeenOnScreen(callId);
     const autoAccept = setTimeout(() => {
-      onAcceptIncomingOnSession();
+      acceptIncomingOnSessionRef.current();
     }, 5_000);
-    const failsafeDecline = setTimeout(() => {
-      onRejectIncomingOnSession();
-    }, 12_000);
-    return () => {
-      clearTimeout(autoAccept);
-      clearTimeout(failsafeDecline);
-    };
-    // Intentionally only re-arm when the incoming invite identity changes.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [receiverAvailabilitySession, receiverSessionPhase, incomingReq?.callId]);
+    return () => clearTimeout(autoAccept);
+  }, [
+    receiverAvailabilitySession,
+    receiverSessionPhase,
+    incomingReq?.callId,
+    confirmIncomingCallSeenOnScreen,
+  ]);
 
   useEffect(() => {
     const id = streamBootstrap?.callId;
