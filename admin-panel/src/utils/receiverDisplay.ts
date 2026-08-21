@@ -33,6 +33,18 @@ export function receiverIsLiveAvailable(r: {
   return Boolean(r.isAvailable && r.isOnline);
 }
 
+export function receiverAvailabilityState(r: {
+  isLiveAvailable?: boolean;
+  isAvailable?: boolean;
+  isOnline?: boolean;
+  isBusyOnCall?: boolean;
+}): 'online' | 'busy' | 'offline' {
+  const live = receiverIsLiveAvailable(r);
+  if (live && r.isBusyOnCall) return 'busy';
+  if (live) return 'online';
+  return 'offline';
+}
+
 export function receiverRatingDisplay(r: {
   accountStatus: string;
   ratingAvg?: number | null;

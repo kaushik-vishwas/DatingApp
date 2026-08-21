@@ -44,9 +44,15 @@ function buildFcmWhyNotWorking(opts: {
       lines.push(`FCM device token: OK (len ${push.fcmLen ?? 0})`);
     } else {
       lines.push(`FCM device token: FAIL — ${push.fcmError ?? 'no token'}`);
-      lines.push(
-        'Without an FCM token, Firebase cannot wake this device when the app is killed. Keep-alive poll may still ring while Go Online stays running.'
-      );
+      if ((push.fcmError ?? '').toUpperCase().includes('SERVICE_NOT_AVAILABLE')) {
+        lines.push(
+          'SERVICE_NOT_AVAILABLE = Google Play Services could not reach FCM (network / Play Services / Xiaomi battery). App Firebase wiring is OK — fix device services, then reopen Selecto.'
+        );
+      } else {
+        lines.push(
+          'Without an FCM token, Firebase cannot wake this device when the app is killed. Keep-alive poll may still ring while Go Online stays running.'
+        );
+      }
     }
     if (push.expoOk) {
       lines.push(`Expo push token: OK (len ${push.expoLen ?? 0})`);

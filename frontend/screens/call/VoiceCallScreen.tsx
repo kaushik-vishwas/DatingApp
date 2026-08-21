@@ -316,6 +316,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
     acceptIncomingCallStayOnScreen,
     stopIncomingRingtone,
     startIncomingRingtone,
+    confirmIncomingCallSeenOnScreen,
   } = useCallSignals();
   const cancelOutgoingRef = useRef(cancelOutgoingCallInvite);
   cancelOutgoingRef.current = cancelOutgoingCallInvite;
@@ -1460,26 +1461,6 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
     stopIncomingRingtone,
   ]);
 
-  useEffect(() => {
-    if (!receiverAvailabilitySession || receiverSessionPhase !== 'incoming' || !incomingReq) return;
-    const timeout = setTimeout(() => {
-      if (!incomingResponding) {
-        rejectIncomingCall(incomingReq);
-        setIncomingReq(null);
-        setReceiverSessionPhase('waiting');
-        void stopIncomingRingtone();
-      }
-    }, 35_000);
-    return () => clearTimeout(timeout);
-  }, [
-    receiverAvailabilitySession,
-    receiverSessionPhase,
-    incomingReq,
-    incomingResponding,
-    rejectIncomingCall,
-    stopIncomingRingtone,
-  ]);
-
   // In-session incoming: pre-ask call permissions + warm audio while ringing.
   useEffect(() => {
     if (!receiverAvailabilitySession || receiverSessionPhase !== 'incoming') return;
@@ -1537,6 +1518,24 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
       }
     })();
   };
+
+  // Auto-pick after 5s while on-screen incoming UI is visible; failsafe decline at 12s.
+  useEffect(() => {
+    if (!receiverAvailabilitySession || receiverSessionPhase !== 'incoming' || !incomingReq) return;
+    confirmIncomingCallSeenOnScreen(incomingReq.callId);
+    const autoAccept = setTimeout(() => {
+      onAcceptIncomingOnSession();
+    }, 5_000);
+    const failsafeDecline = setTimeout(() => {
+      onRejectIncomingOnSession();
+    }, 12_000);
+    return () => {
+      clearTimeout(autoAccept);
+      clearTimeout(failsafeDecline);
+    };
+    // Intentionally only re-arm when the incoming invite identity changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [receiverAvailabilitySession, receiverSessionPhase, incomingReq?.callId]);
 
   useEffect(() => {
     const id = streamBootstrap?.callId;

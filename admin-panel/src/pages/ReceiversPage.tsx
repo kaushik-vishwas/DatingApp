@@ -7,7 +7,7 @@ import {
 } from '../api/client';
 import { ReceiverDetailModal } from '../components/ReceiverDetailModal';
 import { ReceiverEditModal } from '../components/ReceiverEditModal';
-import { formatINR, receiverIsLiveAvailable, receiverRatingDisplay, receiverCode } from '../utils/receiverDisplay';
+import { formatINR, receiverAvailabilityState, receiverIsLiveAvailable, receiverRatingDisplay, receiverCode } from '../utils/receiverDisplay';
 
 type Tab = 'all' | 'approved' | 'pending';
 
@@ -229,7 +229,7 @@ export function ReceiversPage() {
                 {filtered.map((r) => {
                   const idx = idIndex.get(r._id) ?? 0;
                   const kyc = kycLabel(r.accountStatus);
-                  const live = receiverIsLiveAvailable(r);
+                  const availability = receiverAvailabilityState(r);
                   const ratingLabel = receiverRatingDisplay(r);
                   const callsToday = r.callsToday ?? 0;
                   const totalCalls = r.totalCalls ?? 0;
@@ -271,9 +271,17 @@ export function ReceiversPage() {
                       <td className="px-4 py-3">
                         <span className="inline-flex items-center gap-2">
                           <span
-                            className={`h-2 w-2 rounded-full ${live ? 'bg-emerald-500' : 'bg-neutral-300'}`}
+                            className={`h-2 w-2 rounded-full ${
+                              availability === 'online'
+                                ? 'bg-emerald-500'
+                                : availability === 'busy'
+                                  ? 'bg-amber-500'
+                                  : 'bg-neutral-300'
+                            }`}
                           />
-                          <span className="text-neutral-700">{live ? 'Online' : 'Offline'}</span>
+                          <span className="text-neutral-700">
+                            {availability === 'online' ? 'Online' : availability === 'busy' ? 'Busy' : 'Offline'}
+                          </span>
                         </span>
                       </td>
                       <td className="px-4 py-3">

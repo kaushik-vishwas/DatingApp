@@ -181,7 +181,8 @@ export function WalletOffersPage() {
         <div>
           <h1 className="text-2xl font-bold text-neutral-900">Wallet Offers</h1>
           <p className="mt-1 text-sm text-neutral-500">
-            Manage recharge packages shown to callers. Active offers appear in the app wallet.
+            Manage recharge packages shown to callers. Use the radio on an active offer to show it as the
+            caller home-screen popup (both layouts, one after another — once at login, then once per day).
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
@@ -244,6 +245,20 @@ export function WalletOffersPage() {
               onEdit={openEditModal}
               onDelete={handleDelete}
               onToggleStatus={toggleStatus}
+              onSelectHomePopup={async (offer) => {
+                setBusyId(offer.id);
+                try {
+                  await updateWalletOffer(offer.id, {
+                    homePopup: true,
+                    active: true,
+                  });
+                  await load();
+                } catch (err: any) {
+                  setError(err.message || 'Failed to set home popup offer');
+                } finally {
+                  setBusyId(null);
+                }
+              }}
             />
           </div>
         </div>
@@ -412,18 +427,23 @@ function OfferTable({
   onEdit,
   onDelete,
   onToggleStatus,
+  onSelectHomePopup,
 }: {
   offers: WalletOffer[];
   busyId: string | null;
   onEdit: (offer: WalletOffer) => void;
   onDelete: (id: string) => void;
   onToggleStatus: (offer: WalletOffer) => void;
+  onSelectHomePopup?: (offer: WalletOffer) => void;
 }) {
   return (
     <div className="overflow-x-auto">
-      <table className="w-full min-w-[800px] text-left text-sm">
+      <table className="w-full min-w-[900px] text-left text-sm">
         <thead>
           <tr className="border-b border-neutral-100 bg-neutral-50/80">
+            {onSelectHomePopup ? (
+              <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-neutral-500">Home popup</th>
+            ) : null}
             <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-neutral-500">Amount</th>
             <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-neutral-500">Bonus</th>
             <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-neutral-500">Credit</th>
@@ -438,6 +458,22 @@ function OfferTable({
             const credit = offer.amount * (1 + offer.bonusPercent / 100);
             return (
               <tr key={offer.id} className="border-b border-neutral-100 last:border-0">
+                {onSelectHomePopup ? (
+                  <td className="px-4 py-3">
+                    <label className="inline-flex items-center gap-2">
+                      <input
+                        type="radio"
+                        name="home-popup-offer"
+                        checked={Boolean(offer.homePopup)}
+                        disabled={busyId === offer.id}
+                        onChange={() => onSelectHomePopup(offer)}
+                      />
+                      <span className={`text-xs font-semibold ${offer.homePopup ? 'text-emerald-700' : 'text-neutral-400'}`}>
+                        {offer.homePopup ? 'Selected' : 'Off'}
+                      </span>
+                    </label>
+                  </td>
+                ) : null}
                 <td className="px-4 py-3 font-semibold text-neutral-900">₹{offer.amount.toLocaleString('en-IN')}</td>
                 <td className="px-4 py-3 text-emerald-600 font-semibold">+{offer.bonusPercent}%</td>
                 <td className="px-4 py-3 text-neutral-600">₹{Math.round(credit).toLocaleString('en-IN')}</td>

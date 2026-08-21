@@ -59,6 +59,16 @@ const handledIncomingCallIds = new Set<string>();
 let incomingCallNavigationGuard: ((callId: string) => boolean) | null = null;
 let openHandler: ((incoming: IncomingCallNotificationPayload) => void) | null = null;
 const pendingOpens = new Map<string, IncomingCallNotificationPayload>();
+/** Incoming-call UI / tray is receiver-only. Callers must never present it. */
+let receiverIncomingCallUiEnabled = false;
+
+export function setReceiverIncomingCallUiEnabled(enabled: boolean): void {
+  receiverIncomingCallUiEnabled = Boolean(enabled);
+}
+
+export function isReceiverIncomingCallUiEnabled(): boolean {
+  return receiverIncomingCallUiEnabled;
+}
 
 export function setIncomingCallNavigationGuard(
   guard: ((callId: string) => boolean) | null
@@ -67,6 +77,7 @@ export function setIncomingCallNavigationGuard(
 }
 
 export function canNavigateToIncomingCall(callId: string): boolean {
+  if (!receiverIncomingCallUiEnabled) return false;
   const id = callId.trim();
   if (!id) return false;
   if (handledIncomingCallIds.has(id)) return false;
@@ -138,7 +149,15 @@ async function loadNotificationsModule(): Promise<typeof import('expo-notificati
 }
 
 export function isAppInBackground(): boolean {
-  return AppState.currentState !== 'active';
+  // Only true background counts as minimized. `inactive` happens during
+  // transitions / permission sheets while the receiver still has the UI on screen.
+  return AppState.currentState === 'background';
+}
+
+/** True when the app is usable on-screen (active or brief inactive). */
+export function isAppOnScreen(): boolean {
+  const s = AppState.currentState;
+  return s === 'active' || s === 'inactive';
 }
 
 export function incomingCallDeepLink(incoming: IncomingCallNotificationPayload): string {
@@ -618,6 +637,17 @@ export async function ensureIncomingCallNotificationSetup(): Promise<void> {
         };
       }
 
+      // Callers must never see incoming-call tray / heads-up.
+      if (isIncomingCall && !receiverIncomingCallUiEnabled) {
+        return {
+          shouldShowAlert: false,
+          shouldPlaySound: false,
+          shouldSetBadge: false,
+          shouldShowBanner: false,
+          shouldShowList: false,
+        };
+      }
+
       // Remote FCM duplicate while background: suppress a second tray row.
       // Local incoming-{callId} notifications must still play channel ringtone.
       if (isIncomingCall && !appActive) {
@@ -817,6 +847,7 @@ async function playIncomingRingtoneForBackgroundAlert(): Promise<boolean> {
 export async function alertReceiverIncomingCallInBackground(
   incoming: IncomingCallNotificationPayload
 ): Promise<void> {
+  if (!receiverIncomingCallUiEnabled) return;
   void playIncomingRingtoneForBackgroundAlert();
   await showIncomingCallNotification(incoming, { visualOnly: false });
 }
@@ -826,6 +857,7 @@ export async function showIncomingCallNotification(
   incoming: IncomingCallNotificationPayload,
   options?: { visualOnly?: boolean }
 ): Promise<void> {
+  if (!receiverIncomingCallUiEnabled) return;
   if (!canUseLocalNotifications()) return;
   const callId = incoming.callId.trim();
   if (!callId || notifiedCallIds.has(callId)) return;
@@ -937,6 +969,41 @@ function tokenErrorMessage(e: unknown): string {
   return s ? s.slice(0, 240) : 'unknown';
 }
 
+function isTransientPushTokenError(message: string): boolean {
+  const m = message.toUpperCase();
+  return (
+    m.includes('SERVICE_NOT_AVAILABLE') ||
+    m.includes('TIMEOUT') ||
+    m.includes('NETWORK') ||
+    m.includes('UNAVAILABLE') ||
+    m.includes('FIS_AUTH')
+  );
+}
+
+async function sleepMs(ms: number): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function withPushTokenRetries<T>(
+  label: 'fcm' | 'expo',
+  attempt: () => Promise<T>
+): Promise<{ value?: T; error?: string }> {
+  const delaysMs = [0, 1_200, 3_000];
+  let lastError = '';
+  for (let i = 0; i < delaysMs.length; i += 1) {
+    if (delaysMs[i] > 0) await sleepMs(delaysMs[i]);
+    try {
+      return { value: await attempt() };
+    } catch (e) {
+      lastError = tokenErrorMessage(e);
+      if (!isTransientPushTokenError(lastError) || i === delaysMs.length - 1) {
+        return { error: lastError };
+      }
+    }
+  }
+  return { error: lastError || `${label}_token_failed` };
+}
+
 export async function registerReceiverPushTokens(
   saveTokens: (payload: { expoPushToken?: string; fcmDeviceToken?: string }) => Promise<void>
 ): Promise<ReceiverPushRegistrationResult> {
@@ -980,36 +1047,33 @@ export async function registerReceiverPushTokens(
   let fcmDeviceToken: string | undefined;
 
   if (Platform.OS === 'android' && typeof Notifications.getDevicePushTokenAsync === 'function') {
-    try {
+    const fcm = await withPushTokenRetries('fcm', async () => {
       const device = await Notifications.getDevicePushTokenAsync();
       const data = typeof device?.data === 'string' ? device.data.trim() : '';
-      if (data && !data.startsWith('ExponentPushToken')) {
-        fcmDeviceToken = data;
-      } else if (data) {
-        result.fcmError = 'device_token_looks_like_expo';
-      } else {
-        result.fcmError = 'empty_device_push_token';
-      }
-    } catch (e) {
-      result.fcmError = tokenErrorMessage(e);
-    }
+      if (data && !data.startsWith('ExponentPushToken')) return data;
+      if (data) throw new Error('device_token_looks_like_expo');
+      throw new Error('empty_device_push_token');
+    });
+    if (fcm.value) fcmDeviceToken = fcm.value;
+    else if (fcm.error) result.fcmError = fcm.error;
   } else if (Platform.OS === 'android') {
     result.fcmError = 'getDevicePushTokenAsync_unavailable';
   }
 
   if (projectId) {
-    try {
+    const expo = await withPushTokenRetries('expo', async () => {
       const push = await Notifications.getExpoPushTokenAsync({
         projectId,
         ...(fcmDeviceToken
           ? { devicePushToken: { type: 'fcm' as const, data: fcmDeviceToken } }
           : {}),
       });
-      expoPushToken = push.data?.trim() || undefined;
-      if (!expoPushToken) result.expoError = 'empty_expo_push_token';
-    } catch (e) {
-      result.expoError = tokenErrorMessage(e);
-    }
+      const token = push.data?.trim() || '';
+      if (!token) throw new Error('empty_expo_push_token');
+      return token;
+    });
+    if (expo.value) expoPushToken = expo.value;
+    else if (expo.error) result.expoError = expo.error;
   } else {
     result.expoError = 'missing_eas_project_id';
   }
@@ -1055,6 +1119,7 @@ export function ensureIncomingCallNotificationInfrastructure(): () => void {
     });
 
     receivedSub = Notifications.addNotificationReceivedListener((notification) => {
+      if (!receiverIncomingCallUiEnabled) return;
       const incoming = parseIncomingFromNotificationRequest(notification.request);
       if (!incoming || !isAppInBackground()) return;
       logIncomingCallNotif('received.background', {

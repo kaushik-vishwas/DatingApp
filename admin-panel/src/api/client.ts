@@ -73,6 +73,7 @@ export type ReceiverRecord = {
   isOnline?: boolean;
   /** Logged in with availability switch on (isAvailable && isOnline). */
   isLiveAvailable?: boolean;
+  isBusyOnCall?: boolean;
   ratingAvg?: number | null;
   ratingCount?: number;
   totalCalls?: number;
@@ -147,6 +148,8 @@ export type WalletOffer = {
   popular: boolean;
   active: boolean;
   offerBannerDataUrl?: string | null;
+  homePopup?: boolean;
+  homePopupKind?: 'social' | 'spotlight';
 };
 
 export type WalletOffersResponse = {

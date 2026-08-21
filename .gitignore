@@ -1,0 +1,19 @@
+# Local Gradle user home (APK builds with GRADLE_USER_HOME)
+.gradle-home/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
+.vscode/
+
+# Local secrets / env
+.env
+.env.*
+!.env.example
+
+# Build artifacts
+*.apk
+*.aab
+*.log

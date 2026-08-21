@@ -26,8 +26,8 @@ const callController_1 = require("../controllers/callController");
 const callQueue_1 = require("../services/callQueue");
 const expoPush_1 = require("../services/expoPush");
 const receiverPresence_1 = require("../services/receiverPresence");
-/** Open receiver app: skip to next caller target after this if they do not accept. */
-const RING_NO_ANSWER_FOREGROUND_MS = 5_000;
+/** Open receiver app: give time for 5s auto-accept + Stream join before skip. */
+const RING_NO_ANSWER_FOREGROUND_MS = 12_000;
 /** Minimized / frozen receiver: wait this long for a notification tap. */
 const RING_NO_ANSWER_BACKGROUND_MS = 15_000;
 function inviteCallerId(invite) {
@@ -819,6 +819,7 @@ function attachChatSocket(httpServer) {
                     ringSeen: 'unknown',
                 };
                 activeCallInvites.set(callId, invite);
+                // Start with the longer budget; call:incoming-seen shortens to foreground once UI is on-screen.
                 armInviteNoAnswerTimeout(invite, RING_NO_ANSWER_BACKGROUND_MS);
                 let fromName = '';
                 let fromImage = null;
@@ -890,14 +891,20 @@ function attachChatSocket(httpServer) {
                 return;
             }
             if (invite.ringSeen !== 'unknown') {
+                // Upgrade minimized → on-screen budget when the receiver opens the call UI.
+                if (invite.ringSeen === 'background' && foreground) {
+                    invite.ringSeen = 'foreground';
+                    const elapsed = Date.now() - invite.invitedAt.getTime();
+                    armInviteNoAnswerTimeout(invite, Math.max(1_000, RING_NO_ANSWER_FOREGROUND_MS - elapsed));
+                }
                 ack?.({ ok: true });
                 return;
             }
-            const foreground = payload?.appState === 'active' || payload?.appState === 'foreground';
+            const foreground = payload?.appState === 'active' || payload?.appState === 'foreground' || payload?.appState === 'inactive';
             invite.ringSeen = foreground ? 'foreground' : 'background';
             const budgetMs = foreground ? RING_NO_ANSWER_FOREGROUND_MS : RING_NO_ANSWER_BACKGROUND_MS;
             const elapsed = Date.now() - invite.invitedAt.getTime();
-            armInviteNoAnswerTimeout(invite, budgetMs - elapsed);
+            armInviteNoAnswerTimeout(invite, Math.max(1_000, budgetMs - elapsed));
             ack?.({ ok: true });
         });
         socket.on('call:response', (payload, ack) => {

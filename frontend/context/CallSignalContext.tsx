@@ -33,10 +33,12 @@ import {
   canNavigateToIncomingCall,
   clearIncomingCallNotificationDedupe,
   isAppInBackground,
+  isAppOnScreen,
   markIncomingCallHandled,
   registerReceiverExpoPushToken,
   registerReceiverPushTokens,
   setIncomingCallNavigationGuard,
+  setReceiverIncomingCallUiEnabled,
   alertReceiverIncomingCallInBackground,
   showIncomingCallNotification,
 } from '../utils/incomingCallNotifications';
@@ -198,6 +200,8 @@ type CallSignalContextValue = {
   startIncomingRingtone: () => Promise<void>;
   /** Accept invite and return Stream bootstrap without leaving the current VoiceCall screen. */
   acceptIncomingCallStayOnScreen: (req: IncomingCallRequest) => Promise<VoiceBootstrapResponse>;
+  /** IncomingCall screen mounted on-screen — lock server to foreground ring budget. */
+  confirmIncomingCallSeenOnScreen: (callId: string) => void;
 };
 
 const CallSignalContext = createContext<CallSignalContextValue | null>(null);
@@ -350,7 +354,8 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
   useEffect(() => {
     userRoleRef.current = user?.role ?? null;
-  }, [user?.role]);
+    setReceiverIncomingCallUiEnabled(Boolean(isSignedIn && user?.role === 'receiver'));
+  }, [isSignedIn, user?.role]);
 
   useEffect(() => {
     if (user?.role === 'receiver') {
@@ -439,6 +444,7 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   }, []);
 
   const openIncomingCall = useCallback((incoming: IncomingCallRequest) => {
+    if (userRoleRef.current !== 'receiver') return;
     if (!canNavigateToIncomingCall(incoming.callId)) return;
     const navigate = () => {
       const nav = navigationRef.current;
@@ -1003,6 +1009,21 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   const stopIncomingRingtone = useCallback(() => stopIncomingRingtonePlayback(), []);
   const startIncomingRingtoneCtx = useCallback(async () => {
     await ensureIncomingRingtonePlaying();
+  }, []);
+
+  const confirmIncomingCallSeenOnScreen = useCallback((callId: string) => {
+    const id = callId.trim();
+    if (!id || userRoleRef.current !== 'receiver') return;
+    const socket = socketRef.current;
+    if (!socket?.connected) return;
+    try {
+      socket.emit('call:incoming-seen', {
+        callId: id,
+        appState: isAppOnScreen() ? 'active' : 'background',
+      });
+    } catch {
+      // Server keeps prior budget if this fails.
+    }
   }, []);
 
   const setIncomingCallHandler = useCallback((handler: ((req: IncomingCallRequest) => void) | null) => {
@@ -1578,15 +1599,25 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       });
 
       socket.on('call:incoming', (payload: CallIncomingPayload) => {
-        if (userRoleRef.current === 'receiver') {
-          logPresenceDiagnostic('socket_call_incoming', {
-            callId: payload.callId,
-            appState: AppState.currentState,
-            available: userAvailableRef.current,
-            socketConnected: socket.connected,
-          });
+        // Incoming UI is receiver-only. Callers placing an outbound call must never see it.
+        if (userRoleRef.current !== 'receiver') {
+          return;
         }
-        if (payload.fromType === (userRoleRef.current === 'caller' ? 'u' : 'r')) return;
+        logPresenceDiagnostic('socket_call_incoming', {
+          callId: payload.callId,
+          appState: AppState.currentState,
+          available: userAvailableRef.current,
+          socketConnected: socket.connected,
+        });
+        // Ignore echoes of our own outbound invite.
+        if (
+          outgoingSessionByCallIdRef.current.has(payload.callId) ||
+          pendingOutgoingByCallIdRef.current.has(payload.callId)
+        ) {
+          return;
+        }
+        // Receivers only get invites from callers (fromType u).
+        if (payload.fromType === 'r') return;
         if (acceptedIncomingCallIdsRef.current.has(payload.callId)) {
           return;
         }
@@ -1608,10 +1639,10 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         try {
           socket.emit('call:incoming-seen', {
             callId: payload.callId,
-            appState: isAppInBackground() ? 'background' : 'active',
+            appState: isAppOnScreen() ? 'active' : 'background',
           });
         } catch {
-          // Server still uses the 15s minimized budget if this never arrives.
+          // Server still uses the minimized budget if this never arrives.
         }
         const peerName =
           (typeof payload.fromName === 'string' && payload.fromName.trim()) ||
@@ -1633,54 +1664,28 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
           return;
         }
 
-        if (userRoleRef.current === 'receiver') {
-          activeIncomingCallUiCallIdRef.current = incoming.callId;
-          pendingIncomingCallRequestRef.current = incoming;
+        activeIncomingCallUiCallIdRef.current = incoming.callId;
+        pendingIncomingCallRequestRef.current = incoming;
 
-          if (isAppInBackground()) {
-            void ensureIncomingBootstrapPromise(incoming);
-            void alertReceiverIncomingCallInBackground(incoming);
-            return;
-          }
-
-          clearIncomingCallNotificationDedupe(incoming.callId);
-
-          void (async () => {
-            try {
-              await ensureIncomingRingtonePlaying();
-            } catch {
-              // Keep UI even if ring fails.
-            }
-          })();
-
+        if (isAppInBackground()) {
           void ensureIncomingBootstrapPromise(incoming);
-
-          openIncomingCallRef.current(incoming);
+          void alertReceiverIncomingCallInBackground(incoming);
           return;
         }
 
-        Alert.alert(`${peerName} is calling`, 'Accept this voice call request?', [
-          {
-            text: 'Reject',
-            style: 'destructive',
-            onPress: () => {
-              rejectIncomingCallRef.current(incoming);
-            },
-          },
-          {
-            text: 'Accept',
-            onPress: () => {
-              void (async () => {
-                try {
-                  await acceptIncomingCallRef.current(incoming);
-                } catch (e: unknown) {
-                  const msg = e instanceof Error ? e.message : 'Unable to join call.';
-                  Alert.alert('Call failed', msg);
-                }
-              })();
-            },
-          },
-        ]);
+        clearIncomingCallNotificationDedupe(incoming.callId);
+
+        void (async () => {
+          try {
+            await ensureIncomingRingtonePlaying();
+          } catch {
+            // Keep UI even if ring fails.
+          }
+        })();
+
+        void ensureIncomingBootstrapPromise(incoming);
+
+        openIncomingCallRef.current(incoming);
       });
 
       socket.on('call:response', (payload: CallResponsePayload) => {
@@ -1875,6 +1880,7 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       stopIncomingRingtone,
       startIncomingRingtone: startIncomingRingtoneCtx,
       acceptIncomingCallStayOnScreen,
+      confirmIncomingCallSeenOnScreen,
     }),
     [
       registerPeer,
@@ -1899,6 +1905,7 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       stopIncomingRingtone,
       startIncomingRingtoneCtx,
       acceptIncomingCallStayOnScreen,
+      confirmIncomingCallSeenOnScreen,
       clearReceiverIncomingCallUi,
     ]
   );

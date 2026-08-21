@@ -1,5 +1,5 @@
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Animated, Image, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -10,13 +10,21 @@ import { resolveProfileImageSource } from '../../utils/avatarSource';
 
 type Props = NativeStackScreenProps<ReceiverStackParamList, 'IncomingCall'>;
 
-const INCOMING_CALL_UI_TIMEOUT_MS = 16_000;
+/** Auto-answer when the receiver is looking at the incoming UI. */
+const AUTO_ACCEPT_MS = 5_000;
+/** Failsafe decline if accept never completes (aligned with server foreground budget). */
+const FAILSAFE_DECLINE_MS = 12_000;
 
 export default function IncomingCallScreen({ navigation, route }: Props): React.JSX.Element {
   const insets = useSafeAreaInsets();
   const { callId, fromType, fromId, peerName, peerImage } = route.params;
-  const { acceptIncomingCall, rejectIncomingCall, stopIncomingRingtone, startIncomingRingtone } =
-    useCallSignals();
+  const {
+    acceptIncomingCall,
+    rejectIncomingCall,
+    stopIncomingRingtone,
+    startIncomingRingtone,
+    confirmIncomingCallSeenOnScreen,
+  } = useCallSignals();
 
   const req: IncomingCallRequest = useMemo(
     () => ({ callId, fromType, fromId, peerName, peerImage: peerImage ?? null }),
@@ -27,6 +35,10 @@ export default function IncomingCallScreen({ navigation, route }: Props): React.
 
   const [responding, setResponding] = useState(false);
   const respondedRef = useRef(false);
+
+  useEffect(() => {
+    confirmIncomingCallSeenOnScreen(callId);
+  }, [callId, confirmIncomingCallSeenOnScreen]);
 
   useEffect(() => {
     void (async () => {
@@ -77,7 +89,7 @@ export default function IncomingCallScreen({ navigation, route }: Props): React.
   const ring2Opacity = pulse.interpolate({ inputRange: [0, 1], outputRange: [0.55, 0], extrapolate: 'clamp' });
   const ring2Scale = pulse.interpolate({ inputRange: [0, 1], outputRange: [0.85, 1.2], extrapolate: 'clamp' });
 
-  const onReject = async () => {
+  const onReject = useCallback(async () => {
     if (respondedRef.current) return;
     respondedRef.current = true;
     setResponding(true);
@@ -87,9 +99,9 @@ export default function IncomingCallScreen({ navigation, route }: Props): React.
     } finally {
       navigation.goBack();
     }
-  };
+  }, [navigation, rejectIncomingCall, req, stopIncomingRingtone]);
 
-  const onAccept = async () => {
+  const onAccept = useCallback(async () => {
     if (respondedRef.current) return;
     respondedRef.current = true;
     setResponding(true);
@@ -100,18 +112,27 @@ export default function IncomingCallScreen({ navigation, route }: Props): React.
       setResponding(false);
       respondedRef.current = false;
     }
-  };
+  }, [acceptIncomingCall, req, stopIncomingRingtone]);
 
-  // Auto-decline if the receiver does not respond.
+  // Auto-pick (accept) after 5s while this screen is visible.
   useEffect(() => {
     const timeout = setTimeout(() => {
-      if (!responding && !respondedRef.current) {
+      if (!respondedRef.current) {
+        void onAccept();
+      }
+    }, AUTO_ACCEPT_MS);
+    return () => clearTimeout(timeout);
+  }, [onAccept]);
+
+  // Failsafe decline if accept never lands (server also expires ~12s).
+  useEffect(() => {
+    const timeout = setTimeout(() => {
+      if (!respondedRef.current) {
         void onReject();
       }
-    }, INCOMING_CALL_UI_TIMEOUT_MS);
+    }, FAILSAFE_DECLINE_MS);
     return () => clearTimeout(timeout);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [responding]);
+  }, [onReject]);
 
   const peerInitial = (peerName || 'U').trim().charAt(0).toUpperCase();
 
@@ -198,4 +219,3 @@ const styles = StyleSheet.create({
   rejectBtn: { backgroundColor: '#ff3048' },
   acceptBtn: { backgroundColor: '#2ad07f' },
 });
-
