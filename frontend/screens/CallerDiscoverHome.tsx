@@ -273,11 +273,8 @@ const DiscoverReceiverRow = React.memo(function DiscoverReceiverRow({
   const receiverAvatarSource = resolveProfileImageSource(item.profileImage);
 
   return (
-    <TouchableOpacity
-      style={styles.card}
-      activeOpacity={0.92}
-    // onPress={() => onOpenProfile(item)}
-    >
+    // View (not TouchableOpacity): a parent Touchable with no onPress steals taps from Call on Android.
+    <View style={styles.card}>
       <View style={styles.cardRow}>
         <View style={styles.leftColumn}>
           <View style={[styles.avatarWrapper, { borderColor: statusColor }]}>
@@ -327,14 +324,14 @@ const DiscoverReceiverRow = React.memo(function DiscoverReceiverRow({
           </View>
           <TouchableOpacity
             style={[styles.callNowButton, !presence.canCall && styles.callNowButtonDisabled]}
-            onPress={(e) => {
-              e.stopPropagation();
-              onCall(item);
-            }}
-            activeOpacity={presence.canCall ? 0.9 : 1}
-            disabled={!presence.canCall}
+            onPress={() => onCall(item)}
+            activeOpacity={0.9}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            accessibilityRole="button"
+            accessibilityLabel={`Call ${item.name}`}
+            accessibilityState={{ disabled: !presence.canCall }}
           >
-            <View style={styles.callNowButtonContent}>
+            <View style={styles.callNowButtonContent} pointerEvents="none">
               <Ionicons name="call-outline" size={16} color="#fff" />
               <Text style={styles.callNowButtonText}> Call</Text>
             </View>
@@ -344,7 +341,7 @@ const DiscoverReceiverRow = React.memo(function DiscoverReceiverRow({
           </View>
         </View>
       </View>
-    </TouchableOpacity>
+    </View>
   );
 });
 
@@ -1588,7 +1585,7 @@ const styles = StyleSheet.create({
 
 
   callNowButtonDisabled: {
-    backgroundColor: '#8FD18F',
+    backgroundColor: '#9ca3af',
     shadowOpacity: 0,
     elevation: 0,
   },
