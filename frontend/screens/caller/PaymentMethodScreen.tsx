@@ -15,6 +15,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../context/AuthContext';
 import type { CallerStackParamList } from '../../navigation/CallerStackParamList';
 import { getErrorMessage, walletApi } from '../../services/api';
+import { logMetaWalletPurchase } from '../../utils/metaAppEvents';
 import { openRazorpayWalletCheckoutInApp } from '../../utils/openRazorpayWalletCheckout';
 import { WALLET_RECHARGE_GST_PERCENT } from '../../utils/walletRechargeFees';
 
@@ -62,6 +63,11 @@ export default function PaymentMethodScreen({ navigation, route }: Props): React
         razorpay_signature: checkout.razorpay_signature,
         payAmount: paymentAmount,
         bonusPercent,
+        walletAmount,
+      });
+      void logMetaWalletPurchase({
+        razorpayPaymentId: checkout.razorpay_payment_id,
+        payAmountInr: paymentAmount,
         walletAmount,
       });
       await refreshUser();

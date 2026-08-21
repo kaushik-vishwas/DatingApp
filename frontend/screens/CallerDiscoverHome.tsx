@@ -31,14 +31,18 @@ import DiscoverSearchModal from '../components/caller/DiscoverSearchModal';
 import { CALLER_LANGUAGE_OPTIONS } from '../constants/userOnboarding';
 import { useAuth } from '../context/AuthContext';
 import { useCallSignals } from '../context/CallSignalContext';
-import { discoverApi, getErrorMessage, profileApi } from '../services/api';
-import type { CallerNotificationContent, DiscoverReceiverSummary } from '../types/api';
+import { discoverApi, getErrorMessage, profileApi, walletApi } from '../services/api';
+import type { CallerNotificationContent, DiscoverReceiverSummary, WalletHomeOfferPopup } from '../types/api';
 import { resolveProfileImageSource } from '../utils/avatarSource';
 import { getReceiverPresenceInfo, sortDiscoverReceivers } from '../utils/receiverStatus';
 import { withTimeout } from '../utils/withTimeout';
+import { computeWalletRechargeBreakdown, walletCreditForRecharge } from '../utils/walletRechargeFees';
+import {
+  markCallerHomeOfferPopupSeen,
+  shouldShowCallerHomeOfferPopup,
+} from '../utils/callerHomeOfferPopupStorage';
+import CallerHomeOfferPopup from '../components/caller/CallerHomeOfferPopup';
 import SelectoLogo from '../assets/SelectoLogo.png'
-import { CallDiagnosticsTopBarButton } from '../components/call/CallDiagnosticsTopBarButton';
-// import { LastCallDebugFab } from '../components/call/LastCallDebugFab';
 import { PresenceDiagnosticsTopBarButton } from '../components/call/PresenceDiagnosticsTopBarButton';
 import NoticeBg from '../assets/noticeBg.png'
 
@@ -108,7 +112,6 @@ type DiscoverStickyTopProps = {
   userInitial: string;
   onWalletPress: () => void;
   onProfilePress: () => void;
-  onDiagnosticsPress: () => void;
   onPresenceDiagnosticsPress: () => void;
 };
 
@@ -118,7 +121,6 @@ const DiscoverStickyTop = React.memo(function DiscoverStickyTop({
   userInitial,
   onWalletPress,
   onProfilePress,
-  onDiagnosticsPress,
   onPresenceDiagnosticsPress,
 }: DiscoverStickyTopProps): React.JSX.Element {
   const { width: windowWidth } = useWindowDimensions();
@@ -161,8 +163,7 @@ const DiscoverStickyTop = React.memo(function DiscoverStickyTop({
               ]}
               resizeMode="contain"
             />
-            {/* <CallDiagnosticsTopBarButton onPress={onDiagnosticsPress} />
-            <PresenceDiagnosticsTopBarButton onPress={onPresenceDiagnosticsPress} /> */}
+            <PresenceDiagnosticsTopBarButton onPress={onPresenceDiagnosticsPress} />
           </View>
           <View style={[styles.topRight, { gap: topBarMetrics.topRightGap }]}>
             <TouchableOpacity
@@ -350,7 +351,7 @@ const DiscoverReceiverRow = React.memo(function DiscoverReceiverRow({
 export default function CallerDiscoverHome(): React.JSX.Element {
   const contentBottomPadding = useReceiverTabBarBottomInset();
   const navigation = useCallerAppNavigation();
-  const { user, refreshUser, token, bootstrapping } = useAuth();
+  const { user, refreshUser, token, bootstrapping, consumeCallerHomeOfferLoginShow } = useAuth();
   const { startCallInvite, startRandomCallEngagement, randomCallMatchingVisible } = useCallSignals();
   const [language, setLanguage] = useState<string | null>(null);
   const [search, setSearch] = useState('');
@@ -368,6 +369,8 @@ export default function CallerDiscoverHome(): React.JSX.Element {
   const discoverLoadGenRef = useRef(0);
   const hasDiscoverDataRef = useRef(false);
   const skipNextFocusRefreshRef = useRef(true);
+  const [homeOfferPopup, setHomeOfferPopup] = useState<WalletHomeOfferPopup | null>(null);
+  const [homeOfferPopupVisible, setHomeOfferPopupVisible] = useState(false);
 
   useEffect(() => {
     const t = setTimeout(() => setDebounced(search.trim()), 350);
@@ -549,13 +552,68 @@ export default function CallerDiscoverHome(): React.JSX.Element {
     navigation.navigate('CallerProfile');
   }, [navigation]);
 
-  const onDiagnosticsPress = useCallback(() => {
-    navigation.navigate('CallDiagnostics');
-  }, [navigation]);
-
   const onPresenceDiagnosticsPress = useCallback(() => {
     navigation.navigate('PresenceDiagnostics');
   }, [navigation]);
+
+  useEffect(() => {
+    if (!canFetchDiscover || !user?._id) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const { data } = await walletApi.offers();
+        const popup = data.popup ?? null;
+        if (!popup?.offerId || cancelled) {
+          if (!cancelled) {
+            setHomeOfferPopup(null);
+            setHomeOfferPopupVisible(false);
+          }
+          return;
+        }
+        const forceFromLogin = consumeCallerHomeOfferLoginShow();
+        const show = await shouldShowCallerHomeOfferPopup({
+          userId: user._id,
+          offerId: popup.offerId,
+          forceFromLogin,
+        });
+        if (cancelled) return;
+        setHomeOfferPopup(popup);
+        setHomeOfferPopupVisible(show);
+        if (show) {
+          await markCallerHomeOfferPopupSeen(user._id, popup.offerId);
+        }
+      } catch {
+        if (!cancelled) {
+          setHomeOfferPopup(null);
+          setHomeOfferPopupVisible(false);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [canFetchDiscover, user?._id, consumeCallerHomeOfferLoginShow]);
+
+  const dismissHomeOfferPopup = useCallback(() => {
+    setHomeOfferPopupVisible(false);
+  }, []);
+
+  const rechargeHomeOfferPopup = useCallback(() => {
+    if (!homeOfferPopup) return;
+    setHomeOfferPopupVisible(false);
+    const breakdown = computeWalletRechargeBreakdown(homeOfferPopup.amount);
+    const credit = walletCreditForRecharge(homeOfferPopup.amount, homeOfferPopup.bonusPercent);
+    navigation.navigate('PaymentMethod', {
+      walletAmount: breakdown.walletAmount,
+      payAmount: breakdown.totalPayable,
+      gstAmount: breakdown.gstAmount,
+      platformFeeAmount: breakdown.platformFee,
+      platformFeePercent: breakdown.platformFeePercent,
+      totalAmount: breakdown.totalPayable,
+      bonusPercent: homeOfferPopup.bonusPercent,
+      creditAmount: credit,
+    });
+  }, [homeOfferPopup, navigation]);
 
   const openFilterModal = useCallback(() => {
     setModalDraft({ ...appliedFilters });
@@ -770,7 +828,6 @@ export default function CallerDiscoverHome(): React.JSX.Element {
             userInitial={user?.name?.charAt(0) ?? '?'}
             onWalletPress={onWalletPress}
             onProfilePress={onProfilePress}
-            onDiagnosticsPress={onDiagnosticsPress}
             onPresenceDiagnosticsPress={onPresenceDiagnosticsPress}
           />
 
@@ -811,10 +868,14 @@ export default function CallerDiscoverHome(): React.JSX.Element {
           setFilterModalVisible(false);
         }}
       />
-      {/* <LastCallDebugFab
-        bottomOffset={contentBottomPadding + 12}
-        onPress={() => navigation.navigate('CallDiagnostics')}
-      /> */}
+      {homeOfferPopup ? (
+        <CallerHomeOfferPopup
+          visible={homeOfferPopupVisible}
+          popup={homeOfferPopup}
+          onDismiss={dismissHomeOfferPopup}
+          onRecharge={rechargeHomeOfferPopup}
+        />
+      ) : null}
     </SafeAreaView>
   );
 }

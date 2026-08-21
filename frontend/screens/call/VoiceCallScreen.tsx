@@ -1661,9 +1661,13 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
         }
         setSdk((prev) => prev ?? streamSdk);
 
-        // Permissions are pre-asked before dial/ring/accept. Verify only — no dialogs during connect.
-        const { hasVoiceCallMicrophonePermission } = await import('../../utils/voiceCallPermissions');
-        const micGranted = await hasVoiceCallMicrophonePermission();
+        // Permissions are pre-asked before dial/ring/accept. Skip Audio I/O when already cached.
+        const {
+          hasVoiceCallMicrophonePermission,
+          isVoiceCallMicrophonePermissionCached,
+        } = await import('../../utils/voiceCallPermissions');
+        const micGranted =
+          isVoiceCallMicrophonePermissionCached() || (await hasVoiceCallMicrophonePermission());
         if (!micGranted) {
           throw new Error('Microphone permission is required for voice calls');
         }
@@ -1674,6 +1678,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
           });
         });
 
+        // Create client + call object and start session/start in parallel with join prep.
         const nextClient = streamSdk.StreamVideoClient.getOrCreateInstance({
           apiKey: boot.apiKey,
           user: {

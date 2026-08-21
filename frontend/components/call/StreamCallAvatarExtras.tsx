@@ -200,7 +200,7 @@ export function StreamTalkTimingBridge({
     if (callingState !== CallingState.JOINED) return;
     fireOnce();
     if (firedRef.current) return;
-    const intervalId = setInterval(fireOnce, 40);
+    const intervalId = setInterval(fireOnce, 16);
     return () => clearInterval(intervalId);
   }, [callingState, participants]);
 

@@ -170,7 +170,7 @@ export default function WithdrawEarningsScreen(): React.JSX.Element {
             Alert.alert('Payment successful', 'Withdrawal credited to your UPI.');
           } else if (row.payoutStatus === 'failed') {
             setStep('failed');
-            Alert.alert('Payment failed', 'Payment is failed.');
+            Alert.alert('Payment failed', 'We could not send money to your UPI. No money was deducted.');
           }
         } catch {
           // keep polling on transient failures
@@ -207,7 +207,7 @@ export default function WithdrawEarningsScreen(): React.JSX.Element {
             Alert.alert('Payment successful', 'Withdrawal credited to your UPI.');
           } else if (payload.payoutStatus === 'failed') {
             setStep('failed');
-            Alert.alert('Payment failed', 'Payment is failed.');
+            Alert.alert('Payment failed', 'We could not send money to your UPI. No money was deducted.');
           }
           void loadOverview({ silent: true });
         }

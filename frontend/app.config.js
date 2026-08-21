@@ -83,12 +83,27 @@ module.exports = {
           'android.permission.FOREGROUND_SERVICE_CAMERA',
           'android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK',
           'android.permission.WAKE_LOCK',
+          'android.permission.FOREGROUND_SERVICE_SPECIAL_USE',
+          'android.permission.USE_FULL_SCREEN_INTENT',
+          'android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS',
         ])
       ),
       usesCleartextTraffic: true,
     },
     plugins: [
       ...(appJson.expo.plugins || []),
+      [
+        'react-native-fbsdk-next',
+        {
+          appID: '4631877233709603',
+          clientToken: '53d93b40a74a838477b49779452a1e20',
+          displayName: 'Selecto',
+          scheme: 'fb4631877233709603',
+          advertiserIDCollectionEnabled: true,
+          autoLogAppEventsEnabled: true,
+          isAutoInitEnabled: true,
+        },
+      ],
       [
         'expo-build-properties',
         {

@@ -18,7 +18,10 @@ export const STATUS_YELLOW = '#f59e0b';
 export const STATUS_GREY = '#9ca3af';
 
 export function getReceiverPresenceInfo(receiver: DiscoverReceiverSummary): ReceiverPresenceInfo {
-  if (Boolean(receiver.isBusyOnCall)) {
+  const acceptingCalls = Boolean(receiver.isAvailable);
+  const loggedIn = Boolean(receiver.isOnline);
+
+  if (Boolean(receiver.isBusyOnCall) && acceptingCalls && loggedIn) {
     return {
       status: 'busy',
       label: 'Busy',
@@ -27,9 +30,6 @@ export function getReceiverPresenceInfo(receiver: DiscoverReceiverSummary): Rece
       canMessage: true,
     };
   }
-
-  // Callable when logged in (socket) and Go Online switch is on.
-  const acceptingCalls = Boolean(receiver.isAvailable);
   if (!acceptingCalls) {
     return {
       status: 'offline',
@@ -40,7 +40,6 @@ export function getReceiverPresenceInfo(receiver: DiscoverReceiverSummary): Rece
     };
   }
 
-  const loggedIn = Boolean(receiver.isOnline);
   if (!loggedIn) {
     return {
       status: 'offline',

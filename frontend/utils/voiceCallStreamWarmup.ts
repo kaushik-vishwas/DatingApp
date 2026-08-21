@@ -44,7 +44,7 @@ export async function warmVoiceCallStreamClient(
     // Never prompt here — permissions are asked while ringing / before dial.
     if (!(await hasVoiceCallMicrophonePermission())) return;
 
-    streamSdk.StreamVideoClient.getOrCreateInstance({
+    const client = streamSdk.StreamVideoClient.getOrCreateInstance({
       apiKey: boot.apiKey,
       user: {
         id: boot.streamUserId,
@@ -52,7 +52,15 @@ export async function warmVoiceCallStreamClient(
         image: profileImageUrlForStreamOrNetwork(profileImage),
       },
       token: boot.token,
-    });
+    }) as { call?: (type: string, id: string) => unknown };
+
+    // Prefetch Call object so join() after accept does less first-touch work.
+    try {
+      const callType = typeof boot.callType === 'string' && boot.callType.trim() ? boot.callType : 'default';
+      client.call?.(callType, callId);
+    } catch {
+      // Client warm is enough.
+    }
     warmedCallIds.add(callId);
   } catch {
     // Best-effort; VoiceCallScreen join still runs.

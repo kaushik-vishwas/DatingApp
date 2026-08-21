@@ -8,6 +8,16 @@ export type VoiceCallPermissionResult = {
 };
 
 let inFlight: Promise<VoiceCallPermissionResult> | null = null;
+/** Set after a successful check/prompt so accept→join can skip another Audio round-trip. */
+let micGrantedCache: boolean | null = null;
+
+export function isVoiceCallMicrophonePermissionCached(): boolean {
+  return micGrantedCache === true;
+}
+
+export function clearVoiceCallMicrophonePermissionCache(): void {
+  micGrantedCache = null;
+}
 
 async function requestAndroidIfNeeded(permission: string): Promise<boolean> {
   try {
@@ -40,6 +50,7 @@ export async function ensureVoiceCallPermissions(): Promise<VoiceCallPermissionR
     } catch {
       microphone = false;
     }
+    micGrantedCache = microphone;
 
     let readPhoneState = Platform.OS !== 'android';
     let bluetoothConnect = true;
@@ -67,11 +78,14 @@ export async function ensureVoiceCallPermissions(): Promise<VoiceCallPermissionR
   }
 }
 
-/** Fast check — never shows a system dialog. */
+/** Fast check — never shows a system dialog. Uses ring-time cache when available. */
 export async function hasVoiceCallMicrophonePermission(): Promise<boolean> {
+  if (micGrantedCache === true) return true;
   try {
     const existing = await Audio.getPermissionsAsync();
-    return existing.status === 'granted';
+    const ok = existing.status === 'granted';
+    micGrantedCache = ok;
+    return ok;
   } catch {
     return false;
   }

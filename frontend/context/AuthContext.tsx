@@ -5,11 +5,13 @@ import React, {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from 'react';
 import { Alert } from 'react-native';
 import { io, type Socket } from 'socket.io-client';
 import { authApi, clearJwt, getJwt, getResolvedApiBaseUrl, profileApi } from '../services/api';
+import { stopReceiverOnlineKeepAlive } from '../utils/receiverOnlineKeepAlive';
 import { markAuthWelcomeSeen } from '../services/authWelcomeStorage';
 import type { UserProfile } from '../types/user';
 
@@ -25,6 +27,8 @@ type AuthContextValue = {
   applyServerUser: (profile: UserProfile) => void;
   signOut: () => Promise<void>;
   refreshUser: () => Promise<void>;
+  /** True once after a fresh login (not session restore). Home offer popup uses this. */
+  consumeCallerHomeOfferLoginShow: () => boolean;
 };
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -34,6 +38,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [user, setUser] = useState<UserProfile | null>(null);
   const [bootstrapping, setBootstrapping] = useState(true);
   const [loadingUser, setLoadingUser] = useState(false);
+  const callerHomeOfferLoginShowRef = useRef(false);
 
   const refreshUser = useCallback(async (): Promise<void> => {
     const t = await getJwt();
@@ -89,6 +94,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, []);
 
   const signIn = useCallback((jwt: string, initialUser?: UserProfile | null) => {
+    callerHomeOfferLoginShowRef.current = true;
     if (initialUser) setUser(initialUser);
     setToken(jwt);
     void markAuthWelcomeSeen();
@@ -102,11 +108,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       } catch {
         // Best-effort: clear local session even if offline request fails.
       }
+      stopReceiverOnlineKeepAlive();
     }
     await clearJwt();
     setToken(null);
     setUser(null);
   }, [user?.role]);
+
+  const consumeCallerHomeOfferLoginShow = useCallback((): boolean => {
+    if (!callerHomeOfferLoginShowRef.current) return false;
+    callerHomeOfferLoginShowRef.current = false;
+    return true;
+  }, []);
 
   /** Single-device login: server emits when this account signs in elsewhere; older JWT `sv` is lower. */
   useEffect(() => {
@@ -176,8 +189,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       applyServerUser,
       signOut,
       refreshUser,
+      consumeCallerHomeOfferLoginShow,
     }),
-    [token, user, bootstrapping, loadingUser, signIn, applyServerUser, signOut, refreshUser]
+    [token, user, bootstrapping, loadingUser, signIn, applyServerUser, signOut, refreshUser, consumeCallerHomeOfferLoginShow]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

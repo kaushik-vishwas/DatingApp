@@ -8,6 +8,7 @@ import { CallSignalProvider } from './context/CallSignalContext';
 import { ChatInboxProvider } from './context/ChatInboxContext';
 import AppNavigator from './navigation/AppNavigator';
 import { ensureIncomingCallNotificationInfrastructure } from './utils/incomingCallNotifications';
+import { ensureOnlinePresenceNotificationInfrastructure } from './utils/onlinePresenceNotifications';
 import {
   capturePendingReferralSilently,
   subscribeReferralDeepLinks,
@@ -15,7 +16,12 @@ import {
 
 export default function App() {
   useEffect(() => {
-    return ensureIncomingCallNotificationInfrastructure();
+    const stopIncoming = ensureIncomingCallNotificationInfrastructure();
+    const stopOnline = ensureOnlinePresenceNotificationInfrastructure();
+    return () => {
+      stopIncoming();
+      stopOnline();
+    };
   }, []);
 
   useEffect(() => {

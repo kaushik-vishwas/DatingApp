@@ -57,6 +57,14 @@ object IncomingCallFcmPresenter {
     val identifier = ID_PREFIX + callId
     val notificationId = (identifier.hashCode() and 0x7fffffff)
 
+    val nm = appContext.getSystemService(NotificationManager::class.java)
+    val canFullScreen =
+      if (Build.VERSION.SDK_INT >= 34) {
+        nm?.canUseFullScreenIntent() == true
+      } else {
+        true
+      }
+
     val openIntent =
       Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
         setPackage(appContext.packageName)
@@ -105,7 +113,6 @@ object IncomingCallFcmPresenter {
         .setContentText(body)
         .setStyle(NotificationCompat.BigTextStyle().bigText(body))
         .setContentIntent(contentPending)
-        .setFullScreenIntent(fullScreenPending, true)
         .setCategory(NotificationCompat.CATEGORY_CALL)
         .setPriority(NotificationCompat.PRIORITY_MAX)
         .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
@@ -116,6 +123,12 @@ object IncomingCallFcmPresenter {
         .setDefaults(NotificationCompat.DEFAULT_LIGHTS or NotificationCompat.DEFAULT_VIBRATE)
         .setVibrate(longArrayOf(0, 280, 200, 280, 200, 280))
         .setTimeoutAfter(55_000L)
+
+    if (canFullScreen) {
+      builder.setFullScreenIntent(fullScreenPending, true)
+    } else {
+      Log.w(TAG, "Full-screen intent not granted; posting MAX heads-up only")
+    }
 
     if (ringUri != null) {
       builder.setSound(ringUri)
@@ -162,22 +175,51 @@ object IncomingCallFcmPresenter {
     builder.extras.putString("peerImage", peerImage)
     builder.extras.putString("url", url)
 
+    val notificationsEnabled = nm?.areNotificationsEnabled() != false
+
     try {
-      if (Build.VERSION.SDK_INT >= 33) {
-        val nm = appContext.getSystemService(NotificationManager::class.java)
-        // Still attempt present; POST_NOTIFICATIONS may already be granted from app use.
-        if (nm != null && !nm.areNotificationsEnabled()) {
-          Log.w(TAG, "Notifications disabled — cannot present incoming call")
-        }
+      if (!notificationsEnabled) {
+        Log.w(TAG, "Notifications disabled — cannot present incoming call")
       }
       NotificationManagerCompat.from(appContext).notify(identifier, notificationId, builder.build())
       Log.i(TAG, "Presented incoming call notification tag=$identifier")
+      PresenceNativeWakeLog.append(
+        appContext,
+        "native_fcm_incoming",
+        mapOf(
+          "callId" to callId,
+          "presented" to true,
+          "canFullScreen" to canFullScreen,
+          "notificationsEnabled" to notificationsEnabled,
+          "sdkInt" to Build.VERSION.SDK_INT
+        )
+      )
       return true
     } catch (e: SecurityException) {
       Log.e(TAG, "Failed to present incoming call notification", e)
+      PresenceNativeWakeLog.append(
+        appContext,
+        "native_fcm_present_failed",
+        mapOf(
+          "callId" to callId,
+          "presented" to false,
+          "canFullScreen" to canFullScreen,
+          "notificationsEnabled" to notificationsEnabled,
+          "error" to (e.message ?: "SecurityException")
+        )
+      )
       return false
     } catch (e: Exception) {
       Log.e(TAG, "Unexpected present failure", e)
+      PresenceNativeWakeLog.append(
+        appContext,
+        "native_fcm_present_failed",
+        mapOf(
+          "callId" to callId,
+          "presented" to false,
+          "error" to (e.message ?: "present_failed")
+        )
+      )
       return false
     }
   }

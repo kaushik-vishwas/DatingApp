@@ -32,7 +32,7 @@ export function PresenceDiagnosticsTopBarButton({ onPress }: Props): React.JSX.E
       style={styles.btn}
       onPress={onPress}
       activeOpacity={0.85}
-      accessibilityLabel="Receiver presence logs"
+      accessibilityLabel="FCM and wake debug"
       accessibilityRole="button"
     >
       <Ionicons name="radio-outline" size={20} color="#fff" />

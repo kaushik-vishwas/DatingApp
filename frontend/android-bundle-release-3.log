@@ -1,0 +1,1040 @@
+﻿To honour the JVM settings for this build a single-use Daemon process will be forked. For more on this, please refer to https://docs.gradle.org/8.14.3/userguide/gradle_daemon.html#sec:disabling_the_daemon in the Gradle documentation.
+Daemon will be stopped at the end of the build 
+> Task :gradle-plugin:settings-plugin:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :gradle-plugin:shared:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :expo-gradle-plugin:expo-autolinking-plugin-shared:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :gradle-plugin:shared:compileKotlin UP-TO-DATE
+> Task :gradle-plugin:shared:compileJava NO-SOURCE
+> Task :gradle-plugin:shared:processResources NO-SOURCE
+> Task :gradle-plugin:shared:classes UP-TO-DATE
+> Task :gradle-plugin:shared:jar UP-TO-DATE
+> Task :expo-gradle-plugin:expo-autolinking-plugin-shared:compileKotlin UP-TO-DATE
+> Task :expo-gradle-plugin:expo-autolinking-plugin-shared:compileJava NO-SOURCE
+> Task :expo-gradle-plugin:expo-autolinking-plugin-shared:processResources NO-SOURCE
+> Task :expo-gradle-plugin:expo-autolinking-plugin-shared:classes UP-TO-DATE
+> Task :expo-gradle-plugin:expo-autolinking-plugin-shared:jar UP-TO-DATE
+> Task :expo-gradle-plugin:expo-autolinking-settings-plugin:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :gradle-plugin:settings-plugin:compileKotlin UP-TO-DATE
+> Task :gradle-plugin:settings-plugin:compileJava NO-SOURCE
+> Task :gradle-plugin:settings-plugin:pluginDescriptors UP-TO-DATE
+> Task :gradle-plugin:settings-plugin:processResources UP-TO-DATE
+> Task :gradle-plugin:settings-plugin:classes UP-TO-DATE
+> Task :gradle-plugin:settings-plugin:jar UP-TO-DATE
+> Task :expo-gradle-plugin:expo-autolinking-settings-plugin:compileKotlin UP-TO-DATE
+> Task :expo-gradle-plugin:expo-autolinking-settings-plugin:compileJava NO-SOURCE
+> Task :expo-gradle-plugin:expo-autolinking-settings-plugin:pluginDescriptors UP-TO-DATE
+> Task :expo-gradle-plugin:expo-autolinking-settings-plugin:processResources UP-TO-DATE
+> Task :expo-gradle-plugin:expo-autolinking-settings-plugin:classes UP-TO-DATE
+> Task :expo-gradle-plugin:expo-autolinking-settings-plugin:jar UP-TO-DATE
+> Task :expo-module-gradle-plugin:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :expo-module-gradle-plugin:pluginDescriptors UP-TO-DATE
+> Task :expo-module-gradle-plugin:processResources UP-TO-DATE
+> Task :gradle-plugin:react-native-gradle-plugin:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :expo-gradle-plugin:expo-autolinking-plugin:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :expo-gradle-plugin:expo-autolinking-plugin:compileKotlin UP-TO-DATE
+> Task :expo-gradle-plugin:expo-autolinking-plugin:compileJava NO-SOURCE
+> Task :expo-gradle-plugin:expo-autolinking-plugin:pluginDescriptors UP-TO-DATE
+> Task :expo-gradle-plugin:expo-autolinking-plugin:processResources UP-TO-DATE
+> Task :expo-gradle-plugin:expo-autolinking-plugin:classes UP-TO-DATE
+> Task :expo-gradle-plugin:expo-autolinking-plugin:jar UP-TO-DATE
+> Task :gradle-plugin:react-native-gradle-plugin:compileKotlin UP-TO-DATE
+> Task :gradle-plugin:react-native-gradle-plugin:compileJava NO-SOURCE
+> Task :gradle-plugin:react-native-gradle-plugin:pluginDescriptors UP-TO-DATE
+> Task :gradle-plugin:react-native-gradle-plugin:processResources UP-TO-DATE
+> Task :gradle-plugin:react-native-gradle-plugin:classes UP-TO-DATE
+> Task :gradle-plugin:react-native-gradle-plugin:jar UP-TO-DATE
+> Task :expo-module-gradle-plugin:compileKotlin UP-TO-DATE
+> Task :expo-module-gradle-plugin:compileJava NO-SOURCE
+> Task :expo-module-gradle-plugin:classes UP-TO-DATE
+> Task :expo-module-gradle-plugin:jar UP-TO-DATE
+
+> Configure project :
+[32m[ExpoRootProject][0m Using the following versions:
+  - buildTools:  [32m36.0.0[0m
+  - minSdk:      [32m24[0m
+  - compileSdk:  [32m36[0m
+  - targetSdk:   [32m36[0m
+  - ndk:         [32m27.1.12297006[0m
+  - kotlin:      [32m2.1.20[0m
+  - ksp:         [32m2.1.20-2.0.1[0m
+
+> Configure project :expo
+
+Using expo modules
+  - [32mexpo-constants[0m (18.0.13)
+  - [32mexpo-modules-core[0m (3.0.29)
+  - [32mincoming-call-android[0m (1.0.0)
+  - [33m[?][0m [32mexpo-application[0m (7.0.8)
+  - [33m[?][0m [32mexpo-asset[0m (12.0.12)
+  - [33m[?][0m [32mexpo-av[0m (16.0.8)
+  - [33m[?][0m [32mexpo-clipboard[0m (8.0.8)
+  - [33m[?][0m [32mexpo-device[0m (8.0.10)
+  - [33m[?][0m [32mexpo-document-picker[0m (14.0.8)
+  - [33m[?][0m [32mexpo-file-system[0m (19.0.23)
+  - [33m[?][0m [32mexpo-font[0m (55.0.6)
+  - [33m[?][0m [32mexpo-keep-awake[0m (15.0.8)
+  - [33m[?][0m [32mexpo-linear-gradient[0m (15.0.8)
+  - [33m[?][0m [32mexpo-navigation-bar[0m (5.0.10)
+  - [33m[?][0m [32mexpo-notifications[0m (0.32.17)
+  - [33m[?][0m [32mexpo-print[0m (15.0.8)
+  - [33m[?][0m [32mexpo-screen-capture[0m (8.0.9)
+  - [33m[?][0m [32mexpo-sharing[0m (14.0.8)
+  - [33m[?][0m [32mexpo-task-manager[0m (14.0.9)
+  - [33m[?][0m [32mexpo-web-browser[0m (15.0.11)
+  - [33m[?][0m [32munimodules-app-loader[0m (6.0.8)
+
+
+> Configure project :stream-io_react-native-webrtc
+Building Stream WebRTC React Native module with Kotlin version: 2.1.20
+
+> Task :app:createBundleReleaseJsAndAssets UP-TO-DATE
+> Task :app:generateAutolinkingNewArchitectureFiles UP-TO-DATE
+> Task :app:generateAutolinkingPackageList UP-TO-DATE
+> Task :app:generateCodegenSchemaFromJavaScript SKIPPED
+> Task :app:generateCodegenArtifactsFromSchema SKIPPED
+> Task :app:generateReactNativeEntryPoint UP-TO-DATE
+> Task :expo:generatePackagesList UP-TO-DATE
+> Task :expo:preBuild UP-TO-DATE
+
+> Task :expo-constants:createExpoConfig
+.\gradlew.bat : The NODE_ENV environment variable is required but was not specified. Ensure the project is bundled 
+with Expo CLI or NODE_ENV is set. Using only .env.local and .env
+At C:\Users\kaush\AppData\Local\Temp\ps-script-4b2a91d7-d1c1-4f44-b9d7-0c38345a590f.ps1:103 char:200
++ ... e home..."; .\gradlew.bat bundleRelease --no-daemon --max-workers=1 - ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (The NODE_ENV en....local and .env:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+Γùç injected env (0) from .env // tip: Γùê encrypted .env [www.dotenvx.com]
+
+> Task :expo-constants:preBuild
+> Task :expo-modules-core:preBuild UP-TO-DATE
+> Task :incoming-call-android:preBuild UP-TO-DATE
+> Task :react-native-async-storage_async-storage:generateCodegenSchemaFromJavaScript UP-TO-DATE
+> Task :react-native-async-storage_async-storage:generateCodegenArtifactsFromSchema UP-TO-DATE
+> Task :react-native-async-storage_async-storage:preBuild UP-TO-DATE
+> Task :react-native-community_datetimepicker:generateCodegenSchemaFromJavaScript UP-TO-DATE
+> Task :react-native-community_datetimepicker:generateCodegenArtifactsFromSchema UP-TO-DATE
+> Task :react-native-community_datetimepicker:preBuild UP-TO-DATE
+> Task :react-native-community_netinfo:generateCodegenSchemaFromJavaScript UP-TO-DATE
+> Task :react-native-community_netinfo:generateCodegenArtifactsFromSchema UP-TO-DATE
+> Task :react-native-community_netinfo:preBuild UP-TO-DATE
+> Task :react-native-community_slider:generateCodegenSchemaFromJavaScript UP-TO-DATE
+> Task :react-native-community_slider:generateCodegenArtifactsFromSchema UP-TO-DATE
+> Task :react-native-community_slider:preBuild UP-TO-DATE
+> Task :react-native-fbsdk-next:preBuild UP-TO-DATE
+> Task :react-native-gesture-handler:generateCodegenSchemaFromJavaScript UP-TO-DATE
+> Task :react-native-gesture-handler:generateCodegenArtifactsFromSchema UP-TO-DATE
+> Task :react-native-gesture-handler:preBuild UP-TO-DATE
+> Task :react-native-linear-gradient:preBuild UP-TO-DATE
+> Task :react-native-pager-view:generateCodegenSchemaFromJavaScript UP-TO-DATE
+> Task :react-native-pager-view:generateCodegenArtifactsFromSchema UP-TO-DATE
+> Task :react-native-pager-view:preBuild UP-TO-DATE
+> Task :react-native-razorpay:generateCodegenSchemaFromJavaScript UP-TO-DATE
+> Task :react-native-razorpay:generateCodegenArtifactsFromSchema UP-TO-DATE
+> Task :react-native-razorpay:preBuild UP-TO-DATE
+> Task :react-native-safe-area-context:generateCodegenSchemaFromJavaScript UP-TO-DATE
+> Task :react-native-safe-area-context:generateCodegenArtifactsFromSchema UP-TO-DATE
+> Task :react-native-safe-area-context:preBuild UP-TO-DATE
+> Task :react-native-screens:generateCodegenSchemaFromJavaScript UP-TO-DATE
+> Task :react-native-screens:generateCodegenArtifactsFromSchema UP-TO-DATE
+> Task :react-native-screens:preBuild UP-TO-DATE
+> Task :react-native-svg:generateCodegenSchemaFromJavaScript UP-TO-DATE
+> Task :react-native-svg:generateCodegenArtifactsFromSchema UP-TO-DATE
+> Task :react-native-svg:preBuild UP-TO-DATE
+> Task :react-native-webview:generateCodegenSchemaFromJavaScript UP-TO-DATE
+> Task :react-native-webview:generateCodegenArtifactsFromSchema UP-TO-DATE
+> Task :react-native-webview:preBuild UP-TO-DATE
+> Task :stream-io_react-native-webrtc:preBuild UP-TO-DATE
+> Task :stream-io_video-react-native-sdk:generateCodegenSchemaFromJavaScript UP-TO-DATE
+> Task :stream-io_video-react-native-sdk:generateCodegenArtifactsFromSchema UP-TO-DATE
+> Task :stream-io_video-react-native-sdk:preBuild UP-TO-DATE
+> Task :app:preBuild
+> Task :app:preReleaseBuild
+> Task :app:generateReleaseResValues UP-TO-DATE
+> Task :expo:preReleaseBuild UP-TO-DATE
+> Task :expo:generateReleaseResValues UP-TO-DATE
+> Task :expo:generateReleaseResources UP-TO-DATE
+> Task :expo:packageReleaseResources UP-TO-DATE
+> Task :expo-constants:preReleaseBuild
+> Task :expo-constants:generateReleaseResValues UP-TO-DATE
+> Task :expo-constants:generateReleaseResources UP-TO-DATE
+> Task :expo-constants:packageReleaseResources UP-TO-DATE
+> Task :expo-modules-core:preReleaseBuild UP-TO-DATE
+> Task :expo-modules-core:generateReleaseResValues UP-TO-DATE
+> Task :expo-modules-core:generateReleaseResources UP-TO-DATE
+> Task :expo-modules-core:packageReleaseResources UP-TO-DATE
+> Task :incoming-call-android:preReleaseBuild UP-TO-DATE
+> Task :incoming-call-android:generateReleaseResValues UP-TO-DATE
+> Task :incoming-call-android:generateReleaseResources UP-TO-DATE
+> Task :incoming-call-android:packageReleaseResources UP-TO-DATE
+> Task :react-native-async-storage_async-storage:preReleaseBuild UP-TO-DATE
+> Task :react-native-async-storage_async-storage:generateReleaseResValues UP-TO-DATE
+> Task :react-native-async-storage_async-storage:generateReleaseResources UP-TO-DATE
+> Task :react-native-async-storage_async-storage:packageReleaseResources UP-TO-DATE
+> Task :react-native-community_datetimepicker:preReleaseBuild UP-TO-DATE
+> Task :react-native-community_datetimepicker:generateReleaseResValues UP-TO-DATE
+> Task :react-native-community_datetimepicker:generateReleaseResources UP-TO-DATE
+> Task :react-native-community_datetimepicker:packageReleaseResources UP-TO-DATE
+> Task :react-native-community_netinfo:preReleaseBuild UP-TO-DATE
+> Task :react-native-community_netinfo:generateReleaseResValues UP-TO-DATE
+> Task :react-native-community_netinfo:generateReleaseResources UP-TO-DATE
+> Task :react-native-community_netinfo:packageReleaseResources UP-TO-DATE
+> Task :react-native-community_slider:preReleaseBuild UP-TO-DATE
+> Task :react-native-community_slider:generateReleaseResValues UP-TO-DATE
+> Task :react-native-community_slider:generateReleaseResources UP-TO-DATE
+> Task :react-native-community_slider:packageReleaseResources UP-TO-DATE
+> Task :react-native-fbsdk-next:preReleaseBuild UP-TO-DATE
+> Task :react-native-fbsdk-next:generateReleaseResValues UP-TO-DATE
+> Task :react-native-fbsdk-next:generateReleaseResources UP-TO-DATE
+> Task :react-native-fbsdk-next:packageReleaseResources UP-TO-DATE
+> Task :react-native-gesture-handler:preReleaseBuild UP-TO-DATE
+> Task :react-native-gesture-handler:generateReleaseResValues UP-TO-DATE
+> Task :react-native-gesture-handler:generateReleaseResources UP-TO-DATE
+> Task :react-native-gesture-handler:packageReleaseResources UP-TO-DATE
+> Task :react-native-linear-gradient:preReleaseBuild UP-TO-DATE
+> Task :react-native-linear-gradient:generateReleaseResValues UP-TO-DATE
+> Task :react-native-linear-gradient:generateReleaseResources UP-TO-DATE
+> Task :react-native-linear-gradient:packageReleaseResources UP-TO-DATE
+> Task :react-native-pager-view:preReleaseBuild UP-TO-DATE
+> Task :react-native-pager-view:generateReleaseResValues UP-TO-DATE
+> Task :react-native-pager-view:generateReleaseResources UP-TO-DATE
+> Task :react-native-pager-view:packageReleaseResources UP-TO-DATE
+> Task :react-native-razorpay:preReleaseBuild UP-TO-DATE
+> Task :react-native-razorpay:generateReleaseResValues UP-TO-DATE
+> Task :react-native-razorpay:generateReleaseResources UP-TO-DATE
+> Task :react-native-razorpay:packageReleaseResources UP-TO-DATE
+> Task :react-native-safe-area-context:preReleaseBuild UP-TO-DATE
+> Task :react-native-safe-area-context:generateReleaseResValues UP-TO-DATE
+> Task :react-native-safe-area-context:generateReleaseResources UP-TO-DATE
+> Task :react-native-safe-area-context:packageReleaseResources UP-TO-DATE
+> Task :react-native-screens:preReleaseBuild UP-TO-DATE
+> Task :react-native-screens:generateReleaseResValues UP-TO-DATE
+> Task :react-native-screens:generateReleaseResources UP-TO-DATE
+> Task :react-native-screens:packageReleaseResources UP-TO-DATE
+> Task :react-native-svg:preReleaseBuild UP-TO-DATE
+> Task :react-native-svg:generateReleaseResValues UP-TO-DATE
+> Task :react-native-svg:generateReleaseResources UP-TO-DATE
+> Task :react-native-svg:packageReleaseResources UP-TO-DATE
+> Task :react-native-webview:preReleaseBuild UP-TO-DATE
+> Task :react-native-webview:generateReleaseResValues UP-TO-DATE
+> Task :react-native-webview:generateReleaseResources UP-TO-DATE
+> Task :react-native-webview:packageReleaseResources UP-TO-DATE
+> Task :stream-io_react-native-webrtc:preReleaseBuild UP-TO-DATE
+> Task :stream-io_react-native-webrtc:generateReleaseResValues UP-TO-DATE
+> Task :stream-io_react-native-webrtc:generateReleaseResources UP-TO-DATE
+> Task :stream-io_react-native-webrtc:packageReleaseResources UP-TO-DATE
+> Task :stream-io_video-react-native-sdk:preReleaseBuild UP-TO-DATE
+> Task :stream-io_video-react-native-sdk:generateReleaseResValues UP-TO-DATE
+> Task :stream-io_video-react-native-sdk:generateReleaseResources UP-TO-DATE
+> Task :stream-io_video-react-native-sdk:packageReleaseResources UP-TO-DATE
+> Task :app:mapReleaseSourceSetPaths UP-TO-DATE
+> Task :app:generateReleaseResources UP-TO-DATE
+> Task :app:mergeReleaseResources UP-TO-DATE
+> Task :app:createReleaseCompatibleScreenManifests UP-TO-DATE
+> Task :app:extractDeepLinksRelease UP-TO-DATE
+> Task :expo:extractDeepLinksRelease UP-TO-DATE
+> Task :expo:processReleaseManifest UP-TO-DATE
+> Task :expo-constants:extractDeepLinksRelease UP-TO-DATE
+> Task :expo-constants:processReleaseManifest UP-TO-DATE
+> Task :expo-modules-core:extractDeepLinksRelease UP-TO-DATE
+> Task :expo-modules-core:processReleaseManifest UP-TO-DATE
+> Task :incoming-call-android:extractDeepLinksRelease UP-TO-DATE
+> Task :incoming-call-android:processReleaseManifest UP-TO-DATE
+> Task :react-native-async-storage_async-storage:extractDeepLinksRelease UP-TO-DATE
+> Task :react-native-async-storage_async-storage:processReleaseManifest UP-TO-DATE
+> Task :react-native-community_datetimepicker:extractDeepLinksRelease UP-TO-DATE
+> Task :react-native-community_datetimepicker:processReleaseManifest UP-TO-DATE
+> Task :react-native-community_netinfo:extractDeepLinksRelease UP-TO-DATE
+> Task :react-native-community_netinfo:processReleaseManifest UP-TO-DATE
+> Task :react-native-community_slider:extractDeepLinksRelease UP-TO-DATE
+> Task :react-native-community_slider:processReleaseManifest UP-TO-DATE
+> Task :react-native-fbsdk-next:extractDeepLinksRelease UP-TO-DATE
+> Task :react-native-fbsdk-next:processReleaseManifest UP-TO-DATE
+> Task :react-native-gesture-handler:extractDeepLinksRelease UP-TO-DATE
+> Task :react-native-gesture-handler:processReleaseManifest UP-TO-DATE
+> Task :react-native-linear-gradient:extractDeepLinksRelease UP-TO-DATE
+> Task :react-native-linear-gradient:processReleaseManifest UP-TO-DATE
+> Task :react-native-pager-view:extractDeepLinksRelease UP-TO-DATE
+> Task :react-native-pager-view:processReleaseManifest UP-TO-DATE
+> Task :react-native-razorpay:extractDeepLinksRelease UP-TO-DATE
+> Task :react-native-razorpay:processReleaseManifest UP-TO-DATE
+> Task :react-native-safe-area-context:extractDeepLinksRelease UP-TO-DATE
+> Task :react-native-safe-area-context:processReleaseManifest UP-TO-DATE
+> Task :react-native-screens:extractDeepLinksRelease UP-TO-DATE
+> Task :react-native-screens:processReleaseManifest UP-TO-DATE
+> Task :react-native-svg:extractDeepLinksRelease UP-TO-DATE
+> Task :react-native-svg:processReleaseManifest UP-TO-DATE
+> Task :react-native-webview:extractDeepLinksRelease UP-TO-DATE
+> Task :react-native-webview:processReleaseManifest UP-TO-DATE
+> Task :stream-io_react-native-webrtc:extractDeepLinksRelease UP-TO-DATE
+> Task :stream-io_react-native-webrtc:processReleaseManifest UP-TO-DATE
+> Task :stream-io_video-react-native-sdk:extractDeepLinksRelease UP-TO-DATE
+> Task :stream-io_video-react-native-sdk:processReleaseManifest UP-TO-DATE
+> Task :app:processReleaseMainManifest UP-TO-DATE
+> Task :app:processReleaseManifest UP-TO-DATE
+> Task :app:processApplicationManifestReleaseForBundle UP-TO-DATE
+> Task :expo:writeReleaseAarMetadata UP-TO-DATE
+> Task :expo-constants:writeReleaseAarMetadata UP-TO-DATE
+> Task :expo-modules-core:writeReleaseAarMetadata UP-TO-DATE
+> Task :incoming-call-android:writeReleaseAarMetadata UP-TO-DATE
+> Task :react-native-async-storage_async-storage:writeReleaseAarMetadata UP-TO-DATE
+> Task :react-native-community_datetimepicker:writeReleaseAarMetadata UP-TO-DATE
+> Task :react-native-community_netinfo:writeReleaseAarMetadata UP-TO-DATE
+> Task :react-native-community_slider:writeReleaseAarMetadata UP-TO-DATE
+> Task :react-native-fbsdk-next:writeReleaseAarMetadata UP-TO-DATE
+> Task :react-native-gesture-handler:writeReleaseAarMetadata UP-TO-DATE
+> Task :react-native-linear-gradient:writeReleaseAarMetadata UP-TO-DATE
+> Task :react-native-pager-view:writeReleaseAarMetadata UP-TO-DATE
+> Task :react-native-razorpay:writeReleaseAarMetadata UP-TO-DATE
+> Task :react-native-safe-area-context:writeReleaseAarMetadata UP-TO-DATE
+> Task :react-native-screens:writeReleaseAarMetadata UP-TO-DATE
+> Task :react-native-svg:writeReleaseAarMetadata UP-TO-DATE
+> Task :react-native-webview:writeReleaseAarMetadata UP-TO-DATE
+> Task :stream-io_react-native-webrtc:writeReleaseAarMetadata UP-TO-DATE
+> Task :stream-io_video-react-native-sdk:writeReleaseAarMetadata UP-TO-DATE
+> Task :app:checkReleaseAarMetadata UP-TO-DATE
+> Task :app:packageReleaseResources UP-TO-DATE
+> Task :app:parseReleaseLocalResources UP-TO-DATE
+> Task :app:processReleaseManifestForPackage UP-TO-DATE
+> Task :expo:compileReleaseLibraryResources UP-TO-DATE
+> Task :expo:parseReleaseLocalResources UP-TO-DATE
+> Task :expo:generateReleaseRFile UP-TO-DATE
+> Task :expo-constants:compileReleaseLibraryResources UP-TO-DATE
+> Task :expo-constants:parseReleaseLocalResources UP-TO-DATE
+> Task :expo-constants:generateReleaseRFile UP-TO-DATE
+> Task :expo-modules-core:compileReleaseLibraryResources UP-TO-DATE
+> Task :expo-modules-core:parseReleaseLocalResources UP-TO-DATE
+> Task :expo-modules-core:generateReleaseRFile UP-TO-DATE
+> Task :incoming-call-android:compileReleaseLibraryResources UP-TO-DATE
+> Task :incoming-call-android:parseReleaseLocalResources UP-TO-DATE
+> Task :incoming-call-android:generateReleaseRFile UP-TO-DATE
+> Task :react-native-async-storage_async-storage:compileReleaseLibraryResources UP-TO-DATE
+> Task :react-native-async-storage_async-storage:parseReleaseLocalResources UP-TO-DATE
+> Task :react-native-async-storage_async-storage:generateReleaseRFile UP-TO-DATE
+> Task :react-native-community_datetimepicker:compileReleaseLibraryResources UP-TO-DATE
+> Task :react-native-community_datetimepicker:parseReleaseLocalResources UP-TO-DATE
+> Task :react-native-community_datetimepicker:generateReleaseRFile UP-TO-DATE
+> Task :react-native-community_netinfo:compileReleaseLibraryResources UP-TO-DATE
+> Task :react-native-community_netinfo:parseReleaseLocalResources UP-TO-DATE
+> Task :react-native-community_netinfo:generateReleaseRFile UP-TO-DATE
+> Task :react-native-community_slider:compileReleaseLibraryResources UP-TO-DATE
+> Task :react-native-community_slider:parseReleaseLocalResources UP-TO-DATE
+> Task :react-native-community_slider:generateReleaseRFile UP-TO-DATE
+> Task :react-native-fbsdk-next:compileReleaseLibraryResources UP-TO-DATE
+> Task :react-native-fbsdk-next:parseReleaseLocalResources UP-TO-DATE
+> Task :react-native-fbsdk-next:generateReleaseRFile UP-TO-DATE
+> Task :react-native-gesture-handler:compileReleaseLibraryResources UP-TO-DATE
+> Task :react-native-gesture-handler:parseReleaseLocalResources UP-TO-DATE
+> Task :react-native-gesture-handler:generateReleaseRFile UP-TO-DATE
+> Task :react-native-linear-gradient:compileReleaseLibraryResources UP-TO-DATE
+> Task :react-native-linear-gradient:parseReleaseLocalResources UP-TO-DATE
+> Task :react-native-linear-gradient:generateReleaseRFile UP-TO-DATE
+> Task :react-native-pager-view:compileReleaseLibraryResources UP-TO-DATE
+> Task :react-native-pager-view:parseReleaseLocalResources UP-TO-DATE
+> Task :react-native-pager-view:generateReleaseRFile UP-TO-DATE
+> Task :react-native-razorpay:compileReleaseLibraryResources UP-TO-DATE
+> Task :react-native-razorpay:parseReleaseLocalResources UP-TO-DATE
+> Task :react-native-razorpay:generateReleaseRFile UP-TO-DATE
+> Task :react-native-safe-area-context:compileReleaseLibraryResources UP-TO-DATE
+> Task :react-native-safe-area-context:parseReleaseLocalResources UP-TO-DATE
+> Task :react-native-safe-area-context:generateReleaseRFile UP-TO-DATE
+> Task :react-native-screens:compileReleaseLibraryResources UP-TO-DATE
+> Task :react-native-screens:parseReleaseLocalResources UP-TO-DATE
+> Task :react-native-screens:generateReleaseRFile UP-TO-DATE
+> Task :react-native-svg:compileReleaseLibraryResources UP-TO-DATE
+> Task :react-native-svg:parseReleaseLocalResources UP-TO-DATE
+> Task :react-native-svg:generateReleaseRFile UP-TO-DATE
+> Task :react-native-webview:compileReleaseLibraryResources UP-TO-DATE
+> Task :react-native-webview:parseReleaseLocalResources UP-TO-DATE
+> Task :react-native-webview:generateReleaseRFile UP-TO-DATE
+> Task :stream-io_react-native-webrtc:compileReleaseLibraryResources UP-TO-DATE
+> Task :stream-io_react-native-webrtc:parseReleaseLocalResources UP-TO-DATE
+> Task :stream-io_react-native-webrtc:generateReleaseRFile UP-TO-DATE
+> Task :stream-io_video-react-native-sdk:compileReleaseLibraryResources UP-TO-DATE
+> Task :stream-io_video-react-native-sdk:parseReleaseLocalResources UP-TO-DATE
+> Task :stream-io_video-react-native-sdk:generateReleaseRFile UP-TO-DATE
+> Task :app:processReleaseResources
+> Task :app:bundleReleaseResources
+> Task :app:extractReleaseVersionControlInfo UP-TO-DATE
+> Task :react-native-community_datetimepicker:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :react-native-community_datetimepicker:generateReleaseBuildConfig UP-TO-DATE
+> Task :react-native-community_datetimepicker:compileReleaseKotlin UP-TO-DATE
+> Task :react-native-community_datetimepicker:javaPreCompileRelease UP-TO-DATE
+> Task :react-native-community_datetimepicker:compileReleaseJavaWithJavac UP-TO-DATE
+> Task :react-native-community_datetimepicker:bundleLibRuntimeToDirRelease UP-TO-DATE
+> Task :stream-io_react-native-webrtc:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :stream-io_react-native-webrtc:generateReleaseBuildConfig UP-TO-DATE
+> Task :stream-io_react-native-webrtc:compileReleaseKotlin UP-TO-DATE
+> Task :stream-io_react-native-webrtc:javaPreCompileRelease UP-TO-DATE
+> Task :stream-io_react-native-webrtc:compileReleaseJavaWithJavac UP-TO-DATE
+> Task :stream-io_react-native-webrtc:bundleLibCompileToJarRelease UP-TO-DATE
+> Task :stream-io_video-react-native-sdk:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :stream-io_video-react-native-sdk:generateReleaseBuildConfig UP-TO-DATE
+
+> Task :stream-io_video-react-native-sdk:compileReleaseKotlin
+w: file:///D:/DatingApp/frontend/node_modules/@stream-io/video-react-native-sdk/android/src/main/java/com/streamvideo/reactnative/audio/utils/AudioFocusUtil.kt:61:26 'fun requestAudioFocus(p0: AudioManager.OnAudioFocusChangeListener!, p1: Int, p2: Int): Int' is deprecated. Deprecated in Java.
+w: file:///D:/DatingApp/frontend/node_modules/@stream-io/video-react-native-sdk/android/src/main/java/com/streamvideo/reactnative/audio/utils/AudioFocusUtil.kt:73:26 'fun abandonAudioFocus(p0: AudioManager.OnAudioFocusChangeListener!): Int' is deprecated. Deprecated in Java.
+
+> Task :stream-io_video-react-native-sdk:javaPreCompileRelease UP-TO-DATE
+> Task :stream-io_video-react-native-sdk:compileReleaseJavaWithJavac UP-TO-DATE
+> Task :stream-io_video-react-native-sdk:bundleLibRuntimeToDirRelease UP-TO-DATE
+> Task :react-native-gesture-handler:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :react-native-gesture-handler:generateReleaseBuildConfig UP-TO-DATE
+> Task :react-native-svg:generateReleaseBuildConfig UP-TO-DATE
+> Task :react-native-svg:javaPreCompileRelease UP-TO-DATE
+> Task :react-native-svg:compileReleaseJavaWithJavac UP-TO-DATE
+> Task :react-native-svg:bundleLibCompileToJarRelease UP-TO-DATE
+> Task :react-native-gesture-handler:compileReleaseKotlin UP-TO-DATE
+> Task :react-native-gesture-handler:javaPreCompileRelease UP-TO-DATE
+> Task :react-native-gesture-handler:compileReleaseJavaWithJavac UP-TO-DATE
+> Task :react-native-gesture-handler:bundleLibRuntimeToDirRelease UP-TO-DATE
+> Task :react-native-pager-view:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :react-native-pager-view:generateReleaseBuildConfig UP-TO-DATE
+> Task :react-native-pager-view:compileReleaseKotlin UP-TO-DATE
+> Task :react-native-pager-view:javaPreCompileRelease UP-TO-DATE
+> Task :react-native-pager-view:compileReleaseJavaWithJavac UP-TO-DATE
+> Task :react-native-pager-view:bundleLibRuntimeToDirRelease UP-TO-DATE
+> Task :react-native-safe-area-context:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :react-native-safe-area-context:generateReleaseBuildConfig UP-TO-DATE
+> Task :react-native-safe-area-context:compileReleaseKotlin UP-TO-DATE
+> Task :react-native-safe-area-context:javaPreCompileRelease UP-TO-DATE
+> Task :react-native-safe-area-context:compileReleaseJavaWithJavac UP-TO-DATE
+> Task :react-native-safe-area-context:bundleLibRuntimeToDirRelease UP-TO-DATE
+> Task :react-native-screens:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :react-native-screens:generateReleaseBuildConfig UP-TO-DATE
+> Task :react-native-screens:compileReleaseKotlin UP-TO-DATE
+> Task :react-native-screens:javaPreCompileRelease UP-TO-DATE
+> Task :react-native-screens:compileReleaseJavaWithJavac UP-TO-DATE
+> Task :react-native-screens:bundleLibRuntimeToDirRelease UP-TO-DATE
+> Task :react-native-webview:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :react-native-webview:generateReleaseBuildConfig UP-TO-DATE
+> Task :react-native-webview:compileReleaseKotlin UP-TO-DATE
+> Task :react-native-webview:javaPreCompileRelease UP-TO-DATE
+> Task :react-native-webview:compileReleaseJavaWithJavac UP-TO-DATE
+> Task :react-native-webview:bundleLibRuntimeToDirRelease UP-TO-DATE
+> Task :stream-io_react-native-webrtc:bundleLibRuntimeToDirRelease UP-TO-DATE
+> Task :react-native-async-storage_async-storage:generateReleaseBuildConfig UP-TO-DATE
+> Task :react-native-async-storage_async-storage:javaPreCompileRelease UP-TO-DATE
+> Task :react-native-async-storage_async-storage:compileReleaseJavaWithJavac UP-TO-DATE
+> Task :react-native-async-storage_async-storage:bundleLibRuntimeToDirRelease UP-TO-DATE
+> Task :react-native-community_slider:generateReleaseBuildConfig UP-TO-DATE
+> Task :react-native-community_slider:javaPreCompileRelease UP-TO-DATE
+> Task :react-native-community_slider:compileReleaseJavaWithJavac UP-TO-DATE
+> Task :react-native-community_slider:bundleLibRuntimeToDirRelease UP-TO-DATE
+> Task :expo:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :expo:generateReleaseBuildConfig UP-TO-DATE
+> Task :expo-constants:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :expo-constants:generateReleaseBuildConfig UP-TO-DATE
+> Task :expo-modules-core:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :expo-modules-core:generateReleaseBuildConfig UP-TO-DATE
+> Task :expo-modules-core:compileReleaseKotlin UP-TO-DATE
+> Task :expo-modules-core:javaPreCompileRelease UP-TO-DATE
+> Task :expo-modules-core:compileReleaseJavaWithJavac UP-TO-DATE
+> Task :expo-modules-core:bundleLibCompileToJarRelease UP-TO-DATE
+> Task :expo-constants:compileReleaseKotlin UP-TO-DATE
+> Task :expo-constants:javaPreCompileRelease UP-TO-DATE
+> Task :expo-constants:compileReleaseJavaWithJavac UP-TO-DATE
+> Task :expo-constants:bundleLibCompileToJarRelease UP-TO-DATE
+> Task :incoming-call-android:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :incoming-call-android:generateReleaseBuildConfig UP-TO-DATE
+> Task :incoming-call-android:compileReleaseKotlin UP-TO-DATE
+> Task :incoming-call-android:javaPreCompileRelease UP-TO-DATE
+> Task :incoming-call-android:compileReleaseJavaWithJavac UP-TO-DATE
+> Task :incoming-call-android:bundleLibCompileToJarRelease UP-TO-DATE
+> Task :expo:compileReleaseKotlin UP-TO-DATE
+> Task :expo:javaPreCompileRelease UP-TO-DATE
+> Task :expo:compileReleaseJavaWithJavac UP-TO-DATE
+> Task :expo:bundleLibRuntimeToDirRelease UP-TO-DATE
+> Task :react-native-fbsdk-next:generateReleaseBuildConfig UP-TO-DATE
+> Task :react-native-fbsdk-next:javaPreCompileRelease UP-TO-DATE
+> Task :react-native-fbsdk-next:compileReleaseJavaWithJavac UP-TO-DATE
+> Task :react-native-fbsdk-next:bundleLibRuntimeToDirRelease UP-TO-DATE
+> Task :react-native-linear-gradient:generateReleaseBuildConfig UP-TO-DATE
+> Task :react-native-linear-gradient:javaPreCompileRelease UP-TO-DATE
+> Task :react-native-linear-gradient:compileReleaseJavaWithJavac UP-TO-DATE
+> Task :react-native-linear-gradient:bundleLibRuntimeToDirRelease UP-TO-DATE
+> Task :react-native-razorpay:generateReleaseBuildConfig UP-TO-DATE
+> Task :react-native-razorpay:javaPreCompileRelease UP-TO-DATE
+> Task :react-native-razorpay:compileReleaseJavaWithJavac UP-TO-DATE
+> Task :react-native-razorpay:bundleLibRuntimeToDirRelease UP-TO-DATE
+> Task :react-native-community_netinfo:generateReleaseBuildConfig UP-TO-DATE
+> Task :react-native-community_netinfo:javaPreCompileRelease UP-TO-DATE
+> Task :react-native-community_netinfo:compileReleaseJavaWithJavac UP-TO-DATE
+> Task :react-native-community_netinfo:bundleLibRuntimeToDirRelease UP-TO-DATE
+> Task :react-native-svg:bundleLibRuntimeToDirRelease UP-TO-DATE
+> Task :incoming-call-android:bundleLibRuntimeToDirRelease UP-TO-DATE
+> Task :expo-modules-core:bundleLibRuntimeToDirRelease UP-TO-DATE
+> Task :expo-constants:bundleLibRuntimeToDirRelease UP-TO-DATE
+> Task :app:checkReleaseDuplicateClasses UP-TO-DATE
+> Task :app:buildKotlinToolingMetadata UP-TO-DATE
+> Task :app:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :app:generateReleaseBuildConfig UP-TO-DATE
+> Task :expo:bundleLibCompileToJarRelease UP-TO-DATE
+> Task :react-native-async-storage_async-storage:bundleLibCompileToJarRelease UP-TO-DATE
+> Task :react-native-community_datetimepicker:bundleLibCompileToJarRelease UP-TO-DATE
+> Task :react-native-community_netinfo:bundleLibCompileToJarRelease UP-TO-DATE
+> Task :react-native-community_slider:bundleLibCompileToJarRelease UP-TO-DATE
+> Task :react-native-fbsdk-next:bundleLibCompileToJarRelease UP-TO-DATE
+> Task :react-native-gesture-handler:bundleLibCompileToJarRelease UP-TO-DATE
+> Task :react-native-linear-gradient:bundleLibCompileToJarRelease UP-TO-DATE
+> Task :react-native-pager-view:bundleLibCompileToJarRelease UP-TO-DATE
+> Task :react-native-razorpay:bundleLibCompileToJarRelease UP-TO-DATE
+> Task :react-native-safe-area-context:bundleLibCompileToJarRelease UP-TO-DATE
+> Task :react-native-screens:bundleLibCompileToJarRelease UP-TO-DATE
+> Task :react-native-webview:bundleLibCompileToJarRelease UP-TO-DATE
+> Task :stream-io_video-react-native-sdk:bundleLibCompileToJarRelease UP-TO-DATE
+> Task :app:compileReleaseKotlin
+> Task :app:javaPreCompileRelease UP-TO-DATE
+> Task :app:compileReleaseJavaWithJavac UP-TO-DATE
+> Task :app:dexBuilderRelease UP-TO-DATE
+> Task :app:desugarReleaseFileDependencies UP-TO-DATE
+> Task :app:mergeReleaseStartupProfile UP-TO-DATE
+> Task :app:mergeExtDexRelease UP-TO-DATE
+> Task :app:mergeDexRelease UP-TO-DATE
+> Task :app:mergeReleaseShaders UP-TO-DATE
+> Task :app:compileReleaseShaders NO-SOURCE
+> Task :app:generateReleaseAssets UP-TO-DATE
+> Task :expo:mergeReleaseShaders UP-TO-DATE
+> Task :expo:compileReleaseShaders NO-SOURCE
+> Task :expo:generateReleaseAssets UP-TO-DATE
+> Task :expo:mergeReleaseAssets UP-TO-DATE
+> Task :expo-constants:mergeReleaseShaders UP-TO-DATE
+> Task :expo-constants:compileReleaseShaders NO-SOURCE
+> Task :expo-constants:generateReleaseAssets UP-TO-DATE
+> Task :expo-constants:mergeReleaseAssets UP-TO-DATE
+> Task :expo-modules-core:mergeReleaseShaders UP-TO-DATE
+> Task :expo-modules-core:compileReleaseShaders NO-SOURCE
+> Task :expo-modules-core:generateReleaseAssets UP-TO-DATE
+> Task :expo-modules-core:mergeReleaseAssets UP-TO-DATE
+> Task :incoming-call-android:mergeReleaseShaders UP-TO-DATE
+> Task :incoming-call-android:compileReleaseShaders NO-SOURCE
+> Task :incoming-call-android:generateReleaseAssets UP-TO-DATE
+> Task :incoming-call-android:mergeReleaseAssets UP-TO-DATE
+> Task :react-native-async-storage_async-storage:mergeReleaseShaders UP-TO-DATE
+> Task :react-native-async-storage_async-storage:compileReleaseShaders NO-SOURCE
+> Task :react-native-async-storage_async-storage:generateReleaseAssets UP-TO-DATE
+> Task :react-native-async-storage_async-storage:mergeReleaseAssets UP-TO-DATE
+> Task :react-native-community_datetimepicker:mergeReleaseShaders UP-TO-DATE
+> Task :react-native-community_datetimepicker:compileReleaseShaders NO-SOURCE
+> Task :react-native-community_datetimepicker:generateReleaseAssets UP-TO-DATE
+> Task :react-native-community_datetimepicker:mergeReleaseAssets UP-TO-DATE
+> Task :react-native-community_netinfo:mergeReleaseShaders UP-TO-DATE
+> Task :react-native-community_netinfo:compileReleaseShaders NO-SOURCE
+> Task :react-native-community_netinfo:generateReleaseAssets UP-TO-DATE
+> Task :react-native-community_netinfo:mergeReleaseAssets UP-TO-DATE
+> Task :react-native-community_slider:mergeReleaseShaders UP-TO-DATE
+> Task :react-native-community_slider:compileReleaseShaders NO-SOURCE
+> Task :react-native-community_slider:generateReleaseAssets UP-TO-DATE
+> Task :react-native-community_slider:mergeReleaseAssets UP-TO-DATE
+> Task :react-native-fbsdk-next:mergeReleaseShaders UP-TO-DATE
+> Task :react-native-fbsdk-next:compileReleaseShaders NO-SOURCE
+> Task :react-native-fbsdk-next:generateReleaseAssets UP-TO-DATE
+> Task :react-native-fbsdk-next:mergeReleaseAssets UP-TO-DATE
+> Task :react-native-gesture-handler:mergeReleaseShaders UP-TO-DATE
+> Task :react-native-gesture-handler:compileReleaseShaders NO-SOURCE
+> Task :react-native-gesture-handler:generateReleaseAssets UP-TO-DATE
+> Task :react-native-gesture-handler:mergeReleaseAssets UP-TO-DATE
+> Task :react-native-linear-gradient:mergeReleaseShaders UP-TO-DATE
+> Task :react-native-linear-gradient:compileReleaseShaders NO-SOURCE
+> Task :react-native-linear-gradient:generateReleaseAssets UP-TO-DATE
+> Task :react-native-linear-gradient:mergeReleaseAssets UP-TO-DATE
+> Task :react-native-pager-view:mergeReleaseShaders UP-TO-DATE
+> Task :react-native-pager-view:compileReleaseShaders NO-SOURCE
+> Task :react-native-pager-view:generateReleaseAssets UP-TO-DATE
+> Task :react-native-pager-view:mergeReleaseAssets UP-TO-DATE
+> Task :react-native-razorpay:mergeReleaseShaders UP-TO-DATE
+> Task :react-native-razorpay:compileReleaseShaders NO-SOURCE
+> Task :react-native-razorpay:generateReleaseAssets UP-TO-DATE
+> Task :react-native-razorpay:mergeReleaseAssets UP-TO-DATE
+> Task :react-native-safe-area-context:mergeReleaseShaders UP-TO-DATE
+> Task :react-native-safe-area-context:compileReleaseShaders NO-SOURCE
+> Task :react-native-safe-area-context:generateReleaseAssets UP-TO-DATE
+> Task :react-native-safe-area-context:mergeReleaseAssets UP-TO-DATE
+> Task :react-native-screens:mergeReleaseShaders UP-TO-DATE
+> Task :react-native-screens:compileReleaseShaders NO-SOURCE
+> Task :react-native-screens:generateReleaseAssets UP-TO-DATE
+> Task :react-native-screens:mergeReleaseAssets UP-TO-DATE
+> Task :react-native-svg:mergeReleaseShaders UP-TO-DATE
+> Task :react-native-svg:compileReleaseShaders NO-SOURCE
+> Task :react-native-svg:generateReleaseAssets UP-TO-DATE
+> Task :react-native-svg:mergeReleaseAssets UP-TO-DATE
+> Task :react-native-webview:mergeReleaseShaders UP-TO-DATE
+> Task :react-native-webview:compileReleaseShaders NO-SOURCE
+> Task :react-native-webview:generateReleaseAssets UP-TO-DATE
+> Task :react-native-webview:mergeReleaseAssets UP-TO-DATE
+> Task :stream-io_react-native-webrtc:mergeReleaseShaders UP-TO-DATE
+> Task :stream-io_react-native-webrtc:compileReleaseShaders NO-SOURCE
+> Task :stream-io_react-native-webrtc:generateReleaseAssets UP-TO-DATE
+> Task :stream-io_react-native-webrtc:mergeReleaseAssets UP-TO-DATE
+> Task :stream-io_video-react-native-sdk:mergeReleaseShaders UP-TO-DATE
+> Task :stream-io_video-react-native-sdk:compileReleaseShaders NO-SOURCE
+> Task :stream-io_video-react-native-sdk:generateReleaseAssets UP-TO-DATE
+> Task :stream-io_video-react-native-sdk:mergeReleaseAssets UP-TO-DATE
+> Task :app:mergeReleaseAssets UP-TO-DATE
+> Task :react-native-community_datetimepicker:bundleLibRuntimeToJarRelease UP-TO-DATE
+> Task :stream-io_video-react-native-sdk:bundleLibRuntimeToJarRelease UP-TO-DATE
+> Task :react-native-gesture-handler:bundleLibRuntimeToJarRelease UP-TO-DATE
+> Task :react-native-pager-view:bundleLibRuntimeToJarRelease UP-TO-DATE
+> Task :react-native-safe-area-context:bundleLibRuntimeToJarRelease UP-TO-DATE
+> Task :react-native-screens:bundleLibRuntimeToJarRelease UP-TO-DATE
+> Task :react-native-webview:bundleLibRuntimeToJarRelease UP-TO-DATE
+> Task :stream-io_react-native-webrtc:bundleLibRuntimeToJarRelease UP-TO-DATE
+> Task :react-native-async-storage_async-storage:bundleLibRuntimeToJarRelease UP-TO-DATE
+> Task :react-native-community_slider:bundleLibRuntimeToJarRelease UP-TO-DATE
+> Task :expo:bundleLibRuntimeToJarRelease UP-TO-DATE
+> Task :react-native-fbsdk-next:bundleLibRuntimeToJarRelease UP-TO-DATE
+> Task :react-native-linear-gradient:bundleLibRuntimeToJarRelease UP-TO-DATE
+> Task :react-native-razorpay:bundleLibRuntimeToJarRelease UP-TO-DATE
+> Task :react-native-community_netinfo:bundleLibRuntimeToJarRelease UP-TO-DATE
+> Task :react-native-svg:bundleLibRuntimeToJarRelease UP-TO-DATE
+> Task :incoming-call-android:bundleLibRuntimeToJarRelease UP-TO-DATE
+> Task :expo-modules-core:bundleLibRuntimeToJarRelease UP-TO-DATE
+> Task :expo-constants:bundleLibRuntimeToJarRelease UP-TO-DATE
+> Task :app:mergeReleaseGlobalSynthetics UP-TO-DATE
+> Task :app:processReleaseJavaRes UP-TO-DATE
+> Task :expo:processReleaseJavaRes UP-TO-DATE
+> Task :expo-constants:processReleaseJavaRes UP-TO-DATE
+> Task :expo-modules-core:processReleaseJavaRes UP-TO-DATE
+> Task :incoming-call-android:processReleaseJavaRes UP-TO-DATE
+> Task :react-native-async-storage_async-storage:processReleaseJavaRes NO-SOURCE
+> Task :react-native-community_datetimepicker:processReleaseJavaRes UP-TO-DATE
+> Task :react-native-community_netinfo:processReleaseJavaRes NO-SOURCE
+> Task :react-native-community_slider:processReleaseJavaRes NO-SOURCE
+> Task :react-native-fbsdk-next:processReleaseJavaRes NO-SOURCE
+> Task :react-native-gesture-handler:processReleaseJavaRes UP-TO-DATE
+> Task :react-native-linear-gradient:processReleaseJavaRes NO-SOURCE
+> Task :react-native-pager-view:processReleaseJavaRes UP-TO-DATE
+> Task :react-native-razorpay:processReleaseJavaRes NO-SOURCE
+> Task :react-native-safe-area-context:processReleaseJavaRes UP-TO-DATE
+> Task :react-native-screens:processReleaseJavaRes UP-TO-DATE
+> Task :react-native-svg:processReleaseJavaRes NO-SOURCE
+> Task :react-native-webview:processReleaseJavaRes UP-TO-DATE
+> Task :stream-io_react-native-webrtc:processReleaseJavaRes UP-TO-DATE
+> Task :stream-io_video-react-native-sdk:processReleaseJavaRes UP-TO-DATE
+> Task :app:mergeReleaseJavaResource UP-TO-DATE
+
+> Task :app:configureCMakeRelWithDebInfo[arm64-v8a]
+[CXX5304] This version only understands SDK XML versions up to 3 but an SDK XML file of version 4 was encountered. This can happen if you use versions of Android Studio and the command-line tools that were released at different times.
+[CXX5304] This version only understands SDK XML versions up to 3 but an SDK XML file of version 4 was encountered. This can happen if you use versions of Android Studio and the command-line tools that were released at different times.
+
+> Task :app:buildCMakeRelWithDebInfo[arm64-v8a]
+> Task :app:mergeReleaseJniLibFolders
+> Task :expo:mergeReleaseJniLibFolders
+> Task :expo:mergeReleaseNativeLibs NO-SOURCE
+> Task :expo:copyReleaseJniLibsProjectOnly
+> Task :expo-constants:mergeReleaseJniLibFolders
+> Task :expo-constants:mergeReleaseNativeLibs NO-SOURCE
+> Task :expo-constants:copyReleaseJniLibsProjectOnly
+> Task :expo-modules-core:configureCMakeRelWithDebInfo[arm64-v8a]
+> Task :expo-modules-core:buildCMakeRelWithDebInfo[arm64-v8a]
+> Task :expo-modules-core:mergeReleaseJniLibFolders
+> Task :expo-modules-core:mergeReleaseNativeLibs
+> Task :expo-modules-core:copyReleaseJniLibsProjectOnly
+> Task :incoming-call-android:mergeReleaseJniLibFolders
+> Task :incoming-call-android:mergeReleaseNativeLibs NO-SOURCE
+> Task :incoming-call-android:copyReleaseJniLibsProjectOnly
+> Task :react-native-async-storage_async-storage:mergeReleaseJniLibFolders
+> Task :react-native-async-storage_async-storage:mergeReleaseNativeLibs NO-SOURCE
+> Task :react-native-async-storage_async-storage:copyReleaseJniLibsProjectOnly
+> Task :react-native-community_datetimepicker:mergeReleaseJniLibFolders
+> Task :react-native-community_datetimepicker:mergeReleaseNativeLibs NO-SOURCE
+> Task :react-native-community_datetimepicker:copyReleaseJniLibsProjectOnly
+> Task :react-native-community_netinfo:mergeReleaseJniLibFolders
+> Task :react-native-community_netinfo:mergeReleaseNativeLibs NO-SOURCE
+> Task :react-native-community_netinfo:copyReleaseJniLibsProjectOnly
+> Task :react-native-community_slider:mergeReleaseJniLibFolders
+> Task :react-native-community_slider:mergeReleaseNativeLibs NO-SOURCE
+> Task :react-native-community_slider:copyReleaseJniLibsProjectOnly
+> Task :react-native-fbsdk-next:mergeReleaseJniLibFolders
+> Task :react-native-fbsdk-next:mergeReleaseNativeLibs NO-SOURCE
+> Task :react-native-fbsdk-next:copyReleaseJniLibsProjectOnly
+> Task :react-native-gesture-handler:configureCMakeRelWithDebInfo[arm64-v8a]
+> Task :react-native-gesture-handler:buildCMakeRelWithDebInfo[arm64-v8a]
+> Task :react-native-gesture-handler:mergeReleaseJniLibFolders
+> Task :react-native-gesture-handler:mergeReleaseNativeLibs
+> Task :react-native-gesture-handler:copyReleaseJniLibsProjectOnly
+> Task :react-native-linear-gradient:mergeReleaseJniLibFolders
+> Task :react-native-linear-gradient:mergeReleaseNativeLibs NO-SOURCE
+> Task :react-native-linear-gradient:copyReleaseJniLibsProjectOnly
+> Task :react-native-pager-view:mergeReleaseJniLibFolders
+> Task :react-native-pager-view:mergeReleaseNativeLibs NO-SOURCE
+> Task :react-native-pager-view:copyReleaseJniLibsProjectOnly
+> Task :react-native-razorpay:mergeReleaseJniLibFolders
+> Task :react-native-razorpay:mergeReleaseNativeLibs NO-SOURCE
+> Task :react-native-razorpay:copyReleaseJniLibsProjectOnly
+> Task :react-native-safe-area-context:mergeReleaseJniLibFolders
+> Task :react-native-safe-area-context:mergeReleaseNativeLibs NO-SOURCE
+> Task :react-native-safe-area-context:copyReleaseJniLibsProjectOnly
+> Task :react-native-screens:configureCMakeRelWithDebInfo[arm64-v8a]
+> Task :react-native-screens:buildCMakeRelWithDebInfo[arm64-v8a]
+> Task :react-native-screens:mergeReleaseJniLibFolders
+> Task :react-native-screens:mergeReleaseNativeLibs
+> Task :react-native-screens:copyReleaseJniLibsProjectOnly
+> Task :react-native-svg:mergeReleaseJniLibFolders
+> Task :react-native-svg:mergeReleaseNativeLibs NO-SOURCE
+> Task :react-native-svg:copyReleaseJniLibsProjectOnly
+> Task :react-native-webview:mergeReleaseJniLibFolders
+> Task :react-native-webview:mergeReleaseNativeLibs NO-SOURCE
+> Task :react-native-webview:copyReleaseJniLibsProjectOnly
+> Task :stream-io_react-native-webrtc:mergeReleaseJniLibFolders
+> Task :stream-io_react-native-webrtc:mergeReleaseNativeLibs NO-SOURCE
+> Task :stream-io_react-native-webrtc:copyReleaseJniLibsProjectOnly
+> Task :stream-io_video-react-native-sdk:mergeReleaseJniLibFolders
+> Task :stream-io_video-react-native-sdk:mergeReleaseNativeLibs NO-SOURCE
+> Task :stream-io_video-react-native-sdk:copyReleaseJniLibsProjectOnly
+> Task :app:mergeReleaseNativeLibs
+> Task :app:stripReleaseDebugSymbols
+> Task :app:writeReleaseAppMetadata
+> Task :app:buildReleasePreBundle
+> Task :expo:prepareReleaseArtProfile UP-TO-DATE
+> Task :expo-constants:prepareReleaseArtProfile UP-TO-DATE
+> Task :expo-modules-core:prepareReleaseArtProfile UP-TO-DATE
+> Task :incoming-call-android:prepareReleaseArtProfile UP-TO-DATE
+> Task :react-native-async-storage_async-storage:prepareReleaseArtProfile UP-TO-DATE
+> Task :react-native-community_datetimepicker:prepareReleaseArtProfile UP-TO-DATE
+> Task :react-native-community_netinfo:prepareReleaseArtProfile UP-TO-DATE
+> Task :react-native-community_slider:prepareReleaseArtProfile UP-TO-DATE
+> Task :react-native-fbsdk-next:prepareReleaseArtProfile
+> Task :react-native-gesture-handler:prepareReleaseArtProfile UP-TO-DATE
+> Task :react-native-linear-gradient:prepareReleaseArtProfile UP-TO-DATE
+> Task :react-native-pager-view:prepareReleaseArtProfile UP-TO-DATE
+> Task :react-native-razorpay:prepareReleaseArtProfile UP-TO-DATE
+> Task :react-native-safe-area-context:prepareReleaseArtProfile UP-TO-DATE
+> Task :react-native-screens:prepareReleaseArtProfile UP-TO-DATE
+> Task :react-native-svg:prepareReleaseArtProfile UP-TO-DATE
+> Task :react-native-webview:prepareReleaseArtProfile UP-TO-DATE
+> Task :stream-io_react-native-webrtc:prepareReleaseArtProfile UP-TO-DATE
+> Task :stream-io_video-react-native-sdk:prepareReleaseArtProfile UP-TO-DATE
+> Task :app:mergeReleaseArtProfile
+> Task :app:compileReleaseArtProfile
+> Task :app:collectReleaseDependencies
+> Task :app:configureReleaseDependencies
+> Task :app:extractReleaseNativeSymbolTables
+> Task :app:extractProguardFiles
+> Task :expo:createFullJarRelease
+> Task :expo:extractProguardFiles
+> Task :expo-constants:createFullJarRelease
+> Task :expo-constants:extractProguardFiles
+> Task :expo-modules-core:createFullJarRelease
+> Task :expo-modules-core:extractProguardFiles
+> Task :expo-modules-core:generateReleaseLintModel
+> Task :expo-modules-core:prepareLintJarForPublish UP-TO-DATE
+> Task :expo-constants:generateReleaseLintModel
+> Task :expo-constants:prepareLintJarForPublish UP-TO-DATE
+> Task :incoming-call-android:createFullJarRelease
+> Task :incoming-call-android:extractProguardFiles
+> Task :incoming-call-android:generateReleaseLintModel
+> Task :incoming-call-android:prepareLintJarForPublish UP-TO-DATE
+> Task :expo:generateReleaseLintModel
+> Task :expo:prepareLintJarForPublish UP-TO-DATE
+> Task :react-native-async-storage_async-storage:createFullJarRelease
+> Task :react-native-async-storage_async-storage:extractProguardFiles
+> Task :react-native-async-storage_async-storage:generateReleaseLintModel
+> Task :react-native-async-storage_async-storage:prepareLintJarForPublish UP-TO-DATE
+> Task :react-native-community_datetimepicker:createFullJarRelease
+> Task :react-native-community_datetimepicker:extractProguardFiles
+> Task :react-native-community_datetimepicker:generateReleaseLintModel
+> Task :react-native-community_datetimepicker:prepareLintJarForPublish UP-TO-DATE
+> Task :react-native-community_netinfo:createFullJarRelease
+> Task :react-native-community_netinfo:extractProguardFiles
+> Task :react-native-community_netinfo:generateReleaseLintModel
+> Task :react-native-community_netinfo:prepareLintJarForPublish UP-TO-DATE
+> Task :react-native-community_slider:createFullJarRelease
+> Task :react-native-community_slider:extractProguardFiles
+> Task :react-native-community_slider:generateReleaseLintModel
+> Task :react-native-community_slider:prepareLintJarForPublish UP-TO-DATE
+> Task :react-native-fbsdk-next:createFullJarRelease
+> Task :react-native-fbsdk-next:extractProguardFiles
+> Task :react-native-fbsdk-next:generateReleaseLintModel
+> Task :react-native-fbsdk-next:prepareLintJarForPublish
+> Task :react-native-gesture-handler:createFullJarRelease
+> Task :react-native-gesture-handler:extractProguardFiles
+> Task :react-native-svg:createFullJarRelease
+> Task :react-native-svg:extractProguardFiles
+> Task :react-native-svg:generateReleaseLintModel
+> Task :react-native-svg:prepareLintJarForPublish UP-TO-DATE
+> Task :react-native-gesture-handler:generateReleaseLintModel
+> Task :react-native-gesture-handler:prepareLintJarForPublish UP-TO-DATE
+> Task :react-native-linear-gradient:createFullJarRelease
+> Task :react-native-linear-gradient:extractProguardFiles
+> Task :react-native-linear-gradient:generateReleaseLintModel
+> Task :react-native-linear-gradient:prepareLintJarForPublish UP-TO-DATE
+> Task :react-native-pager-view:createFullJarRelease
+> Task :react-native-pager-view:extractProguardFiles
+> Task :react-native-pager-view:generateReleaseLintModel
+> Task :react-native-pager-view:prepareLintJarForPublish UP-TO-DATE
+> Task :react-native-razorpay:createFullJarRelease
+> Task :react-native-razorpay:extractProguardFiles
+> Task :react-native-razorpay:generateReleaseLintModel
+> Task :react-native-razorpay:prepareLintJarForPublish UP-TO-DATE
+> Task :react-native-safe-area-context:createFullJarRelease
+> Task :react-native-safe-area-context:extractProguardFiles
+> Task :react-native-safe-area-context:generateReleaseLintModel
+> Task :react-native-safe-area-context:prepareLintJarForPublish UP-TO-DATE
+> Task :react-native-screens:createFullJarRelease
+> Task :react-native-screens:extractProguardFiles
+> Task :react-native-screens:generateReleaseLintModel
+> Task :react-native-screens:prepareLintJarForPublish UP-TO-DATE
+> Task :react-native-webview:createFullJarRelease
+> Task :react-native-webview:extractProguardFiles
+> Task :react-native-webview:generateReleaseLintModel
+> Task :react-native-webview:prepareLintJarForPublish UP-TO-DATE
+> Task :stream-io_react-native-webrtc:createFullJarRelease
+> Task :stream-io_react-native-webrtc:extractProguardFiles
+> Task :stream-io_react-native-webrtc:generateReleaseLintModel
+> Task :stream-io_react-native-webrtc:prepareLintJarForPublish UP-TO-DATE
+> Task :stream-io_video-react-native-sdk:createFullJarRelease
+> Task :stream-io_video-react-native-sdk:extractProguardFiles
+> Task :stream-io_video-react-native-sdk:generateReleaseLintModel
+> Task :stream-io_video-react-native-sdk:prepareLintJarForPublish UP-TO-DATE
+> Task :app:generateReleaseLintVitalReportModel
+> Task :react-native-community_datetimepicker:stripReleaseDebugSymbols NO-SOURCE
+> Task :react-native-community_datetimepicker:copyReleaseJniLibsProjectAndLocalJars
+> Task :react-native-community_datetimepicker:extractDeepLinksForAarRelease UP-TO-DATE
+> Task :react-native-community_datetimepicker:extractReleaseAnnotations
+> Task :react-native-community_datetimepicker:mergeReleaseGeneratedProguardFiles UP-TO-DATE
+> Task :react-native-community_datetimepicker:mergeReleaseConsumerProguardFiles UP-TO-DATE
+> Task :react-native-community_datetimepicker:mergeReleaseJavaResource
+> Task :react-native-community_datetimepicker:syncReleaseLibJars
+> Task :react-native-community_datetimepicker:bundleReleaseLocalLintAar
+> Task :stream-io_video-react-native-sdk:stripReleaseDebugSymbols NO-SOURCE
+> Task :stream-io_video-react-native-sdk:copyReleaseJniLibsProjectAndLocalJars
+> Task :stream-io_video-react-native-sdk:extractDeepLinksForAarRelease UP-TO-DATE
+> Task :stream-io_video-react-native-sdk:extractReleaseAnnotations
+> Task :stream-io_video-react-native-sdk:mergeReleaseGeneratedProguardFiles UP-TO-DATE
+> Task :stream-io_video-react-native-sdk:mergeReleaseConsumerProguardFiles UP-TO-DATE
+> Task :stream-io_video-react-native-sdk:mergeReleaseJavaResource
+> Task :stream-io_video-react-native-sdk:syncReleaseLibJars
+> Task :stream-io_video-react-native-sdk:bundleReleaseLocalLintAar
+> Task :react-native-gesture-handler:stripReleaseDebugSymbols
+> Task :react-native-gesture-handler:copyReleaseJniLibsProjectAndLocalJars
+> Task :react-native-gesture-handler:extractDeepLinksForAarRelease UP-TO-DATE
+> Task :react-native-gesture-handler:extractReleaseAnnotations
+> Task :react-native-gesture-handler:mergeReleaseGeneratedProguardFiles UP-TO-DATE
+> Task :react-native-gesture-handler:mergeReleaseConsumerProguardFiles UP-TO-DATE
+> Task :react-native-gesture-handler:mergeReleaseJavaResource
+> Task :react-native-gesture-handler:syncReleaseLibJars
+> Task :react-native-gesture-handler:bundleReleaseLocalLintAar
+> Task :react-native-pager-view:stripReleaseDebugSymbols NO-SOURCE
+> Task :react-native-pager-view:copyReleaseJniLibsProjectAndLocalJars
+> Task :react-native-pager-view:extractDeepLinksForAarRelease UP-TO-DATE
+> Task :react-native-pager-view:extractReleaseAnnotations
+> Task :react-native-pager-view:mergeReleaseGeneratedProguardFiles UP-TO-DATE
+> Task :react-native-pager-view:mergeReleaseConsumerProguardFiles UP-TO-DATE
+> Task :react-native-pager-view:mergeReleaseJavaResource
+> Task :react-native-pager-view:syncReleaseLibJars
+> Task :react-native-pager-view:bundleReleaseLocalLintAar
+> Task :react-native-safe-area-context:stripReleaseDebugSymbols NO-SOURCE
+> Task :react-native-safe-area-context:copyReleaseJniLibsProjectAndLocalJars
+> Task :react-native-safe-area-context:extractDeepLinksForAarRelease UP-TO-DATE
+> Task :react-native-safe-area-context:extractReleaseAnnotations
+> Task :react-native-safe-area-context:mergeReleaseGeneratedProguardFiles UP-TO-DATE
+> Task :react-native-safe-area-context:mergeReleaseConsumerProguardFiles UP-TO-DATE
+> Task :react-native-safe-area-context:mergeReleaseJavaResource
+> Task :react-native-safe-area-context:syncReleaseLibJars
+> Task :react-native-safe-area-context:bundleReleaseLocalLintAar
+> Task :react-native-screens:stripReleaseDebugSymbols
+> Task :react-native-screens:copyReleaseJniLibsProjectAndLocalJars
+> Task :react-native-screens:extractDeepLinksForAarRelease UP-TO-DATE
+> Task :react-native-screens:extractReleaseAnnotations
+> Task :react-native-screens:mergeReleaseGeneratedProguardFiles UP-TO-DATE
+> Task :react-native-screens:mergeReleaseConsumerProguardFiles UP-TO-DATE
+> Task :react-native-screens:mergeReleaseJavaResource
+> Task :react-native-screens:syncReleaseLibJars
+> Task :react-native-screens:bundleReleaseLocalLintAar
+> Task :react-native-webview:stripReleaseDebugSymbols NO-SOURCE
+> Task :react-native-webview:copyReleaseJniLibsProjectAndLocalJars
+> Task :react-native-webview:extractDeepLinksForAarRelease UP-TO-DATE
+> Task :react-native-webview:extractReleaseAnnotations
+> Task :react-native-webview:mergeReleaseGeneratedProguardFiles UP-TO-DATE
+> Task :react-native-webview:mergeReleaseConsumerProguardFiles UP-TO-DATE
+> Task :react-native-webview:mergeReleaseJavaResource
+> Task :react-native-webview:syncReleaseLibJars
+> Task :react-native-webview:bundleReleaseLocalLintAar
+> Task :stream-io_react-native-webrtc:stripReleaseDebugSymbols NO-SOURCE
+> Task :stream-io_react-native-webrtc:copyReleaseJniLibsProjectAndLocalJars
+> Task :stream-io_react-native-webrtc:extractDeepLinksForAarRelease UP-TO-DATE
+> Task :stream-io_react-native-webrtc:extractReleaseAnnotations
+> Task :stream-io_react-native-webrtc:mergeReleaseGeneratedProguardFiles UP-TO-DATE
+> Task :stream-io_react-native-webrtc:mergeReleaseConsumerProguardFiles
+> Task :stream-io_react-native-webrtc:mergeReleaseJavaResource
+> Task :stream-io_react-native-webrtc:syncReleaseLibJars
+> Task :stream-io_react-native-webrtc:bundleReleaseLocalLintAar
+> Task :react-native-async-storage_async-storage:stripReleaseDebugSymbols NO-SOURCE
+> Task :react-native-async-storage_async-storage:copyReleaseJniLibsProjectAndLocalJars
+> Task :react-native-async-storage_async-storage:extractDeepLinksForAarRelease UP-TO-DATE
+> Task :react-native-async-storage_async-storage:extractReleaseAnnotations
+> Task :react-native-async-storage_async-storage:mergeReleaseGeneratedProguardFiles UP-TO-DATE
+> Task :react-native-async-storage_async-storage:mergeReleaseConsumerProguardFiles UP-TO-DATE
+> Task :react-native-async-storage_async-storage:mergeReleaseJavaResource
+> Task :react-native-async-storage_async-storage:syncReleaseLibJars
+> Task :react-native-async-storage_async-storage:bundleReleaseLocalLintAar
+> Task :react-native-community_slider:stripReleaseDebugSymbols NO-SOURCE
+> Task :react-native-community_slider:copyReleaseJniLibsProjectAndLocalJars
+> Task :react-native-community_slider:extractDeepLinksForAarRelease UP-TO-DATE
+> Task :react-native-community_slider:extractReleaseAnnotations
+> Task :react-native-community_slider:mergeReleaseGeneratedProguardFiles UP-TO-DATE
+> Task :react-native-community_slider:mergeReleaseConsumerProguardFiles UP-TO-DATE
+> Task :react-native-community_slider:mergeReleaseJavaResource
+> Task :react-native-community_slider:syncReleaseLibJars
+> Task :react-native-community_slider:bundleReleaseLocalLintAar
+> Task :expo:stripReleaseDebugSymbols NO-SOURCE
+> Task :expo:copyReleaseJniLibsProjectAndLocalJars
+> Task :expo:extractDeepLinksForAarRelease UP-TO-DATE
+> Task :expo:extractReleaseAnnotations
+> Task :expo:mergeReleaseGeneratedProguardFiles UP-TO-DATE
+> Task :expo:mergeReleaseConsumerProguardFiles
+> Task :expo:mergeReleaseJavaResource
+> Task :expo:syncReleaseLibJars
+> Task :expo:bundleReleaseLocalLintAar
+> Task :react-native-fbsdk-next:stripReleaseDebugSymbols NO-SOURCE
+> Task :react-native-fbsdk-next:copyReleaseJniLibsProjectAndLocalJars
+> Task :react-native-fbsdk-next:extractDeepLinksForAarRelease
+> Task :react-native-fbsdk-next:extractReleaseAnnotations
+> Task :react-native-fbsdk-next:mergeReleaseGeneratedProguardFiles
+> Task :react-native-fbsdk-next:mergeReleaseConsumerProguardFiles
+> Task :react-native-fbsdk-next:mergeReleaseJavaResource
+> Task :react-native-fbsdk-next:syncReleaseLibJars
+> Task :react-native-fbsdk-next:bundleReleaseLocalLintAar
+> Task :react-native-linear-gradient:stripReleaseDebugSymbols NO-SOURCE
+> Task :react-native-linear-gradient:copyReleaseJniLibsProjectAndLocalJars
+> Task :react-native-linear-gradient:extractDeepLinksForAarRelease UP-TO-DATE
+> Task :react-native-linear-gradient:extractReleaseAnnotations
+> Task :react-native-linear-gradient:mergeReleaseGeneratedProguardFiles UP-TO-DATE
+> Task :react-native-linear-gradient:mergeReleaseConsumerProguardFiles UP-TO-DATE
+> Task :react-native-linear-gradient:mergeReleaseJavaResource
+> Task :react-native-linear-gradient:syncReleaseLibJars
+> Task :react-native-linear-gradient:bundleReleaseLocalLintAar
+> Task :react-native-razorpay:stripReleaseDebugSymbols NO-SOURCE
+> Task :react-native-razorpay:copyReleaseJniLibsProjectAndLocalJars
+> Task :react-native-razorpay:extractDeepLinksForAarRelease UP-TO-DATE
+> Task :react-native-razorpay:extractReleaseAnnotations
+> Task :react-native-razorpay:mergeReleaseGeneratedProguardFiles UP-TO-DATE
+> Task :react-native-razorpay:mergeReleaseConsumerProguardFiles UP-TO-DATE
+> Task :react-native-razorpay:mergeReleaseJavaResource
+> Task :react-native-razorpay:syncReleaseLibJars
+> Task :react-native-razorpay:bundleReleaseLocalLintAar
+> Task :react-native-community_netinfo:stripReleaseDebugSymbols NO-SOURCE
+> Task :react-native-community_netinfo:copyReleaseJniLibsProjectAndLocalJars
+> Task :react-native-community_netinfo:extractDeepLinksForAarRelease UP-TO-DATE
+> Task :react-native-community_netinfo:extractReleaseAnnotations
+> Task :react-native-community_netinfo:mergeReleaseGeneratedProguardFiles UP-TO-DATE
+> Task :react-native-community_netinfo:mergeReleaseConsumerProguardFiles UP-TO-DATE
+> Task :react-native-community_netinfo:mergeReleaseJavaResource
+> Task :react-native-community_netinfo:syncReleaseLibJars
+> Task :react-native-community_netinfo:bundleReleaseLocalLintAar
+> Task :react-native-svg:stripReleaseDebugSymbols NO-SOURCE
+> Task :react-native-svg:copyReleaseJniLibsProjectAndLocalJars
+> Task :react-native-svg:extractDeepLinksForAarRelease UP-TO-DATE
+> Task :react-native-svg:extractReleaseAnnotations
+> Task :react-native-svg:mergeReleaseGeneratedProguardFiles UP-TO-DATE
+> Task :react-native-svg:mergeReleaseConsumerProguardFiles
+> Task :react-native-svg:mergeReleaseJavaResource
+> Task :react-native-svg:syncReleaseLibJars
+> Task :react-native-svg:bundleReleaseLocalLintAar
+> Task :incoming-call-android:stripReleaseDebugSymbols NO-SOURCE
+> Task :incoming-call-android:copyReleaseJniLibsProjectAndLocalJars
+> Task :incoming-call-android:extractDeepLinksForAarRelease UP-TO-DATE
+> Task :incoming-call-android:extractReleaseAnnotations
+> Task :incoming-call-android:mergeReleaseGeneratedProguardFiles UP-TO-DATE
+> Task :incoming-call-android:mergeReleaseConsumerProguardFiles UP-TO-DATE
+> Task :incoming-call-android:mergeReleaseJavaResource
+> Task :incoming-call-android:syncReleaseLibJars
+> Task :incoming-call-android:bundleReleaseLocalLintAar
+> Task :expo-modules-core:stripReleaseDebugSymbols
+> Task :expo-modules-core:copyReleaseJniLibsProjectAndLocalJars
+> Task :expo-modules-core:extractDeepLinksForAarRelease UP-TO-DATE
+> Task :expo-modules-core:extractReleaseAnnotations
+> Task :expo-modules-core:mergeReleaseGeneratedProguardFiles UP-TO-DATE
+> Task :expo-modules-core:mergeReleaseConsumerProguardFiles
+> Task :expo-modules-core:mergeReleaseJavaResource
+> Task :expo-modules-core:syncReleaseLibJars
+> Task :expo-modules-core:bundleReleaseLocalLintAar
+> Task :expo-constants:stripReleaseDebugSymbols NO-SOURCE
+> Task :expo-constants:copyReleaseJniLibsProjectAndLocalJars
+> Task :expo-constants:extractDeepLinksForAarRelease UP-TO-DATE
+> Task :expo-constants:extractReleaseAnnotations
+> Task :expo-constants:mergeReleaseGeneratedProguardFiles UP-TO-DATE
+> Task :expo-constants:mergeReleaseConsumerProguardFiles UP-TO-DATE
+> Task :expo-constants:mergeReleaseJavaResource
+> Task :expo-constants:syncReleaseLibJars
+> Task :expo-constants:bundleReleaseLocalLintAar
+> Task :expo-constants:writeReleaseLintModelMetadata
+> Task :expo-modules-core:writeReleaseLintModelMetadata
+> Task :incoming-call-android:writeReleaseLintModelMetadata
+> Task :expo:lintVitalAnalyzeRelease
+> Task :expo:writeReleaseLintModelMetadata
+> Task :expo-constants:lintVitalAnalyzeRelease
+> Task :expo-modules-core:lintVitalAnalyzeRelease
+> Task :incoming-call-android:lintVitalAnalyzeRelease
+> Task :react-native-async-storage_async-storage:lintVitalAnalyzeRelease
+> Task :react-native-async-storage_async-storage:writeReleaseLintModelMetadata
+> Task :react-native-community_datetimepicker:lintVitalAnalyzeRelease
+> Task :react-native-community_datetimepicker:writeReleaseLintModelMetadata
+> Task :react-native-community_netinfo:lintVitalAnalyzeRelease
+> Task :react-native-community_netinfo:writeReleaseLintModelMetadata
+> Task :react-native-community_slider:lintVitalAnalyzeRelease
+> Task :react-native-community_slider:writeReleaseLintModelMetadata
+> Task :react-native-fbsdk-next:lintVitalAnalyzeRelease
+> Task :react-native-fbsdk-next:writeReleaseLintModelMetadata
+> Task :react-native-svg:writeReleaseLintModelMetadata
+> Task :react-native-gesture-handler:lintVitalAnalyzeRelease
+> Task :react-native-gesture-handler:writeReleaseLintModelMetadata
+> Task :react-native-linear-gradient:lintVitalAnalyzeRelease
+> Task :react-native-linear-gradient:writeReleaseLintModelMetadata
+> Task :react-native-pager-view:lintVitalAnalyzeRelease
+> Task :react-native-pager-view:writeReleaseLintModelMetadata
+> Task :react-native-razorpay:lintVitalAnalyzeRelease
+> Task :react-native-razorpay:writeReleaseLintModelMetadata
+> Task :react-native-safe-area-context:lintVitalAnalyzeRelease
+> Task :react-native-safe-area-context:writeReleaseLintModelMetadata
+> Task :react-native-screens:lintVitalAnalyzeRelease
+> Task :react-native-screens:writeReleaseLintModelMetadata
+> Task :react-native-svg:lintVitalAnalyzeRelease
+> Task :react-native-webview:lintVitalAnalyzeRelease
+> Task :react-native-webview:writeReleaseLintModelMetadata
+> Task :stream-io_react-native-webrtc:lintVitalAnalyzeRelease
+> Task :stream-io_react-native-webrtc:writeReleaseLintModelMetadata
+> Task :stream-io_video-react-native-sdk:lintVitalAnalyzeRelease
+> Task :stream-io_video-react-native-sdk:writeReleaseLintModelMetadata
+> Task :app:lintVitalAnalyzeRelease
+> Task :expo:generateReleaseLintVitalModel
+> Task :expo-constants:generateReleaseLintVitalModel
+> Task :expo-modules-core:generateReleaseLintVitalModel
+> Task :incoming-call-android:generateReleaseLintVitalModel
+> Task :react-native-async-storage_async-storage:generateReleaseLintVitalModel
+> Task :react-native-community_datetimepicker:generateReleaseLintVitalModel
+> Task :react-native-community_netinfo:generateReleaseLintVitalModel
+> Task :react-native-community_slider:generateReleaseLintVitalModel
+> Task :react-native-fbsdk-next:generateReleaseLintVitalModel
+> Task :react-native-gesture-handler:generateReleaseLintVitalModel
+> Task :react-native-linear-gradient:generateReleaseLintVitalModel
+> Task :react-native-pager-view:generateReleaseLintVitalModel
+> Task :react-native-razorpay:generateReleaseLintVitalModel
+> Task :react-native-safe-area-context:generateReleaseLintVitalModel
+> Task :react-native-screens:generateReleaseLintVitalModel
+> Task :react-native-svg:generateReleaseLintVitalModel
+> Task :react-native-webview:generateReleaseLintVitalModel
+> Task :stream-io_react-native-webrtc:generateReleaseLintVitalModel
+> Task :stream-io_video-react-native-sdk:generateReleaseLintVitalModel
+> Task :app:lintVitalReportRelease
+> Task :app:lintVitalRelease
+> Task :app:parseReleaseIntegrityConfig UP-TO-DATE
+> Task :app:packageReleaseBundle
+> Task :app:validateSigningRelease
+> Task :app:signReleaseBundle
+> Task :app:produceReleaseBundleIdeListingFile
+> Task :app:createReleaseBundleListingFileRedirect
+> Task :app:bundleRelease
+
+[Incubating] Problems report is available at: file:///D:/DatingApp/frontend/android/build/reports/problems/problems-report.html
+
+Deprecated Gradle features were used in this build, making it incompatible with Gradle 9.0.
+
+You can use '--warning-mode all' to show the individual deprecation warnings and determine if they come from your own scripts or plugins.
+
+For more on this, please refer to https://docs.gradle.org/8.14.3/userguide/command_line_interface.html#sec:command_line_warnings in the Gradle documentation.
+
+BUILD SUCCESSFUL in 7m 50s
+810 actionable tasks: 295 executed, 515 up-to-date

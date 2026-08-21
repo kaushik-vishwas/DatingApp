@@ -1,5 +1,6 @@
 package expo.modules.incomingcallandroid
 
+import android.app.NotificationManager
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
@@ -56,6 +57,83 @@ class IncomingCallAndroidModule : Module() {
       val context = appContext.reactContext ?: return@Function false
       val pm = context.getSystemService(PowerManager::class.java) ?: return@Function false
       pm.isIgnoringBatteryOptimizations(context.packageName)
+    }
+
+    Function("canUseFullScreenIntent") {
+      val context = appContext.reactContext ?: return@Function true
+      if (Build.VERSION.SDK_INT < 34) return@Function true
+      val nm = context.getSystemService(android.app.NotificationManager::class.java)
+      nm?.canUseFullScreenIntent() ?: true
+    }
+
+    AsyncFunction("openFullScreenIntentSettingsAsync") {
+      val context = appContext.reactContext
+        ?: return@AsyncFunction mapOf("ok" to false, "reason" to "no_context")
+      return@AsyncFunction try {
+        val intent =
+          if (Build.VERSION.SDK_INT >= 34) {
+            Intent("android.settings.MANAGE_APP_USE_FULL_SCREEN_INTENT").apply {
+              data = Uri.parse("package:${context.packageName}")
+              addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+          } else {
+            Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+              data = Uri.parse("package:${context.packageName}")
+              addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+          }
+        context.startActivity(intent)
+        mapOf("ok" to true)
+      } catch (e: Exception) {
+        mapOf("ok" to false, "reason" to (e.message ?: "start_failed"))
+      }
+    }
+
+    Function("startOnlinePresenceKeepAlive") { apiBase: String?, authToken: String? ->
+      val context = appContext.reactContext ?: return@Function false
+      OnlinePresenceForegroundService.start(context, apiBase.orEmpty(), authToken.orEmpty())
+      true
+    }
+
+    Function("stopOnlinePresenceKeepAlive") {
+      val context = appContext.reactContext ?: return@Function false
+      OnlinePresenceForegroundService.stop(context)
+      true
+    }
+
+    Function("isOnlinePresenceKeepAliveRunning") {
+      OnlinePresenceForegroundService.running
+    }
+
+    Function("readNativePresenceWakeLog") {
+      val context = appContext.reactContext ?: return@Function ""
+      PresenceNativeWakeLog.readAll(context)
+    }
+
+    Function("clearNativePresenceWakeLog") {
+      val context = appContext.reactContext ?: return@Function false
+      PresenceNativeWakeLog.clear(context)
+      true
+    }
+
+    Function("getPresenceDebugSnapshot") {
+      val context = appContext.reactContext ?: return@Function mapOf("ok" to false, "reason" to "no_context")
+      val pm = context.getSystemService(PowerManager::class.java)
+      val nm = context.getSystemService(NotificationManager::class.java)
+      val canFsi =
+        if (Build.VERSION.SDK_INT < 34) true else nm?.canUseFullScreenIntent() == true
+      mapOf(
+        "ok" to true,
+        "sdkInt" to Build.VERSION.SDK_INT,
+        "manufacturer" to Build.MANUFACTURER,
+        "brand" to Build.BRAND,
+        "model" to Build.MODEL,
+        "batteryUnrestricted" to (pm?.isIgnoringBatteryOptimizations(context.packageName) == true),
+        "canUseFullScreenIntent" to canFsi,
+        "notificationsEnabled" to (nm?.areNotificationsEnabled() != false),
+        "keepAliveRunning" to OnlinePresenceForegroundService.running,
+        "packageName" to context.packageName
+      )
     }
 
     AsyncFunction("applyFullScreenIntentAsync") { identifier: String, debugEnabled: Boolean ->

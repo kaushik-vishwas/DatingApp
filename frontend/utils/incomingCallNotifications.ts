@@ -410,6 +410,10 @@ async function processNotificationResponse(
 
   lastNotificationResponseListenerAtMs = Date.now();
   const identifier = response.notification.request.identifier ?? '';
+  const data = response.notification.request.content.data as Record<string, unknown> | undefined;
+  if (data?.type === 'receiver_online' || data?.type === 'caller_online') {
+    return;
+  }
 
   if (isIncomingCallNotifDebugBuild()) {
     const fileDbg = await import('./incomingCallNotificationFileDebug');
@@ -603,6 +607,17 @@ export async function ensureIncomingCallNotificationSetup(): Promise<void> {
         };
       }
 
+      const dataType = notification.request.content.data?.type;
+      if (dataType === 'receiver_online' || dataType === 'caller_online') {
+        return {
+          shouldShowAlert: true,
+          shouldPlaySound: true,
+          shouldSetBadge: false,
+          shouldShowBanner: true,
+          shouldShowList: true,
+        };
+      }
+
       // Remote FCM duplicate while background: suppress a second tray row.
       // Local incoming-{callId} notifications must still play channel ringtone.
       if (isIncomingCall && !appActive) {
@@ -684,6 +699,12 @@ export async function ensureIncomingCallNotificationSetup(): Promise<void> {
       lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
       bypassDnd: true,
     });
+    await Notifications.setNotificationChannelAsync('online_presence', {
+      name: 'Online alerts',
+      importance: Notifications.AndroidImportance.HIGH,
+      vibrationPattern: [0, 250],
+      enableVibrate: true,
+    });
   }
 
   const defaultAction =
@@ -701,6 +722,10 @@ export async function ensureIncomingCallNotificationSetup(): Promise<void> {
   );
 
   setupDone = true;
+}
+
+export async function ensureIncomingCallNotificationPermission(): Promise<boolean> {
+  return ensureNotificationPermission();
 }
 
 async function ensureNotificationPermission(): Promise<boolean> {
@@ -888,28 +913,119 @@ export function clearIncomingCallNotificationDedupe(callId?: string): void {
 
 export async function registerReceiverExpoPushToken(
   saveToken: (expoPushToken: string) => Promise<void>
-): Promise<void> {
-  if (!canUseExpoPushToken()) return;
+): Promise<boolean> {
+  const result = await registerReceiverPushTokens(async (payload) => {
+    if (payload.expoPushToken) await saveToken(payload.expoPushToken);
+  });
+  return result.expoOk;
+}
+
+export type ReceiverPushRegistrationResult = {
+  expoOk: boolean;
+  fcmOk: boolean;
+  expoLen?: number;
+  fcmLen?: number;
+  projectIdPresent?: boolean;
+  permission?: boolean;
+  expoError?: string;
+  fcmError?: string;
+};
+
+function tokenErrorMessage(e: unknown): string {
+  if (e instanceof Error && e.message.trim()) return e.message.trim().slice(0, 240);
+  const s = String(e ?? '').trim();
+  return s ? s.slice(0, 240) : 'unknown';
+}
+
+export async function registerReceiverPushTokens(
+  saveTokens: (payload: { expoPushToken?: string; fcmDeviceToken?: string }) => Promise<void>
+): Promise<ReceiverPushRegistrationResult> {
+  const result: ReceiverPushRegistrationResult = {
+    expoOk: false,
+    fcmOk: false,
+    expoLen: 0,
+    fcmLen: 0,
+    projectIdPresent: false,
+    permission: false,
+  };
+  if (!canUseExpoPushToken()) {
+    result.expoError = 'expo_push_unavailable';
+    return result;
+  }
+
+  const Notifications = await loadNotificationsModule();
+  if (!Notifications) {
+    result.expoError = 'notifications_module_unavailable';
+    return result;
+  }
 
   try {
-    const Notifications = await loadNotificationsModule();
-    if (!Notifications) return;
-
     await ensureIncomingCallNotificationSetup();
-    if (!(await ensureNotificationPermission())) return;
-
-    const projectId =
-      Constants.expoConfig?.extra?.eas?.projectId ??
-      (Constants as { easConfig?: { projectId?: string } }).easConfig?.projectId;
-    if (!projectId) return;
-
-    const push = await Notifications.getExpoPushTokenAsync({ projectId });
-    const token = push.data?.trim();
-    if (!token) return;
-    await saveToken(token);
-  } catch {
-    // Push registration is best-effort (e.g. missing FCM on some builds).
+  } catch (e) {
+    result.expoError = tokenErrorMessage(e);
   }
+
+  result.permission = await ensureNotificationPermission();
+  if (!result.permission) {
+    result.expoError = result.expoError ?? 'notification_permission_denied';
+    return result;
+  }
+
+  const projectId =
+    Constants.expoConfig?.extra?.eas?.projectId ??
+    (Constants as { easConfig?: { projectId?: string } }).easConfig?.projectId;
+  result.projectIdPresent = Boolean(projectId);
+
+  let expoPushToken: string | undefined;
+  let fcmDeviceToken: string | undefined;
+
+  if (Platform.OS === 'android' && typeof Notifications.getDevicePushTokenAsync === 'function') {
+    try {
+      const device = await Notifications.getDevicePushTokenAsync();
+      const data = typeof device?.data === 'string' ? device.data.trim() : '';
+      if (data && !data.startsWith('ExponentPushToken')) {
+        fcmDeviceToken = data;
+      } else if (data) {
+        result.fcmError = 'device_token_looks_like_expo';
+      } else {
+        result.fcmError = 'empty_device_push_token';
+      }
+    } catch (e) {
+      result.fcmError = tokenErrorMessage(e);
+    }
+  } else if (Platform.OS === 'android') {
+    result.fcmError = 'getDevicePushTokenAsync_unavailable';
+  }
+
+  if (projectId) {
+    try {
+      const push = await Notifications.getExpoPushTokenAsync({
+        projectId,
+        ...(fcmDeviceToken
+          ? { devicePushToken: { type: 'fcm' as const, data: fcmDeviceToken } }
+          : {}),
+      });
+      expoPushToken = push.data?.trim() || undefined;
+      if (!expoPushToken) result.expoError = 'empty_expo_push_token';
+    } catch (e) {
+      result.expoError = tokenErrorMessage(e);
+    }
+  } else {
+    result.expoError = 'missing_eas_project_id';
+  }
+
+  result.expoLen = expoPushToken?.length ?? 0;
+  result.fcmLen = fcmDeviceToken?.length ?? 0;
+  if (!expoPushToken && !fcmDeviceToken) return result;
+  try {
+    await saveTokens({ expoPushToken, fcmDeviceToken });
+  } catch (e) {
+    result.expoError = result.expoError ?? `save_failed:${tokenErrorMessage(e)}`;
+    return result;
+  }
+  result.expoOk = Boolean(expoPushToken);
+  result.fcmOk = Boolean(fcmDeviceToken);
+  return result;
 }
 
 /** Register listeners once; safe to call from App root. */

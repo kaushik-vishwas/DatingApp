@@ -3,7 +3,7 @@
     "name": "Selecto",
     "slug": "frontend",
     "scheme": "nestham",
-    "version": "1.0.17",
+    "version": "1.0.23",
     "orientation": "portrait",
     "icon": "./assets/installed-logo.png",
     "userInterfaceStyle": "light",
@@ -23,14 +23,15 @@
     },
     "android": {
       "package": "com.selecto.app",
-      "versionCode": 19,
+      "googleServicesFile": "./google-services.json",
+      "versionCode": 23,
       "permissions": [
         "android.permission.RECORD_AUDIO",
         "android.permission.USE_FULL_SCREEN_INTENT",
         "android.permission.FOREGROUND_SERVICE",
         "android.permission.FOREGROUND_SERVICE_MICROPHONE",
         "android.permission.FOREGROUND_SERVICE_CAMERA",
-        "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK",
+        "android.permission.FOREGROUND_SERVICE_SPECIAL_USE",
         "android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS",
         "android.permission.WAKE_LOCK",
         "android.permission.BLUETOOTH_CONNECT"

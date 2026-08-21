@@ -149,6 +149,16 @@ export type WalletOfferRow = {
   popular: boolean;
   active: boolean;
   offerBannerDataUrl?: string | null;
+  homePopup?: boolean;
+  homePopupKind?: 'social' | 'spotlight';
+};
+
+export type WalletHomeOfferPopup = {
+  offerId: string;
+  amount: number;
+  bonusPercent: number;
+  /** @deprecated Both layouts show sequentially on the caller home screen. */
+  kind?: 'social' | 'spotlight';
 };
 
 export type WalletOffersResponse = {
@@ -159,6 +169,7 @@ export type WalletOffersResponse = {
         imageDataUrl: string;
       }
     | null;
+  popup?: WalletHomeOfferPopup | null;
 };
 
 export interface DiscoverReceiversResponse {

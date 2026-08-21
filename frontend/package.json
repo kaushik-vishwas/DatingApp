@@ -7,7 +7,8 @@
     "android": "expo run:android",
     "prebuild:android": "npx expo prebuild --platform android --clean && node scripts/ensureAndroidLocalProperties.js",
     "android:apk:prebuild": "npm run prebuild:android",
-    "android:apk": "cd android && gradlew.bat assembleRelease",
+    "android:apk": "cd android && gradlew.bat assembleRelease -PreactNativeArchitectures=arm64-v8a",
+    "android:apk:fast": "cd android && gradlew.bat assembleRelease -PreactNativeArchitectures=arm64-v8a --build-cache",
     "ios": "expo run:ios",
     "web": "expo start --web",
     "typecheck": "tsc -p tsconfig.json --noEmit"
@@ -43,6 +44,7 @@
     "incoming-call-android": "file:./modules/incoming-call-android",
     "react": "19.1.0",
     "react-native": "0.81.5",
+    "react-native-fbsdk-next": "^13.4.3",
     "react-native-gesture-handler": "~2.28.0",
     "react-native-linear-gradient": "^2.8.3",
     "react-native-pager-view": "^8.0.1",

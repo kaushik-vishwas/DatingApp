@@ -1,6 +1,6 @@
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Animated, AppState, Image, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Animated, Image, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -10,9 +10,7 @@ import { resolveProfileImageSource } from '../../utils/avatarSource';
 
 type Props = NativeStackScreenProps<ReceiverStackParamList, 'IncomingCall'>;
 
-const INCOMING_CALL_UI_TIMEOUT_MS = 35_000;
-/** Receiver can tap Accept anytime; auto-accept after 5s if still ringing and app is active. */
-const AUTO_ACCEPT_MS = 5_000;
+const INCOMING_CALL_UI_TIMEOUT_MS = 16_000;
 
 export default function IncomingCallScreen({ navigation, route }: Props): React.JSX.Element {
   const insets = useSafeAreaInsets();
@@ -28,15 +26,7 @@ export default function IncomingCallScreen({ navigation, route }: Props): React.
   const peerAvatarSource = useMemo(() => resolveProfileImageSource(peerImage), [peerImage]);
 
   const [responding, setResponding] = useState(false);
-  const [appActive, setAppActive] = useState(AppState.currentState === 'active');
   const respondedRef = useRef(false);
-
-  useEffect(() => {
-    const sub = AppState.addEventListener('change', (state) => {
-      setAppActive(state === 'active');
-    });
-    return () => sub.remove();
-  }, []);
 
   useEffect(() => {
     void (async () => {
@@ -122,18 +112,6 @@ export default function IncomingCallScreen({ navigation, route }: Props): React.
     return () => clearTimeout(timeout);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [responding]);
-
-  // Auto-accept only while app is active (never from background).
-  useEffect(() => {
-    if (!appActive) return;
-    const timeout = setTimeout(() => {
-      if (appActive && !responding && !respondedRef.current) {
-        void onAccept();
-      }
-    }, AUTO_ACCEPT_MS);
-    return () => clearTimeout(timeout);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [appActive, responding]);
 
   const peerInitial = (peerName || 'U').trim().charAt(0).toUpperCase();
 

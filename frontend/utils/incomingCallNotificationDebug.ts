@@ -2,6 +2,8 @@
  * Incoming-call notification tap tracing (console only in __DEV__).
  * Console: __DEV__ or EXPO_PUBLIC_INCOMING_CALL_NOTIF_LOG=1
  */
+import { logPresenceDiagnostic, logPresenceFailure } from './receiverPresenceDiagnostics';
+
 const CONSOLE_ENABLED =
   __DEV__ || process.env.EXPO_PUBLIC_INCOMING_CALL_NOTIF_LOG === '1';
 
@@ -56,6 +58,27 @@ export type IncomingCallNotifLogStep =
   | 'debug.cleared'
   | 'share.requested';
 
+const PRESENCE_BRIDGE_STEPS = new Set<IncomingCallNotifLogStep>([
+  'received.background',
+  'show.error',
+  'show.fullscreen_skip',
+  'show.fullscreen_error',
+  'bg_task.error',
+  'bg_task.incoming',
+  'bg_task.register_fail',
+  'tap.open_start',
+  'nav.blocked',
+  'show.scheduled',
+]);
+
+const PRESENCE_ERROR_STEPS = new Set<IncomingCallNotifLogStep>([
+  'show.error',
+  'show.fullscreen_error',
+  'bg_task.error',
+  'bg_task.register_fail',
+  'nav.blocked',
+]);
+
 export function logIncomingCallNotif(
   step: IncomingCallNotifLogStep,
   detail?: Record<string, unknown>
@@ -63,6 +86,14 @@ export function logIncomingCallNotif(
   if (CONSOLE_ENABLED) {
     const payload = detail ? ` ${JSON.stringify(detail)}` : '';
     console.log(`[IncomingCallNotif] ${step}${payload}`);
+  }
+  if (PRESENCE_BRIDGE_STEPS.has(step)) {
+    const event = `incoming_${step.replace(/\./g, '_')}`;
+    if (PRESENCE_ERROR_STEPS.has(step)) {
+      logPresenceFailure(event, typeof detail?.reason === 'string' ? detail.reason : step, detail ?? {});
+    } else {
+      logPresenceDiagnostic(event, detail ?? {});
+    }
   }
   if (isIncomingCallNotifDebugBuild()) {
     void import('./incomingCallNotificationFileDebug').then((m) =>

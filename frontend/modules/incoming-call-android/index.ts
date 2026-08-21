@@ -38,6 +38,14 @@ export type IncomingCallAndroidModule = {
     sdkInt?: number;
   }>;
   isIgnoringBatteryOptimizations(): boolean;
+  canUseFullScreenIntent(): boolean;
+  openFullScreenIntentSettingsAsync(): Promise<{ ok?: boolean; reason?: string }>;
+  startOnlinePresenceKeepAlive(apiBase?: string, authToken?: string): boolean;
+  stopOnlinePresenceKeepAlive(): boolean;
+  isOnlinePresenceKeepAliveRunning(): boolean;
+  readNativePresenceWakeLog(): string;
+  clearNativePresenceWakeLog(): boolean;
+  getPresenceDebugSnapshot(): Record<string, unknown>;
   applyFullScreenIntentAsync(
     identifier: string,
     debugEnabled: boolean
@@ -74,7 +82,13 @@ function unavailableMethod(name: string): (...args: unknown[]) => unknown {
   return (..._args: unknown[]) => {
     if (name === 'isBluetoothVoiceOutputAvailable') return false;
     if (name === 'isIgnoringBatteryOptimizations') return false;
+    if (name === 'canUseFullScreenIntent') return true;
+    if (name === 'isOnlinePresenceKeepAliveRunning') return false;
+    if (name === 'readNativePresenceWakeLog') return '';
+    if (name === 'clearNativePresenceWakeLog') return false;
+    if (name === 'getPresenceDebugSnapshot') return { ok: false, reason: 'unavailable' };
     if (name.startsWith('start')) return false;
+    if (name.startsWith('stop')) return false;
     if (name === 'stopCellularCallHoldWatch' || name === 'releaseVoiceCallAudioRoute') return undefined;
     if (name === 'releaseVoiceCallAudioRoute') return undefined;
     if (name.endsWith('Async')) {

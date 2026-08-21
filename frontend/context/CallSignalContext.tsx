@@ -8,10 +8,12 @@ import { getCallSocketIoOptions } from '../utils/androidCallNetwork';
 import { registerCallKeepaliveSocket } from '../utils/callActiveKeepalive';
 import { attachSocketIoProbe, detachSocketIoProbe } from '../utils/gsmDisconnectProbe';
 import {
+  ingestNativePresenceWakeLog,
   logPresenceDiagnostic,
   logPresenceFailure,
 } from '../utils/receiverPresenceDiagnostics';
 import RandomCallMatchingOverlay from '../components/caller/RandomCallMatchingOverlay';
+import { getIncomingCallAndroidNativeModule } from '../modules/incoming-call-android';
 import { useAuth } from './AuthContext';
 import { callApi, getErrorMessage, getJwt, getResolvedApiBaseUrl, profileApi } from '../services/api';
 import { MAX_RANDOM_CALL_RETRIES, isRetryableRandomInviteError } from '../utils/randomCallMatch';
@@ -33,15 +35,18 @@ import {
   isAppInBackground,
   markIncomingCallHandled,
   registerReceiverExpoPushToken,
+  registerReceiverPushTokens,
   setIncomingCallNavigationGuard,
   alertReceiverIncomingCallInBackground,
   showIncomingCallNotification,
 } from '../utils/incomingCallNotifications';
+import { bindOnlinePresenceCallHandler } from '../utils/onlinePresenceNotifications';
 import { registerIncomingCallBootstrapPrefetch } from '../utils/incomingCallBootstrapPrefetch';
 import { clearVoiceCallStreamWarmup, warmVoiceCallStreamClient } from '../utils/voiceCallStreamWarmup';
 import {
   ensureVoiceCallPermissions,
   hasVoiceCallMicrophonePermission,
+  isVoiceCallMicrophonePermissionCached,
 } from '../utils/voiceCallPermissions';
 
 let outgoingNavigateGeneration = 0;
@@ -91,6 +96,7 @@ type CallResponsePayload = {
   accepted: boolean;
   fromType: 'u' | 'r';
   fromId: string;
+  reason?: string;
 };
 
 type CallEndedPayload = {
@@ -113,7 +119,11 @@ type CallMutePayload = {
   fromId: string;
 };
 
-type CallInviteAck = { ok?: boolean; error?: string };
+type CallInviteAck = {
+  ok?: boolean;
+  error?: string;
+  debug?: Record<string, unknown>;
+};
 type CallQueueAck = { ok?: boolean; error?: string; active?: boolean };
 
 type PendingOutgoingCall = {
@@ -667,6 +677,20 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
           });
         });
 
+        logPresenceDiagnostic(
+          'call_invite_ack',
+          {
+            callId: data.callId,
+            peerId: id,
+            ok: ack.ok !== false,
+            error: ack.error ?? null,
+            debug: ack.debug ?? null,
+            socketConnected: socket.connected,
+            role: userRoleRef.current,
+          },
+          ack.ok === false ? 'error' : 'info'
+        );
+
         if (abort.signal.aborted) {
           return;
         }
@@ -679,10 +703,15 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
           const timeout = setTimeout(() => {
             pendingInviteOutcomeRef.current.delete(data.callId);
             resolve({ accepted: false, reason: 'timeout' });
-          }, 30_000);
+          }, 18_000);
           pendingInviteOutcomeRef.current.set(data.callId, { resolve, timeout });
         });
         if (!outcome.accepted) {
+          logPresenceFailure('call_invite_unanswered', outcome.reason, {
+            callId: data.callId,
+            peerId: id,
+            inviteDebug: ack.debug ?? null,
+          });
           clearOutgoingCallSession(data.callId);
           if (socket.connected) {
             instrumentedEmitCallEnd(
@@ -713,6 +742,14 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         if (abort.signal.aborted) {
           return;
         }
+        const axiosDebug =
+          e && typeof e === 'object' && 'response' in e
+            ? (e as { response?: { data?: { debug?: unknown; message?: unknown } } }).response?.data
+            : null;
+        logPresenceFailure('call_invite_failed', getErrorMessage(e), {
+          peerId: id,
+          httpDebug: axiosDebug ?? null,
+        });
         dismissCallerVoiceCallScreen();
         throw e;
       } finally {
@@ -851,45 +888,53 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
       const bootstrapPromise = ensureIncomingBootstrapPromise(req);
 
-      // Mic check + socket ready in parallel (mic usually already granted while ringing).
+      // Notify caller immediately when the socket is already up so they can join Stream
+      // while we finish mic/bootstrap locally (biggest accept→talk latency win).
+      const existingSocket = socketRef.current;
+      let acceptEmitted = false;
+      if (existingSocket?.connected) {
+        existingSocket.emit('call:response', { callId: req.callId, accepted: true });
+        acceptEmitted = true;
+      }
+
       let socket: Socket;
       try {
-        const [micOk, readySocket] = await Promise.all([
-          hasVoiceCallMicrophonePermission().then(async (ok) =>
-            ok ? true : (await ensureVoiceCallPermissions()).microphone
-          ),
-          socketRef.current?.connected
-            ? Promise.resolve(socketRef.current)
+        const [micOk, readySocket, bootstrapped] = await Promise.all([
+          isVoiceCallMicrophonePermissionCached()
+            ? Promise.resolve(true)
+            : hasVoiceCallMicrophonePermission().then(async (ok) =>
+                ok ? true : (await ensureVoiceCallPermissions()).microphone
+              ),
+          existingSocket?.connected
+            ? Promise.resolve(existingSocket)
             : ensureCallSocketReady(socketRef),
+          bootstrapPromise,
         ]);
         if (!micOk) {
           throw new Error('Microphone permission is required for voice calls');
         }
         socket = readySocket;
-      } catch (e) {
-        throw e;
-      }
-      // Tell caller immediately so both sides can join Stream without waiting on bootstrap I/O.
-      socket.emit('call:response', { callId: req.callId, accepted: true });
+        if (!acceptEmitted) {
+          socket.emit('call:response', { callId: req.callId, accepted: true });
+        }
 
-      let bootstrapped: VoiceBootstrapResponse;
-      try {
-        bootstrapped = await bootstrapPromise;
+        incomingBootstrapByCallIdRef.current.delete(req.callId);
+        incomingBootstrapPromiseByCallIdRef.current.delete(req.callId);
+        return bootstrapped;
       } catch (e) {
-        if (socket.connected) {
-          instrumentedEmitCallEnd(
-            socket,
-            req.callId,
-            'accept_stay_on_screen_bootstrap_failed',
-            'main_call_socket'
-          );
+        if (acceptEmitted && (existingSocket?.connected || socketRef.current?.connected)) {
+          const s = existingSocket?.connected ? existingSocket : socketRef.current;
+          if (s) {
+            instrumentedEmitCallEnd(
+              s,
+              req.callId,
+              'accept_stay_on_screen_failed',
+              'main_call_socket'
+            );
+          }
         }
         throw e;
       }
-
-      incomingBootstrapByCallIdRef.current.delete(req.callId);
-      incomingBootstrapPromiseByCallIdRef.current.delete(req.callId);
-      return bootstrapped;
     },
     [ensureIncomingBootstrapPromise]
   );
@@ -906,44 +951,51 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
       const bootstrapPromise = ensureIncomingBootstrapPromise(req);
 
+      const existingSocket = socketRef.current;
+      let acceptEmitted = false;
+      if (existingSocket?.connected) {
+        existingSocket.emit('call:response', { callId: req.callId, accepted: true });
+        acceptEmitted = true;
+      }
+
       let socket: Socket;
       try {
-        const [micOk, readySocket] = await Promise.all([
-          hasVoiceCallMicrophonePermission().then(async (ok) =>
-            ok ? true : (await ensureVoiceCallPermissions()).microphone
-          ),
-          socketRef.current?.connected
-            ? Promise.resolve(socketRef.current)
+        const [micOk, readySocket, bootstrapped] = await Promise.all([
+          isVoiceCallMicrophonePermissionCached()
+            ? Promise.resolve(true)
+            : hasVoiceCallMicrophonePermission().then(async (ok) =>
+                ok ? true : (await ensureVoiceCallPermissions()).microphone
+              ),
+          existingSocket?.connected
+            ? Promise.resolve(existingSocket)
             : ensureCallSocketReady(socketRef),
+          bootstrapPromise,
         ]);
         if (!micOk) {
           throw new Error('Microphone permission is required for voice calls');
         }
         socket = readySocket;
-      } catch (e) {
-        throw e;
-      }
-      // Tell caller immediately so both sides can join Stream without waiting on bootstrap I/O.
-      socket.emit('call:response', { callId: req.callId, accepted: true });
+        if (!acceptEmitted) {
+          socket.emit('call:response', { callId: req.callId, accepted: true });
+        }
 
-      let bootstrapped: VoiceBootstrapResponse;
-      try {
-        bootstrapped = await bootstrapPromise;
+        incomingBootstrapByCallIdRef.current.delete(req.callId);
+        incomingBootstrapPromiseByCallIdRef.current.delete(req.callId);
+        openVoiceCall(bootstrapped, req.peerName, req.peerImage ?? null);
       } catch (e) {
-        if (socket.connected) {
-          instrumentedEmitCallEnd(
-            socket,
-            req.callId,
-            'accept_incoming_bootstrap_failed',
-            'main_call_socket'
-          );
+        if (acceptEmitted && (existingSocket?.connected || socketRef.current?.connected)) {
+          const s = existingSocket?.connected ? existingSocket : socketRef.current;
+          if (s) {
+            instrumentedEmitCallEnd(
+              s,
+              req.callId,
+              'accept_incoming_failed',
+              'main_call_socket'
+            );
+          }
         }
         throw e;
       }
-
-      incomingBootstrapByCallIdRef.current.delete(req.callId);
-      incomingBootstrapPromiseByCallIdRef.current.delete(req.callId);
-      openVoiceCall(bootstrapped, req.peerName, req.peerImage ?? null);
     },
     [ensureIncomingBootstrapPromise, openVoiceCall]
   );
@@ -1140,6 +1192,28 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   useEffect(() => {
     if (!isSignedIn || user?.role !== 'receiver') return;
     let backgroundHeartbeat: ReturnType<typeof setInterval> | null = null;
+    let pendingInvitePoll: ReturnType<typeof setInterval> | null = null;
+
+    const pollPendingIncomingInvite = (): void => {
+      if (!userAvailableRef.current) return;
+      void callApi
+        .incomingPending()
+        .then(({ data }) => {
+          const pending = data?.incoming;
+          const callId = pending?.callId?.trim() ?? '';
+          if (!pending || !callId || !canNavigateToIncomingCall(callId)) return;
+          void alertReceiverIncomingCallInBackground({
+            callId,
+            fromId: pending.fromId,
+            fromType: pending.fromType === 'r' ? 'r' : 'u',
+            peerName: pending.fromName?.trim() || 'Caller',
+            peerImage: pending.fromImage,
+          });
+        })
+        .catch(() => {
+          // Native keep-alive poll is the reliable path while JS is frozen.
+        });
+    };
 
     const keepCallSocketAlive = (): void => {
       const socket = socketRef.current;
@@ -1200,13 +1274,62 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     };
 
     const refreshPushToken = (): void => {
-      void registerReceiverExpoPushToken((token) => profileApi.updateReceiverExpoPushToken(token));
+      void registerReceiverPushTokens(async (payload) => {
+        await profileApi.updateReceiverPushTokens(payload);
+      })
+        .then((result) => {
+          logPresenceDiagnostic(
+            'push_token_refresh',
+            {
+              expoOk: result.expoOk,
+              fcmOk: result.fcmOk,
+              expoLen: result.expoLen ?? 0,
+              fcmLen: result.fcmLen ?? 0,
+              projectIdPresent: result.projectIdPresent ?? null,
+              permission: result.permission ?? null,
+              expoError: result.expoError ?? null,
+              fcmError: result.fcmError ?? null,
+            },
+            result.expoOk || result.fcmOk ? 'info' : 'warn'
+          );
+        })
+        .catch((e) => {
+          logPresenceFailure(
+            'push_token_refresh_failed',
+            e instanceof Error ? e.message : String(e)
+          );
+        });
     };
 
+    logPresenceDiagnostic('receiver_js_session_started', {
+      available: userAvailableRef.current,
+      socketConnected: Boolean(socketRef.current?.connected),
+      keepAliveRunning: Boolean(
+        getIncomingCallAndroidNativeModule()?.isOnlinePresenceKeepAliveRunning?.()
+      ),
+    });
+    void ingestNativePresenceWakeLog().then((n) => {
+      if (n > 0) {
+        logPresenceDiagnostic('native_wake_log_ingested', { count: n });
+      }
+    });
     keepCallSocketAlive();
     refreshPushToken();
 
+    const memorySub = AppState.addEventListener('memoryWarning', () => {
+      logPresenceFailure('js_memory_warning', 'os_memory_warning', {
+        available: userAvailableRef.current,
+        socketConnected: Boolean(socketRef.current?.connected),
+      });
+    });
+
     const sub = AppState.addEventListener('change', (state: AppStateStatus) => {
+      logPresenceDiagnostic('app_state_changed', {
+        state,
+        available: userAvailableRef.current,
+        socketConnected: Boolean(socketRef.current?.connected),
+        heartbeatRunning: Boolean(backgroundHeartbeat),
+      });
       if (state === 'active' || state === 'background' || state === 'inactive') {
         keepCallSocketAlive();
         if (userRoleRef.current === 'receiver' && userAvailableRef.current) {
@@ -1214,9 +1337,15 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
             touchReceiverBackgroundPresence(`appstate_${state}`);
             void ensureIncomingRingtoneLoaded();
             if (!backgroundHeartbeat) {
+              logPresenceDiagnostic('background_heartbeat_started', { intervalMs: 45_000 });
               backgroundHeartbeat = setInterval(() => {
                 touchReceiverBackgroundPresence('background_heartbeat');
               }, 45_000);
+            }
+            if (!pendingInvitePoll) {
+              logPresenceDiagnostic('pending_invite_poll_started', { intervalMs: 4_000 });
+              pollPendingIncomingInvite();
+              pendingInvitePoll = setInterval(pollPendingIncomingInvite, 4_000);
             }
           }
           if (queueModeRef.current) {
@@ -1235,6 +1364,12 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         if (backgroundHeartbeat) {
           clearInterval(backgroundHeartbeat);
           backgroundHeartbeat = null;
+          logPresenceDiagnostic('background_heartbeat_stopped');
+        }
+        if (pendingInvitePoll) {
+          clearInterval(pendingInvitePoll);
+          pendingInvitePoll = null;
+          logPresenceDiagnostic('pending_invite_poll_stopped');
         }
         if (userRoleRef.current === 'receiver' && userAvailableRef.current) {
           void profileApi
@@ -1268,7 +1403,9 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
     return () => {
       sub.remove();
+      memorySub.remove();
       if (backgroundHeartbeat) clearInterval(backgroundHeartbeat);
+      if (pendingInvitePoll) clearInterval(pendingInvitePoll);
     };
   }, [isSignedIn, signedInAccountId, user?.role]);
 
@@ -1304,6 +1441,35 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       unbind();
     };
   }, [ensureIncomingBootstrapPromise, isSignedIn, user?.role]);
+
+  useEffect(() => {
+    if (!isSignedIn || user?.role !== 'caller') return;
+    const refresh = (): void => {
+      void registerReceiverExpoPushToken(async (token) => {
+        await profileApi.updateCallerExpoPushToken(token);
+      });
+    };
+    refresh();
+    const sub = AppState.addEventListener('change', (state: AppStateStatus) => {
+      if (state === 'active') refresh();
+    });
+    return () => sub.remove();
+  }, [isSignedIn, signedInAccountId, user?.role]);
+
+  useEffect(() => {
+    if (!isSignedIn || user?.role !== 'caller') {
+      return bindOnlinePresenceCallHandler(null);
+    }
+    return bindOnlinePresenceCallHandler((target) => {
+      void (async () => {
+        try {
+          await startCallInvite(target.receiverId, target.receiverName, target.receiverImage);
+        } catch (e) {
+          Alert.alert('Call failed', getErrorMessage(e));
+        }
+      })();
+    });
+  }, [isSignedIn, startCallInvite, user?.role]);
 
   const setQueueMode = useCallback(async (active: boolean): Promise<void> => {
     queueModeRef.current = active;
@@ -1352,6 +1518,11 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       registerCallKeepaliveSocket('main_call_signal', socket);
       attachSocketIoProbe(socket, 'main_call_signal');
       socket.on('connect_error', (err: Error) => {
+        if (userRoleRef.current === 'receiver') {
+          logPresenceFailure('call_socket_connect_error', err.message, {
+            userAvailable: userAvailableRef.current,
+          });
+        }
         if (__DEV__) {
           console.warn('[CallSignal] socket connect_error:', err.message);
         }
@@ -1407,6 +1578,14 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       });
 
       socket.on('call:incoming', (payload: CallIncomingPayload) => {
+        if (userRoleRef.current === 'receiver') {
+          logPresenceDiagnostic('socket_call_incoming', {
+            callId: payload.callId,
+            appState: AppState.currentState,
+            available: userAvailableRef.current,
+            socketConnected: socket.connected,
+          });
+        }
         if (payload.fromType === (userRoleRef.current === 'caller' ? 'u' : 'r')) return;
         if (acceptedIncomingCallIdsRef.current.has(payload.callId)) {
           return;
@@ -1425,6 +1604,14 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         // Keep map bounded.
         for (const [id, ts] of seenIncomingCallIdsRef.current) {
           if (now - ts > 60_000) seenIncomingCallIdsRef.current.delete(id);
+        }
+        try {
+          socket.emit('call:incoming-seen', {
+            callId: payload.callId,
+            appState: isAppInBackground() ? 'background' : 'active',
+          });
+        } catch {
+          // Server still uses the 15s minimized budget if this never arrives.
         }
         const peerName =
           (typeof payload.fromName === 'string' && payload.fromName.trim()) ||
@@ -1512,7 +1699,10 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
           waiter.resolve(
             payload.accepted
               ? { accepted: true, reason: 'accepted' }
-              : { accepted: false, reason: 'rejected' }
+              : {
+                  accepted: false,
+                  reason: payload.reason === 'no_answer' ? 'timeout' : 'rejected',
+                }
           );
         }
 

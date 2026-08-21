@@ -11,7 +11,44 @@ const APP_PACKAGE = 'com.selecto.app';
 const FCM_SERVICE = `${APP_PACKAGE}.fcm.NesthamFirebaseMessagingService`;
 const EXPO_FCM_SERVICE = 'expo.modules.notifications.service.ExpoFirebaseMessagingService';
 const FIREBASE_MESSAGING_DEP = 'implementation("com.google.firebase:firebase-messaging")';
+const GOOGLE_SERVICES_CLASSPATH = "classpath('com.google.gms:google-services:4.4.2')";
+const GOOGLE_SERVICES_PLUGIN = "apply plugin: 'com.google.gms.google-services'";
 const CLEAN_WORKAROUND_MARKER = '[nestham] RN new-arch clean workaround';
+
+function ensureGoogleServicesJson(projectRoot) {
+  const src = path.join(projectRoot, 'google-services.json');
+  const dest = path.join(projectRoot, 'android', 'app', 'google-services.json');
+  if (!fs.existsSync(src)) {
+    console.warn('[withIncomingCallFcm] google-services.json missing at project root');
+    return;
+  }
+  fs.mkdirSync(path.dirname(dest), { recursive: true });
+  fs.copyFileSync(src, dest);
+}
+
+function ensureGoogleServicesClasspath(rootBuildGradlePath) {
+  if (!fs.existsSync(rootBuildGradlePath)) return;
+  let gradle = fs.readFileSync(rootBuildGradlePath, 'utf8');
+  if (gradle.includes('com.google.gms:google-services')) return;
+  if (!/classpath\('org\.jetbrains\.kotlin:kotlin-gradle-plugin'\)/.test(gradle)) {
+    console.warn('[withIncomingCallFcm] could not inject google-services classpath');
+    return;
+  }
+  gradle = gradle.replace(
+    /classpath\('org\.jetbrains\.kotlin:kotlin-gradle-plugin'\)/,
+    (match) => `${match}\n    ${GOOGLE_SERVICES_CLASSPATH}`
+  );
+  fs.writeFileSync(rootBuildGradlePath, gradle);
+}
+
+function ensureGoogleServicesPlugin(appBuildGradlePath) {
+  if (!fs.existsSync(appBuildGradlePath)) return;
+  let gradle = fs.readFileSync(appBuildGradlePath, 'utf8');
+  if (gradle.includes("com.google.gms.google-services")) return;
+  if (!gradle.trimEnd().endsWith('\n')) gradle += '\n';
+  gradle += `\n${GOOGLE_SERVICES_PLUGIN}\n`;
+  fs.writeFileSync(appBuildGradlePath, gradle);
+}
 
 function ensureGradleCleanWorkaround(appBuildGradlePath) {
   if (!fs.existsSync(appBuildGradlePath)) return;
@@ -152,6 +189,7 @@ function withIncomingCallFcm(config) {
         'IncomingCallFcmPresenter.kt',
         'IncomingCallNotificationChannels.kt',
         'IncomingCallDeclineReceiver.kt',
+        'PresenceNativeWakeLog.kt',
       ]) {
         fs.copyFileSync(path.join(sourceDir, file), path.join(targetDir, file));
       }
@@ -164,7 +202,11 @@ function withIncomingCallFcm(config) {
       }
 
       const appBuildGradlePath = path.join(projectRoot, 'android', 'app', 'build.gradle');
+      const rootBuildGradlePath = path.join(projectRoot, 'android', 'build.gradle');
+      ensureGoogleServicesJson(projectRoot);
+      ensureGoogleServicesClasspath(rootBuildGradlePath);
       ensureFirebaseMessagingDependency(appBuildGradlePath);
+      ensureGoogleServicesPlugin(appBuildGradlePath);
       ensureGradleCleanWorkaround(appBuildGradlePath);
       return config;
     },

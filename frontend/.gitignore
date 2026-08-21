@@ -39,6 +39,10 @@ yarn-error.*
 # typescript
 *.tsbuildinfo
 
+# Firebase client config (keep local; Expo prebuild copies it into /android)
+google-services.json
+GoogleService-Info.plist
+
 # generated native folders
 /ios
 /android

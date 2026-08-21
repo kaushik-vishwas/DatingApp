@@ -37,15 +37,14 @@ import type {
 import { type ReceiverPresenceInfo } from '../utils/receiverStatus';
 import { resolveProfileImageSource } from '../utils/avatarSource';
 import SelectoLogo from '../assets/SelectoLogo.png';
-import { CallDiagnosticsTopBarButton } from '../components/call/CallDiagnosticsTopBarButton';
-// import { LastCallDebugFab } from '../components/call/LastCallDebugFab';
 import { PresenceDiagnosticsTopBarButton } from '../components/call/PresenceDiagnosticsTopBarButton';
 import EarningsCardBg from '../assets/earnBg.png';
 import NoticeBg from '../assets/noticeBg.png';
 import EarnCoinsImg from '../assets/earn-coins.png';
 import EarnGiftImg from '../assets/earn-gift.png';
 import { useReceiverTabBarBottomInset } from '../utils/receiverTabBarInset';
-import { ensureReceiverBatteryUnrestrictedOnce } from '../utils/receiverBatteryOptimization';
+import { startReceiverOnlineKeepAlive, stopReceiverOnlineKeepAlive } from '../utils/receiverOnlineKeepAlive';
+import { logPresenceDiagnostic } from '../utils/receiverPresenceDiagnostics';
 import { CHAT_RECEIVER_EARN_LABEL } from '../constants/chatPricing';
 
 const MAROON = 'purple';
@@ -163,15 +162,21 @@ export default function ReceiverHomeDashboard(): React.JSX.Element {
   }, [availabilityFromServer]);
 
   React.useEffect(() => {
+    if (available) startReceiverOnlineKeepAlive();
+    else stopReceiverOnlineKeepAlive();
+  }, [available]);
+
+  React.useEffect(() => {
     if (!receiverId || user?.role !== 'receiver') return;
     if (user.isAvailable === true) {
       autoAvailabilityAppliedForRef.current = receiverId;
+      startReceiverOnlineKeepAlive();
       return;
     }
     if (autoAvailabilityAppliedForRef.current === receiverId) return;
     autoAvailabilityAppliedForRef.current = receiverId;
-    setAvailable(true);
     void (async () => {
+      setAvailable(true);
       try {
         await profileApi.updateReceiverProfile({ isAvailable: true });
         try {
@@ -179,9 +184,11 @@ export default function ReceiverHomeDashboard(): React.JSX.Element {
         } catch {
           // Queue sync is best-effort if the call socket is still connecting.
         }
+        startReceiverOnlineKeepAlive();
         void refreshUser();
       } catch {
         setAvailable(Boolean(user.isAvailable ?? false));
+        stopReceiverOnlineKeepAlive();
       }
     })();
   }, [receiverId, user?.role, user?.isAvailable, refreshUser, setQueueMode]);
@@ -293,7 +300,7 @@ export default function ReceiverHomeDashboard(): React.JSX.Element {
     useCallback(() => {
       if (!receiverId || !available) return;
       void setQueueMode(true).catch(() => { });
-      void ensureReceiverBatteryUnrestrictedOnce();
+      startReceiverOnlineKeepAlive();
     }, [receiverId, available, setQueueMode])
   );
 
@@ -302,14 +309,14 @@ export default function ReceiverHomeDashboard(): React.JSX.Element {
     setAvailable(next);
     try {
       await profileApi.updateReceiverProfile({ isAvailable: next });
+      logPresenceDiagnostic(next ? 'go_online' : 'go_offline', { next });
       try {
         await setQueueMode(next);
       } catch {
         // Queue sync is best-effort if the call socket is still connecting.
       }
-      if (next) {
-        void ensureReceiverBatteryUnrestrictedOnce();
-      }
+      if (next) startReceiverOnlineKeepAlive();
+      else stopReceiverOnlineKeepAlive();
       void refreshUser();
     } catch (e) {
       setAvailable(prev);
@@ -437,12 +444,9 @@ export default function ReceiverHomeDashboard(): React.JSX.Element {
                 ]}
                 resizeMode="contain"
               />
-              {/* <CallDiagnosticsTopBarButton
-                onPress={() => navigation.navigate('CallDiagnostics')}
-              />
               <PresenceDiagnosticsTopBarButton
                 onPress={() => navigation.navigate('PresenceDiagnostics')}
-              /> */}
+              />
             </View>
             <View style={[styles.topRight, { gap: topBarMetrics.topRightGap }]}>
               {showScoreInTopBar ? (
@@ -805,10 +809,6 @@ export default function ReceiverHomeDashboard(): React.JSX.Element {
           </CompactInfoCard>
         ) : null}
       </ScrollView>
-      {/* <LastCallDebugFab
-        bottomOffset={scrollBottomInset + 12}
-        onPress={() => navigation.navigate('CallDiagnostics')}
-      /> */}
     </SafeAreaView>
   );
 }

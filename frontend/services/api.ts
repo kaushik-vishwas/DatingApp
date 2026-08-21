@@ -539,6 +539,12 @@ export const profileApi = {
   updateReceiverExpoPushToken: (expoPushToken: string) =>
     api.patch<{ ok: boolean }>('/profile/receiver/push-token', { expoPushToken }),
 
+  updateReceiverPushTokens: (payload: { expoPushToken?: string; fcmDeviceToken?: string }) =>
+    api.patch<{ ok: boolean }>('/profile/receiver/push-token', payload),
+
+  updateCallerExpoPushToken: (expoPushToken: string) =>
+    api.patch<{ ok: boolean }>('/profile/caller/push-token', { expoPushToken }),
+
   receiverBackgroundPresence: () =>
     api.post<{ ok: boolean; graceUntilMs?: number; reason?: string | null }>(
       '/profile/receiver/presence/background'
@@ -724,6 +730,17 @@ export const callApi = {
     api.post<{ ok: boolean }>('/calls/session/rate', { callId, rating }),
   sessionReport: (callId: string, tags: string[]) =>
     api.post<{ ok: boolean }>('/calls/session/report', { callId, tags }),
+  incomingPending: () =>
+    api.get<{
+      incoming: {
+        callId: string;
+        fromId: string;
+        fromType: 'u' | 'r';
+        fromName: string;
+        fromImage: string | null;
+        expiresAt: string;
+      } | null;
+    }>('/calls/incoming-pending'),
 };
 
 export default api;

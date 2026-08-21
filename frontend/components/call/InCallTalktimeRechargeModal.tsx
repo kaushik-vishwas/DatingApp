@@ -12,6 +12,7 @@ import {
 
 import { getErrorMessage, walletApi } from '../../services/api';
 import type { WalletOfferRow } from '../../types/api';
+import { logMetaWalletPurchase } from '../../utils/metaAppEvents';
 import { openRazorpayWalletCheckoutInApp } from '../../utils/openRazorpayWalletCheckout';
 import {
   computeWalletRechargeBreakdown,
@@ -98,6 +99,11 @@ export default function InCallTalktimeRechargeModal({
         razorpay_signature: checkout.razorpay_signature,
         payAmount: breakdown.totalPayable,
         bonusPercent: selected.bonusPercent,
+        walletAmount: breakdown.walletAmount,
+      });
+      void logMetaWalletPurchase({
+        razorpayPaymentId: checkout.razorpay_payment_id,
+        payAmountInr: breakdown.totalPayable,
         walletAmount: breakdown.walletAmount,
       });
       const newBalance =
