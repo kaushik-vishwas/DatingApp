@@ -11,7 +11,9 @@ import androidx.core.app.NotificationManagerCompat
  */
 class IncomingCallDeclineReceiver : BroadcastReceiver() {
   override fun onReceive(context: Context, intent: Intent?) {
-    if (intent?.action != ACTION_DECLINE) return
+    val action = intent?.action ?: return
+    IncomingCallRingtonePlayer.stop(context)
+    if (action != ACTION_DECLINE) return
     val tag = intent.getStringExtra(EXTRA_TAG)?.trim().orEmpty()
     val id = intent.getIntExtra(EXTRA_ID, -1)
     if (tag.isEmpty() || id < 0) return
@@ -24,6 +26,7 @@ class IncomingCallDeclineReceiver : BroadcastReceiver() {
 
   companion object {
     const val ACTION_DECLINE = "com.selecto.app.fcm.ACTION_DECLINE_INCOMING_CALL"
+    const val ACTION_STOP_RING = "com.selecto.app.fcm.ACTION_STOP_INCOMING_RING"
     const val EXTRA_TAG = "notificationTag"
     const val EXTRA_ID = "notificationId"
   }

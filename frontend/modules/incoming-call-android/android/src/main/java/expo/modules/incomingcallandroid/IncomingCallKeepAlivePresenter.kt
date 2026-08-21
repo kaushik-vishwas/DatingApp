@@ -77,8 +77,10 @@ object IncomingCallKeepAlivePresenter {
       PendingIntent.getActivity(appContext, notificationId + 17, openIntent, piFlags)
 
     val body = "$name is calling you"
+    val nativeRingOk = IncomingCallRingtonePlayer.start(appContext)
+    val channelId = IncomingCallNotificationChannels.presentChannelId(nativeRingOk)
     val builder =
-      NotificationCompat.Builder(appContext, IncomingCallNotificationChannels.CHANNEL_ID)
+      NotificationCompat.Builder(appContext, channelId)
         .setSmallIcon(android.R.drawable.sym_call_incoming)
         .setContentTitle("Incoming call")
         .setContentText(body)
@@ -98,7 +100,9 @@ object IncomingCallKeepAlivePresenter {
     if (canFullScreen) {
       builder.setFullScreenIntent(fullScreenPending, true)
     }
-    IncomingCallNotificationChannels.resolveRingtoneUri(appContext)?.let { builder.setSound(it) }
+    if (!nativeRingOk) {
+      IncomingCallNotificationChannels.resolveRingtoneUri(appContext)?.let { builder.setSound(it) }
+    }
 
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
       try {
@@ -116,7 +120,7 @@ object IncomingCallKeepAlivePresenter {
       PresenceNativeWakeLog.append(
         appContext,
         "native_keepalive_incoming",
-        mapOf("callId" to id, "canFullScreen" to canFullScreen)
+        mapOf("callId" to id, "canFullScreen" to canFullScreen, "nativeRing" to nativeRingOk)
       )
       true
     } catch (e: Exception) {

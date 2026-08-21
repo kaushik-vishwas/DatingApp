@@ -1,4 +1,7 @@
 import { Audio, InterruptionModeAndroid, InterruptionModeIOS, type AVPlaybackStatusSuccess } from 'expo-av';
+import { Platform } from 'react-native';
+
+import { getIncomingCallAndroidNativeModule } from '../modules/incoming-call-android';
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const CALLER_RINGTONE = require('../assets/sounds/caller_ringtone.mp3') as number;
@@ -14,10 +17,50 @@ let incomingRingBackgroundAudio = false;
 let incomingRingSound: Audio.Sound | null = null;
 let incomingRingLoadPromise: Promise<void> | null = null;
 let incomingRingtonePlaying = false;
+/** True when Android native MediaPlayer owns the incoming ring. */
+let incomingNativeRingtoneActive = false;
 
 /** True while the in-app incoming ring should be audible (looping). */
 export function isIncomingRingtonePlaying(): boolean {
+  if (incomingNativeRingtoneActive) {
+    const mod = getIncomingCallAndroidNativeModule();
+    if (mod && typeof mod.isIncomingRingtonePlaying === 'function') {
+      try {
+        return Boolean(mod.isIncomingRingtonePlaying());
+      } catch {
+        return true;
+      }
+    }
+    return true;
+  }
   return incomingRingtonePlaying;
+}
+
+function tryStartNativeIncomingRingtone(): boolean {
+  if (Platform.OS !== 'android') return false;
+  const mod = getIncomingCallAndroidNativeModule();
+  if (!mod || typeof mod.startIncomingRingtone !== 'function') return false;
+  try {
+    const started = Boolean(mod.startIncomingRingtone());
+    incomingNativeRingtoneActive = started;
+    if (started) incomingRingtonePlaying = true;
+    return started;
+  } catch {
+    incomingNativeRingtoneActive = false;
+    return false;
+  }
+}
+
+function tryStopNativeIncomingRingtone(): void {
+  const mod = getIncomingCallAndroidNativeModule();
+  if (mod && typeof mod.stopIncomingRingtone === 'function') {
+    try {
+      mod.stopIncomingRingtone();
+    } catch {
+      // ignore
+    }
+  }
+  incomingNativeRingtoneActive = false;
 }
 
 function attachIncomingRingLoopGuard(sound: Audio.Sound): void {
@@ -89,7 +132,11 @@ export async function ensureIncomingRingtoneLoaded(): Promise<void> {
       await s.loadAsync(RECEIVER_RINGTONE, { shouldPlay: false, isLooping: true, volume: 1.0 });
       attachIncomingRingLoopGuard(s);
       incomingRingSound = s;
-    })();
+    })().catch((e) => {
+      incomingRingLoadPromise = null;
+      incomingRingSound = null;
+      throw e;
+    });
   }
   await incomingRingLoadPromise;
 }
@@ -97,6 +144,7 @@ export async function ensureIncomingRingtoneLoaded(): Promise<void> {
 /** Stop the shared incoming ring (safe to call repeatedly). */
 export async function stopIncomingRingtonePlayback(): Promise<void> {
   incomingRingtonePlaying = false;
+  tryStopNativeIncomingRingtone();
   if (!incomingRingSound) {
     await releaseIncomingRingtoneAudioMode();
     return;
@@ -202,33 +250,54 @@ export async function startRandomMatchingTone(): Promise<() => Promise<void>> {
 
 /** Start looping incoming ring without restarting if already playing (tap handoff). */
 export async function ensureIncomingRingtonePlaying(): Promise<() => Promise<void>> {
+  if (tryStartNativeIncomingRingtone()) {
+    return stopIncomingRingtonePlayback;
+  }
+  incomingRingBackgroundAudio = false;
   await ensureIncomingRingtoneAudioMode();
-  await ensureIncomingRingtoneLoaded();
-  const sound = incomingRingSound!;
+  try {
+    await ensureIncomingRingtoneLoaded();
+  } catch {
+    return stopIncomingRingtonePlayback;
+  }
+  const sound = incomingRingSound;
+  if (!sound) return stopIncomingRingtonePlayback;
   try {
     const status = await sound.getStatusAsync();
     if (status.isLoaded && status.isPlaying) {
       incomingRingtonePlaying = true;
       return stopIncomingRingtonePlayback;
     }
-    if (!status.isLoaded || !status.isPlaying) {
-      if (!status.isPlaying) {
-        await sound.setPositionAsync(0);
-      }
+    if (status.isLoaded) {
+      await sound.setPositionAsync(0);
       await sound.playAsync();
       incomingRingtonePlaying = true;
     }
   } catch {
-    incomingRingtonePlaying = false;
+    try {
+      await sound.replayAsync();
+      incomingRingtonePlaying = true;
+    } catch {
+      incomingRingtonePlaying = false;
+    }
   }
   return stopIncomingRingtonePlayback;
 }
 
 /** Start looping incoming ring (receiver) from the beginning. */
 export async function startIncomingRingtone(): Promise<() => Promise<void>> {
+  if (tryStartNativeIncomingRingtone()) {
+    return stopIncomingRingtonePlayback;
+  }
+  incomingRingBackgroundAudio = false;
   await ensureIncomingRingtoneAudioMode();
-  await ensureIncomingRingtoneLoaded();
-  const sound = incomingRingSound!;
+  try {
+    await ensureIncomingRingtoneLoaded();
+  } catch {
+    return stopIncomingRingtonePlayback;
+  }
+  const sound = incomingRingSound;
+  if (!sound) return stopIncomingRingtonePlayback;
   try {
     const status = await sound.getStatusAsync();
     if (status.isLoaded && status.isPlaying) {
@@ -239,7 +308,12 @@ export async function startIncomingRingtone(): Promise<() => Promise<void>> {
     await sound.playAsync();
     incomingRingtonePlaying = true;
   } catch {
-    incomingRingtonePlaying = false;
+    try {
+      await sound.replayAsync();
+      incomingRingtonePlaying = true;
+    } catch {
+      incomingRingtonePlaying = false;
+    }
   }
   return stopIncomingRingtonePlayback;
 }

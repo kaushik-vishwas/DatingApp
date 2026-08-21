@@ -159,6 +159,11 @@ function withIncomingCallFcm(config) {
                 'android:name': 'com.selecto.app.fcm.ACTION_DECLINE_INCOMING_CALL',
               },
             },
+            {
+              $: {
+                'android:name': 'com.selecto.app.fcm.ACTION_STOP_INCOMING_RING',
+              },
+            },
           ],
         },
       ],
@@ -188,6 +193,7 @@ function withIncomingCallFcm(config) {
         'NesthamFirebaseMessagingService.kt',
         'IncomingCallFcmPresenter.kt',
         'IncomingCallNotificationChannels.kt',
+        'IncomingCallRingtonePlayer.kt',
         'IncomingCallDeclineReceiver.kt',
         'PresenceNativeWakeLog.kt',
       ]) {

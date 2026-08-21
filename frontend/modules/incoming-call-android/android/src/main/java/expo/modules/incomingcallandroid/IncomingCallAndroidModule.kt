@@ -31,6 +31,22 @@ class IncomingCallAndroidModule : Module() {
       mapOf("ensured" to true)
     }
 
+    Function("startIncomingRingtone") {
+      val context = appContext.reactContext ?: return@Function false
+      IncomingCallNotificationChannels.ensureIncomingCallChannel(context)
+      IncomingCallRingtonePlayer.start(context)
+    }
+
+    Function("stopIncomingRingtone") {
+      val context = appContext.reactContext
+      IncomingCallRingtonePlayer.stop(context)
+      true
+    }
+
+    Function("isIncomingRingtonePlaying") {
+      IncomingCallRingtonePlayer.isPlaying()
+    }
+
     /** Prompt once-friendly: open system dialog to ignore battery optimizations. */
     AsyncFunction("requestIgnoreBatteryOptimizationsAsync") {
       val context = appContext.reactContext

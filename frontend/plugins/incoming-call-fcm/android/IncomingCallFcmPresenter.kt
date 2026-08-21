@@ -101,18 +101,27 @@ object IncomingCallFcmPresenter {
         openIntent,
         piFlags
       )
+    val stopRingIntent =
+      Intent(appContext, IncomingCallDeclineReceiver::class.java).apply {
+        action = IncomingCallDeclineReceiver.ACTION_STOP_RING
+      }
+    val deletePending =
+      PendingIntent.getBroadcast(appContext, notificationId + 23, stopRingIntent, piFlags)
 
     val title = "Incoming call"
     val body = "$peerName is calling you"
     val ringUri = IncomingCallNotificationChannels.resolveRingtoneUri(appContext)
+    val nativeRingOk = IncomingCallRingtonePlayer.start(appContext)
+    val channelId = IncomingCallNotificationChannels.presentChannelId(nativeRingOk)
 
     val builder =
-      NotificationCompat.Builder(appContext, IncomingCallNotificationChannels.CHANNEL_ID)
+      NotificationCompat.Builder(appContext, channelId)
         .setSmallIcon(resolveSmallIcon(appContext))
         .setContentTitle(title)
         .setContentText(body)
         .setStyle(NotificationCompat.BigTextStyle().bigText(body))
         .setContentIntent(contentPending)
+        .setDeleteIntent(deletePending)
         .setCategory(NotificationCompat.CATEGORY_CALL)
         .setPriority(NotificationCompat.PRIORITY_MAX)
         .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
@@ -130,14 +139,17 @@ object IncomingCallFcmPresenter {
       Log.w(TAG, "Full-screen intent not granted; posting MAX heads-up only")
     }
 
-    if (ringUri != null) {
-      builder.setSound(ringUri)
-    } else {
-      builder.setDefaults(
-        NotificationCompat.DEFAULT_SOUND or
-          NotificationCompat.DEFAULT_LIGHTS or
-          NotificationCompat.DEFAULT_VIBRATE
-      )
+    // Full Selecto ringtone is MediaPlayer. Only attach channel sound as fallback.
+    if (!nativeRingOk) {
+      if (ringUri != null) {
+        builder.setSound(ringUri)
+      } else {
+        builder.setDefaults(
+          NotificationCompat.DEFAULT_SOUND or
+            NotificationCompat.DEFAULT_LIGHTS or
+            NotificationCompat.DEFAULT_VIBRATE
+        )
+      }
     }
 
     // Android 12+ CallStyle improves heads-up / OEM call treatment when permitted.
@@ -182,7 +194,7 @@ object IncomingCallFcmPresenter {
         Log.w(TAG, "Notifications disabled — cannot present incoming call")
       }
       NotificationManagerCompat.from(appContext).notify(identifier, notificationId, builder.build())
-      Log.i(TAG, "Presented incoming call notification tag=$identifier")
+      Log.i(TAG, "Presented incoming call notification tag=$identifier nativeRing=$nativeRingOk")
       PresenceNativeWakeLog.append(
         appContext,
         "native_fcm_incoming",
@@ -191,6 +203,7 @@ object IncomingCallFcmPresenter {
           "presented" to true,
           "canFullScreen" to canFullScreen,
           "notificationsEnabled" to notificationsEnabled,
+          "nativeRing" to nativeRingOk,
           "sdkInt" to Build.VERSION.SDK_INT
         )
       )

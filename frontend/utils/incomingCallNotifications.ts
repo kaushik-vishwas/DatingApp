@@ -32,8 +32,8 @@ export type IncomingCallNotificationPayload = {
 };
 
 const INCOMING_CALL_CHANNEL_ID = 'incoming_calls_ring_v2';
-/** Tray-only channel when in-app ringtone is already looping (avoids double alert sounds). */
-const INCOMING_CALL_VISUAL_CHANNEL_ID = 'incoming_calls_visual';
+/** Silent heads-up tray while full Selecto ringtone plays via native MediaPlayer. */
+const INCOMING_CALL_VISUAL_CHANNEL_ID = 'incoming_calls_heads_up_v1';
 /** Android `res/raw` basename (no extension). */
 const INCOMING_CALL_NOTIFICATION_SOUND_ANDROID = 'receiver_ringtone';
 /** Bundled via expo-notifications plugin (iOS). */
@@ -697,7 +697,12 @@ export async function ensureIncomingCallNotificationSetup(): Promise<void> {
   if (Platform.OS === 'android') {
     // Recreate so ringtone asset updates apply on existing installs (channel sound is immutable).
     // Also remove the legacy channel id so OEMs do not keep an old default-sound channel.
-    for (const legacyId of ['incoming_calls', INCOMING_CALL_CHANNEL_ID]) {
+    for (const legacyId of [
+      'incoming_calls',
+      'incoming_calls_visual',
+      INCOMING_CALL_CHANNEL_ID,
+      INCOMING_CALL_VISUAL_CHANNEL_ID,
+    ]) {
       try {
         await Notifications.deleteNotificationChannelAsync(legacyId);
       } catch {
@@ -724,7 +729,7 @@ export async function ensureIncomingCallNotificationSetup(): Promise<void> {
       },
     });
     await Notifications.setNotificationChannelAsync(INCOMING_CALL_VISUAL_CHANNEL_ID, {
-      name: 'Incoming calls',
+      name: 'Incoming call screen',
       importance: Notifications.AndroidImportance.MAX,
       vibrationPattern: [0, 280, 200, 280],
       lightColor: '#7c3aed',
@@ -845,17 +850,16 @@ async function playIncomingRingtoneForBackgroundAlert(): Promise<boolean> {
 }
 
 /**
- * Receiver minimized/background: tray must always use the ringing channel.
- * OEM freezes often kill in-app audio; channel ringtone is the reliable Selecto ring.
- * In-app ringtone remains best-effort and must not replace or silence the tray sound.
+ * Receiver minimized/background: start full Selecto ringtone (native MediaPlayer),
+ * then show a silent heads-up tray so OEMs do not play a short system notification ding.
+ * If native ring fails, fall back to the ringing notification channel.
  */
 export async function alertReceiverIncomingCallInBackground(
   incoming: IncomingCallNotificationPayload
 ): Promise<void> {
   if (!receiverIncomingCallUiEnabled) return;
-  // Best-effort only; channel sound below is what users hear on many OEMs.
-  void playIncomingRingtoneForBackgroundAlert();
-  await showIncomingCallNotification(incoming, { visualOnly: false });
+  const ringing = await playIncomingRingtoneForBackgroundAlert();
+  await showIncomingCallNotification(incoming, { visualOnly: ringing });
 }
 
 /** Shows a high-priority local notification (Android background / minimized app). */

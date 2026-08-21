@@ -31,6 +31,9 @@ export type SamsungCallCompatProfile = {
 
 export type IncomingCallAndroidModule = {
   ensureIncomingCallChannelAsync(): Promise<{ ensured?: boolean }>;
+  startIncomingRingtone(): boolean;
+  stopIncomingRingtone(): boolean;
+  isIncomingRingtonePlaying(): boolean;
   requestIgnoreBatteryOptimizationsAsync(): Promise<{
     ok?: boolean;
     alreadyIgnoring?: boolean;
