@@ -123,7 +123,7 @@ async function sendReceiverIncomingCallPush(payload) {
         /** Keep deliverable through OEM doze briefly; invite window is ~45s. */
         ttl: 55,
         expiration: Math.floor(Date.now() / 1000) + 55,
-        channelId: 'incoming_calls',
+        channelId: 'incoming_calls_ring_v2',
         _contentAvailable: true,
         data: {
             type: 'call_incoming',

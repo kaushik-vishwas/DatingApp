@@ -12,7 +12,7 @@ import android.os.Build
  * High-priority incoming-call channel with bundled [receiver_ringtone] raw asset.
  */
 object IncomingCallNotificationChannels {
-  const val CHANNEL_ID = "incoming_calls"
+  const val CHANNEL_ID = "incoming_calls_ring_v2"
   private const val SOUND_RAW_BASENAME = "receiver_ringtone"
 
   fun ensureIncomingCallChannel(context: Context) {
@@ -21,6 +21,13 @@ object IncomingCallNotificationChannels {
     val appContext = context.applicationContext
     val nm = appContext.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
     val soundUri = resolveRingtoneUri(appContext)
+
+    // Drop legacy default-sound channel so tray uses Selecto ringtone.
+    try {
+      nm.deleteNotificationChannel("incoming_calls")
+    } catch (_: Exception) {
+      // ignore
+    }
 
     val existing = nm.getNotificationChannel(CHANNEL_ID)
     if (

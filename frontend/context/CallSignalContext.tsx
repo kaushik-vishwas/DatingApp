@@ -35,7 +35,6 @@ import {
   isAppInBackground,
   isAppOnScreen,
   markIncomingCallHandled,
-  registerReceiverExpoPushToken,
   registerReceiverPushTokens,
   setIncomingCallNavigationGuard,
   setReceiverIncomingCallUiEnabled,
@@ -1466,9 +1465,35 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   useEffect(() => {
     if (!isSignedIn || user?.role !== 'caller') return;
     const refresh = (): void => {
-      void registerReceiverExpoPushToken(async (token) => {
-        await profileApi.updateCallerExpoPushToken(token);
-      });
+      void registerReceiverPushTokens(async (payload) => {
+        const expo = payload.expoPushToken?.trim();
+        if (!expo) return;
+        await profileApi.updateCallerExpoPushToken(expo);
+      })
+        .then((result) => {
+          logPresenceDiagnostic(
+            'push_token_refresh',
+            {
+              role: 'caller',
+              expoOk: result.expoOk,
+              fcmOk: false,
+              expoLen: result.expoLen ?? 0,
+              fcmLen: 0,
+              projectIdPresent: result.projectIdPresent ?? null,
+              permission: result.permission ?? null,
+              expoError: result.expoError ?? null,
+              fcmError: 'n/a_for_caller',
+            },
+            result.expoOk ? 'info' : 'warn'
+          );
+        })
+        .catch((e) => {
+          logPresenceFailure(
+            'push_token_refresh_failed',
+            e instanceof Error ? e.message : String(e),
+            { role: 'caller' }
+          );
+        });
     };
     refresh();
     const sub = AppState.addEventListener('change', (state: AppStateStatus) => {

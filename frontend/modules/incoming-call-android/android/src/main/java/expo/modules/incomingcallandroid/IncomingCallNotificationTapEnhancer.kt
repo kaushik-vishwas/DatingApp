@@ -74,9 +74,9 @@ object IncomingCallNotificationTapEnhancer {
 
     val channelId =
       if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-        existing.channelId ?: "incoming_calls"
+        existing.channelId ?: IncomingCallNotificationChannels.CHANNEL_ID
       } else {
-        "incoming_calls"
+        IncomingCallNotificationChannels.CHANNEL_ID
       }
 
     val title =

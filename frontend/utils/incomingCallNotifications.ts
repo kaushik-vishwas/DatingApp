@@ -31,7 +31,7 @@ export type IncomingCallNotificationPayload = {
   peerImage?: string | null;
 };
 
-const INCOMING_CALL_CHANNEL_ID = 'incoming_calls';
+const INCOMING_CALL_CHANNEL_ID = 'incoming_calls_ring_v2';
 /** Tray-only channel when in-app ringtone is already looping (avoids double alert sounds). */
 const INCOMING_CALL_VISUAL_CHANNEL_ID = 'incoming_calls_visual';
 /** Android `res/raw` basename (no extension). */
@@ -649,7 +649,9 @@ export async function ensureIncomingCallNotificationSetup(): Promise<void> {
       }
 
       // Remote FCM duplicate while background: suppress a second tray row.
-      // Local incoming-{callId} notifications must still play channel ringtone.
+      // Local incoming-{callId} must always use the ringing channel sound.
+      // Do NOT gate on isIncomingRingtonePlaying() — OEMs often mute JS audio while
+      // minimized, which would wrongly suppress the Selecto channel ringtone.
       if (isIncomingCall && !appActive) {
         const isLocalIncoming = identifier.startsWith(INCOMING_CALL_NOTIFICATION_ID_PREFIX);
         logIncomingCallNotif('handler.decision', {
@@ -669,7 +671,7 @@ export async function ensureIncomingCallNotificationSetup(): Promise<void> {
         }
         return {
           shouldShowAlert: true,
-          shouldPlaySound: !isIncomingRingtonePlaying(),
+          shouldPlaySound: true,
           shouldSetBadge: false,
           shouldShowBanner: true,
           shouldShowList: true,
@@ -694,10 +696,13 @@ export async function ensureIncomingCallNotificationSetup(): Promise<void> {
 
   if (Platform.OS === 'android') {
     // Recreate so ringtone asset updates apply on existing installs (channel sound is immutable).
-    try {
-      await Notifications.deleteNotificationChannelAsync(INCOMING_CALL_CHANNEL_ID);
-    } catch {
-      // ignore
+    // Also remove the legacy channel id so OEMs do not keep an old default-sound channel.
+    for (const legacyId of ['incoming_calls', INCOMING_CALL_CHANNEL_ID]) {
+      try {
+        await Notifications.deleteNotificationChannelAsync(legacyId);
+      } catch {
+        // ignore
+      }
     }
     await Notifications.setNotificationChannelAsync(INCOMING_CALL_CHANNEL_ID, {
       name: 'Incoming calls',
@@ -841,13 +846,14 @@ async function playIncomingRingtoneForBackgroundAlert(): Promise<boolean> {
 
 /**
  * Receiver minimized/background: tray must always use the ringing channel.
- * OEM freezes often kill in-app audio; visual-only trays are easy to miss.
- * In-app ringtone is best-effort only and must not silence the system tray.
+ * OEM freezes often kill in-app audio; channel ringtone is the reliable Selecto ring.
+ * In-app ringtone remains best-effort and must not replace or silence the tray sound.
  */
 export async function alertReceiverIncomingCallInBackground(
   incoming: IncomingCallNotificationPayload
 ): Promise<void> {
   if (!receiverIncomingCallUiEnabled) return;
+  // Best-effort only; channel sound below is what users hear on many OEMs.
   void playIncomingRingtoneForBackgroundAlert();
   await showIncomingCallNotification(incoming, { visualOnly: false });
 }

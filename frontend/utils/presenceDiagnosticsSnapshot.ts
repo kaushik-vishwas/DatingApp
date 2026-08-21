@@ -25,22 +25,28 @@ function androidSdk(): number {
   return typeof Platform.Version === 'number' ? Platform.Version : Number(Platform.Version) || 0;
 }
 
+export type PresenceDiagAccountRole = 'caller' | 'receiver' | null | undefined;
+
 function buildFcmWhyNotWorking(opts: {
   push: ReceiverPushRegistrationResult | null;
   pushError?: string;
   nativeSnap: Record<string, unknown> | null;
   missing: string[];
   analysisHints: string[];
+  role: PresenceDiagAccountRole;
 }): string[] {
   const lines: string[] = [];
   const push = opts.push;
+  const isCaller = opts.role === 'caller';
 
   if (opts.pushError) {
     lines.push(`Push check failed: ${opts.pushError}`);
   }
 
   if (push) {
-    if (push.fcmOk) {
+    if (isCaller) {
+      lines.push('FCM device token: N/A for callers (online alerts use Expo push only)');
+    } else if (push.fcmOk) {
       lines.push(`FCM device token: OK (len ${push.fcmLen ?? 0})`);
     } else {
       lines.push(`FCM device token: FAIL — ${push.fcmError ?? 'no token'}`);
@@ -77,15 +83,17 @@ function buildFcmWhyNotWorking(opts: {
     if (native.batteryUnrestricted === false) {
       lines.push('Battery optimization not unrestricted — OEM may kill keep-alive / delay FCM.');
     }
-    if (native.canUseFullScreenIntent === false) {
+    if (!isCaller && native.canUseFullScreenIntent === false) {
       lines.push('Full-screen intent not allowed — incoming call may not pop over lock screen.');
     }
-    if (native.keepAliveRunning === true) {
-      lines.push('Keep-alive foreground service: running');
-    } else {
-      lines.push('Keep-alive foreground service: not running (Go Online may be off, or OEM stopped it)');
+    if (!isCaller) {
+      if (native.keepAliveRunning === true) {
+        lines.push('Keep-alive foreground service: running');
+      } else {
+        lines.push('Keep-alive foreground service: not running (Go Online may be off, or OEM stopped it)');
+      }
     }
-  } else if (Platform.OS === 'android') {
+  } else if (Platform.OS === 'android' && !isCaller) {
     lines.push(
       'Native presence module snapshot unavailable — rebuild the Android APK with incoming-call module.'
     );
@@ -95,7 +103,13 @@ function buildFcmWhyNotWorking(opts: {
     if (id === 'notifications') lines.push('Missing: notification permission');
     if (id === 'battery') lines.push('Missing: battery unrestricted');
     if (id === 'fullScreenIntent') lines.push('Missing: full-screen intent');
-    if (id === 'pushToken') lines.push('Missing: Expo or FCM push token on server');
+    if (id === 'pushToken') {
+      lines.push(
+        isCaller
+          ? 'Missing: Expo push token on server (caller online alerts)'
+          : 'Missing: Expo or FCM push token on server'
+      );
+    }
   }
 
   for (const hint of opts.analysisHints) {
@@ -104,14 +118,45 @@ function buildFcmWhyNotWorking(opts: {
 
   if (lines.length === 0) {
     lines.push(
-      'No FCM blockers detected from this snapshot. If calls still miss, check backend FCM_PROJECT_ID / service account and that the receiver is Go Online.'
+      isCaller
+        ? 'No caller push blockers detected. Online alerts need User.expoPushToken saved and notification permission.'
+        : 'No FCM blockers detected from this snapshot. If calls still miss, check backend FCM_PROJECT_ID / service account and that the receiver is Go Online.'
     );
   }
 
   return lines;
 }
 
-export async function collectPresenceEnvironmentSnapshot(): Promise<Record<string, unknown>> {
+async function registerPushTokensForRole(
+  role: PresenceDiagAccountRole
+): Promise<ReceiverPushRegistrationResult> {
+  if (role === 'caller') {
+    // Callers only persist Expo (User.expoPushToken) for receiver-online alerts.
+    return registerReceiverPushTokens(async (payload) => {
+      const expo = payload.expoPushToken?.trim();
+      if (!expo) return;
+      await profileApi.updateCallerExpoPushToken(expo);
+    });
+  }
+  if (role === 'receiver') {
+    return registerReceiverPushTokens(async (payload) => {
+      await profileApi.updateReceiverPushTokens(payload);
+    });
+  }
+  return {
+    expoOk: false,
+    fcmOk: false,
+    expoLen: 0,
+    fcmLen: 0,
+    projectIdPresent: false,
+    permission: false,
+    expoError: 'unknown_account_role',
+  };
+}
+
+export async function collectPresenceEnvironmentSnapshot(
+  role?: PresenceDiagAccountRole
+): Promise<Record<string, unknown>> {
   const mod = getIncomingCallAndroidNativeModule();
   const nativeSnap =
     typeof mod?.getPresenceDebugSnapshot === 'function'
@@ -121,9 +166,7 @@ export async function collectPresenceEnvironmentSnapshot(): Promise<Record<strin
   let push: ReceiverPushRegistrationResult | null = null;
   let pushError: string | undefined;
   try {
-    push = await registerReceiverPushTokens(async (payload) => {
-      await profileApi.updateReceiverPushTokens(payload);
-    });
+    push = await registerPushTokensForRole(role);
   } catch (e) {
     pushError = e instanceof Error ? e.message : String(e);
   }
@@ -149,11 +192,12 @@ export async function collectPresenceEnvironmentSnapshot(): Promise<Record<strin
           ? Boolean(mod.canUseFullScreenIntent())
           : true;
 
-  const pushTokenOk = Boolean(push?.expoOk || push?.fcmOk);
+  const isCaller = role === 'caller';
+  const pushTokenOk = isCaller ? Boolean(push?.expoOk) : Boolean(push?.expoOk || push?.fcmOk);
   const missing: string[] = [];
   if (!notifications) missing.push('notifications');
   if (Platform.OS === 'android' && !batteryUnrestricted) missing.push('battery');
-  if (Platform.OS === 'android' && androidSdk() >= 34 && !fullScreenIntent) {
+  if (!isCaller && Platform.OS === 'android' && androidSdk() >= 34 && !fullScreenIntent) {
     missing.push('fullScreenIntent');
   }
   if (!pushTokenOk) missing.push('pushToken');
@@ -165,10 +209,12 @@ export async function collectPresenceEnvironmentSnapshot(): Promise<Record<strin
     nativeSnap,
     missing,
     analysisHints: analysis.hints,
+    role,
   });
 
   return {
     capturedAt: new Date().toISOString(),
+    accountRole: role ?? null,
     app: {
       version: Constants.expoConfig?.version ?? Constants.nativeAppVersion ?? 'unknown',
       nativeBuild: Application.nativeBuildVersion ?? null,
@@ -205,9 +251,11 @@ export async function collectPresenceEnvironmentSnapshot(): Promise<Record<strin
   };
 }
 
-export async function buildPresenceDiagnosticsExport(): Promise<string> {
+export async function buildPresenceDiagnosticsExport(
+  role?: PresenceDiagAccountRole
+): Promise<string> {
   await ingestNativePresenceWakeLog();
-  const snapshot = await collectPresenceEnvironmentSnapshot();
+  const snapshot = await collectPresenceEnvironmentSnapshot(role);
   const entries: PresenceDiagnosticEntry[] = getPresenceDiagnosticEntries();
   return JSON.stringify(
     {

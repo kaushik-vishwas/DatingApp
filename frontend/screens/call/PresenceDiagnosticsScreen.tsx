@@ -11,6 +11,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { CallerStackParamList } from '../../navigation/CallerStackParamList';
 import type { ReceiverStackParamList } from '../../navigation/ReceiverStackParamList';
+import { useAuth } from '../../context/AuthContext';
 import {
   analyzePresenceLog,
   clearPresenceDiagnostics,
@@ -33,6 +34,8 @@ const FCM_EVENT_RE =
 
 export default function PresenceDiagnosticsScreen({ navigation }: Props): React.JSX.Element {
   const insets = useSafeAreaInsets();
+  const { user } = useAuth();
+  const accountRole = user?.role === 'caller' || user?.role === 'receiver' ? user.role : null;
   const [, bump] = useState(0);
   const [whyLines, setWhyLines] = useState<string[]>(['Loading FCM / wake status…']);
   const [copyBusy, setCopyBusy] = useState(false);
@@ -41,7 +44,7 @@ export default function PresenceDiagnosticsScreen({ navigation }: Props): React.
   const loadSnapshot = useCallback(async (): Promise<void> => {
     try {
       await ingestNativePresenceWakeLog();
-      const snap = await collectPresenceEnvironmentSnapshot();
+      const snap = await collectPresenceEnvironmentSnapshot(accountRole);
       const lines = Array.isArray(snap.fcmWhyNotWorking)
         ? (snap.fcmWhyNotWorking as string[])
         : ['No FCM verdict produced.'];
@@ -50,7 +53,7 @@ export default function PresenceDiagnosticsScreen({ navigation }: Props): React.
     } catch (e) {
       setWhyLines([`Snapshot failed: ${e instanceof Error ? e.message : String(e)}`]);
     }
-  }, [refresh]);
+  }, [accountRole, refresh]);
 
   React.useEffect(() => {
     void hydratePresenceDiagnostics()
@@ -70,7 +73,7 @@ export default function PresenceDiagnosticsScreen({ navigation }: Props): React.
     setCopyBusy(true);
     try {
       await ingestNativePresenceWakeLog();
-      const text = await buildPresenceDiagnosticsExport();
+      const text = await buildPresenceDiagnosticsExport(accountRole);
       const result = await copyTextToClipboard(text);
       Alert.alert('Copied', copySuccessMessage(result));
       await loadSnapshot();
