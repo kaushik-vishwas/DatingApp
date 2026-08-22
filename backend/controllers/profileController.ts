@@ -23,6 +23,7 @@ import { blockReceiverUntilApproved } from '../utils/accountAccess';
 import { CHAT_TEXT_FEE_INR } from '../constants/chatPricing';
 import { scheduleReceiverAvailabilityNotifications } from '../services/receiverAvailabilityNotifier';
 import {
+  armReceiverDiscoverGraceImmediate,
   clearReceiverDiscoverGrace,
   syncReceiverPresenceInDatabase,
   touchReceiverBackgroundPresence,
@@ -2455,6 +2456,9 @@ export const updateReceiverProfile = async (
             endedAt,
           });
         }
+      } else {
+        // Go Online: arm grace immediately so discover shows online before socket/keep-alive renews.
+        armReceiverDiscoverGraceImmediate(receiverId);
       }
       // Go Online only sets isAvailable; isOnline is set when the receiver socket connects.
     }

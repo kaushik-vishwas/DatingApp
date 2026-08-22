@@ -3,7 +3,7 @@
     "name": "Selecto",
     "slug": "frontend",
     "scheme": "nestham",
-    "version": "1.0.23",
+    "version": "1.0.24",
     "orientation": "portrait",
     "icon": "./assets/installed-logo.png",
     "userInterfaceStyle": "light",
@@ -24,7 +24,7 @@
     "android": {
       "package": "com.selecto.app",
       "googleServicesFile": "./google-services.json",
-      "versionCode": 23,
+      "versionCode": 24,
       "permissions": [
         "android.permission.RECORD_AUDIO",
         "android.permission.USE_FULL_SCREEN_INTENT",
