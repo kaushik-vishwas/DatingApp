@@ -165,6 +165,7 @@ async function sendOnlinePresencePush(payload) {
     if (accessToken) {
         headers.Authorization = `Bearer ${accessToken}`;
     }
+    const imageUrl = payload.imageUrl?.trim() ?? '';
     const body = {
         to: token,
         title: payload.title,
@@ -175,6 +176,9 @@ async function sendOnlinePresencePush(payload) {
         channelId: ONLINE_PRESENCE_CHANNEL_ID,
         data: payload.data,
     };
+    if (/^https:\/\//i.test(imageUrl)) {
+        body.richContent = { image: imageUrl };
+    }
     try {
         const res = await fetch('https://exp.host/--/api/v2/push/send', {
             method: 'POST',

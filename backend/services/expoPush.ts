@@ -155,6 +155,8 @@ export type OnlinePresencePushPayload = {
   title: string;
   body: string;
   data: Record<string, string>;
+  /** HTTPS image URL shown as small Android notification thumbnail. */
+  imageUrl?: string;
 };
 
 /** Visible tray notification for caller/receiver "is online" alerts (foreground + background). */
@@ -171,7 +173,8 @@ export async function sendOnlinePresencePush(payload: OnlinePresencePushPayload)
     headers.Authorization = `Bearer ${accessToken}`;
   }
 
-  const body = {
+  const imageUrl = payload.imageUrl?.trim() ?? '';
+  const body: Record<string, unknown> = {
     to: token,
     title: payload.title,
     body: payload.body,
@@ -181,6 +184,9 @@ export async function sendOnlinePresencePush(payload: OnlinePresencePushPayload)
     channelId: ONLINE_PRESENCE_CHANNEL_ID,
     data: payload.data,
   };
+  if (/^https:\/\//i.test(imageUrl)) {
+    body.richContent = { image: imageUrl };
+  }
 
   try {
     const res = await fetch('https://exp.host/--/api/v2/push/send', {

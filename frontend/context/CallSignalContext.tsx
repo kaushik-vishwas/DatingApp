@@ -1513,6 +1513,8 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     }
     return bindOnlinePresenceCallHandler((target) => {
       void (async () => {
+        // Cold start from killed app: give nav/auth/socket a beat before dialing.
+        await new Promise((r) => setTimeout(r, 500));
         try {
           await startCallInvite(target.receiverId, target.receiverName, target.receiverImage);
         } catch (e) {

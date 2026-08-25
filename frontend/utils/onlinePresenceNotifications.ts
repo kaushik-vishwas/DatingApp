@@ -11,6 +11,7 @@ export const CALLER_RECEIVER_ONLINE_EVENT = 'caller-receiver-online';
 const PENDING_CALL_KEY = '@selecto/pending_receiver_online_call_v1';
 const TAP_DEDUPE_MS = 5000;
 const LOCAL_PRESENT_DEDUPE_MS = 20_000;
+const HANDLED_RESPONSE_IDS = new Set<string>();
 
 export type ReceiverOnlineCallTarget = {
   receiverId: string;
@@ -25,6 +26,7 @@ let lastHandledReceiverIdAt = new Map<string, number>();
 let lastLocalPresentedAt = new Map<string, number>();
 let infrastructureReady = false;
 let disposeInfrastructure: (() => void) | null = null;
+let coldStartRetryTimers: ReturnType<typeof setTimeout>[] = [];
 
 export type ReceiverOnlineLivePayload = {
   id: string;
@@ -39,6 +41,13 @@ export type ReceiverOnlineLivePayload = {
 
 export function emitCallerReceiverOnlineEvent(payload: ReceiverOnlineLivePayload): void {
   DeviceEventEmitter.emit(CALLER_RECEIVER_ONLINE_EVENT, payload);
+}
+
+function httpsImageUrl(url: string | null | undefined): string | undefined {
+  const t = typeof url === 'string' ? url.trim() : '';
+  if (!t) return undefined;
+  if (!/^https:\/\//i.test(t)) return undefined;
+  return t;
 }
 
 /** Tray notification while the caller app is open (push covers background/closed). */
@@ -67,6 +76,7 @@ export async function presentReceiverOnlineLocalNotification(payload: {
     typeof payload.subtitle === 'string' && payload.subtitle.trim()
       ? payload.subtitle.trim()
       : 'Call while she is available.';
+  const imageUrl = httpsImageUrl(payload.receiverImage);
 
   try {
     const Notifications = await import('expo-notifications');
@@ -83,9 +93,14 @@ export async function presentReceiverOnlineLocalNotification(payload: {
             typeof payload.receiverName === 'string' && payload.receiverName.trim()
               ? payload.receiverName.trim()
               : 'Receiver',
-          receiverImage:
-            typeof payload.receiverImage === 'string' ? payload.receiverImage.trim() : '',
+          receiverImage: imageUrl ?? '',
         },
+        ...(imageUrl
+          ? {
+              // Android shows as small largeIcon; iOS needs service extension for remote images.
+              attachments: [{ url: imageUrl, identifier: 'receiver' }],
+            }
+          : {}),
         ...(Platform.OS === 'android' ? { channelId: ONLINE_PRESENCE_CHANNEL_ID } : {}),
       },
       trigger: null,
@@ -155,14 +170,18 @@ function shouldSkipDuplicateCallTap(receiverId: string): boolean {
   return false;
 }
 
+/**
+ * Persist when cold-starting (handler not ready yet).
+ * Only dedupe when actually invoking the call — otherwise pending is wiped on consume.
+ */
 function openReceiverOnlineCall(target: ReceiverOnlineCallTarget): void {
-  if (shouldSkipDuplicateCallTap(target.receiverId)) return;
-  if (callHandler) {
-    callHandler(target);
-    void clearPendingReceiverOnlineCall();
+  if (!callHandler) {
+    void persistPendingReceiverOnlineCall(target);
     return;
   }
-  void persistPendingReceiverOnlineCall(target);
+  if (shouldSkipDuplicateCallTap(target.receiverId)) return;
+  callHandler(target);
+  void clearPendingReceiverOnlineCall();
 }
 
 async function consumePendingReceiverOnlineCall(): Promise<void> {
@@ -177,6 +196,16 @@ async function consumePendingReceiverOnlineCall(): Promise<void> {
   await clearPendingReceiverOnlineCall();
 }
 
+function responseIdentity(
+  response: import('expo-notifications').NotificationResponse
+): string {
+  const id = response.notification.request.identifier || '';
+  const data = response.notification.request.content.data as Record<string, unknown> | undefined;
+  const receiverId = typeof data?.receiverId === 'string' ? data.receiverId : '';
+  const at = response.notification.date ?? 0;
+  return `${id}|${receiverId}|${at}`;
+}
+
 async function handleNotificationResponse(
   response: import('expo-notifications').NotificationResponse | null
 ): Promise<void> {
@@ -188,7 +217,34 @@ async function handleNotificationResponse(
   }
   const target = parseReceiverOnlineCallTarget(data);
   if (!target) return;
+
+  const identity = responseIdentity(response);
+  if (HANDLED_RESPONSE_IDS.has(identity)) return;
+  HANDLED_RESPONSE_IDS.add(identity);
+  if (HANDLED_RESPONSE_IDS.size > 40) {
+    const first = HANDLED_RESPONSE_IDS.values().next().value;
+    if (first) HANDLED_RESPONSE_IDS.delete(first);
+  }
+
   openReceiverOnlineCall(target);
+}
+
+function clearColdStartRetries(): void {
+  coldStartRetryTimers.forEach(clearTimeout);
+  coldStartRetryTimers = [];
+}
+
+function scheduleColdStartCallRetries(): void {
+  clearColdStartRetries();
+  // Closed-app tap: last-response + auth/nav/socket may not be ready on first bind.
+  for (const ms of [400, 1200, 2800]) {
+    coldStartRetryTimers.push(
+      setTimeout(() => {
+        void checkLastOnlinePresenceResponse();
+        void consumePendingReceiverOnlineCall();
+      }, ms)
+    );
+  }
 }
 
 /** Register the caller-side tap handler that starts a call. */
@@ -197,9 +253,13 @@ export function bindOnlinePresenceCallHandler(handler: OnlinePresenceCallHandler
   if (handler) {
     void consumePendingReceiverOnlineCall();
     void checkLastOnlinePresenceResponse();
+    scheduleColdStartCallRetries();
+  } else {
+    clearColdStartRetries();
   }
   return () => {
     if (callHandler === handler) callHandler = null;
+    clearColdStartRetries();
   };
 }
 
@@ -237,8 +297,7 @@ export function ensureOnlinePresenceNotificationInfrastructure(): () => void {
         if (data?.type !== RECEIVER_ONLINE_PUSH_TYPE) return;
         const receiverId = typeof data.receiverId === 'string' ? data.receiverId.trim() : '';
         const identifier = notification.request.identifier ?? '';
-        const dedupeKey =
-          identifier.replace(/^receiver-online-/, '') || receiverId;
+        const dedupeKey = identifier.replace(/^receiver-online-/, '') || receiverId;
         if (dedupeKey) lastLocalPresentedAt.set(dedupeKey, Date.now());
       });
       await checkLastOnlinePresenceResponse();
@@ -250,6 +309,7 @@ export function ensureOnlinePresenceNotificationInfrastructure(): () => void {
   infrastructureReady = true;
   disposeInfrastructure = () => {
     disposed = true;
+    clearColdStartRetries();
     responseSub?.remove();
     responseSub = null;
     receivedSub?.remove();

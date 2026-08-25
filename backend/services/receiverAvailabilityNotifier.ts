@@ -74,15 +74,17 @@ async function flushUserBatch(userId: string): Promise<void> {
 
     const token = caller?.expoPushToken?.trim() ?? '';
     if (!token) return;
+    const imageUrl = /^https:\/\//i.test(receiverImage) ? receiverImage : '';
     void sendOnlinePresencePush({
       expoPushToken: token,
       title,
       body: subtitle,
+      imageUrl: imageUrl || undefined,
       data: {
         type: 'receiver_online',
         receiverId,
         receiverName: resolvedName,
-        receiverImage,
+        receiverImage: imageUrl || receiverImage,
       },
     });
   } catch (e) {
