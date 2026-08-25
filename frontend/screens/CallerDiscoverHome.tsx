@@ -41,25 +41,27 @@ import {
   markCallerHomeOfferPopupSeen,
   shouldShowCallerHomeOfferPopup,
 } from '../utils/callerHomeOfferPopupStorage';
+import {
+  markCallerFreeTalkPopupShown,
+  shouldShowCallerFreeTalkPopup,
+} from '../utils/callerFreeTalkPopupStorage';
 import CallerHomeOfferPopup from '../components/caller/CallerHomeOfferPopup';
+import CallerFreeTalkPopup from '../components/caller/CallerFreeTalkPopup';
 import SelectoLogo from '../assets/SelectoLogo.png'
 import { PresenceDiagnosticsTopBarButton } from '../components/call/PresenceDiagnosticsTopBarButton';
 import NoticeBg from '../assets/noticeBg.png'
+import CoupleImg from '../assets/coupleImg.png'
+import RoseImg from '../assets/roseImg.png'
 
 const PURPLE = '#7b2cff';
 const GREEN = '#22c55e';
 const NOTICE_GRADIENT_START = '#4ade80';
 const NOTICE_GRADIENT_END = '#3B82F6';
-const NOTICE_BTN_GRADIENT_START = '#7F00FF';
-const NOTICE_BTN_GRADIENT_END = '#A855F7';
-const NOTICE_BTN_BORDER = 'rgba(255, 255, 255, 0.45)';
-const NOTICE_BTN_TEXT = '#ffffff';
-const NOTICE_BTN_ICON = '#ffffff';
-const PROMO_BTN_GRADIENT_START = '#06b6d4';
-const PROMO_BTN_GRADIENT_END = '#8b5cf6';
-const PROMO_BTN_BORDER = 'rgba(255, 255, 255, 0.55)';
-const PROMO_BTN_TEXT = '#ffffff';
-const PROMO_BTN_ICON = '#ffffff';
+const SHARE_BTN_GRADIENT_START = '#f472b6';
+const SHARE_BTN_GRADIENT_END = '#db2777';
+const SHARE_BTN_BORDER = 'rgba(255, 255, 255, 0.45)';
+const SHARE_BTN_TEXT = '#ffffff';
+const SHARE_BTN_ICON = '#ffffff';
 /** Discover list only — shorter than generic screen timeout so home does not spin too long. */
 const DISCOVER_FETCH_TIMEOUT_MS = 12_000;
 const listFooterSpacer = <View style={{ height: 12 }} />;
@@ -368,6 +370,7 @@ export default function CallerDiscoverHome(): React.JSX.Element {
   const skipNextFocusRefreshRef = useRef(true);
   const [homeOfferPopup, setHomeOfferPopup] = useState<WalletHomeOfferPopup | null>(null);
   const [homeOfferPopupVisible, setHomeOfferPopupVisible] = useState(false);
+  const [freeTalkPopupVisible, setFreeTalkPopupVisible] = useState(false);
 
   useEffect(() => {
     const t = setTimeout(() => setDebounced(search.trim()), 350);
@@ -545,6 +548,10 @@ export default function CallerDiscoverHome(): React.JSX.Element {
     navigation.navigate('Wallet');
   }, [navigation]);
 
+  const onShareAppPress = useCallback(() => {
+    navigation.navigate('CallerShareApp');
+  }, [navigation]);
+
   const onProfilePress = useCallback(() => {
     navigation.navigate('CallerProfile');
   }, [navigation]);
@@ -558,6 +565,21 @@ export default function CallerDiscoverHome(): React.JSX.Element {
     let cancelled = false;
     void (async () => {
       try {
+        // Prefer free-talk popup (new caller + every 1 hour). Keep recharge offer as fallback.
+        const showFreeTalk = await shouldShowCallerFreeTalkPopup(user._id);
+        if (cancelled) return;
+        if (showFreeTalk) {
+          setFreeTalkPopupVisible(true);
+          setHomeOfferPopupVisible(false);
+          await markCallerFreeTalkPopupShown(user._id);
+          // Still load recharge offer data in background for later sessions.
+          void walletApi.offers().then(({ data }) => {
+            if (cancelled) return;
+            setHomeOfferPopup(data.popup ?? null);
+          });
+          return;
+        }
+
         const { data } = await walletApi.offers();
         const popup = data.popup ?? null;
         if (!popup?.offerId || cancelled) {
@@ -594,6 +616,16 @@ export default function CallerDiscoverHome(): React.JSX.Element {
   const dismissHomeOfferPopup = useCallback(() => {
     setHomeOfferPopupVisible(false);
   }, []);
+
+  const dismissFreeTalkPopup = useCallback(() => {
+    setFreeTalkPopupVisible(false);
+  }, []);
+
+  const onFreeTalkRandomCall = useCallback(() => {
+    setFreeTalkPopupVisible(false);
+    if (randomCallMatchingVisible) return;
+    void startRandomCallEngagement();
+  }, [randomCallMatchingVisible, startRandomCallEngagement]);
 
   const rechargeHomeOfferPopup = useCallback(() => {
     if (!homeOfferPopup) return;
@@ -670,20 +702,21 @@ export default function CallerDiscoverHome(): React.JSX.Element {
               <View style={styles.adminNoticeLeft}>
                 <View style={styles.adminNoticeBtnWrap}>
                   <LinearGradient
-                    colors={[NOTICE_BTN_GRADIENT_START, NOTICE_BTN_GRADIENT_END]}
+                    colors={[SHARE_BTN_GRADIENT_START, SHARE_BTN_GRADIENT_END]}
                     start={{ x: 0, y: 0 }}
                     end={{ x: 1, y: 1 }}
                     style={styles.adminNoticeBtn}
                   >
                     <TouchableOpacity
-                      onPress={onWalletPress}
+                      onPress={onShareAppPress}
                       activeOpacity={0.88}
                       style={styles.adminNoticeBtnHit}
+                      accessibilityLabel="Share app and get free talk time"
                     >
                       <View style={styles.adminNoticeBtnContent}>
-                        <Ionicons name="wallet-outline" size={18} color={NOTICE_BTN_ICON} />
+                        <Ionicons name="share-social" size={18} color={SHARE_BTN_ICON} />
                         <Text style={styles.adminNoticeBtnText} numberOfLines={2}>
-                          {callerNotification.title?.trim() || 'Announcement'}
+                          {'Share app &\nget free talk time'}
                         </Text>
                       </View>
                     </TouchableOpacity>
@@ -699,46 +732,29 @@ export default function CallerDiscoverHome(): React.JSX.Element {
           </LinearGradient>
         ) : null}
 
-        <TouchableOpacity
-          activeOpacity={0.9}
-          onPress={onCallRandom}
-          disabled={randomCallMatchingVisible}
-          style={styles.promoCard}
-        >
-          <LinearGradient
-            colors={['#7F00FF', '#A855F7', '#fb5880']}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
-            style={styles.promoGradient}
-          >
-            <View style={styles.promoTwoColumns}>
-              <View style={styles.promoLeftColumn}>
-                <LinearGradient
-                  colors={[PROMO_BTN_GRADIENT_START, PROMO_BTN_GRADIENT_END]}
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 1, y: 1 }}
-                  style={styles.promoBtn}
-                >
-                  <View style={styles.randomBtnContent}>
-                    {!randomCallMatchingVisible && (
-                      <Ionicons name="shuffle-outline" size={24} color={PROMO_BTN_ICON} />
-                    )}
-                    <Text style={styles.promoBtnText} numberOfLines={1}>
-                      {randomCallMatchingVisible ? 'Please wait…' : 'Random Call'}
-                    </Text>
-                    <View style={styles.callIconWrapper}>
-                      <Ionicons name="call-outline" size={15} color="#fff" />
-                    </View>
-                  </View>
-                </LinearGradient>
-              </View>
-              <View style={styles.promoRightColumn}>
-                <Text style={styles.promoTitle}>Meet Someone New!</Text>
+        <View style={styles.promoCard}>
+          <View style={styles.promoBanner}>
+            <Image
+              source={RoseImg}
+              style={[styles.promoRose, styles.promoRoseLeft]}
+              resizeMode="contain"
+            />
+            <Image
+              source={RoseImg}
+              style={[styles.promoRose, styles.promoRoseRight]}
+              resizeMode="contain"
+            />
+            <View style={styles.promoTextCol}>
+              <Text style={styles.promoTitle} numberOfLines={1}>
+                Meet Someone New here
+              </Text>
+              <View style={styles.promoRateBadge}>
                 <Text style={styles.promoRate}>₹5/min only</Text>
               </View>
             </View>
-          </LinearGradient>
-        </TouchableOpacity>
+            <Image source={CoupleImg} style={styles.promoCoupleImg} resizeMode="contain" />
+          </View>
+        </View>
 
         <View style={styles.filterBarRow}>
           <ScrollView
@@ -792,11 +808,9 @@ export default function CallerDiscoverHome(): React.JSX.Element {
       hasActiveSearch,
       language,
       loading,
-      onCallRandom,
-      onWalletPress,
+      onShareAppPress,
       openFilterModal,
       openSearchModal,
-      randomCallMatchingVisible,
       receivers.length,
       showCallerNotification,
     ]
@@ -811,6 +825,10 @@ export default function CallerDiscoverHome(): React.JSX.Element {
       ) : null,
     [err, loading, receivers.length]
   );
+
+  // Screen layout already sits above the tab bar — keep button flush to that edge.
+  const stickyRandomBottom = 4;
+  const listBottomPad = contentBottomPadding + 44;
 
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'left', 'right']}>
@@ -832,7 +850,7 @@ export default function CallerDiscoverHome(): React.JSX.Element {
             data={receivers}
             keyExtractor={(it) => it._id}
             renderItem={renderReceiverRow}
-            contentContainerStyle={[styles.listContent, { paddingBottom: contentBottomPadding }]}
+            contentContainerStyle={[styles.listContent, { paddingBottom: listBottomPad }]}
             ListHeaderComponent={listHeader}
             ListFooterComponent={listFooterSpacer}
             refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void onRefresh()} />}
@@ -845,6 +863,33 @@ export default function CallerDiscoverHome(): React.JSX.Element {
             maxToRenderPerBatch={8}
             updateCellsBatchingPeriod={50}
           />
+
+          <View pointerEvents="box-none" style={[styles.stickyRandomWrap, { bottom: stickyRandomBottom }]}>
+            <TouchableOpacity
+              activeOpacity={0.9}
+              onPress={onCallRandom}
+              disabled={randomCallMatchingVisible}
+              accessibilityLabel="Random Call"
+              style={styles.stickyRandomHit}
+            >
+              <LinearGradient
+                colors={[SHARE_BTN_GRADIENT_START, '#a855f7', SHARE_BTN_GRADIENT_END]}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={[
+                  styles.stickyRandomBtn,
+                  randomCallMatchingVisible && styles.stickyRandomBtnDisabled,
+                ]}
+              >
+                <View style={styles.randomBtnContent}>
+                  <Text style={styles.stickyRandomBtnText} numberOfLines={1}>
+                    {randomCallMatchingVisible ? 'Please wait…' : 'Random Call'}
+                  </Text>
+                  <Ionicons name="call-outline" size={15} color="#fff" />
+                </View>
+              </LinearGradient>
+            </TouchableOpacity>
+          </View>
         </View>
       </KeyboardAvoidingView>
       <DiscoverSearchModal
@@ -867,12 +912,18 @@ export default function CallerDiscoverHome(): React.JSX.Element {
       />
       {homeOfferPopup ? (
         <CallerHomeOfferPopup
-          visible={homeOfferPopupVisible}
+          visible={homeOfferPopupVisible && !freeTalkPopupVisible}
           popup={homeOfferPopup}
           onDismiss={dismissHomeOfferPopup}
           onRecharge={rechargeHomeOfferPopup}
         />
       ) : null}
+      <CallerFreeTalkPopup
+        visible={freeTalkPopupVisible}
+        onDismiss={dismissFreeTalkPopup}
+        onRandomCall={onFreeTalkRandomCall}
+        randomCallBusy={randomCallMatchingVisible}
+      />
     </SafeAreaView>
   );
 }
@@ -1184,43 +1235,108 @@ const styles = StyleSheet.create({
 
 
   promoCard: {
-    marginBottom: 6,
+    marginBottom: 8,
   },
-  promoGradient: {
-    borderRadius: 16,
-    padding: 8,
-    shadowColor: '#7F00FF',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 4,
-  },
-  promoTwoColumns: {
+  promoBanner: {
+    position: 'relative',
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    width: '100%',
+    backgroundColor: '#faf7f2',
+    borderRadius: 18,
+    paddingTop: 12,
+    paddingBottom: 12,
+    paddingLeft: 14,
+    paddingRight: 150,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: '#f0ebe3',
+    minHeight: 84,
   },
-  promoLeftColumn: {
-    width: '50%',
-    alignItems: 'flex-start',
-  },
-  promoRightColumn: {
-    width: '50%',
-    alignItems: 'flex-end',
+  promoTextCol: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 8,
+    zIndex: 1,
   },
   promoTitle: {
-    color: '#fff',
-    fontSize: 14,
+    color: '#7b2cff',
+    fontSize: 15,
     fontWeight: '800',
-    textAlign: 'right',
-    marginBottom: 4,
+    letterSpacing: -0.2,
+    textAlign: 'center',
+  },
+  promoRateBadge: {
+    alignSelf: 'center',
+    backgroundColor: '#ec4899',
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+    borderRadius: 14,
   },
   promoRate: {
-    color: 'rgba(255,255,255,0.9)',
+    color: '#fff',
+    fontSize: 13,
+    fontWeight: '700',
+    textAlign: 'center',
+  },
+  // coupleImg.png is 487×224 — fixed size so absolute layout doesn't collapse to 0 height.
+  promoCoupleImg: {
+    position: 'absolute',
+    right: 36,
+    bottom: 0,
+    width: 136,
+    height: 62,
+    zIndex: 2,
+  },
+  promoRose: {
+    position: 'absolute',
+    bottom: -4,
+    width: 52,
+    height: 52,
+    opacity: 0.72,
+    zIndex: 0,
+  },
+  promoRoseLeft: {
+    left: -2,
+  },
+  promoRoseRight: {
+    right: -2,
+  },
+  stickyRandomWrap: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    zIndex: 20,
+    alignItems: 'center',
+  },
+  stickyRandomHit: {
+    alignSelf: 'center',
+    borderRadius: 22,
+    overflow: 'hidden',
+    shadowColor: '#db2777',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.25,
+    shadowRadius: 6,
+    elevation: 5,
+  },
+  stickyRandomBtn: {
+    minHeight: 40,
+    borderRadius: 22,
+    paddingHorizontal: 18,
+    paddingVertical: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.45)',
+  },
+  stickyRandomBtnDisabled: {
+    opacity: 0.75,
+  },
+  stickyRandomBtnText: {
+    color: '#fff',
+    fontWeight: '800',
     fontSize: 14,
-    fontWeight: '600',
-    textAlign: 'right',
+    letterSpacing: 0.2,
   },
   randomBtnContent: {
     flexDirection: 'row',
@@ -1228,33 +1344,13 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: 6,
   },
-  promoBtn: {
-    borderWidth: 1,
-    borderColor: PROMO_BTN_BORDER,
-    paddingHorizontal: 12,
-    paddingVertical: 4,
-    borderRadius: 20,
-    paddingLeft: 20,
-    alignItems: 'center',
-    justifyContent: 'center',
-    minWidth: 150,
-    overflow: 'hidden',
-  },
-  promoBtnText: {
-    color: PROMO_BTN_TEXT,
-    fontWeight: '900',
-    fontSize: 14,
-    textShadowColor: 'rgba(0, 0, 0, 0.15)',
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 1,
-  },
   adminNoticeCard: {
     marginBottom: 10,
     borderRadius: 16,
-    paddingVertical: 6,
-    paddingHorizontal: 12,
+    paddingVertical: 8,
+    paddingHorizontal: 6,
     overflow: 'hidden',
-    minHeight: 60,
+    minHeight: 64,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.12,
@@ -1276,23 +1372,24 @@ const styles = StyleSheet.create({
   adminNoticeRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
+    gap: 8,
     position: 'relative',
     zIndex: 2,
   },
   adminNoticeLeft: {
     flexGrow: 0,
     flexShrink: 0,
-    width: '40%',
-    minWidth: 120,
+    width: '46%',
+    minWidth: 148,
+    maxWidth: '50%',
     justifyContent: 'center',
-    paddingRight: 4,
+    paddingRight: 2,
   },
   adminNoticeBtnWrap: {
     width: '100%',
     borderRadius: 20,
     overflow: 'hidden',
-    shadowColor: '#4c1d95',
+    shadowColor: '#9d174d',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.35,
     shadowRadius: 4,
@@ -1300,48 +1397,50 @@ const styles = StyleSheet.create({
   },
   adminNoticeBtn: {
     width: '100%',
-    minHeight: 42,
+    minHeight: 46,
     borderWidth: 1,
-    borderColor: NOTICE_BTN_BORDER,
+    borderColor: SHARE_BTN_BORDER,
     borderRadius: 20,
     overflow: 'hidden',
   },
   adminNoticeBtnHit: {
     width: '100%',
-    minHeight: 42,
-    paddingHorizontal: 12,
+    minHeight: 46,
+    paddingHorizontal: 10,
     paddingVertical: 10,
     justifyContent: 'center',
   },
   adminNoticeBtnContent: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
+    justifyContent: 'flex-start',
+    gap: 7,
     width: '100%',
   },
   adminNoticeBtnText: {
+    flex: 1,
     flexShrink: 1,
-    color: NOTICE_BTN_TEXT,
+    color: SHARE_BTN_TEXT,
     fontWeight: '800',
-    fontSize: 14,
-    lineHeight: 18,
+    fontSize: 12.5,
+    lineHeight: 16,
     textShadowColor: 'rgba(0, 0, 0, 0.25)',
     textShadowOffset: { width: 0, height: 1 },
     textShadowRadius: 2,
   },
   adminNoticeRight: {
     flex: 1,
+    minWidth: 0,
     justifyContent: 'center',
-    paddingLeft: 10,
+    paddingLeft: 8,
     borderLeftWidth: 1,
     borderLeftColor: 'rgba(255,255,255,0.25)',
   },
   adminNoticeBody: {
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: '600',
     color: 'rgba(255,255,255,0.95)',
-    lineHeight: 18,
+    lineHeight: 16,
   },
   leftColumn: {
     alignItems: 'center',
@@ -1576,18 +1675,16 @@ const styles = StyleSheet.create({
     minWidth: 65,              // Further reduced from 85 to 65
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: PURPLE,
+    shadowColor: '#047857',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.25,
-    shadowRadius: 4,
-    elevation: 3,
+    shadowOpacity: 0.35,
+    shadowRadius: 3,
+    elevation: 4,
   },
 
 
   callNowButtonDisabled: {
-    backgroundColor: '#9ca3af',
-    shadowOpacity: 0,
-    elevation: 0,
+    backgroundColor: '#6EE7B7',
   },
 
 

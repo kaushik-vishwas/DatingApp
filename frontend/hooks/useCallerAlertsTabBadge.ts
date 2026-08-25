@@ -1,5 +1,6 @@
 import { useNavigationState } from '@react-navigation/native';
 import { useCallback, useEffect, useState } from 'react';
+import { DeviceEventEmitter } from 'react-native';
 
 import type { CallerTabParamList } from '../navigation/CallerTabParamList';
 import { profileApi } from '../services/api';
@@ -8,6 +9,7 @@ import {
   getNotificationLastSeenAt,
   markNotificationsSeenNow,
 } from '../services/notificationUnread';
+import { CALLER_RECEIVER_ONLINE_EVENT } from '../utils/onlinePresenceNotifications';
 
 export function useCallerAlertsTabBadge(): {
   badge: number | string | undefined;
@@ -42,6 +44,18 @@ export function useCallerAlertsTabBadge(): {
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  useEffect(() => {
+    const sub = DeviceEventEmitter.addListener(CALLER_RECEIVER_ONLINE_EVENT, () => {
+      if (tabRouteName === 'CallerAlerts') {
+        clearBadge();
+        return;
+      }
+      setNotificationUnread((n) => n + 1);
+      void refresh();
+    });
+    return () => sub.remove();
+  }, [tabRouteName, clearBadge, refresh]);
 
   const badge =
     notificationUnread <= 0 ? undefined : notificationUnread > 99 ? '99+' : notificationUnread;

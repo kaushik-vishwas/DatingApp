@@ -84,6 +84,25 @@ export function emitCallerOnlineToReceiver(
   ioInstance.to(room).emit('caller:online', payload);
 }
 
+/** Live in-app + badge update when a history receiver comes online (push is sent separately). */
+export function emitReceiverOnlineToCaller(
+  callerId: string,
+  payload: {
+    id: string;
+    receiverIds: string[];
+    receiverId: string;
+    receiverName: string;
+    receiverImage: string;
+    title: string;
+    subtitle: string;
+    at: string;
+  }
+): void {
+  if (!ioInstance) return;
+  const room = `account:u:${String(callerId).trim()}`;
+  ioInstance.to(room).emit('receiver:online', payload);
+}
+
 /** Notify both call participants that the voice session ended (REST fallback when socket `call:end` is missed). */
 /** Push shared talkStartedAt to both parties the moment both are connected (instant timer sync). */
 export function emitCallTalkStarted(

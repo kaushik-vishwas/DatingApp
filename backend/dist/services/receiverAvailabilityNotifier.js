@@ -12,7 +12,6 @@ const User_1 = __importDefault(require("../models/User"));
 const expoPush_1 = require("./expoPush");
 const socketRegistry_1 = require("../socket/socketRegistry");
 const RECENT_CALL_WINDOW_DAYS = 14;
-const USER_RECEIVER_COOLDOWN_MS = 30 * 60 * 1000;
 const GROUP_WINDOW_MS = 20 * 1000;
 const pendingByUserId = new Map();
 function receiverOnlineTitle(names) {
@@ -40,25 +39,37 @@ async function flushUserBatch(userId) {
     const names = [...pending.receiverNamesById.values()];
     const title = receiverOnlineTitle(names);
     const subtitle = receiverOnlineSubtitle(names);
-    await ReceiverAvailabilityNotification_1.default.create({
+    const created = await ReceiverAvailabilityNotification_1.default.create({
         userId: new mongoose_1.default.Types.ObjectId(userId),
         receiverIds: receiverIds.map((id) => new mongoose_1.default.Types.ObjectId(id)),
         title,
         subtitle,
     });
+    const receiverId = receiverIds[0] ?? '';
+    const receiverName = names[0] || 'A receiver';
+    let receiverImage = '';
     try {
         const [caller, primaryReceiver] = await Promise.all([
             User_1.default.findById(userId).select('expoPushToken').lean(),
-            Receiver_1.default.findById(receiverIds[0])
+            Receiver_1.default.findById(receiverId)
                 .select('name profileImage')
                 .lean(),
         ]);
+        receiverImage = primaryReceiver?.profileImage?.trim() ?? '';
+        const resolvedName = receiverName || primaryReceiver?.name?.trim() || 'A receiver';
+        (0, socketRegistry_1.emitReceiverOnlineToCaller)(userId, {
+            id: String(created._id),
+            receiverIds,
+            receiverId,
+            receiverName: resolvedName,
+            receiverImage,
+            title,
+            subtitle,
+            at: created.createdAt.toISOString(),
+        });
         const token = caller?.expoPushToken?.trim() ?? '';
         if (!token)
             return;
-        const receiverId = receiverIds[0] ?? '';
-        const receiverName = names[0] || primaryReceiver?.name?.trim() || 'A receiver';
-        const receiverImage = primaryReceiver?.profileImage?.trim() ?? '';
         void (0, expoPush_1.sendOnlinePresencePush)({
             expoPushToken: token,
             title,
@@ -66,7 +77,7 @@ async function flushUserBatch(userId) {
             data: {
                 type: 'receiver_online',
                 receiverId,
-                receiverName,
+                receiverName: resolvedName,
                 receiverImage,
             },
         });
@@ -93,9 +104,9 @@ function enqueueForUser(userId, receiverId, receiverName) {
 }
 /**
  * Notify recent male callers only when a receiver is BOTH online and available.
- * - Limits targets to recent call history window
- * - Applies user+receiver cooldown
+ * - Limits targets to recent call history window (14 days)
  * - Groups multiple receiver-online events in a short window per user
+ * - Persists Alerts row + live socket + Expo push (foreground / background / closed)
  */
 async function scheduleReceiverAvailabilityNotifications(receiverId) {
     if (!mongoose_1.default.Types.ObjectId.isValid(receiverId))
@@ -127,17 +138,8 @@ async function scheduleReceiverAvailabilityNotifications(receiverId) {
         .lean();
     if (callers.length === 0)
         return;
-    const cooldownSince = new Date(Date.now() - USER_RECEIVER_COOLDOWN_MS);
     const receiverName = receiver.name?.trim() || 'A receiver';
     for (const caller of callers) {
-        const uid = String(caller._id);
-        const recentlyNotified = await ReceiverAvailabilityNotification_1.default.exists({
-            userId: caller._id,
-            receiverIds: rid,
-            createdAt: { $gte: cooldownSince },
-        });
-        if (recentlyNotified)
-            continue;
-        enqueueForUser(uid, receiverId, receiverName);
+        enqueueForUser(String(caller._id), receiverId, receiverName);
     }
 }

@@ -15,6 +15,8 @@ import {
   applyReferralRewardOnSignup,
   generateUniqueReferralCode,
 } from '../services/referralService';
+import { grantCallerWelcomeFreeTalk } from '../services/callerWelcomeFreeTalk';
+import { CALLER_WELCOME_FREE_TALK_MINUTES } from '../constants/callerWelcomeFreeTalk';
 import {
   httpStatusForMessageCentral,
   MessageCentralError,
@@ -1173,6 +1175,14 @@ export const completeMobileSignup = async (
       if (!referralResult.applied && referralCode) {
         t.warn('referral_not_applied', { reason: referralResult.reason ?? 'unknown' });
       }
+      const welcome = await grantCallerWelcomeFreeTalk(String(user._id));
+      if (welcome.granted) {
+        const prev =
+          typeof user.walletBalance === 'number' && Number.isFinite(user.walletBalance)
+            ? user.walletBalance
+            : 0;
+        user.walletBalance = Math.round((prev + welcome.amountInr) * 100) / 100;
+      }
       const sv = await bumpUserAuthSession(String(user._id));
       emitAuthSessionSuperseded('u', String(user._id), sv);
       const token = signAppAccessToken(String(user._id), 'u', sv);
@@ -1181,6 +1191,8 @@ export const completeMobileSignup = async (
         token,
         user: toApiUser(user),
         accountType: 'user',
+        welcomeFreeTalkGranted: welcome.granted,
+        welcomeFreeTalkMinutes: welcome.granted ? CALLER_WELCOME_FREE_TALK_MINUTES : 0,
       });
       return;
     }

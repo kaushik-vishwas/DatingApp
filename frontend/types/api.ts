@@ -76,6 +76,9 @@ export interface CompleteMobileSignupResponse {
   token: string;
   user: UserProfile;
   accountType: AuthAccountType;
+  /** Caller signup: ₹10 (2 min) welcome free-talk wallet credit was applied. */
+  welcomeFreeTalkGranted?: boolean;
+  welcomeFreeTalkMinutes?: number;
 }
 
 export interface RegisterResponse {

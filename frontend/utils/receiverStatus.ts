@@ -21,40 +21,22 @@ export function getReceiverPresenceInfo(receiver: DiscoverReceiverSummary): Rece
   const acceptingCalls = Boolean(receiver.isAvailable);
   const loggedIn = Boolean(receiver.isOnline);
 
-  if (Boolean(receiver.isBusyOnCall) && acceptingCalls && loggedIn) {
+  if (acceptingCalls && loggedIn && !Boolean(receiver.isBusyOnCall)) {
     return {
-      status: 'busy',
-      label: 'Busy',
-      color: STATUS_YELLOW,
-      canCall: false,
-      canMessage: true,
-    };
-  }
-  if (!acceptingCalls) {
-    return {
-      status: 'offline',
-      label: 'Not available',
-      color: STATUS_GREY,
-      canCall: false,
+      status: 'available',
+      label: 'Available',
+      color: STATUS_GREEN,
+      canCall: true,
       canMessage: true,
     };
   }
 
-  if (!loggedIn) {
-    return {
-      status: 'offline',
-      label: 'Offline',
-      color: STATUS_GREY,
-      canCall: false,
-      canMessage: true,
-    };
-  }
-
+  // On call, offline, or switch-off: show Busy on caller UI (engagement; still not callable).
   return {
-    status: 'available',
-    label: 'Available',
-    color: STATUS_GREEN,
-    canCall: true,
+    status: 'busy',
+    label: 'Busy',
+    color: STATUS_YELLOW,
+    canCall: false,
     canMessage: true,
   };
 }

@@ -1,9 +1,10 @@
 import { useFocusEffect } from '@react-navigation/native';
-import React, { useCallback, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import {
   ActivityIndicator,
   Alert,
+  DeviceEventEmitter,
   ScrollView,
   StyleSheet,
   Text,
@@ -29,6 +30,8 @@ import type {
   CallerNotificationRow,
   CallerNotificationType,
 } from '../../types/api';
+import { CALLER_RECEIVER_ONLINE_EVENT } from '../../utils/onlinePresenceNotifications';
+import type { ReceiverOnlineLivePayload } from '../../utils/onlinePresenceNotifications';
 import { SCREEN_FETCH_TIMEOUT_MS, withTimeout } from '../../utils/withTimeout';
 
 const initialLayout = {
@@ -80,6 +83,24 @@ export default function CallerAlertsTabScreen(): React.JSX.Element {
       void load();
     }, [load])
   );
+
+  useEffect(() => {
+    const sub = DeviceEventEmitter.addListener(
+      CALLER_RECEIVER_ONLINE_EVENT,
+      (payload: ReceiverOnlineLivePayload) => {
+        const rowId = `avail-${payload.id}`;
+        const row: CallerNotificationRow = {
+          id: rowId,
+          type: 'call',
+          title: payload.title,
+          subtitle: payload.subtitle,
+          at: payload.at,
+        };
+        setRows((prev) => [row, ...prev.filter((r) => r.id !== rowId)]);
+      }
+    );
+    return () => sub.remove();
+  }, []);
 
   const parseChatNotification = (
     row: CallerNotificationRow

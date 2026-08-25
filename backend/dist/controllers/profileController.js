@@ -2028,6 +2028,10 @@ const updateReceiverProfile = async (req, res) => {
                     });
                 }
             }
+            else {
+                // Go Online: arm grace immediately so discover shows online before socket/keep-alive renews.
+                (0, receiverPresence_1.armReceiverDiscoverGraceImmediate)(receiverId);
+            }
             // Go Online only sets isAvailable; isOnline is set when the receiver socket connects.
         }
         if (receiver.accountStatus === 'pending_profile') {
@@ -2038,9 +2042,9 @@ const updateReceiverProfile = async (req, res) => {
         }
         await receiver.save();
         await (0, receiverPresence_1.syncReceiverPresenceInDatabase)(receiverId);
-        const becameCallAvailable = !wasAvailable &&
-            Boolean(receiver.isAvailable) &&
-            (0, socketRegistry_1.isReceiverSocketConnected)(receiverId);
+        // Notify when Go Online flips on. Socket may connect a moment later; that path also schedules.
+        // scheduleReceiverAvailabilityNotifications no-ops until socket is live.
+        const becameCallAvailable = !wasAvailable && Boolean(receiver.isAvailable);
         if (becameCallAvailable) {
             void (0, receiverAvailabilityNotifier_1.scheduleReceiverAvailabilityNotifications)(receiverId).catch((e) => {
                 const msg = e instanceof Error ? e.message : String(e);
@@ -2266,9 +2270,7 @@ const completeReceiverAudioOnboarding = async (req, res) => {
         receiver.accountStatus = 'approved';
         await receiver.save();
         await (0, receiverPresence_1.syncReceiverPresenceInDatabase)(receiverId);
-        const becameCallAvailable = !wasAvailable &&
-            Boolean(receiver.isAvailable) &&
-            (0, socketRegistry_1.isReceiverSocketConnected)(receiverId);
+        const becameCallAvailable = !wasAvailable && Boolean(receiver.isAvailable);
         if (becameCallAvailable) {
             void (0, receiverAvailabilityNotifier_1.scheduleReceiverAvailabilityNotifications)(receiverId).catch((e) => {
                 const msg = e instanceof Error ? e.message : String(e);

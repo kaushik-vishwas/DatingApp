@@ -771,7 +771,15 @@ const getIncomingPending = async (req, res) => {
             res.status(403).json({ message: 'Receiver account required' });
             return;
         }
-        const incoming = await (0, pendingIncomingCall_1.getLivePendingIncomingCall)(String(req.receiver._id));
+        const receiverId = String(req.receiver._id);
+        // Native keep-alive polls every 4s — renew discover grace so callers keep seeing her online.
+        try {
+            await (0, receiverPresence_1.touchReceiverBackgroundPresence)(receiverId);
+        }
+        catch {
+            // Poll response must not fail if grace sync fails.
+        }
+        const incoming = await (0, pendingIncomingCall_1.getLivePendingIncomingCall)(receiverId);
         res.status(200).json({
             incoming: incoming
                 ? {

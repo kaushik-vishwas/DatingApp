@@ -41,7 +41,12 @@ import {
   alertReceiverIncomingCallInBackground,
   showIncomingCallNotification,
 } from '../utils/incomingCallNotifications';
-import { bindOnlinePresenceCallHandler } from '../utils/onlinePresenceNotifications';
+import {
+  bindOnlinePresenceCallHandler,
+  emitCallerReceiverOnlineEvent,
+  presentReceiverOnlineLocalNotification,
+  type ReceiverOnlineLivePayload,
+} from '../utils/onlinePresenceNotifications';
 import { registerIncomingCallBootstrapPrefetch } from '../utils/incomingCallBootstrapPrefetch';
 import { clearVoiceCallStreamWarmup, warmVoiceCallStreamClient } from '../utils/voiceCallStreamWarmup';
 import {
@@ -1621,6 +1626,51 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         if (userRoleRef.current === 'receiver') {
           void ensureIncomingRingtoneLoaded();
         }
+      });
+
+      socket.on('receiver:online', (payload: Partial<ReceiverOnlineLivePayload>) => {
+        if (userRoleRef.current !== 'caller') return;
+        const receiverId =
+          typeof payload?.receiverId === 'string' ? payload.receiverId.trim() : '';
+        const title =
+          typeof payload?.title === 'string' && payload.title.trim()
+            ? payload.title.trim()
+            : 'A receiver is online now';
+        const subtitle =
+          typeof payload?.subtitle === 'string' && payload.subtitle.trim()
+            ? payload.subtitle.trim()
+            : 'Call while she is available.';
+        const at =
+          typeof payload?.at === 'string' && payload.at.trim()
+            ? payload.at
+            : new Date().toISOString();
+        const id =
+          typeof payload?.id === 'string' && payload.id.trim()
+            ? payload.id.trim()
+            : `live-${receiverId}-${Date.now()}`;
+        const receiverName =
+          typeof payload?.receiverName === 'string' && payload.receiverName.trim()
+            ? payload.receiverName.trim()
+            : 'Receiver';
+        const receiverImage =
+          typeof payload?.receiverImage === 'string' ? payload.receiverImage.trim() : '';
+        const receiverIds = Array.isArray(payload?.receiverIds)
+          ? payload.receiverIds.map((x) => String(x).trim()).filter(Boolean)
+          : receiverId
+            ? [receiverId]
+            : [];
+        const live: ReceiverOnlineLivePayload = {
+          id,
+          receiverIds,
+          receiverId,
+          receiverName,
+          receiverImage,
+          title,
+          subtitle,
+          at,
+        };
+        emitCallerReceiverOnlineEvent(live);
+        void presentReceiverOnlineLocalNotification(live);
       });
 
       socket.on('call:incoming', (payload: CallIncomingPayload) => {

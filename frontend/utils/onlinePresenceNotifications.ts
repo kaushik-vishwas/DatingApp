@@ -1,13 +1,16 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Platform } from 'react-native';
+import { DeviceEventEmitter, Platform } from 'react-native';
 import { canUseLocalNotifications } from './incomingCallNotifications';
 
 export const ONLINE_PRESENCE_CHANNEL_ID = 'online_presence';
 export const RECEIVER_ONLINE_PUSH_TYPE = 'receiver_online';
 export const CALLER_ONLINE_PUSH_TYPE = 'caller_online';
+/** Live socket + local heads-up for callers when a history receiver comes online. */
+export const CALLER_RECEIVER_ONLINE_EVENT = 'caller-receiver-online';
 
 const PENDING_CALL_KEY = '@selecto/pending_receiver_online_call_v1';
 const TAP_DEDUPE_MS = 5000;
+const LOCAL_PRESENT_DEDUPE_MS = 20_000;
 
 export type ReceiverOnlineCallTarget = {
   receiverId: string;
@@ -19,8 +22,78 @@ type OnlinePresenceCallHandler = (target: ReceiverOnlineCallTarget) => void;
 
 let callHandler: OnlinePresenceCallHandler | null = null;
 let lastHandledReceiverIdAt = new Map<string, number>();
+let lastLocalPresentedAt = new Map<string, number>();
 let infrastructureReady = false;
 let disposeInfrastructure: (() => void) | null = null;
+
+export type ReceiverOnlineLivePayload = {
+  id: string;
+  receiverIds: string[];
+  receiverId: string;
+  receiverName: string;
+  receiverImage: string;
+  title: string;
+  subtitle: string;
+  at: string;
+};
+
+export function emitCallerReceiverOnlineEvent(payload: ReceiverOnlineLivePayload): void {
+  DeviceEventEmitter.emit(CALLER_RECEIVER_ONLINE_EVENT, payload);
+}
+
+/** Tray notification while the caller app is open (push covers background/closed). */
+export async function presentReceiverOnlineLocalNotification(payload: {
+  id?: string;
+  receiverId?: string;
+  receiverName?: string;
+  receiverImage?: string | null;
+  title?: string;
+  subtitle?: string;
+}): Promise<void> {
+  if (!canUseLocalNotifications()) return;
+  const receiverId = typeof payload.receiverId === 'string' ? payload.receiverId.trim() : '';
+  const dedupeKey = (typeof payload.id === 'string' && payload.id.trim()) || receiverId;
+  if (!dedupeKey) return;
+  const now = Date.now();
+  const last = lastLocalPresentedAt.get(dedupeKey) ?? 0;
+  if (now - last < LOCAL_PRESENT_DEDUPE_MS) return;
+  lastLocalPresentedAt.set(dedupeKey, now);
+
+  const title =
+    typeof payload.title === 'string' && payload.title.trim()
+      ? payload.title.trim()
+      : `${(payload.receiverName || 'A receiver').trim()} is online now`;
+  const body =
+    typeof payload.subtitle === 'string' && payload.subtitle.trim()
+      ? payload.subtitle.trim()
+      : 'Call while she is available.';
+
+  try {
+    const Notifications = await import('expo-notifications');
+    await Notifications.scheduleNotificationAsync({
+      identifier: `receiver-online-${dedupeKey}`,
+      content: {
+        title,
+        body,
+        sound: true,
+        data: {
+          type: RECEIVER_ONLINE_PUSH_TYPE,
+          receiverId,
+          receiverName:
+            typeof payload.receiverName === 'string' && payload.receiverName.trim()
+              ? payload.receiverName.trim()
+              : 'Receiver',
+          receiverImage:
+            typeof payload.receiverImage === 'string' ? payload.receiverImage.trim() : '',
+        },
+        ...(Platform.OS === 'android' ? { channelId: ONLINE_PRESENCE_CHANNEL_ID } : {}),
+      },
+      trigger: null,
+    });
+  } catch {
+    // ignore
+  }
+}
 
 export function isOnlinePresenceNotificationType(type: unknown): boolean {
   return type === RECEIVER_ONLINE_PUSH_TYPE || type === CALLER_ONLINE_PUSH_TYPE;
@@ -150,6 +223,7 @@ export function ensureOnlinePresenceNotificationInfrastructure(): () => void {
 
   let disposed = false;
   let responseSub: { remove: () => void } | null = null;
+  let receivedSub: { remove: () => void } | null = null;
 
   void (async () => {
     try {
@@ -157,6 +231,15 @@ export function ensureOnlinePresenceNotificationInfrastructure(): () => void {
       if (disposed) return;
       responseSub = Notifications.addNotificationResponseReceivedListener((response) => {
         void handleNotificationResponse(response);
+      });
+      receivedSub = Notifications.addNotificationReceivedListener((notification) => {
+        const data = notification.request.content.data as Record<string, unknown> | undefined;
+        if (data?.type !== RECEIVER_ONLINE_PUSH_TYPE) return;
+        const receiverId = typeof data.receiverId === 'string' ? data.receiverId.trim() : '';
+        const identifier = notification.request.identifier ?? '';
+        const dedupeKey =
+          identifier.replace(/^receiver-online-/, '') || receiverId;
+        if (dedupeKey) lastLocalPresentedAt.set(dedupeKey, Date.now());
       });
       await checkLastOnlinePresenceResponse();
     } catch {
@@ -169,6 +252,8 @@ export function ensureOnlinePresenceNotificationInfrastructure(): () => void {
     disposed = true;
     responseSub?.remove();
     responseSub = null;
+    receivedSub?.remove();
+    receivedSub = null;
     infrastructureReady = false;
     disposeInfrastructure = null;
   };

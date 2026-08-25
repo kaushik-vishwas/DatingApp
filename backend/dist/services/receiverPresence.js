@@ -19,10 +19,16 @@ const Receiver_1 = __importDefault(require("../models/Receiver"));
 const socketRegistry_1 = require("../socket/socketRegistry");
 const receiverScore_1 = require("./receiverScore");
 const callQueue_1 = require("./callQueue");
-/** Keep receivers visible as online on discover after background/minimize socket loss (all Android OEMs). */
-exports.RECEIVER_DISCOVER_GRACE_MS = 20 * 60 * 1000;
+/**
+ * Rolling grace window renewed by JS / native keep-alive heartbeats while Go Online is on.
+ * Long enough that brief OEM doze or network gaps do not drop discover presence.
+ */
+exports.RECEIVER_DISCOVER_GRACE_MS = 24 * 60 * 60 * 1000;
+/** Min interval between DB grace renewals (keep-alive polls every 4s). */
+const BACKGROUND_PRESENCE_TOUCH_MIN_MS = 30_000;
 const discoverGraceUntilByReceiverId = new Map();
 const discoverGraceExpireTimers = new Map();
+const lastBackgroundPresenceTouchAt = new Map();
 function normalizeReceiverId(receiverId) {
     return String(receiverId).trim();
 }
@@ -41,7 +47,7 @@ function isReceiverInDiscoverGrace(receiverId, discoverGraceUntil) {
         return true;
     return false;
 }
-/** Socket connected now, or within the 20-minute post-disconnect grace while Go Online is on. */
+/** Socket connected now, or within the rolling grace window while Go Online is on. */
 function isReceiverDiscoverPresenceLive(receiverId, discoverGraceUntil, _reachability) {
     const rid = normalizeReceiverId(receiverId);
     return (0, socketRegistry_1.isReceiverSocketConnected)(rid) || isReceiverInDiscoverGrace(rid, discoverGraceUntil);
@@ -77,6 +83,7 @@ function armReceiverDiscoverGraceImmediate(receiverId) {
 function clearReceiverDiscoverGrace(receiverId) {
     const rid = normalizeReceiverId(receiverId);
     discoverGraceUntilByReceiverId.delete(rid);
+    lastBackgroundPresenceTouchAt.delete(rid);
     const timer = discoverGraceExpireTimers.get(rid);
     if (timer) {
         clearTimeout(timer);
@@ -87,15 +94,34 @@ function clearReceiverDiscoverGrace(receiverId) {
 function armReceiverDiscoverGrace(receiverId) {
     return armReceiverDiscoverGraceImmediate(receiverId);
 }
-/** Client-driven (minimize): arm grace before the socket disconnect reaches the server. */
+function currentGraceUntilMs(receiverId, discoverGraceUntil) {
+    const rid = normalizeReceiverId(receiverId);
+    const mem = discoverGraceUntilByReceiverId.get(rid);
+    if (typeof mem === 'number' && mem > Date.now())
+        return mem;
+    if (discoverGraceUntil instanceof Date && discoverGraceUntil.getTime() > Date.now()) {
+        return discoverGraceUntil.getTime();
+    }
+    return 0;
+}
+/** Client-driven (minimize / keep-alive): arm grace before socket loss or while backgrounded. */
 async function touchReceiverBackgroundPresence(receiverId) {
     const rid = normalizeReceiverId(receiverId);
-    const receiver = await Receiver_1.default.findById(rid).select('isAvailable').lean();
+    const receiver = await Receiver_1.default.findById(rid)
+        .select('isAvailable discoverGraceUntil')
+        .lean();
     if (!receiver?.isAvailable) {
         clearReceiverDiscoverGrace(rid);
         await syncReceiverPresenceInDatabase(rid);
         return { ok: false, graceUntilMs: 0, reason: 'isAvailable_false' };
     }
+    const now = Date.now();
+    const graceStillLive = isReceiverInDiscoverGrace(rid, receiver.discoverGraceUntil);
+    const lastTouch = lastBackgroundPresenceTouchAt.get(rid) ?? 0;
+    if (graceStillLive && now - lastTouch < BACKGROUND_PRESENCE_TOUCH_MIN_MS) {
+        return { ok: true, graceUntilMs: currentGraceUntilMs(rid, receiver.discoverGraceUntil) };
+    }
+    lastBackgroundPresenceTouchAt.set(rid, now);
     const graceUntilMs = armReceiverDiscoverGraceImmediate(rid);
     await syncReceiverPresenceInDatabase(rid);
     return { ok: true, graceUntilMs };

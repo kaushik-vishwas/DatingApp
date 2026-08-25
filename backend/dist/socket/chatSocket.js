@@ -258,8 +258,9 @@ function attachChatSocket(httpServer) {
                         .select('isOnline isAvailable accountStatus suspended onlineSince')
                         .lean();
                     await (0, receiverPresence_1.syncReceiverPresenceInDatabase)(socketAccountId);
+                    // Do not require !prev.isOnline — Go Online arms discover grace first, so isOnline
+                    // is often already true before the socket connects, which previously skipped caller push.
                     if (prev &&
-                        !prev.isOnline &&
                         prev.isAvailable &&
                         (0, socketRegistry_1.isReceiverSocketConnected)(socketAccountId) &&
                         prev.accountStatus === 'approved' &&

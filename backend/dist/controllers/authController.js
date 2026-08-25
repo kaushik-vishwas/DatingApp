@@ -50,6 +50,8 @@ const socketRegistry_1 = require("../socket/socketRegistry");
 const apiTraceLog_1 = require("../utils/apiTraceLog");
 const phoneNormalize_1 = require("../utils/phoneNormalize");
 const referralService_1 = require("../services/referralService");
+const callerWelcomeFreeTalk_1 = require("../services/callerWelcomeFreeTalk");
+const callerWelcomeFreeTalk_2 = require("../constants/callerWelcomeFreeTalk");
 const messageCentral_1 = require("../services/messageCentral");
 const smsOtp_1 = require("../services/smsOtp");
 const otpBypass_1 = require("../utils/otpBypass");
@@ -979,6 +981,13 @@ const completeMobileSignup = async (req, res) => {
             if (!referralResult.applied && referralCode) {
                 t.warn('referral_not_applied', { reason: referralResult.reason ?? 'unknown' });
             }
+            const welcome = await (0, callerWelcomeFreeTalk_1.grantCallerWelcomeFreeTalk)(String(user._id));
+            if (welcome.granted) {
+                const prev = typeof user.walletBalance === 'number' && Number.isFinite(user.walletBalance)
+                    ? user.walletBalance
+                    : 0;
+                user.walletBalance = Math.round((prev + welcome.amountInr) * 100) / 100;
+            }
             const sv = await (0, authSessionService_1.bumpUserAuthSession)(String(user._id));
             (0, socketRegistry_1.emitAuthSessionSuperseded)('u', String(user._id), sv);
             const token = (0, authToken_1.signAppAccessToken)(String(user._id), 'u', sv);
@@ -987,6 +996,8 @@ const completeMobileSignup = async (req, res) => {
                 token,
                 user: toApiUser(user),
                 accountType: 'user',
+                welcomeFreeTalkGranted: welcome.granted,
+                welcomeFreeTalkMinutes: welcome.granted ? callerWelcomeFreeTalk_2.CALLER_WELCOME_FREE_TALK_MINUTES : 0,
             });
             return;
         }

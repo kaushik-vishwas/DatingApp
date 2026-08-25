@@ -40,7 +40,7 @@ import {
   releaseVoiceCallOutputRoute,
 } from '../../utils/voiceCallAudioRoute';
 import { profileImageUrlForStreamOrNetwork, resolveProfileImageSource } from '../../utils/avatarSource';
-import { AvatarSoundWaveRings } from '../../components/call/AvatarVoiceWaves';
+import { AvatarSoundWaveRings, CallingProfileTravelWaves, CallingWaitFooter } from '../../components/call/AvatarVoiceWaves';
 import { useCallScreenCaptureProtection } from '../../utils/callScreenCaptureProtection';
 import { useActiveCallOngoingNotification } from '../../utils/activeCallOngoingNotification';
 import { AndroidCellularHoldMonitor } from '../../components/call/AndroidCellularHoldMonitor';
@@ -570,7 +570,8 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
   const showRemainingTalkCountdown =
     callChargeRatePerMinute > 0 &&
     hasRemainingTalkWallet &&
-    (ready || talkActive || Boolean(streamBootstrap));
+    talkActive &&
+    streamBothConnected;
   const remainingTalkCountdownTitle =
     user?.role === 'receiver' ? "Caller's remaining talk time" : 'Remaining Talk Time';
 
@@ -945,7 +946,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
   ) : null;
 
   const addTalktimeButtonEl =
-    user?.role === 'caller' && talkActive && ready ? (
+    user?.role === 'caller' && talkActive && streamBothConnected && ready ? (
       <TouchableOpacity
         style={styles.addTalktimeBtn}
         onPress={() => setTalktimeRechargeOpen(true)}
@@ -2517,6 +2518,13 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
       !systemCallHold &&
       receiverAvailabilitySession &&
       (receiverSessionPhase === 'incoming' || Boolean(streamBootstrap));
+    const showCallingTravelWaves =
+      !peerCallHold &&
+      !systemCallHold &&
+      !shellPeerEmpty &&
+      (outgoingCallerPhase === 'ringing' ||
+        outgoingCallerPhase === 'joining' ||
+        (Boolean(streamBootstrap) && !talkActive && user?.role === 'caller'));
 
     return (
       <View style={styles.container}>
@@ -2531,10 +2539,10 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
           <View style={styles.statusPill}>
             <Text style={styles.statusText}>{shellStatusLabel}</Text>
           </View>
-          <View style={styles.avatarRow}>
+          <View style={[styles.avatarRow, showCallingTravelWaves && styles.avatarRowCalling]}>
             <View style={styles.avatarCol}>
               <View style={styles.avatarRingHost}>
-                {showPeerPulse ? <AvatarSoundWaveRings active /> : null}
+                {(showPeerPulse || showCallingTravelWaves) ? <AvatarSoundWaveRings active /> : null}
                 <View style={styles.avatarWrap}>
                   {peerSrc ? (
                     <Image source={peerSrc} style={styles.avatar} />
@@ -2556,8 +2564,10 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
                 {shellPeerEmpty ? 'Waiting…' : peerCallHold ? 'On hold' : shellPeerName}
               </Text>
             </View>
+            {showCallingTravelWaves ? <CallingProfileTravelWaves active /> : null}
             <View style={styles.avatarCol}>
               <View style={styles.avatarRingHost}>
+                {showCallingTravelWaves ? <AvatarSoundWaveRings active /> : null}
                 <View style={styles.avatarWrap}>
                   {(() => {
                     const selfSrc = user?.profileImage
@@ -2595,6 +2605,19 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
           </Text>
           {receiverAvailabilitySession && streamBootstrap && !talkActive ? (
             <Text style={styles.waitingHint}>Someone will join soon..s</Text>
+          ) : null}
+          {showCallingTravelWaves ? (
+            <CallingWaitFooter
+              active
+              peerName={shellPeerName}
+              phase={
+                outgoingCallerPhase === 'joining'
+                  ? 'joining'
+                  : outgoingCallerPhase === 'ringing'
+                    ? 'ringing'
+                    : 'connecting'
+              }
+            />
           ) : null}
           {remainingTalkCountdownEl}
           {addTalktimeButtonEl}
@@ -2653,7 +2676,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
           ) : null}
           {!shellShowIncomingActions ? (
             <TouchableOpacity
-              style={styles.hangup}
+              style={[styles.hangup, showCallingTravelWaves && styles.hangupCalling]}
               onPress={() => void hangup()}
               disabled={incomingResponding}
               activeOpacity={0.88}
@@ -3156,6 +3179,9 @@ const styles = StyleSheet.create({
     gap: 22,
     marginTop: 6,
   },
+  avatarRowCalling: {
+    gap: 8,
+  },
   avatarCol: {
     alignItems: 'center',
     maxWidth: 150,
@@ -3254,6 +3280,9 @@ const styles = StyleSheet.create({
     minWidth: 200,
     overflow: 'hidden',
     alignSelf: 'center',
+  },
+  hangupCalling: {
+    marginTop: 20,
   },
   hangupGrad: {
     alignItems: 'center',

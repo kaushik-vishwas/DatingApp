@@ -2474,10 +2474,9 @@ export const updateReceiverProfile = async (
     await receiver.save();
     await syncReceiverPresenceInDatabase(receiverId);
 
-    const becameCallAvailable =
-      !wasAvailable &&
-      Boolean(receiver.isAvailable) &&
-      isReceiverSocketConnected(receiverId);
+    // Notify when Go Online flips on. Socket may connect a moment later; that path also schedules.
+    // scheduleReceiverAvailabilityNotifications no-ops until socket is live.
+    const becameCallAvailable = !wasAvailable && Boolean(receiver.isAvailable);
     if (becameCallAvailable) {
       void scheduleReceiverAvailabilityNotifications(receiverId).catch((e: unknown) => {
         const msg = e instanceof Error ? e.message : String(e);
@@ -2717,10 +2716,7 @@ export const completeReceiverAudioOnboarding = async (
     await receiver.save();
     await syncReceiverPresenceInDatabase(receiverId);
 
-    const becameCallAvailable =
-      !wasAvailable &&
-      Boolean(receiver.isAvailable) &&
-      isReceiverSocketConnected(receiverId);
+    const becameCallAvailable = !wasAvailable && Boolean(receiver.isAvailable);
     if (becameCallAvailable) {
       void scheduleReceiverAvailabilityNotifications(receiverId).catch((e: unknown) => {
         const msg = e instanceof Error ? e.message : String(e);

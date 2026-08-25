@@ -13,6 +13,7 @@ import {
   clearPendingReferralCode,
   getPendingReferralCode,
 } from '../../utils/pendingReferral';
+import { markCallerFreeTalkEligible } from '../../utils/callerFreeTalkPopupStorage';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'AuthGender'>;
 
@@ -45,6 +46,9 @@ export default function AuthGenderScreen({ navigation, route }: Props): React.JS
       }
       await clearPendingReferralCode();
       await saveJwt(data.token);
+      if (data.user?.role === 'caller' && data.welcomeFreeTalkGranted === true) {
+        await markCallerFreeTalkEligible(data.user._id);
+      }
       signIn(data.token, data.user);
     } catch (e) {
       Alert.alert('Signup failed', getErrorMessage(e));

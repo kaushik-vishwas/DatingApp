@@ -36,12 +36,22 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const mongoose_1 = __importStar(require("mongoose"));
 const walletCreditSchema = new mongoose_1.Schema({
     userId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
-    source: { type: String, enum: ['referral_reward'], required: true, index: true },
+    source: {
+        type: String,
+        enum: ['referral_reward', 'welcome_free_talk'],
+        required: true,
+        index: true,
+    },
     amountInr: { type: Number, required: true, min: 0.01 },
     referralId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Referral', default: null },
     description: { type: String, required: true, trim: true, maxlength: 300 },
 }, { timestamps: true });
 walletCreditSchema.index({ userId: 1, createdAt: -1 });
 walletCreditSchema.index({ referralId: 1 }, { unique: true, sparse: true });
+/** At most one welcome free-talk credit per caller. */
+walletCreditSchema.index({ userId: 1, source: 1 }, {
+    unique: true,
+    partialFilterExpression: { source: 'welcome_free_talk' },
+});
 const WalletCredit = mongoose_1.default.models.WalletCredit ?? mongoose_1.default.model('WalletCredit', walletCreditSchema);
 exports.default = WalletCredit;
