@@ -4,6 +4,8 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { CALLER_FREE_TALK_MINUTES } from '../../utils/callerFreeTalkPopupStorage';
 
+const POPUP_CARD_GRADIENT = ['#3b0764', '#1e3a5f', '#064e3b'] as const;
+
 type Props = {
   visible: boolean;
   onDismiss: () => void;
@@ -20,7 +22,12 @@ export default function CallerFreeTalkPopup({
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onDismiss}>
       <View style={styles.scrim}>
-        <View style={styles.card}>
+        <LinearGradient
+          colors={[...POPUP_CARD_GRADIENT]}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={styles.card}
+        >
           <TouchableOpacity
             onPress={onDismiss}
             hitSlop={12}
@@ -65,7 +72,7 @@ export default function CallerFreeTalkPopup({
           <TouchableOpacity onPress={onDismiss} style={styles.dismissWrap} activeOpacity={0.85}>
             <Text style={styles.dismiss}>Maybe later</Text>
           </TouchableOpacity>
-        </View>
+        </LinearGradient>
       </View>
     </Modal>
   );
@@ -74,16 +81,16 @@ export default function CallerFreeTalkPopup({
 const styles = StyleSheet.create({
   scrim: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.62)',
+    backgroundColor: 'rgba(0, 0, 0, 0.62)',
     justifyContent: 'center',
     paddingHorizontal: 22,
   },
   card: {
-    backgroundColor: '#0b1220',
     borderRadius: 22,
     paddingHorizontal: 18,
     paddingTop: 16,
     paddingBottom: 16,
+    overflow: 'hidden',
   },
   closeBtn: {
     position: 'absolute',

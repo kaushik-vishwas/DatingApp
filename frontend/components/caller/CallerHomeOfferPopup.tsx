@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Modal, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import type { WalletHomeOfferPopup } from '../../types/api';
 import { walletCreditForRecharge } from '../../utils/walletRechargeFees';
@@ -13,6 +14,8 @@ type Props = {
 };
 
 type PopupStep = 'social' | 'spotlight';
+
+const POPUP_CARD_GRADIENT = ['#3b0764', '#1e3a5f', '#064e3b'] as const;
 
 function formatCountdown(ms: number): string {
   const total = Math.max(0, Math.floor(ms / 1000));
@@ -57,7 +60,12 @@ export default function CallerHomeOfferPopup({
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={goNextOrClose}>
       <View style={styles.scrim}>
-        <View style={styles.card}>
+        <LinearGradient
+          colors={[...POPUP_CARD_GRADIENT]}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={styles.card}
+        >
           {isSocial ? (
             <View style={styles.timerBar}>
               <Ionicons name="time-outline" size={16} color="#ef4444" />
@@ -120,7 +128,7 @@ export default function CallerHomeOfferPopup({
               <Text style={styles.dismiss}>I don't want this Offer</Text>
             </TouchableOpacity>
           ) : null}
-        </View>
+        </LinearGradient>
       </View>
     </Modal>
   );
@@ -129,16 +137,16 @@ export default function CallerHomeOfferPopup({
 const styles = StyleSheet.create({
   scrim: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.62)',
+    backgroundColor: 'rgba(0, 0, 0, 0.62)',
     justifyContent: 'center',
     paddingHorizontal: 22,
   },
   card: {
-    backgroundColor: '#0b1220',
     borderRadius: 22,
     paddingHorizontal: 18,
     paddingTop: 14,
     paddingBottom: 16,
+    overflow: 'hidden',
   },
   timerBar: {
     flexDirection: 'row',
@@ -202,7 +210,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 2,
-    borderColor: '#0b1220',
+    borderColor: '#1e3a5f',
   },
   avatarTxt: { color: '#fff', fontWeight: '800', fontSize: 12 },
   social: { color: '#fff', textAlign: 'center', fontSize: 13, marginBottom: 16 },
