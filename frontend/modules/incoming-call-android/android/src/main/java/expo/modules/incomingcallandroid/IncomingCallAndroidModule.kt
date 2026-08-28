@@ -1,6 +1,7 @@
 package expo.modules.incomingcallandroid
 
 import android.app.NotificationManager
+import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
@@ -45,6 +46,17 @@ class IncomingCallAndroidModule : Module() {
 
     Function("isIncomingRingtonePlaying") {
       IncomingCallRingtonePlayer.isPlaying()
+    }
+
+    /** Persist receiver-only incoming-call UI flag for native FCM (caller must stay silent). */
+    Function("setReceiverIncomingCallUiEnabled") { enabled: Boolean ->
+      val context = appContext.reactContext?.applicationContext ?: return@Function false
+      context
+        .getSharedPreferences("selecto_app_prefs", Context.MODE_PRIVATE)
+        .edit()
+        .putBoolean("receiver_incoming_call_ui_enabled", enabled)
+        .apply()
+      true
     }
 
     /** Prompt once-friendly: open system dialog to ignore battery optimizations. */

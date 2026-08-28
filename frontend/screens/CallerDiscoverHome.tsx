@@ -55,8 +55,8 @@ import RoseImg from '../assets/roseImg.png'
 
 const PURPLE = '#7b2cff';
 const GREEN = '#22c55e';
-const NOTICE_GRADIENT_START = '#4ade80';
-const NOTICE_GRADIENT_END = '#3B82F6';
+const NOTICE_LEFT_BG = '#2f4a72';
+const NOTICE_RIGHT_BG = '#f7941d';
 const SHARE_BTN_GRADIENT_START = '#f472b6';
 const SHARE_BTN_GRADIENT_END = '#db2777';
 const SHARE_BTN_BORDER = 'rgba(255, 255, 255, 0.45)';
@@ -690,46 +690,41 @@ export default function CallerDiscoverHome(): React.JSX.Element {
     () => (
       <>
         {showCallerNotification && callerNotification ? (
-          <LinearGradient
-            colors={[NOTICE_GRADIENT_START, NOTICE_GRADIENT_END]}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
-            style={styles.adminNoticeCard}
-          >
-            <Image source={NoticeBg} style={styles.adminNoticeBgImage} resizeMode="cover" />
-            <View style={styles.adminNoticeBgScrim} />
-            <View style={styles.adminNoticeRow}>
-              <View style={styles.adminNoticeLeft}>
-                <View style={styles.adminNoticeBtnWrap}>
-                  <LinearGradient
-                    colors={[SHARE_BTN_GRADIENT_START, SHARE_BTN_GRADIENT_END]}
-                    start={{ x: 0, y: 0 }}
-                    end={{ x: 1, y: 1 }}
-                    style={styles.adminNoticeBtn}
+          <View style={styles.adminNoticeCard}>
+            <View style={styles.adminNoticeLeft}>
+              <View style={styles.adminNoticeBtnWrap}>
+                <LinearGradient
+                  colors={[SHARE_BTN_GRADIENT_START, SHARE_BTN_GRADIENT_END]}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 1 }}
+                  style={styles.adminNoticeBtn}
+                >
+                  <TouchableOpacity
+                    onPress={onShareAppPress}
+                    activeOpacity={0.88}
+                    style={styles.adminNoticeBtnHit}
+                    accessibilityLabel="Share app and get free talk time"
                   >
-                    <TouchableOpacity
-                      onPress={onShareAppPress}
-                      activeOpacity={0.88}
-                      style={styles.adminNoticeBtnHit}
-                      accessibilityLabel="Share app and get free talk time"
-                    >
-                      <View style={styles.adminNoticeBtnContent}>
-                        <Ionicons name="share-social" size={18} color={SHARE_BTN_ICON} />
-                        <Text style={styles.adminNoticeBtnText} numberOfLines={2}>
-                          {'Share app &\nget free talk time'}
-                        </Text>
-                      </View>
-                    </TouchableOpacity>
-                  </LinearGradient>
-                </View>
+                    <View style={styles.adminNoticeBtnContent}>
+                      <Ionicons name="share-social" size={17} color={SHARE_BTN_ICON} />
+                      <Text style={styles.adminNoticeBtnText} numberOfLines={2}>
+                        {'Share app &\nget free talk time'}
+                      </Text>
+                    </View>
+                  </TouchableOpacity>
+                </LinearGradient>
               </View>
-              {callerNotification.body?.trim() ? (
+            </View>
+            {callerNotification.body?.trim() ? (
+              <>
+                <View style={styles.adminNoticeSeparator} />
                 <View style={styles.adminNoticeRight}>
+                  <Image source={NoticeBg} style={styles.adminNoticeBgImage} resizeMode="cover" />
                   <Text style={styles.adminNoticeBody}>{callerNotification.body.trim()}</Text>
                 </View>
-              ) : null}
-            </View>
-          </LinearGradient>
+              </>
+            ) : null}
+          </View>
         ) : null}
 
         <View style={styles.promoCard}>
@@ -739,14 +734,9 @@ export default function CallerDiscoverHome(): React.JSX.Element {
               style={[styles.promoRose, styles.promoRoseLeft]}
               resizeMode="contain"
             />
-            <Image
-              source={RoseImg}
-              style={[styles.promoRose, styles.promoRoseRight]}
-              resizeMode="contain"
-            />
             <View style={styles.promoTextCol}>
               <Text style={styles.promoTitle} numberOfLines={1}>
-                Meet Someone New here
+                Meet Someone New Here!
               </Text>
               <View style={styles.promoRateBadge}>
                 <Text style={styles.promoRate}>₹5/min only</Text>
@@ -882,10 +872,10 @@ export default function CallerDiscoverHome(): React.JSX.Element {
                 ]}
               >
                 <View style={styles.randomBtnContent}>
-                  <Text style={styles.stickyRandomBtnText} numberOfLines={1}>
-                    {randomCallMatchingVisible ? 'Please wait…' : 'Random Call'}
+                  <Ionicons name="call-outline" size={21} color="#fff" />
+                  <Text style={styles.stickyRandomBtnText} numberOfLines={2}>
+                    {randomCallMatchingVisible ? 'Please\nwait…' : 'Random\nCall'}
                   </Text>
-                  <Ionicons name="call-outline" size={15} color="#fff" />
                 </View>
               </LinearGradient>
             </TouchableOpacity>
@@ -1246,7 +1236,7 @@ const styles = StyleSheet.create({
     paddingTop: 12,
     paddingBottom: 12,
     paddingLeft: 14,
-    paddingRight: 150,
+    paddingRight: 138,
     overflow: 'hidden',
     borderWidth: 1,
     borderColor: '#f0ebe3',
@@ -1258,10 +1248,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 8,
     zIndex: 1,
+    marginLeft: 36,
   },
   promoTitle: {
     color: '#7b2cff',
-    fontSize: 15,
+    fontSize: 14,
     fontWeight: '800',
     letterSpacing: -0.2,
     textAlign: 'center',
@@ -1282,7 +1273,7 @@ const styles = StyleSheet.create({
   // coupleImg.png is 487×224 — fixed size so absolute layout doesn't collapse to 0 height.
   promoCoupleImg: {
     position: 'absolute',
-    right: 36,
+    right: 14,
     bottom: 0,
     width: 136,
     height: 62,
@@ -1290,17 +1281,14 @@ const styles = StyleSheet.create({
   },
   promoRose: {
     position: 'absolute',
-    bottom: -4,
-    width: 52,
-    height: 52,
+    bottom: -6,
+    width: 75,
+    height: 75,
     opacity: 0.72,
     zIndex: 0,
   },
   promoRoseLeft: {
-    left: -2,
-  },
-  promoRoseRight: {
-    right: -2,
+    left: 3,
   },
   stickyRandomWrap: {
     position: 'absolute',
@@ -1311,23 +1299,24 @@ const styles = StyleSheet.create({
   },
   stickyRandomHit: {
     alignSelf: 'center',
-    borderRadius: 22,
+    borderRadius: 40,
     overflow: 'hidden',
-    shadowColor: '#db2777',
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.25,
-    shadowRadius: 6,
-    elevation: 5,
+    shadowColor: '#e879f9',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.38,
+    shadowRadius: 8,
+    elevation: 8,
   },
   stickyRandomBtn: {
-    minHeight: 40,
-    borderRadius: 22,
-    paddingHorizontal: 18,
-    paddingVertical: 8,
+    width: 78,
+    height: 78,
+    borderRadius: 39,
     alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.45)',
+    borderWidth: 2,
+    borderColor: 'rgba(255, 255, 255, 0.88)',
+    paddingHorizontal: 8,
+    paddingVertical: 10,
   },
   stickyRandomBtnDisabled: {
     opacity: 0.75,
@@ -1335,86 +1324,82 @@ const styles = StyleSheet.create({
   stickyRandomBtnText: {
     color: '#fff',
     fontWeight: '800',
-    fontSize: 14,
-    letterSpacing: 0.2,
+    fontSize: 11,
+    letterSpacing: 0.1,
+    textAlign: 'center',
+    lineHeight: 13,
   },
   randomBtnContent: {
-    flexDirection: 'row',
+    flexDirection: 'column',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 6,
+    gap: 3,
   },
   adminNoticeCard: {
+    flexDirection: 'row',
     marginBottom: 10,
     borderRadius: 16,
-    paddingVertical: 8,
-    paddingHorizontal: 6,
     overflow: 'hidden',
-    minHeight: 64,
+    minHeight: 76,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.12,
+    shadowOpacity: 0.1,
     shadowRadius: 4,
     elevation: 3,
   },
   adminNoticeBgImage: {
     position: 'absolute',
-    right: 2,
-    bottom: -18,
-    width: 140,
-    height: 140,
-    opacity: 0.44,
-  },
-  adminNoticeBgScrim: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(30, 27, 75, 0.32)',
-  },
-  adminNoticeRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    position: 'relative',
-    zIndex: 2,
+    right: -4,
+    bottom: -10,
+    width: 118,
+    height: 92,
+    opacity: 0.55,
   },
   adminNoticeLeft: {
-    flexGrow: 0,
-    flexShrink: 0,
     width: '46%',
-    minWidth: 148,
-    maxWidth: '50%',
+    minWidth: 158,
+    backgroundColor: NOTICE_LEFT_BG,
+    alignItems: 'center',
     justifyContent: 'center',
-    paddingRight: 2,
+    paddingVertical: 10,
+    paddingHorizontal: 10,
+  },
+  adminNoticeSeparator: {
+    width: 1.5,
+    alignSelf: 'stretch',
+    backgroundColor: '#ffffff',
   },
   adminNoticeBtnWrap: {
     width: '100%',
-    borderRadius: 20,
+    maxWidth: 182,
+    borderRadius: 22,
     overflow: 'hidden',
     shadowColor: '#9d174d',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.35,
-    shadowRadius: 4,
-    elevation: 4,
+    shadowOpacity: 0.28,
+    shadowRadius: 3,
+    elevation: 3,
   },
   adminNoticeBtn: {
     width: '100%',
-    minHeight: 46,
+    minHeight: 44,
     borderWidth: 1,
     borderColor: SHARE_BTN_BORDER,
-    borderRadius: 20,
+    borderRadius: 22,
     overflow: 'hidden',
   },
   adminNoticeBtnHit: {
     width: '100%',
-    minHeight: 46,
+    minHeight: 44,
     paddingHorizontal: 10,
-    paddingVertical: 10,
+    paddingVertical: 8,
     justifyContent: 'center',
   },
   adminNoticeBtnContent: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'flex-start',
-    gap: 7,
+    gap: 6,
     width: '100%',
   },
   adminNoticeBtnText: {
@@ -1422,25 +1407,26 @@ const styles = StyleSheet.create({
     flexShrink: 1,
     color: SHARE_BTN_TEXT,
     fontWeight: '800',
-    fontSize: 12.5,
-    lineHeight: 16,
-    textShadowColor: 'rgba(0, 0, 0, 0.25)',
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 2,
+    fontSize: 12,
+    lineHeight: 15,
   },
   adminNoticeRight: {
     flex: 1,
     minWidth: 0,
+    backgroundColor: NOTICE_RIGHT_BG,
     justifyContent: 'center',
-    paddingLeft: 8,
-    borderLeftWidth: 1,
-    borderLeftColor: 'rgba(255,255,255,0.25)',
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    paddingRight: 10,
+    position: 'relative',
+    overflow: 'hidden',
   },
   adminNoticeBody: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: 'rgba(255,255,255,0.95)',
-    lineHeight: 16,
+    fontSize: 12.5,
+    fontWeight: '700',
+    color: '#ffffff',
+    lineHeight: 17,
+    zIndex: 1,
   },
   leftColumn: {
     alignItems: 'center',

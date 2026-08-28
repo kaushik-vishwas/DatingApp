@@ -99,50 +99,8 @@ function enqueueForReceiver(receiverId: string, callerId: string, callerName: st
 
 /**
  * Notify receivers from recent call history when a male caller comes online.
- * Mirrors `scheduleReceiverAvailabilityNotifications` (14-day history, 30m cooldown, 20s batching).
+ * Disabled — receivers should not get "caller is online" alerts.
  */
-export async function scheduleCallerOnlineNotifications(callerId: string): Promise<void> {
-  if (!mongoose.Types.ObjectId.isValid(callerId)) return;
-  const uid = new mongoose.Types.ObjectId(callerId);
-
-  const caller = await User.findById(uid).select('name gender accountStatus suspended');
-  if (
-    !caller ||
-    caller.gender !== 'male' ||
-    caller.accountStatus !== 'approved' ||
-    caller.suspended
-  ) {
-    return;
-  }
-
-  const since = new Date(Date.now() - RECENT_CALL_WINDOW_DAYS * 24 * 60 * 60 * 1000);
-  const receiverIds = (await CallSession.distinct('receiverId', {
-    callerId: uid,
-    status: 'completed',
-    startedAt: { $gte: since },
-  })) as mongoose.Types.ObjectId[];
-  if (receiverIds.length === 0) return;
-
-  const receivers = await Receiver.find({
-    _id: { $in: receiverIds },
-    accountStatus: 'approved',
-    suspended: { $ne: true },
-  })
-    .select('_id')
-    .lean<{ _id: mongoose.Types.ObjectId }[]>();
-  if (receivers.length === 0) return;
-
-  const callerName = caller.name?.trim() || 'Caller';
-  const cooldownSince = new Date(Date.now() - RECEIVER_CALLER_COOLDOWN_MS);
-
-  for (const receiver of receivers) {
-    const rid = String(receiver._id);
-    const recentlyNotified = await CallerOnlineNotification.exists({
-      receiverId: receiver._id,
-      callerIds: uid,
-      createdAt: { $gte: cooldownSince },
-    });
-    if (recentlyNotified) continue;
-    enqueueForReceiver(rid, callerId, callerName);
-  }
+export async function scheduleCallerOnlineNotifications(_callerId: string): Promise<void> {
+  return;
 }

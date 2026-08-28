@@ -12,6 +12,7 @@ const User_1 = __importDefault(require("../models/User"));
 const expoPush_1 = require("./expoPush");
 const socketRegistry_1 = require("../socket/socketRegistry");
 const RECENT_CALL_WINDOW_DAYS = 14;
+const USER_RECEIVER_COOLDOWN_MS = 30 * 60 * 1000;
 const GROUP_WINDOW_MS = 20 * 1000;
 const pendingByUserId = new Map();
 function receiverOnlineTitle(names) {
@@ -107,6 +108,7 @@ function enqueueForUser(userId, receiverId, receiverName) {
 /**
  * Notify recent male callers only when a receiver is BOTH online and available.
  * - Limits targets to recent call history window (14 days)
+ * - 30m cooldown per caller+receiver (avoids spam on repeated go-online)
  * - Groups multiple receiver-online events in a short window per user
  * - Persists Alerts row + live socket + Expo push (foreground / background / closed)
  */
@@ -141,7 +143,15 @@ async function scheduleReceiverAvailabilityNotifications(receiverId) {
     if (callers.length === 0)
         return;
     const receiverName = receiver.name?.trim() || 'A receiver';
+    const cooldownSince = new Date(Date.now() - USER_RECEIVER_COOLDOWN_MS);
     for (const caller of callers) {
+        const recentlyNotified = await ReceiverAvailabilityNotification_1.default.exists({
+            userId: caller._id,
+            receiverIds: rid,
+            createdAt: { $gte: cooldownSince },
+        });
+        if (recentlyNotified)
+            continue;
         enqueueForUser(String(caller._id), receiverId, receiverName);
     }
 }

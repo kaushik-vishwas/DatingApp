@@ -192,6 +192,7 @@ function withIncomingCallFcm(config) {
       for (const file of [
         'NesthamFirebaseMessagingService.kt',
         'IncomingCallFcmPresenter.kt',
+        'IncomingCallUiGate.kt',
         'IncomingCallNotificationChannels.kt',
         'IncomingCallRingtonePlayer.kt',
         'IncomingCallDeclineReceiver.kt',

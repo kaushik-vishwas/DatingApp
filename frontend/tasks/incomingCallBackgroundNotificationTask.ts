@@ -3,6 +3,7 @@ import * as TaskManager from 'expo-task-manager';
 import { Platform } from 'react-native';
 import {
   parseIncomingFromData,
+  isReceiverIncomingCallUiEnabled,
   showIncomingCallNotification,
   type IncomingCallNotificationPayload,
 } from '../utils/incomingCallNotifications';
@@ -62,6 +63,11 @@ TaskManager.defineTask<Notifications.NotificationTaskPayload>(
       return;
     }
     if (!data) return;
+
+    if (!isReceiverIncomingCallUiEnabled()) {
+      logIncomingCallNotif('bg_task.skip', { reason: 'caller_ui_disabled' });
+      return;
+    }
 
     const incoming = parseIncomingFromBackgroundTaskData(data);
     if (!incoming) {

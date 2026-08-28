@@ -36,6 +36,12 @@ object IncomingCallFcmPresenter {
     val type = data["type"]?.trim().orEmpty()
     if (type != TYPE_INCOMING) return false
 
+    val appContext = context.applicationContext
+    if (!IncomingCallUiGate.isReceiverUiEnabled(appContext)) {
+      Log.i(TAG, "Suppressed incoming call notification (receiver UI disabled)")
+      return true
+    }
+
     val callId = data["callId"]?.trim().orEmpty()
     if (callId.isEmpty()) return false
 
@@ -50,7 +56,6 @@ object IncomingCallFcmPresenter {
       data["url"]?.trim()?.takeIf { it.isNotEmpty() }
         ?: buildDeepLink(callId, fromId, fromType, peerName, peerImage)
 
-    val appContext = context.applicationContext
     IncomingCallNotificationChannels.ensureIncomingCallChannel(appContext)
     acquireBriefWakeLock(appContext)
 

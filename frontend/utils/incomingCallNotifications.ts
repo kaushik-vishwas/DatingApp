@@ -22,6 +22,7 @@ import {
 } from './callSounds';
 import { applyIncomingCallFullScreenIntent } from './incomingCallAndroidFullScreen';
 import { ensureIncomingCallNativeTapDebugListener } from './incomingCallAndroidTapDebug';
+import { getIncomingCallAndroidNativeModule } from '../modules/incoming-call-android';
 
 export type IncomingCallNotificationPayload = {
   callId: string;
@@ -64,6 +65,15 @@ let receiverIncomingCallUiEnabled = false;
 
 export function setReceiverIncomingCallUiEnabled(enabled: boolean): void {
   receiverIncomingCallUiEnabled = Boolean(enabled);
+  if (Platform.OS === 'android') {
+    try {
+      getIncomingCallAndroidNativeModule()?.setReceiverIncomingCallUiEnabled?.(
+        receiverIncomingCallUiEnabled
+      );
+    } catch {
+      // Native module may be unavailable before rebuild.
+    }
+  }
 }
 
 export function isReceiverIncomingCallUiEnabled(): boolean {
@@ -431,6 +441,12 @@ async function processNotificationResponse(
   const identifier = response.notification.request.identifier ?? '';
   const data = response.notification.request.content.data as Record<string, unknown> | undefined;
   if (data?.type === 'receiver_online' || data?.type === 'caller_online') {
+    return;
+  }
+  if (data?.type === 'call_incoming' && !receiverIncomingCallUiEnabled) {
+    const callId = typeof data.callId === 'string' ? data.callId.trim() : '';
+    if (callId) void dismissIncomingCallNotification(callId);
+    logIncomingCallNotif('response.caller_suppressed', { callId });
     return;
   }
 

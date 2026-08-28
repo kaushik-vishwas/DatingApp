@@ -7,6 +7,7 @@ import { sendOnlinePresencePush } from './expoPush';
 import { emitReceiverOnlineToCaller, isReceiverSocketConnected } from '../socket/socketRegistry';
 
 const RECENT_CALL_WINDOW_DAYS = 14;
+const USER_RECEIVER_COOLDOWN_MS = 30 * 60 * 1000;
 const GROUP_WINDOW_MS = 20 * 1000;
 
 type PendingUserBatch = {
@@ -115,6 +116,7 @@ function enqueueForUser(userId: string, receiverId: string, receiverName: string
 /**
  * Notify recent male callers only when a receiver is BOTH online and available.
  * - Limits targets to recent call history window (14 days)
+ * - 30m cooldown per caller+receiver (avoids spam on repeated go-online)
  * - Groups multiple receiver-online events in a short window per user
  * - Persists Alerts row + live socket + Expo push (foreground / background / closed)
  */
@@ -156,8 +158,15 @@ export async function scheduleReceiverAvailabilityNotifications(
   if (callers.length === 0) return;
 
   const receiverName = receiver.name?.trim() || 'A receiver';
+  const cooldownSince = new Date(Date.now() - USER_RECEIVER_COOLDOWN_MS);
 
   for (const caller of callers) {
+    const recentlyNotified = await ReceiverAvailabilityNotification.exists({
+      userId: caller._id,
+      receiverIds: rid,
+      createdAt: { $gte: cooldownSince },
+    });
+    if (recentlyNotified) continue;
     enqueueForUser(String(caller._id), receiverId, receiverName);
   }
 }

@@ -34,6 +34,7 @@ export type IncomingCallAndroidModule = {
   startIncomingRingtone(): boolean;
   stopIncomingRingtone(): boolean;
   isIncomingRingtonePlaying(): boolean;
+  setReceiverIncomingCallUiEnabled(enabled: boolean): boolean;
   requestIgnoreBatteryOptimizationsAsync(): Promise<{
     ok?: boolean;
     alreadyIgnoring?: boolean;
