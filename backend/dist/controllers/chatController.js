@@ -51,6 +51,8 @@ const ChatReadState_1 = __importDefault(require("../models/ChatReadState"));
 const UserReport_1 = __importStar(require("../models/UserReport"));
 const accountAccess_1 = require("../utils/accountAccess");
 const callerMessageEligibility_1 = require("../utils/callerMessageEligibility");
+const callerVisibleReceiver_1 = require("../utils/callerVisibleReceiver");
+const Receiver_1 = __importDefault(require("../models/Receiver"));
 const HISTORY_LIMIT = 200;
 function iso(d) {
     return d instanceof Date ? d.toISOString() : new Date(d).toISOString();
@@ -80,6 +82,11 @@ async function getMessages(req, res) {
                     message: 'Complete at least one successful call with this receiver before messaging.',
                     code: 'CALL_REQUIRED',
                 });
+                return;
+            }
+            const receiver = await Receiver_1.default.findById(receiverId).select('accountStatus suspended');
+            if (!(0, callerVisibleReceiver_1.isCallerVisibleReceiver)(receiver)) {
+                res.status(404).json({ message: 'Receiver is not available.' });
                 return;
             }
             const rows = await ChatMessage_1.default.find({ userId, receiverId })
@@ -150,6 +157,7 @@ async function listConversations(req, res) {
                 },
                 { $lookup: { from: 'receivers', localField: '_id', foreignField: '_id', as: 'r' } },
                 { $unwind: '$r' },
+                { $match: { 'r.suspended': { $ne: true }, 'r.accountStatus': 'approved' } },
                 {
                     $project: {
                         _id: 0,

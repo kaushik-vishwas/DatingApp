@@ -6,6 +6,8 @@ import ChatReadState from '../models/ChatReadState';
 import UserReport, { REPORT_REASONS, type ReportReason } from '../models/UserReport';
 import { blockCallerUntilApproved, blockReceiverUntilApproved } from '../utils/accountAccess';
 import { callerHasSuccessfulCallWithReceiver } from '../utils/callerMessageEligibility';
+import { isCallerVisibleReceiver } from '../utils/callerVisibleReceiver';
+import Receiver from '../models/Receiver';
 
 const HISTORY_LIMIT = 200;
 
@@ -38,6 +40,11 @@ export async function getMessages(req: Request, res: Response): Promise<void> {
           message: 'Complete at least one successful call with this receiver before messaging.',
           code: 'CALL_REQUIRED',
         });
+        return;
+      }
+      const receiver = await Receiver.findById(receiverId).select('accountStatus suspended');
+      if (!isCallerVisibleReceiver(receiver)) {
+        res.status(404).json({ message: 'Receiver is not available.' });
         return;
       }
       const rows = await ChatMessage.find({ userId, receiverId })
@@ -113,6 +120,7 @@ export async function listConversations(req: Request, res: Response): Promise<vo
         },
         { $lookup: { from: 'receivers', localField: '_id', foreignField: '_id', as: 'r' } },
         { $unwind: '$r' },
+        { $match: { 'r.suspended': { $ne: true }, 'r.accountStatus': 'approved' } },
         {
           $project: {
             _id: 0,

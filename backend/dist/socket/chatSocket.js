@@ -487,6 +487,13 @@ function attachChatSocket(httpServer) {
                         });
                         return;
                     }
+                    if (typ === 'u') {
+                        const peerRecv = await Receiver_1.default.findById(parsed.receiverId).select('accountStatus suspended');
+                        if (!peerRecv || peerRecv.accountStatus !== 'approved' || peerRecv.suspended) {
+                            ack?.({ ok: false, error: 'Receiver is not available' });
+                            return;
+                        }
+                    }
                     let doc;
                     const uidObj = new mongoose_1.default.Types.ObjectId(parsed.userId);
                     const ridObj = new mongoose_1.default.Types.ObjectId(parsed.receiverId);

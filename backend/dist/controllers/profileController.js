@@ -36,7 +36,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getCallerNotifications = exports.getReceiverCallerOnlineNotifications = exports.getCallerMessageEligibleReceivers = exports.deleteReceiverCallHistory = exports.deleteCallerCallHistory = exports.getCallerCallHistory = exports.getReceiverEarningsBreakdown = exports.verifyReceiverBankUpdateOtp = exports.sendReceiverBankUpdateOtp = exports.deleteReceiverAccount = exports.reopenRejectedReceiverKyc = exports.completeReceiverAudioOnboarding = exports.updateCallerExpoPushToken = exports.updateReceiverExpoPushToken = exports.receiverForegroundPresence = exports.receiverBackgroundPresence = exports.updateReceiverProfile = exports.notifyReceiverRecentUser = exports.getReceiverNotifyCandidates = exports.getCallerNotificationMessage = exports.getReceiverWelcomeMessage = exports.getReceiverCallInsights = exports.verifyReceiverWithdrawalOtpAndCreate = exports.sendReceiverWithdrawalOtp = exports.getReceiverWithdrawalOverview = exports.getReceiverWalletSummary = exports.updateCallerProfile = exports.completeCallerProfile = exports.saveReceiverUserAudio = exports.saveCallerUserAudio = exports.saveReceiverKycBankFinalize = exports.saveReceiverKycDocuments = exports.saveReceiverKycProfileInfo = exports.completeProfile = void 0;
+exports.getCallerNotifications = exports.getReceiverCallerOnlineNotifications = exports.getCallerMessageEligibleReceivers = exports.deleteReceiverCallHistory = exports.deleteCallerCallHistory = exports.getCallerCallHistory = exports.getReceiverEarningsBreakdown = exports.verifyReceiverBankUpdateOtp = exports.sendReceiverBankUpdateOtp = exports.deleteReceiverAccount = exports.reopenRejectedReceiverKyc = exports.completeReceiverAudioOnboarding = exports.updateCallerExpoPushToken = exports.clearReceiverPushTokens = exports.updateReceiverExpoPushToken = exports.receiverForegroundPresence = exports.receiverBackgroundPresence = exports.updateReceiverProfile = exports.notifyReceiverRecentUser = exports.getReceiverNotifyCandidates = exports.getCallerNotificationMessage = exports.getReceiverWelcomeMessage = exports.getReceiverCallInsights = exports.verifyReceiverWithdrawalOtpAndCreate = exports.sendReceiverWithdrawalOtp = exports.getReceiverWithdrawalOverview = exports.getReceiverWalletSummary = exports.updateCallerProfile = exports.completeCallerProfile = exports.saveReceiverUserAudio = exports.saveCallerUserAudio = exports.saveReceiverKycBankFinalize = exports.saveReceiverKycDocuments = exports.saveReceiverKycProfileInfo = exports.completeProfile = void 0;
 const mongoose_1 = __importDefault(require("mongoose"));
 const User_1 = __importDefault(require("../models/User"));
 const Receiver_1 = __importStar(require("../models/Receiver"));
@@ -66,6 +66,7 @@ const socketRegistry_2 = require("../socket/socketRegistry");
 const receiverWithdrawalFees_1 = require("../constants/receiverWithdrawalFees");
 const apiTraceLog_1 = require("../utils/apiTraceLog");
 const callerMessageEligibility_1 = require("../utils/callerMessageEligibility");
+const callerVisibleReceiver_1 = require("../utils/callerVisibleReceiver");
 const receiverPayoutDestination_1 = require("../utils/receiverPayoutDestination");
 const receiverPaymentDetails_1 = require("../utils/receiverPaymentDetails");
 const callController_1 = require("./callController");
@@ -2136,6 +2137,13 @@ const updateReceiverExpoPushToken = async (req, res) => {
             $set.expoPushToken = expoPushToken;
         if (fcmDeviceToken)
             $set.fcmDeviceToken = fcmDeviceToken;
+        // Same physical device re-used across accounts — drop stale tokens on other receivers.
+        if (fcmDeviceToken) {
+            await Receiver_1.default.updateMany({ fcmDeviceToken, _id: { $ne: receiverId } }, { $unset: { fcmDeviceToken: '' } });
+        }
+        if (expoPushToken) {
+            await Receiver_1.default.updateMany({ expoPushToken, _id: { $ne: receiverId } }, { $unset: { expoPushToken: '' } });
+        }
         await Receiver_1.default.updateOne({ _id: receiverId }, { $set });
         res.status(200).json({ ok: true });
     }
@@ -2146,6 +2154,26 @@ const updateReceiverExpoPushToken = async (req, res) => {
     }
 };
 exports.updateReceiverExpoPushToken = updateReceiverExpoPushToken;
+/**
+ * DELETE /profile/receiver/push-token — remove push tokens on logout / account switch.
+ */
+const clearReceiverPushTokens = async (req, res) => {
+    try {
+        if (req.accountKind !== 'receiver') {
+            res.status(403).json({ message: 'This endpoint is only for receiver accounts' });
+            return;
+        }
+        const receiverId = String(req.receiver._id);
+        await Receiver_1.default.updateOne({ _id: receiverId }, { $unset: { expoPushToken: '', fcmDeviceToken: '' } });
+        res.status(200).json({ ok: true });
+    }
+    catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error('clearReceiverPushTokens error:', msg);
+        res.status(500).json({ message: msg || 'Server error' });
+    }
+};
+exports.clearReceiverPushTokens = clearReceiverPushTokens;
 /**
  * PATCH /profile/caller/push-token — store Expo push token for receiver-online alerts.
  */
@@ -2751,10 +2779,14 @@ const getCallerCallHistory = async (req, res) => {
         const receiverIds = [...new Set(rows.map((r) => String(r.receiverId)))];
         const receivers = receiverIds.length === 0
             ? []
-            : await Receiver_1.default.find({ _id: { $in: receiverIds.map((id) => new mongoose_1.default.Types.ObjectId(id)) } })
+            : await Receiver_1.default.find({
+                _id: { $in: receiverIds.map((id) => new mongoose_1.default.Types.ObjectId(id)) },
+                ...callerVisibleReceiver_1.callerVisibleReceiverMongoFilter,
+            })
                 .select('_id name profileImage')
                 .lean();
         const byReceiver = new Map(receivers.map((r) => [String(r._id), r]));
+        const visibleRows = rows.filter((r) => byReceiver.has(String(r.receiverId)));
         const statusFor = (durationSec) => {
             const d = Math.max(0, Math.floor(Number(durationSec) || 0));
             if (d <= 0)
@@ -2764,7 +2796,7 @@ const getCallerCallHistory = async (req, res) => {
             return 'completed';
         };
         res.status(200).json({
-            calls: rows.map((r) => ({
+            calls: visibleRows.map((r) => ({
                 id: String(r._id),
                 receiverId: String(r.receiverId),
                 receiverName: byReceiver.get(String(r.receiverId))?.name ?? 'Receiver',
@@ -2887,8 +2919,16 @@ const getCallerMessageEligibleReceivers = async (req, res) => {
             status: 'completed',
             durationSec: { $gte: callerMessageEligibility_1.CALLER_MESSAGE_MIN_DURATION_SEC },
         });
+        const visible = receiverIds.length === 0
+            ? []
+            : await Receiver_1.default.find({
+                _id: { $in: receiverIds },
+                ...callerVisibleReceiver_1.callerVisibleReceiverMongoFilter,
+            })
+                .select('_id')
+                .lean();
         res.status(200).json({
-            receiverIds: receiverIds.map((id) => String(id)),
+            receiverIds: visible.map((r) => String(r._id)),
         });
     }
     catch (err) {

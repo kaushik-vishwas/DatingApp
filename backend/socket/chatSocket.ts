@@ -547,6 +547,13 @@ export function attachChatSocket(httpServer: HTTPServer): Server {
             });
             return;
           }
+          if (typ === 'u') {
+            const peerRecv = await Receiver.findById(parsed.receiverId).select('accountStatus suspended');
+            if (!peerRecv || peerRecv.accountStatus !== 'approved' || peerRecv.suspended) {
+              ack?.({ ok: false, error: 'Receiver is not available' });
+              return;
+            }
+          }
 
           let doc!: ChatMessageDocument;
 

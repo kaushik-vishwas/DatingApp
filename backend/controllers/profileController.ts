@@ -56,6 +56,9 @@ import {
 import { beginApiTrace, mongoErrCode, reuseOrCreateApiTrace } from '../utils/apiTraceLog';
 import { CALLER_MESSAGE_MIN_DURATION_SEC } from '../utils/callerMessageEligibility';
 import {
+  callerVisibleReceiverMongoFilter,
+} from '../utils/callerVisibleReceiver';
+import {
   inferReceiverPayoutMethod,
   resolveWithdrawalAccountHolderName,
 } from '../utils/receiverPayoutDestination';
@@ -2566,11 +2569,48 @@ export const updateReceiverExpoPushToken = async (req: Request, res: Response): 
     const $set: { expoPushToken?: string; fcmDeviceToken?: string } = {};
     if (expoPushToken) $set.expoPushToken = expoPushToken;
     if (fcmDeviceToken) $set.fcmDeviceToken = fcmDeviceToken;
+
+    // Same physical device re-used across accounts — drop stale tokens on other receivers.
+    if (fcmDeviceToken) {
+      await Receiver.updateMany(
+        { fcmDeviceToken, _id: { $ne: receiverId } },
+        { $unset: { fcmDeviceToken: '' } }
+      );
+    }
+    if (expoPushToken) {
+      await Receiver.updateMany(
+        { expoPushToken, _id: { $ne: receiverId } },
+        { $unset: { expoPushToken: '' } }
+      );
+    }
+
     await Receiver.updateOne({ _id: receiverId }, { $set });
     res.status(200).json({ ok: true });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error('updateReceiverExpoPushToken error:', msg);
+    res.status(500).json({ message: msg || 'Server error' });
+  }
+};
+
+/**
+ * DELETE /profile/receiver/push-token — remove push tokens on logout / account switch.
+ */
+export const clearReceiverPushTokens = async (req: Request, res: Response): Promise<void> => {
+  try {
+    if (req.accountKind !== 'receiver') {
+      res.status(403).json({ message: 'This endpoint is only for receiver accounts' });
+      return;
+    }
+    const receiverId = String(req.receiver!._id);
+    await Receiver.updateOne(
+      { _id: receiverId },
+      { $unset: { expoPushToken: '', fcmDeviceToken: '' } }
+    );
+    res.status(200).json({ ok: true });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error('clearReceiverPushTokens error:', msg);
     res.status(500).json({ message: msg || 'Server error' });
   }
 };
@@ -3285,10 +3325,14 @@ export const getCallerCallHistory = async (
     const receivers =
       receiverIds.length === 0
         ? []
-        : await Receiver.find({ _id: { $in: receiverIds.map((id) => new mongoose.Types.ObjectId(id)) } })
+        : await Receiver.find({
+            _id: { $in: receiverIds.map((id) => new mongoose.Types.ObjectId(id)) },
+            ...callerVisibleReceiverMongoFilter,
+          })
             .select('_id name profileImage')
             .lean<{ _id: mongoose.Types.ObjectId; name: string; profileImage?: string | null }[]>();
     const byReceiver = new Map(receivers.map((r) => [String(r._id), r]));
+    const visibleRows = rows.filter((r) => byReceiver.has(String(r.receiverId)));
 
     const statusFor = (durationSec: number): 'completed' | 'missed' | 'incomplete' => {
       const d = Math.max(0, Math.floor(Number(durationSec) || 0));
@@ -3298,7 +3342,7 @@ export const getCallerCallHistory = async (
     };
 
     res.status(200).json({
-      calls: rows.map((r) => ({
+      calls: visibleRows.map((r) => ({
         id: String(r._id),
         receiverId: String(r.receiverId),
         receiverName: byReceiver.get(String(r.receiverId))?.name ?? 'Receiver',
@@ -3440,8 +3484,17 @@ export const getCallerMessageEligibleReceivers = async (
       status: 'completed',
       durationSec: { $gte: CALLER_MESSAGE_MIN_DURATION_SEC },
     });
+    const visible =
+      receiverIds.length === 0
+        ? []
+        : await Receiver.find({
+            _id: { $in: receiverIds },
+            ...callerVisibleReceiverMongoFilter,
+          })
+            .select('_id')
+            .lean<{ _id: mongoose.Types.ObjectId }[]>();
     res.status(200).json({
-      receiverIds: receiverIds.map((id) => String(id)),
+      receiverIds: visible.map((r) => String(r._id)),
     });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);

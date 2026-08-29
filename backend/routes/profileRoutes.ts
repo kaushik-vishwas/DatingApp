@@ -17,6 +17,7 @@ import {
   receiverBackgroundPresence,
   receiverForegroundPresence,
   updateReceiverExpoPushToken,
+  clearReceiverPushTokens,
   updateCallerExpoPushToken,
   sendReceiverBankUpdateOtp,
   verifyReceiverBankUpdateOtp,
@@ -62,6 +63,7 @@ router.patch('/receiver', protect, updateReceiverProfile);
 router.post('/receiver/presence/background', protect, receiverBackgroundPresence);
 router.post('/receiver/presence/foreground', protect, receiverForegroundPresence);
 router.patch('/receiver/push-token', protect, updateReceiverExpoPushToken);
+router.delete('/receiver/push-token', protect, clearReceiverPushTokens);
 router.patch('/caller/push-token', protect, updateCallerExpoPushToken);
 router.post('/receiver/complete-audio-onboarding', protect, completeReceiverAudioOnboarding);
 router.post('/receiver/reopen-kyc', protect, reopenRejectedReceiverKyc);
