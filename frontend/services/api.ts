@@ -542,6 +542,8 @@ export const profileApi = {
   updateReceiverPushTokens: (payload: { expoPushToken?: string; fcmDeviceToken?: string }) =>
     api.patch<{ ok: boolean }>('/profile/receiver/push-token', payload),
 
+  clearReceiverPushTokens: () => api.delete<{ ok: boolean }>('/profile/receiver/push-token'),
+
   updateCallerExpoPushToken: (expoPushToken: string) =>
     api.patch<{ ok: boolean }>('/profile/caller/push-token', { expoPushToken }),
 

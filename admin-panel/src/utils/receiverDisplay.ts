@@ -24,6 +24,17 @@ export function formatINR(n: number): string {
   return `₹${safe.toLocaleString('en-IN', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`;
 }
 
+/** Receiver passed voice verification (persisted flag, with legacy fallback for older rows). */
+export function receiverVoiceVerificationSucceeded(receiver: {
+  voiceVerificationApproved?: boolean;
+  userAudio?: string | null;
+  accountStatus: string;
+}): boolean {
+  if (receiver.voiceVerificationApproved) return true;
+  const audio = String(receiver.userAudio ?? '').trim();
+  return receiver.accountStatus === 'approved' && /^https?:\/\//i.test(audio);
+}
+
 export function receiverIsLiveAvailable(r: {
   isLiveAvailable?: boolean;
   isAvailable?: boolean;

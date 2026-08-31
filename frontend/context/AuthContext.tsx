@@ -11,6 +11,7 @@ import React, {
 import { Alert } from 'react-native';
 import { io, type Socket } from 'socket.io-client';
 import { authApi, clearJwt, getJwt, getResolvedApiBaseUrl, profileApi } from '../services/api';
+import { teardownCallSession } from '../utils/callSessionTeardown';
 import { stopReceiverOnlineKeepAlive } from '../utils/receiverOnlineKeepAlive';
 import { markAuthWelcomeSeen } from '../services/authWelcomeStorage';
 import type { UserProfile } from '../types/user';
@@ -94,6 +95,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, []);
 
   const signIn = useCallback((jwt: string, initialUser?: UserProfile | null) => {
+    void teardownCallSession();
     callerHomeOfferLoginShowRef.current = true;
     if (initialUser) setUser(initialUser);
     setToken(jwt);
@@ -108,8 +110,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       } catch {
         // Best-effort: clear local session even if offline request fails.
       }
+      try {
+        await profileApi.clearReceiverPushTokens();
+      } catch {
+        // Best-effort: server may already be unreachable.
+      }
       stopReceiverOnlineKeepAlive();
     }
+    await teardownCallSession();
     await clearJwt();
     setToken(null);
     setUser(null);

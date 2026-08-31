@@ -957,6 +957,34 @@ export async function dismissIncomingCallNotification(callId?: string): Promise<
   }
 }
 
+/** Dismiss every presented incoming-call tray notification (logout / role switch). */
+export async function dismissAllIncomingCallNotifications(): Promise<void> {
+  notifiedCallIds.clear();
+  handledIncomingCallIds.clear();
+  pendingOpens.clear();
+  if (!canUseLocalNotifications()) return;
+  try {
+    const Notifications = await loadNotificationsModule();
+    if (!Notifications) return;
+    const presented = await Notifications.getPresentedNotificationsAsync();
+    await Promise.all(
+      presented
+        .map((n) => n.request.identifier)
+        .filter((id): id is string => typeof id === 'string' && id.startsWith(INCOMING_CALL_NOTIFICATION_ID_PREFIX))
+        .map((id) => Notifications.dismissNotificationAsync(id).catch(() => {}))
+    );
+    if (Platform.OS === 'android') {
+      try {
+        getIncomingCallAndroidNativeModule()?.stopIncomingRingtone?.();
+      } catch {
+        // ignore
+      }
+    }
+  } catch {
+    // ignore
+  }
+}
+
 export function clearIncomingCallNotificationDedupe(callId?: string): void {
   const id = callId?.trim();
   if (!id) {

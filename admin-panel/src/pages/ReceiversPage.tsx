@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Edit2, Eye, RefreshCw, Star, Trash2 } from 'lucide-react';
+import { Edit2, Eye, Mic, RefreshCw, Star, Trash2 } from 'lucide-react';
 import {
   deleteReceiverPermanently,
   fetchAllReceivers,
@@ -7,7 +7,14 @@ import {
 } from '../api/client';
 import { ReceiverDetailModal } from '../components/ReceiverDetailModal';
 import { ReceiverEditModal } from '../components/ReceiverEditModal';
-import { formatINR, receiverAvailabilityState, receiverIsLiveAvailable, receiverRatingDisplay, receiverCode } from '../utils/receiverDisplay';
+import {
+  formatINR,
+  receiverAvailabilityState,
+  receiverCode,
+  receiverIsLiveAvailable,
+  receiverRatingDisplay,
+  receiverVoiceVerificationSucceeded,
+} from '../utils/receiverDisplay';
 
 type Tab = 'all' | 'approved' | 'pending';
 
@@ -99,10 +106,12 @@ export function ReceiversPage() {
     const total = sorted.length;
     const pendingKyc = sorted.filter((r) => r.accountStatus === 'pending_review').length;
     let online = 0;
+    let voiceVerified = 0;
     let ratingWeightedSum = 0;
     let ratingWeightedN = 0;
     for (const r of sorted) {
       if (receiverIsLiveAvailable(r)) online += 1;
+      if (receiverVoiceVerificationSucceeded(r)) voiceVerified += 1;
       if (r.accountStatus === 'approved' && typeof r.ratingAvg === 'number' && (r.ratingCount ?? 0) > 0) {
         const count = r.ratingCount ?? 0;
         ratingWeightedSum += r.ratingAvg * count;
@@ -111,7 +120,7 @@ export function ReceiversPage() {
     }
     const avgRating =
       ratingWeightedN > 0 ? Math.round((ratingWeightedSum / ratingWeightedN) * 10) / 10 : null;
-    return { total, online, pendingKyc, avgRating };
+    return { total, online, pendingKyc, voiceVerified, avgRating };
   }, [sorted]);
 
   const tabCounts = useMemo(
@@ -148,7 +157,7 @@ export function ReceiversPage() {
         </div>
       ) : null}
 
-      <div className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
         <div className="rounded-2xl border border-neutral-200 bg-white p-5 shadow-sm">
           <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">Total Receivers</p>
           <p className="mt-2 text-3xl font-bold text-neutral-900">{stats.total}</p>
@@ -161,6 +170,14 @@ export function ReceiversPage() {
         <div className="rounded-2xl border border-neutral-200 bg-white p-5 shadow-sm">
           <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">Pending KYC</p>
           <p className="mt-2 text-3xl font-bold text-amber-600">{stats.pendingKyc}</p>
+        </div>
+        <div className="rounded-2xl border border-neutral-200 bg-white p-5 shadow-sm">
+          <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">Voice Verified</p>
+          <div className="mt-2 flex items-center gap-2">
+            <p className="text-3xl font-bold text-violet-600">{stats.voiceVerified}</p>
+            <Mic className="h-7 w-7 text-violet-500" />
+          </div>
+          <p className="mt-1 text-xs text-neutral-400">Passed voice verification</p>
         </div>
         <div className="rounded-2xl border border-neutral-200 bg-white p-5 shadow-sm">
           <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">Avg Rating</p>

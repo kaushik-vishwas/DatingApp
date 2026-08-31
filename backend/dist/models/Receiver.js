@@ -69,6 +69,7 @@ const receiverSchema = new mongoose_1.Schema({
     passwordHash: { type: String, default: null, select: false },
     audioCallRate: { type: Number, default: exports.RECEIVER_AUDIO_CALL_RATE_INR_PER_MIN },
     userAudio: { type: String, default: null },
+    voiceVerificationApproved: { type: Boolean, default: false },
     walletBalance: { type: Number, default: 0 },
     suspended: { type: Boolean, default: false },
     isAvailable: { type: Boolean, default: false },

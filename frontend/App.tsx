@@ -7,7 +7,7 @@ import { AuthProvider } from './context/AuthContext';
 import { CallSignalProvider } from './context/CallSignalContext';
 import { ChatInboxProvider } from './context/ChatInboxContext';
 import AppNavigator from './navigation/AppNavigator';
-import { ensureIncomingCallNotificationInfrastructure } from './utils/incomingCallNotifications';
+import { ensureIncomingCallNotificationInfrastructure, setReceiverIncomingCallUiEnabled } from './utils/incomingCallNotifications';
 import { ensureOnlinePresenceNotificationInfrastructure } from './utils/onlinePresenceNotifications';
 import {
   capturePendingReferralSilently,
@@ -16,6 +16,8 @@ import {
 
 export default function App() {
   useEffect(() => {
+    // Default off until CallSignalContext confirms signed-in receiver (prevents stale native FCM ring).
+    setReceiverIncomingCallUiEnabled(false);
     const stopIncoming = ensureIncomingCallNotificationInfrastructure();
     const stopOnline = ensureOnlinePresenceNotificationInfrastructure();
     return () => {

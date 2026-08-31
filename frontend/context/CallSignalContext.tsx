@@ -28,6 +28,7 @@ import {
   stopIncomingRingtonePlayback,
   stopOutboundRingtonePlayback,
 } from '../utils/callSounds';
+import { teardownCallSession } from '../utils/callSessionTeardown';
 import {
   bindIncomingCallNotificationHandlers,
   canNavigateToIncomingCall,
@@ -1545,6 +1546,7 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
   useEffect(() => {
     if (!isSignedIn || !user) {
+      void teardownCallSession();
       if (socketRef.current) {
         registerCallKeepaliveSocket('main_call_signal', null);
         detachSocketIoProbe('main_call_signal');
@@ -1872,7 +1874,8 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
           senderRole: payload.fromType === 'u' ? 'caller' : 'receiver',
           receiverRole: userRoleRef.current,
         });
-        clearIncomingCallNotificationDedupe(payload.callId);
+        // Mark handled so background pending-invite poll cannot re-ring the same callId.
+        void markIncomingCallHandled(payload.callId);
         if (!isCallHoldGuardActive()) {
           peerCallHoldHandlerRef.current?.(payload.callId, false);
           peerCallMuteHandlerRef.current?.(payload.callId, false);

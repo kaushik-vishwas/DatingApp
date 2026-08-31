@@ -68,6 +68,8 @@ export interface SafeUser {
   audioCallRate: number | null;
   /** Callers: voice sample URL for admin review; receivers: always null */
   userAudio: string | null;
+  /** Receivers only: passed automated voice-gender verification during onboarding. */
+  voiceVerificationApproved?: boolean;
   /** Receiver availability toggle (callers always `false`). */
   isAvailable: boolean;
   /** Runtime online presence from socket connection(s). */
@@ -295,6 +297,7 @@ export function toApiReceiver(receiver: ReceiverDocument): SafeUser {
       typeof r.walletBalance === 'number' && Number.isFinite(r.walletBalance) ? r.walletBalance : 0,
     audioCallRate: RECEIVER_AUDIO_CALL_RATE_INR_PER_MIN,
     userAudio: typeof r.userAudio === 'string' ? r.userAudio : null,
+    voiceVerificationApproved: Boolean(r.voiceVerificationApproved),
     isAvailable: Boolean(r.isAvailable),
     isOnline: Boolean(r.isOnline),
     rejectionReason: r.rejectionReason ?? null,

@@ -2296,6 +2296,7 @@ const completeReceiverAudioOnboarding = async (req, res) => {
         }
         const wasAvailable = Boolean(receiver.isAvailable);
         receiver.accountStatus = 'approved';
+        receiver.voiceVerificationApproved = true;
         await receiver.save();
         await (0, receiverPresence_1.syncReceiverPresenceInDatabase)(receiverId);
         const becameCallAvailable = !wasAvailable && Boolean(receiver.isAvailable);

@@ -38,6 +38,7 @@ object IncomingCallFcmPresenter {
 
     val appContext = context.applicationContext
     if (!IncomingCallUiGate.isReceiverUiEnabled(appContext)) {
+      IncomingCallRingtonePlayer.stop(appContext)
       Log.i(TAG, "Suppressed incoming call notification (receiver UI disabled)")
       return true
     }

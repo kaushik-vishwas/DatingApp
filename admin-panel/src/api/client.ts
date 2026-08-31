@@ -67,6 +67,7 @@ export type ReceiverRecord = {
   updatedAt: string;
   audioCallRate?: number | null;
   userAudio?: string | null;
+  voiceVerificationApproved?: boolean;
   walletBalance?: number;
   suspended?: boolean;
   isAvailable?: boolean;

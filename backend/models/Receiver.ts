@@ -42,6 +42,8 @@ export interface IReceiver {
   audioCallRate: number | null;
   /** HTTPS URL of voice sample captured during receiver onboarding. */
   userAudio: string | null;
+  /** True after receiver voice-gender verification passes in audio onboarding. */
+  voiceVerificationApproved: boolean;
   /** Earnings wallet in INR (e.g. per-message chat credits). */
   walletBalance: number;
   /** Admin moderation: blocks receiver app access when true (like caller `suspended`). */
@@ -135,6 +137,7 @@ const receiverSchema = new Schema<IReceiver>(
     passwordHash: { type: String, default: null, select: false },
     audioCallRate: { type: Number, default: RECEIVER_AUDIO_CALL_RATE_INR_PER_MIN },
     userAudio: { type: String, default: null },
+    voiceVerificationApproved: { type: Boolean, default: false },
     walletBalance: { type: Number, default: 0 },
     suspended: { type: Boolean, default: false },
     isAvailable: { type: Boolean, default: false },

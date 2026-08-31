@@ -2753,6 +2753,7 @@ export const completeReceiverAudioOnboarding = async (
     const wasAvailable = Boolean(receiver.isAvailable);
 
     receiver.accountStatus = 'approved';
+    receiver.voiceVerificationApproved = true;
     await receiver.save();
     await syncReceiverPresenceInDatabase(receiverId);
 
