@@ -444,9 +444,9 @@ export default function ReceiverHomeDashboard(): React.JSX.Element {
                 ]}
                 resizeMode="contain"
               />
-              <PresenceDiagnosticsTopBarButton
+              {/* <PresenceDiagnosticsTopBarButton
                 onPress={() => navigation.navigate('PresenceDiagnostics')}
-              />
+              /> */}
             </View>
             <View style={[styles.topRight, { gap: topBarMetrics.topRightGap }]}>
               {showScoreInTopBar ? (

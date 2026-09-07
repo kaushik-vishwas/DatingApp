@@ -3,6 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.ADMIN_NOTIFICATIONS_ROOM = void 0;
 exports.registerSocketIOServer = registerSocketIOServer;
 exports.isAccountSocketConnected = isAccountSocketConnected;
 exports.isReceiverSocketConnected = isReceiverSocketConnected;
@@ -17,6 +18,7 @@ exports.emitReceiverOnlineToCaller = emitReceiverOnlineToCaller;
 exports.emitCallTalkStarted = emitCallTalkStarted;
 exports.emitCallEndedToParticipants = emitCallEndedToParticipants;
 exports.emitReceiverWithdrawalUpdate = emitReceiverWithdrawalUpdate;
+exports.emitAdminWithdrawalRequested = emitAdminWithdrawalRequested;
 const mongoose_1 = __importDefault(require("mongoose"));
 let ioInstance = null;
 function registerSocketIOServer(io) {
@@ -137,4 +139,15 @@ function emitReceiverWithdrawalUpdate(accountId, payload) {
         ...payload,
         at: payload.at ?? new Date().toISOString(),
     });
+}
+exports.ADMIN_NOTIFICATIONS_ROOM = 'admin:notifications';
+/** Notify all connected admin panels of a new receiver withdrawal request. */
+function emitAdminWithdrawalRequested(payload) {
+    if (!ioInstance)
+        return;
+    const body = {
+        ...payload,
+        at: payload.at ?? new Date().toISOString(),
+    };
+    ioInstance.to(exports.ADMIN_NOTIFICATIONS_ROOM).emit('admin:withdrawal_requested', body);
 }

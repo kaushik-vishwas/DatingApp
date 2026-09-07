@@ -43,19 +43,19 @@ export const DEFAULT_DISCOVER_FILTERS: DiscoverFiltersState = {
 };
 
 /** Three-line filter glyph (purple), per design. */
-export function DiscoverFilterIcon(): React.JSX.Element {
+export function DiscoverFilterIcon({ color = PURPLE }: { color?: string }): React.JSX.Element {
   return (
     <View style={glyphStyles.wrap}>
-      <View style={[glyphStyles.bar, { width: '100%' }]} />
-      <View style={[glyphStyles.bar, { width: '68%' }]} />
-      <View style={[glyphStyles.bar, { width: '42%' }]} />
+      <View style={[glyphStyles.bar, { width: '100%', backgroundColor: color }]} />
+      <View style={[glyphStyles.bar, { width: '68%', backgroundColor: color }]} />
+      <View style={[glyphStyles.bar, { width: '42%', backgroundColor: color }]} />
     </View>
   );
 }
 
 const glyphStyles = StyleSheet.create({
   wrap: { width: 20, height: 16, justifyContent: 'space-between' },
-  bar: { height: 3, borderRadius: 2, backgroundColor: PURPLE, alignSelf: 'flex-start' },
+  bar: { height: 3, borderRadius: 2, alignSelf: 'flex-start' },
 });
 
 type Props = {

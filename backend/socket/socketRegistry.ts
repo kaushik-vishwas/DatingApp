@@ -152,7 +152,7 @@ export function emitReceiverWithdrawalUpdate(
   payload: {
     withdrawalId: string;
     amount: number;
-    payoutStatus: 'processing' | 'success' | 'failed';
+    payoutStatus: 'processing' | 'success' | 'failed' | 'none';
     message: string;
     at?: string;
   }
@@ -163,4 +163,26 @@ export function emitReceiverWithdrawalUpdate(
     ...payload,
     at: payload.at ?? new Date().toISOString(),
   });
+}
+
+export const ADMIN_NOTIFICATIONS_ROOM = 'admin:notifications';
+
+export type AdminWithdrawalRequestedPayload = {
+  withdrawalId: string;
+  amount: number;
+  payoutAmount: number;
+  receiverName: string;
+  payoutMethod: 'upi' | 'bank' | null;
+  message: string;
+  at: string;
+};
+
+/** Notify all connected admin panels of a new receiver withdrawal request. */
+export function emitAdminWithdrawalRequested(payload: Omit<AdminWithdrawalRequestedPayload, 'at'> & { at?: string }): void {
+  if (!ioInstance) return;
+  const body: AdminWithdrawalRequestedPayload = {
+    ...payload,
+    at: payload.at ?? new Date().toISOString(),
+  };
+  ioInstance.to(ADMIN_NOTIFICATIONS_ROOM).emit('admin:withdrawal_requested', body);
 }

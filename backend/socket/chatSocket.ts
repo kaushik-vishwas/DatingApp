@@ -9,7 +9,7 @@ import { callerHasSuccessfulCallWithReceiver } from '../utils/callerMessageEligi
 import User from '../models/User';
 import Receiver from '../models/Receiver';
 import { getPayloadSessionVersion, type AppJwtPayload } from '../utils/authToken';
-import { isReceiverSocketConnected, registerSocketIOServer } from './socketRegistry';
+import { ADMIN_NOTIFICATIONS_ROOM, isReceiverSocketConnected, registerSocketIOServer } from './socketRegistry';
 import { CHAT_TEXT_CHARGE_INR, CHAT_TEXT_EARN_INR } from '../constants/chatPricing';
 import { recordReceiverCallScore } from '../services/receiverScore';
 import { scheduleCallerOnlineNotifications } from '../services/callerOnlineNotifier';
@@ -233,14 +233,30 @@ export function attachChatSocket(httpServer: HTTPServer): Server {
           next(new Error('server misconfigured'));
           return;
         }
-        const decoded = jwt.verify(token, secret) as AppJwtPayload;
+        const decoded = jwt.verify(token, secret) as
+          | AppJwtPayload
+          | { adminId: string; typ: 'admin' };
+
+        if (decoded.typ === 'admin') {
+          const adminId = String((decoded as { adminId: string }).adminId ?? '').trim();
+          if (!adminId) {
+            next(new Error('invalid token'));
+            return;
+          }
+          socket.data.typ = 'admin';
+          socket.data.accountId = adminId;
+          next();
+          return;
+        }
+
         if (decoded.typ !== 'u' && decoded.typ !== 'r') {
           next(new Error('invalid token'));
           return;
         }
-        const tokenSv = getPayloadSessionVersion(decoded);
-        if (decoded.typ === 'u') {
-          const user = await User.findById(decoded.id).select('authSessionVersion');
+        const appDecoded = decoded as AppJwtPayload;
+        const tokenSv = getPayloadSessionVersion(appDecoded);
+        if (appDecoded.typ === 'u') {
+          const user = await User.findById(appDecoded.id).select('authSessionVersion');
           if (!user) {
             next(new Error('auth failed'));
             return;
@@ -251,7 +267,7 @@ export function attachChatSocket(httpServer: HTTPServer): Server {
             return;
           }
         } else {
-          const receiver = await Receiver.findById(decoded.id).select('authSessionVersion');
+          const receiver = await Receiver.findById(appDecoded.id).select('authSessionVersion');
           if (!receiver) {
             next(new Error('auth failed'));
             return;
@@ -262,8 +278,8 @@ export function attachChatSocket(httpServer: HTTPServer): Server {
             return;
           }
         }
-        socket.data.typ = decoded.typ;
-        socket.data.accountId = decoded.id;
+        socket.data.typ = appDecoded.typ;
+        socket.data.accountId = appDecoded.id;
         next();
       } catch {
         next(new Error('auth failed'));
@@ -272,8 +288,20 @@ export function attachChatSocket(httpServer: HTTPServer): Server {
   });
 
   io.on('connection', async (socket) => {
-    const socketType = socket.data.typ as AccountType;
+    const socketType = socket.data.typ as AccountType | 'admin';
     const socketAccountId = String(socket.data.accountId);
+
+    if (socketType === 'admin') {
+      try {
+        await socket.join(ADMIN_NOTIFICATIONS_ROOM);
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        console.error('socket join admin notifications room failed:', msg);
+        socket.disconnect(true);
+      }
+      return;
+    }
+
     const selfRoom = accountRoom(socketType, socketAccountId);
     // Socket.IO v4: join() is async; callers must not see an empty account room while DB already shows online.
     const hadActiveSocketBeforeJoin =

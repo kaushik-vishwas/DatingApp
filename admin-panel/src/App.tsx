@@ -1,5 +1,6 @@
 import { Navigate, Outlet, Route, Routes, useLocation } from 'react-router-dom';
 import { AdminAuthProvider, useAdminAuth } from './context/AdminAuthContext';
+import { AdminNotificationsProvider } from './context/AdminNotificationsContext';
 import { AdminLayout } from './components/AdminLayout';
 import { LoginPage } from './pages/LoginPage';
 import { OverviewPage } from './pages/OverviewPage';
@@ -40,7 +41,13 @@ function AppRoutes() {
     <Routes>
       <Route path="/login" element={<LoginPage />} />
       <Route element={<RequireAuth />}>
-        <Route element={<AdminLayout />}>
+        <Route
+          element={
+            <AdminNotificationsProvider>
+              <AdminLayout />
+            </AdminNotificationsProvider>
+          }
+        >
           <Route path="/" element={<Navigate to="/overview" replace />} />
           <Route path="/overview" element={<OverviewPage />} />
           <Route path="/users" element={<AppUsersPage />} />

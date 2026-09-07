@@ -1,4 +1,4 @@
-export const RECEIVER_MIN_WITHDRAWAL_INR = 200;
+export const RECEIVER_MIN_WITHDRAWAL_INR = 100;
 export const RECEIVER_WITHDRAWAL_PLATFORM_FEE_PERCENT = 5;
 
 function roundInr(n: number): number {

@@ -578,11 +578,20 @@ export type AdminWithdrawalRow = {
   withdrawalId: string;
   receiverName: string;
   amount: number;
-  /** RazorpayX destination: UPI (VPA) or legacy bank account */
+  platformFee?: number;
+  /** Net amount admin should transfer to the receiver */
+  payoutAmount?: number;
+  /** Destination: UPI (VPA) or bank account */
   payoutMethod?: AdminWithdrawalPayoutMethod;
   bankName: string;
   accountHolderName: string;
-  accountMasked: string;
+  /** @deprecated Prefer upiId / bankAccountNumber — masked values must not be used for payout */
+  accountMasked?: string;
+  /** Full UPI VPA for manual payout (admin only) */
+  upiId?: string | null;
+  bankAccountNumber?: string | null;
+  bankIfsc?: string | null;
+  bankAccountType?: string | null;
   createdAt: string;
   status: AdminWithdrawalStatus;
   payoutStatus?: 'processing' | 'success' | 'failed';

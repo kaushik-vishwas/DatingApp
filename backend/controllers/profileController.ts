@@ -37,7 +37,6 @@ import {
   type ExpectedVoiceGender,
 } from '../services/callerVoiceGenderVerifier';
 import { finalizeReceiverOnlineSession } from '../services/receiverScore';
-import { trackAndFinalizeRazorpayXPayout } from '../services/razorpayXPayoutService';
 import {
   assertSmsOtpValid,
   encodeStoredSmsOtp,
@@ -45,7 +44,7 @@ import {
   MessageCentralError,
 } from '../services/smsOtp';
 import { httpStatusForMessageCentral } from '../services/messageCentral';
-import { emitReceiverWithdrawalUpdate } from '../socket/socketRegistry';
+import { emitAdminWithdrawalRequested, emitReceiverWithdrawalUpdate } from '../socket/socketRegistry';
 import {
   computeReceiverWithdrawalBreakdown,
   isValidReceiverWithdrawalAmount,
@@ -1755,29 +1754,33 @@ export const verifyReceiverWithdrawalOtpAndCreate = async (
     pendingVerification.verifiedAt = new Date();
     pendingVerification.verificationCodeHash = null;
     pendingVerification.verificationExpiresAt = null;
-    pendingVerification.payoutStatus = 'processing';
+    pendingVerification.payoutStatus = 'none';
     pendingVerification.payoutId = null;
     pendingVerification.payoutUtr = null;
     pendingVerification.payoutError = null;
     pendingVerification.walletDebitedAt = null;
     pendingVerification.walletRefundedAt = null;
-    pendingVerification.payoutReferenceId = `wd_${String(pendingVerification._id).slice(-10)}`;
+    pendingVerification.payoutReferenceId = null;
     await pendingVerification.save();
 
     emitReceiverWithdrawalUpdate(rid, {
       withdrawalId: String(pendingVerification._id),
       amount: roundInr(resolveWithdrawalPayoutAmount(pendingVerification)),
-      payoutStatus: 'processing',
-      message: 'Please wait, payment is processing',
+      payoutStatus: 'none',
+      message: 'Withdrawal request submitted. Waiting for admin approval.',
     });
 
-    void trackAndFinalizeRazorpayXPayout(String(pendingVerification._id)).catch((e: unknown) => {
-      const msg = e instanceof Error ? e.message : String(e);
-      console.error('auto payout tracker error:', msg);
+    emitAdminWithdrawalRequested({
+      withdrawalId: String(pendingVerification._id),
+      amount: roundInr(pendingVerification.amount),
+      payoutAmount: roundInr(resolveWithdrawalPayoutAmount(pendingVerification)),
+      receiverName: String(receiver.name ?? 'Receiver'),
+      payoutMethod: pendingVerification.payoutMethod ?? null,
+      message: 'New withdrawal request awaiting review.',
     });
 
     res.status(200).json({
-      message: 'Please wait, payment is processing',
+      message: 'Withdrawal request submitted. Waiting for admin approval.',
       withdrawal: {
         id: String(pendingVerification._id),
         amount: roundInr(pendingVerification.amount),

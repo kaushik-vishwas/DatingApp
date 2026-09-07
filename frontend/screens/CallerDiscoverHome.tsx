@@ -59,7 +59,6 @@ const NOTICE_LEFT_BG = '#2f4a72';
 const NOTICE_RIGHT_BG = '#f7941d';
 const SHARE_BTN_GRADIENT_START = '#f472b6';
 const SHARE_BTN_GRADIENT_END = '#db2777';
-const SHARE_BTN_BORDER = 'rgba(255, 255, 255, 0.45)';
 const SHARE_BTN_TEXT = '#ffffff';
 const SHARE_BTN_ICON = '#ffffff';
 /** Discover list only — shorter than generic screen timeout so home does not spin too long. */
@@ -165,7 +164,7 @@ const DiscoverStickyTop = React.memo(function DiscoverStickyTop({
               ]}
               resizeMode="contain"
             />
-            <PresenceDiagnosticsTopBarButton onPress={onPresenceDiagnosticsPress} />
+            {/* <PresenceDiagnosticsTopBarButton onPress={onPresenceDiagnosticsPress} /> */}
           </View>
           <View style={[styles.topRight, { gap: topBarMetrics.topRightGap }]}>
             <TouchableOpacity
@@ -692,28 +691,30 @@ export default function CallerDiscoverHome(): React.JSX.Element {
         {showCallerNotification && callerNotification ? (
           <View style={styles.adminNoticeCard}>
             <View style={styles.adminNoticeLeft}>
-              <View style={styles.adminNoticeBtnWrap}>
+              <TouchableOpacity
+                onPress={onShareAppPress}
+                activeOpacity={0.82}
+                style={styles.adminNoticeBtnWrap}
+                accessibilityRole="button"
+                accessibilityLabel="Share app, get free talk"
+              >
                 <LinearGradient
                   colors={[SHARE_BTN_GRADIENT_START, SHARE_BTN_GRADIENT_END]}
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 1, y: 1 }}
+                  start={{ x: 0, y: 0.5 }}
+                  end={{ x: 1, y: 0.5 }}
                   style={styles.adminNoticeBtn}
                 >
-                  <TouchableOpacity
-                    onPress={onShareAppPress}
-                    activeOpacity={0.88}
-                    style={styles.adminNoticeBtnHit}
-                    accessibilityLabel="Share app and get free talk time"
-                  >
-                    <View style={styles.adminNoticeBtnContent}>
-                      <Ionicons name="share-social" size={17} color={SHARE_BTN_ICON} />
-                      <Text style={styles.adminNoticeBtnText} numberOfLines={2}>
-                        {'Share app &\nget free talk time'}
-                      </Text>
+                  <View style={styles.adminNoticeBtnContent}>
+                    <View style={styles.adminNoticeBtnIconWrap}>
+                      <Ionicons name="share-social" size={15} color={SHARE_BTN_ICON} />
                     </View>
-                  </TouchableOpacity>
+                    <Text style={styles.adminNoticeBtnText} numberOfLines={2}>
+                      {'Tab for free\ntalk time'}
+                    </Text>
+                    <Ionicons name="chevron-forward" size={15} color="rgba(255,255,255,0.9)" />
+                  </View>
                 </LinearGradient>
-              </View>
+              </TouchableOpacity>
             </View>
             {callerNotification.body?.trim() ? (
               <>
@@ -736,7 +737,7 @@ export default function CallerDiscoverHome(): React.JSX.Element {
             />
             <View style={styles.promoTextCol}>
               <Text style={styles.promoTitle} numberOfLines={1}>
-                Meet Someone New Here!
+                Meet Someone New !
               </Text>
               <View style={styles.promoRateBadge}>
                 <Text style={styles.promoRate}>₹5/min only</Text>
@@ -757,20 +758,24 @@ export default function CallerDiscoverHome(): React.JSX.Element {
             {CALLER_LANGUAGE_OPTIONS.map((l) => langChip(l, l))}
           </ScrollView>
           <TouchableOpacity
-            style={[styles.filterBarIconBtn, hasActiveSearch && styles.filterBarIconBtnActive]}
+            style={[
+              styles.filterBarIconBtn,
+              styles.filterBarSearchBtn,
+              hasActiveSearch && styles.filterBarSearchBtnActive,
+            ]}
             onPress={openSearchModal}
             activeOpacity={0.85}
             accessibilityLabel="Search receivers"
           >
-            <Ionicons name="search-outline" size={22} color={hasActiveSearch ? PURPLE : '#444'} />
+            <Ionicons name="search-outline" size={22} color="#fff" />
           </TouchableOpacity>
           <TouchableOpacity
-            style={styles.filterBarIconBtn}
+            style={[styles.filterBarIconBtn, styles.filterBarFilterBtn]}
             onPress={openFilterModal}
             activeOpacity={0.85}
             accessibilityLabel="Filter receivers"
           >
-            <DiscoverFilterIcon />
+            <DiscoverFilterIcon color="#fff" />
           </TouchableOpacity>
         </View>
 
@@ -872,7 +877,7 @@ export default function CallerDiscoverHome(): React.JSX.Element {
                 ]}
               >
                 <View style={styles.randomBtnContent}>
-                  <Ionicons name="call-outline" size={21} color="#fff" />
+                  <Ionicons name="call-outline" size={17} color="#fff" />
                   <Text style={styles.stickyRandomBtnText} numberOfLines={2}>
                     {randomCallMatchingVisible ? 'Please\nwait…' : 'Random\nCall'}
                   </Text>
@@ -1149,21 +1154,23 @@ const styles = StyleSheet.create({
     width: 44,
     height: 44,
     borderRadius: 12,
-    backgroundColor: '#fff',
-    borderWidth: 1,
-    borderColor: '#e8e8e8',
     alignItems: 'center',
     justifyContent: 'center',
     flexShrink: 0,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
+    shadowOpacity: 0.12,
     shadowRadius: 2,
-    elevation: 1,
+    elevation: 2,
   },
-  filterBarIconBtnActive: {
-    borderColor: PURPLE,
-    backgroundColor: 'rgba(123,44,255,0.08)',
+  filterBarSearchBtn: {
+    backgroundColor: '#B8326A',
+  },
+  filterBarSearchBtnActive: {
+    backgroundColor: '#A02458',
+  },
+  filterBarFilterBtn: {
+    backgroundColor: '#1A73E8',
   },
   langChip: {
     paddingHorizontal: 14,
@@ -1299,24 +1306,24 @@ const styles = StyleSheet.create({
   },
   stickyRandomHit: {
     alignSelf: 'center',
-    borderRadius: 40,
+    borderRadius: 32,
     overflow: 'hidden',
     shadowColor: '#e879f9',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.38,
-    shadowRadius: 8,
-    elevation: 8,
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.35,
+    shadowRadius: 6,
+    elevation: 7,
   },
   stickyRandomBtn: {
-    width: 78,
-    height: 78,
-    borderRadius: 39,
+    width: 64,
+    height: 64,
+    borderRadius: 32,
     alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: 2,
+    borderWidth: 1.5,
     borderColor: 'rgba(255, 255, 255, 0.88)',
-    paddingHorizontal: 8,
-    paddingVertical: 10,
+    paddingHorizontal: 6,
+    paddingVertical: 7,
   },
   stickyRandomBtnDisabled: {
     opacity: 0.75,
@@ -1324,16 +1331,16 @@ const styles = StyleSheet.create({
   stickyRandomBtnText: {
     color: '#fff',
     fontWeight: '800',
-    fontSize: 11,
+    fontSize: 9.5,
     letterSpacing: 0.1,
     textAlign: 'center',
-    lineHeight: 13,
+    lineHeight: 11,
   },
   randomBtnContent: {
     flexDirection: 'column',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 3,
+    gap: 2,
   },
   adminNoticeCard: {
     flexDirection: 'row',
@@ -1371,44 +1378,49 @@ const styles = StyleSheet.create({
   },
   adminNoticeBtnWrap: {
     width: '100%',
-    maxWidth: 182,
-    borderRadius: 22,
-    overflow: 'hidden',
-    shadowColor: '#9d174d',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.28,
-    shadowRadius: 3,
-    elevation: 3,
+    maxWidth: 168,
+    borderRadius: 14,
+    backgroundColor: SHARE_BTN_GRADIENT_END,
+    shadowColor: '#831843',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.4,
+    shadowRadius: 6,
+    elevation: 6,
   },
   adminNoticeBtn: {
     width: '100%',
-    minHeight: 44,
-    borderWidth: 1,
-    borderColor: SHARE_BTN_BORDER,
-    borderRadius: 22,
-    overflow: 'hidden',
-  },
-  adminNoticeBtnHit: {
-    width: '100%',
-    minHeight: 44,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
+    minHeight: 48,
+    borderRadius: 14,
+    borderWidth: 2,
+    borderColor: 'rgba(255, 255, 255, 0.55)',
+    paddingHorizontal: 5,
+    paddingVertical: 9,
     justifyContent: 'center',
   },
   adminNoticeBtnContent: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'flex-start',
-    gap: 6,
+    justifyContent: 'center',
+    gap: 4,
     width: '100%',
+  },
+  adminNoticeBtnIconWrap: {
+    width: 24,
+    height: 24,
+    borderRadius: 7,
+    backgroundColor: 'rgba(255, 255, 255, 0.22)',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   adminNoticeBtnText: {
     flex: 1,
     flexShrink: 1,
     color: SHARE_BTN_TEXT,
     fontWeight: '800',
-    fontSize: 12,
-    lineHeight: 15,
+    fontSize: 13,
+    lineHeight: 16,
+    letterSpacing: 0.15,
+    textAlign: 'left',
   },
   adminNoticeRight: {
     flex: 1,

@@ -187,13 +187,25 @@ function attachChatSocket(httpServer) {
                     return;
                 }
                 const decoded = jsonwebtoken_1.default.verify(token, secret);
+                if (decoded.typ === 'admin') {
+                    const adminId = String(decoded.adminId ?? '').trim();
+                    if (!adminId) {
+                        next(new Error('invalid token'));
+                        return;
+                    }
+                    socket.data.typ = 'admin';
+                    socket.data.accountId = adminId;
+                    next();
+                    return;
+                }
                 if (decoded.typ !== 'u' && decoded.typ !== 'r') {
                     next(new Error('invalid token'));
                     return;
                 }
-                const tokenSv = (0, authToken_1.getPayloadSessionVersion)(decoded);
-                if (decoded.typ === 'u') {
-                    const user = await User_1.default.findById(decoded.id).select('authSessionVersion');
+                const appDecoded = decoded;
+                const tokenSv = (0, authToken_1.getPayloadSessionVersion)(appDecoded);
+                if (appDecoded.typ === 'u') {
+                    const user = await User_1.default.findById(appDecoded.id).select('authSessionVersion');
                     if (!user) {
                         next(new Error('auth failed'));
                         return;
@@ -205,7 +217,7 @@ function attachChatSocket(httpServer) {
                     }
                 }
                 else {
-                    const receiver = await Receiver_1.default.findById(decoded.id).select('authSessionVersion');
+                    const receiver = await Receiver_1.default.findById(appDecoded.id).select('authSessionVersion');
                     if (!receiver) {
                         next(new Error('auth failed'));
                         return;
@@ -216,8 +228,8 @@ function attachChatSocket(httpServer) {
                         return;
                     }
                 }
-                socket.data.typ = decoded.typ;
-                socket.data.accountId = decoded.id;
+                socket.data.typ = appDecoded.typ;
+                socket.data.accountId = appDecoded.id;
                 next();
             }
             catch {
@@ -228,6 +240,17 @@ function attachChatSocket(httpServer) {
     io.on('connection', async (socket) => {
         const socketType = socket.data.typ;
         const socketAccountId = String(socket.data.accountId);
+        if (socketType === 'admin') {
+            try {
+                await socket.join(socketRegistry_1.ADMIN_NOTIFICATIONS_ROOM);
+            }
+            catch (e) {
+                const msg = e instanceof Error ? e.message : String(e);
+                console.error('socket join admin notifications room failed:', msg);
+                socket.disconnect(true);
+            }
+            return;
+        }
         const selfRoom = accountRoom(socketType, socketAccountId);
         // Socket.IO v4: join() is async; callers must not see an empty account room while DB already shows online.
         const hadActiveSocketBeforeJoin = (io.sockets.adapter.rooms.get(selfRoom)?.size ?? 0) > 0;

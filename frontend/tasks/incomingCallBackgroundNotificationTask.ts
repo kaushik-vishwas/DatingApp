@@ -1,4 +1,4 @@
-import * as Notifications from 'expo-notifications';
+import Constants from 'expo-constants';
 import * as TaskManager from 'expo-task-manager';
 import { Platform } from 'react-native';
 import {
@@ -12,8 +12,28 @@ import { logIncomingCallNotif } from '../utils/incomingCallNotificationDebug';
 export const INCOMING_CALL_BACKGROUND_NOTIFICATION_TASK =
   'INCOMING-CALL-BACKGROUND-NOTIFICATION-TASK';
 
+/**
+ * Expo Go on Android (SDK 53+) crashes if expo-notifications is loaded
+ * (remote push removed). Skip all notification task wiring in Expo Go.
+ */
+const skipExpoGoAndroidNotifications =
+  Constants.appOwnership === 'expo' && Platform.OS === 'android';
+
+type NotificationsModule = typeof import('expo-notifications');
+
+function loadNotifications(): NotificationsModule | null {
+  if (skipExpoGoAndroidNotifications) return null;
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    return require('expo-notifications') as NotificationsModule;
+  } catch {
+    return null;
+  }
+}
+
 function parseIncomingFromBackgroundTaskData(
-  data: Notifications.NotificationTaskPayload
+  Notifications: NotificationsModule,
+  data: NotificationsModule['NotificationTaskPayload']
 ): IncomingCallNotificationPayload | null {
   if ('actionIdentifier' in data) return null;
 
@@ -55,35 +75,40 @@ function parseIncomingFromBackgroundTaskData(
   return null;
 }
 
-TaskManager.defineTask<Notifications.NotificationTaskPayload>(
-  INCOMING_CALL_BACKGROUND_NOTIFICATION_TASK,
-  async ({ data, error }) => {
-    if (error) {
-      logIncomingCallNotif('bg_task.error', { message: String(error) });
-      return;
-    }
-    if (!data) return;
+const Notifications = loadNotifications();
 
-    if (!isReceiverIncomingCallUiEnabled()) {
-      logIncomingCallNotif('bg_task.skip', { reason: 'caller_ui_disabled' });
-      return;
-    }
+if (Notifications) {
+  TaskManager.defineTask<NotificationsModule['NotificationTaskPayload']>(
+    INCOMING_CALL_BACKGROUND_NOTIFICATION_TASK,
+    async ({ data, error }) => {
+      if (error) {
+        logIncomingCallNotif('bg_task.error', { message: String(error) });
+        return;
+      }
+      if (!data) return;
 
-    const incoming = parseIncomingFromBackgroundTaskData(data);
-    if (!incoming) {
-      logIncomingCallNotif('bg_task.skip', { reason: 'not_incoming_call' });
-      return;
-    }
+      if (!isReceiverIncomingCallUiEnabled()) {
+        logIncomingCallNotif('bg_task.skip', { reason: 'caller_ui_disabled' });
+        return;
+      }
 
-    logIncomingCallNotif('bg_task.incoming', { callId: incoming.callId });
-    await showIncomingCallNotification(incoming);
-  }
-);
+      const incoming = parseIncomingFromBackgroundTaskData(Notifications, data);
+      if (!incoming) {
+        logIncomingCallNotif('bg_task.skip', { reason: 'not_incoming_call' });
+        return;
+      }
+
+      logIncomingCallNotif('bg_task.incoming', { callId: incoming.callId });
+      await showIncomingCallNotification(incoming);
+    }
+  );
+}
 
 let registerPromise: Promise<void> | null = null;
 
 /** Register headless handler for killed/background data-only FCM (call once at startup). */
 export function registerIncomingCallBackgroundNotificationTask(): void {
+  if (skipExpoGoAndroidNotifications || !Notifications) return;
   if (registerPromise) return;
   registerPromise = (async () => {
     try {

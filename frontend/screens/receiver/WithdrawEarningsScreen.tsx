@@ -1,9 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   KeyboardAvoidingView,
+  Modal,
   Platform,
+  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -29,7 +30,8 @@ import {
 import { receiverPaymentDetailsComplete } from '../../utils/receiverPaymentDetails';
 
 type WithdrawNav = NativeStackNavigationProp<ReceiverStackParamList, 'WithdrawEarnings'>;
-type Step = 'amount' | 'otp' | 'processing' | 'success' | 'failed';
+type Step = 'amount' | 'otp' | 'pending' | 'processing' | 'success' | 'failed';
+type StatusModalStep = Extract<Step, 'pending' | 'processing' | 'success' | 'failed'>;
 
 function formatInr(n: number): string {
   return `₹${(Math.round(n * 100) / 100).toLocaleString('en-IN')}`;
@@ -39,6 +41,54 @@ function formatDate(iso: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;
   return new Intl.DateTimeFormat('en-IN', { dateStyle: 'medium', timeStyle: 'short' }).format(d);
+}
+
+function statusModalCopy(step: StatusModalStep): {
+  icon: string;
+  iconColor: string;
+  iconBg: string;
+  title: string;
+  subtitle: string;
+  cta?: string;
+} {
+  switch (step) {
+    case 'pending':
+      return {
+        icon: 'time-outline',
+        iconColor: '#B45309',
+        iconBg: '#FFF7ED',
+        title: 'Request submitted',
+        subtitle:
+          'Your withdrawal is pending admin review. Money will be sent to your account after approval.',
+        cta: 'Done',
+      };
+    case 'processing':
+      return {
+        icon: 'sync-outline',
+        iconColor: '#7b2cff',
+        iconBg: '#F5F0FF',
+        title: 'Processing…',
+        subtitle: 'Please wait while your payout is being processed.',
+      };
+    case 'success':
+      return {
+        icon: 'checkmark-circle',
+        iconColor: '#059669',
+        iconBg: '#ECFDF5',
+        title: 'Payment successful',
+        subtitle: 'The amount has been paid to your linked UPI or bank account.',
+        cta: 'Done',
+      };
+    case 'failed':
+      return {
+        icon: 'close-circle',
+        iconColor: '#DC2626',
+        iconBg: '#FEF2F2',
+        title: 'Withdrawal not completed',
+        subtitle: 'No money was deducted. You can try again or contact support if this continues.',
+        cta: 'Try again',
+      };
+  }
 }
 
 export default function WithdrawEarningsScreen(): React.JSX.Element {
@@ -52,6 +102,7 @@ export default function WithdrawEarningsScreen(): React.JSX.Element {
   const [otp, setOtp] = useState<string>('');
   const [step, setStep] = useState<Step>('amount');
   const [currentWithdrawalId, setCurrentWithdrawalId] = useState<string | null>(null);
+  const [statusMessage, setStatusMessage] = useState<string | null>(null);
 
   const loadOverview = useCallback(async (opts?: { silent?: boolean }) => {
     if (!opts?.silent) setLoading(true);
@@ -100,9 +151,18 @@ export default function WithdrawEarningsScreen(): React.JSX.Element {
     navigation.navigate('ReceiverBankDetails', { returnToWithdraw: true });
   }, [navigation]);
 
+  const resetFlow = useCallback(() => {
+    setStep('amount');
+    setAmount('');
+    setOtp('');
+    setCurrentWithdrawalId(null);
+    setStatusMessage(null);
+    setError(null);
+  }, []);
+
   const ensurePaymentReady = useCallback((): boolean => {
     if (!isPaymentComplete) {
-      Alert.alert('Payment details', 'Add payout details (UPI or bank account) to withdraw.');
+      setError('Add payout details (UPI or bank account) to withdraw.');
       navigation.navigate('ReceiverBankDetails', { returnToWithdraw: true });
       return false;
     }
@@ -113,11 +173,11 @@ export default function WithdrawEarningsScreen(): React.JSX.Element {
     if (!overview) return;
     if (!ensurePaymentReady()) return;
     if (!Number.isFinite(parsedAmount) || parsedAmount < minWithdrawalInr) {
-      Alert.alert('Invalid amount', `Minimum withdrawal is ${formatInr(minWithdrawalInr)}.`);
+      setError(`Minimum withdrawal is ${formatInr(minWithdrawalInr)}.`);
       return;
     }
     if (parsedAmount > overview.walletBalance) {
-      Alert.alert('Insufficient balance', 'Withdrawal amount is greater than your available wallet.');
+      setError('Withdrawal amount is greater than your available wallet.');
       return;
     }
 
@@ -136,18 +196,21 @@ export default function WithdrawEarningsScreen(): React.JSX.Element {
 
   const onVerifyOtp = async () => {
     if (!/^\d{6}$/.test(otp.trim())) {
-      Alert.alert('Invalid OTP', 'Please enter the 6-digit OTP sent to your mobile.');
+      setError('Please enter the 6-digit OTP sent to your mobile.');
       return;
     }
     setBusy(true);
     setError(null);
     try {
-      setStep('processing');
       const { data } = await profileApi.verifyReceiverWithdrawalOtp(otp.trim());
       setCurrentWithdrawalId(data.withdrawal.id);
       await loadOverview({ silent: true });
+      setStatusMessage('Your withdrawal is pending admin approval. Money will be sent after review.');
+      setStep('pending');
     } catch (e) {
-      setError(getErrorMessage(e));
+      const msg = getErrorMessage(e);
+      setError(msg);
+      setStatusMessage(msg);
       setStep('failed');
     } finally {
       setBusy(false);
@@ -164,13 +227,18 @@ export default function WithdrawEarningsScreen(): React.JSX.Element {
           if (cancelled) return;
           setOverview(data);
           const row = data.recent.find((r) => r.id === currentWithdrawalId);
-          if (!row?.payoutStatus) return;
-          if (row.payoutStatus === 'success') {
+          if (!row) return;
+          if (row.status === 'pending' && (!row.payoutStatus || row.payoutStatus === 'none')) {
+            setStatusMessage('Waiting for admin approval.');
+            setStep('pending');
+            return;
+          }
+          if (row.payoutStatus === 'success' || row.status === 'approved') {
+            setStatusMessage('Withdrawal has been paid to your account.');
             setStep('success');
-            Alert.alert('Payment successful', 'Withdrawal credited to your UPI.');
-          } else if (row.payoutStatus === 'failed') {
+          } else if (row.payoutStatus === 'failed' || row.status === 'rejected') {
+            setStatusMessage('Your withdrawal was not completed. Please try again or contact support.');
             setStep('failed');
-            Alert.alert('Payment failed', 'We could not send money to your UPI. No money was deducted.');
           }
         } catch {
           // keep polling on transient failures
@@ -197,17 +265,27 @@ export default function WithdrawEarningsScreen(): React.JSX.Element {
       });
       socket.on(
         'withdrawal:update',
-        (payload: { withdrawalId?: string; payoutStatus?: 'processing' | 'success' | 'failed' }) => {
+        (payload: {
+          withdrawalId?: string;
+          payoutStatus?: 'processing' | 'success' | 'failed' | 'none';
+          message?: string;
+        }) => {
           if (!payload?.withdrawalId) return;
           if (currentWithdrawalId && payload.withdrawalId !== currentWithdrawalId) return;
-          if (payload.payoutStatus === 'processing') {
+          if (payload.payoutStatus === 'none') {
+            setStatusMessage(payload.message || 'Waiting for admin approval.');
+            setStep('pending');
+          } else if (payload.payoutStatus === 'processing') {
+            setStatusMessage(payload.message || 'Payment is processing.');
             setStep('processing');
           } else if (payload.payoutStatus === 'success') {
+            setStatusMessage(payload.message || 'Withdrawal has been paid.');
             setStep('success');
-            Alert.alert('Payment successful', 'Withdrawal credited to your UPI.');
           } else if (payload.payoutStatus === 'failed') {
+            setStatusMessage(
+              payload.message || 'Your withdrawal was not completed. Please try again or contact support.'
+            );
             setStep('failed');
-            Alert.alert('Payment failed', 'We could not send money to your UPI. No money was deducted.');
           }
           void loadOverview({ silent: true });
         }
@@ -221,6 +299,11 @@ export default function WithdrawEarningsScreen(): React.JSX.Element {
       }
     };
   }, [currentWithdrawalId, loadOverview]);
+
+  const statusModalVisible =
+    step === 'pending' || step === 'processing' || step === 'success' || step === 'failed';
+  const statusCopy = statusModalVisible ? statusModalCopy(step) : null;
+  const modalAmount = withdrawalBreakdown?.netPayout ?? (parsedAmount > 0 ? parsedAmount : null);
 
   if (loading) {
     return (
@@ -242,9 +325,7 @@ export default function WithdrawEarningsScreen(): React.JSX.Element {
             <View style={{ width: 14 }} />
           </View>
 
-
           <View style={styles.centeredCard}>
-            {/* <Text style={styles.actionIcon}>⚠️</Text> */}
             <Text style={styles.centeredTitle}>Action Required</Text>
             <Text style={styles.centeredSubtitle}>
               Add your payout details to withdraw. Name as per Aadhaar and Aadhaar number are optional.
@@ -284,7 +365,7 @@ export default function WithdrawEarningsScreen(): React.JSX.Element {
             <View style={{ width: 14 }} />
           </View>
 
-          {error && <Text style={styles.error}>{error}</Text>}
+          {error ? <Text style={styles.error}>{error}</Text> : null}
 
           {overview ? (
             <>
@@ -308,7 +389,7 @@ export default function WithdrawEarningsScreen(): React.JSX.Element {
                   onChangeText={setAmount}
                   placeholder="0"
                   placeholderTextColor="#aaa"
-                  editable={!busy && step !== 'success' && step !== 'processing'}
+                  editable={!busy && !statusModalVisible}
                 />
               </View>
 
@@ -420,64 +501,6 @@ export default function WithdrawEarningsScreen(): React.JSX.Element {
                 </View>
               ) : null}
 
-              {step === 'processing' ? (
-                <View style={styles.successCard}>
-                  <ActivityIndicator size="large" color="#7b2cff" />
-                  <Text style={styles.successTitle}>Please wait...</Text>
-                  <Text style={styles.successSub}>Payment is processing.</Text>
-                </View>
-              ) : null}
-
-              {step === 'success' ? (
-                <View style={styles.successCard}>
-                  <Text style={styles.successTitle}>Payment Successful!</Text>
-                  <Text style={styles.successSub}>Amount credited to your UPI.</Text>
-                  <TouchableOpacity
-                    style={styles.primaryBtn}
-                    onPress={() => {
-                      setStep('amount');
-                      setAmount('');
-                      setOtp('');
-                      setCurrentWithdrawalId(null);
-                    }}
-                  >
-                    <LinearGradient
-                      colors={['#7F00FF', '#A855F7', '#E100FF']}
-                      start={{ x: 0, y: 0 }}
-                      end={{ x: 1, y: 0 }}
-                      style={styles.primaryBtnInner}
-                    >
-                      <Text style={styles.primaryText}>Go Back</Text>
-                    </LinearGradient>
-                  </TouchableOpacity>
-                </View>
-              ) : null}
-
-              {step === 'failed' ? (
-                <View style={styles.successCard}>
-                  <Text style={styles.successTitle}>Payment Failed</Text>
-                  <Text style={styles.successSub}>No money was deducted. Please try again.</Text>
-                  <TouchableOpacity
-                    style={styles.primaryBtn}
-                    onPress={() => {
-                      setStep('amount');
-                      setAmount('');
-                      setOtp('');
-                      setCurrentWithdrawalId(null);
-                    }}
-                  >
-                    <LinearGradient
-                      colors={['#7F00FF', '#A855F7', '#E100FF']}
-                      start={{ x: 0, y: 0 }}
-                      end={{ x: 1, y: 0 }}
-                      style={styles.primaryBtnInner}
-                    >
-                      <Text style={styles.primaryText}>Try Again</Text>
-                    </LinearGradient>
-                  </TouchableOpacity>
-                </View>
-              ) : null}
-
               <View style={styles.historyWrap}>
                 <Text style={styles.sectionLabel}>Recent Withdrawals</Text>
                 {overview.recent.length === 0 ? (
@@ -493,9 +516,13 @@ export default function WithdrawEarningsScreen(): React.JSX.Element {
                         </Text>
                       </View>
                       <Text style={styles.historyStatus}>
-                        {row.payoutStatus
-                          ? row.payoutStatus[0].toUpperCase() + row.payoutStatus.slice(1)
-                          : row.status}
+                        {row.status === 'pending'
+                          ? 'Pending'
+                          : row.status === 'rejected'
+                            ? 'Rejected'
+                            : row.payoutStatus
+                              ? row.payoutStatus[0].toUpperCase() + row.payoutStatus.slice(1)
+                              : row.status}
                       </Text>
                     </View>
                   ))
@@ -525,6 +552,46 @@ export default function WithdrawEarningsScreen(): React.JSX.Element {
           )}
         </ScrollView>
       </KeyboardAvoidingView>
+
+      <Modal visible={statusModalVisible} transparent animationType="fade" statusBarTranslucent>
+        <View style={styles.modalOverlay}>
+          <Pressable style={styles.modalBackdrop} onPress={step === 'processing' ? undefined : resetFlow} />
+          {statusCopy ? (
+            <View style={styles.modalCard}>
+              <View style={[styles.modalIconWrap, { backgroundColor: statusCopy.iconBg }]}>
+                {step === 'processing' ? (
+                  <ActivityIndicator size="large" color="#7b2cff" />
+                ) : (
+                  <Icon name={statusCopy.icon as 'time-outline'} size={40} color={statusCopy.iconColor} />
+                )}
+              </View>
+              <Text style={styles.modalTitle}>{statusCopy.title}</Text>
+              {modalAmount != null && step !== 'failed' ? (
+                <Text style={styles.modalAmount}>{formatInr(modalAmount)}</Text>
+              ) : null}
+              <Text style={styles.modalSubtitle}>{statusMessage || statusCopy.subtitle}</Text>
+              {statusCopy.cta ? (
+                <TouchableOpacity style={styles.modalCta} onPress={resetFlow} activeOpacity={0.85}>
+                  <LinearGradient
+                    colors={
+                      step === 'failed'
+                        ? ['#DC2626', '#EF4444']
+                        : step === 'success'
+                          ? ['#059669', '#10B981']
+                          : ['#7F00FF', '#A855F7', '#E100FF']
+                    }
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 0 }}
+                    style={styles.modalCtaInner}
+                  >
+                    <Text style={styles.modalCtaText}>{statusCopy.cta}</Text>
+                  </LinearGradient>
+                </TouchableOpacity>
+              ) : null}
+            </View>
+          ) : null}
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -536,7 +603,6 @@ const styles = StyleSheet.create({
   centered: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   centeredContainer: { flex: 1, backgroundColor: '#f7f7f8', padding: 16 },
   topRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 },
-  back: { fontSize: 24, color: '#111', fontWeight: '700', padding: 4 },
   title: { fontSize: 20, fontWeight: '800', color: '#111' },
   error: { color: '#b91c1c', fontSize: 12, fontWeight: '700', marginBottom: 10 },
   centeredCard: {
@@ -544,10 +610,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     paddingHorizontal: 24,
-  },
-  actionIcon: {
-    fontSize: 48,
-    marginBottom: 16,
   },
   centeredTitle: {
     fontSize: 22,
@@ -569,35 +631,12 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     minWidth: 200,
   },
-  actionButtonText: {
-    color: '#fff',
-    fontSize: 15,
-    fontWeight: '800',
-    textAlign: 'center',
-  },
-  infoCard: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#f0d8b0',
-    padding: 12,
-    marginBottom: 10,
-  },
-  infoTitle: { fontSize: 13, fontWeight: '800', color: '#7a4b00' },
-  infoText: { marginTop: 4, fontSize: 12, color: '#5f5f5f' },
-  infoBtn: {
-    marginTop: 10,
-    alignSelf: 'flex-start',
-    borderRadius: 8,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-  },
-  infoBtnText: { color: '#fff', fontSize: 13, fontWeight: '800', textAlign: 'center' },
+  actionButtonText: { color: '#fff', fontSize: 14, fontWeight: '800', textAlign: 'center' },
   balanceCard: {
-    backgroundColor: '#eb83da',
-    borderRadius: 14,
+    borderRadius: 16,
     padding: 16,
-    marginBottom: 12,
+    marginBottom: 8,
+    backgroundColor: '#7b2cff',
   },
   balanceLabel: { fontSize: 12, color: '#fff', opacity: 0.95, fontWeight: '700' },
   balanceAmount: { fontSize: 34, color: '#fff', fontWeight: '900', marginTop: 4 },
@@ -636,7 +675,6 @@ const styles = StyleSheet.create({
   },
   currency: { fontSize: 18, fontWeight: '700', color: '#222' },
   input: { flex: 1, fontSize: 22, color: '#111', paddingVertical: 10, marginLeft: 8, fontWeight: '700' },
-  deductNote: { fontSize: 11, color: '#777', marginTop: 6, textAlign: 'right' },
   quickRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 4 },
   quickBtn: {
     borderWidth: 1,
@@ -698,17 +736,6 @@ const styles = StyleSheet.create({
   },
   otpActions: { marginTop: 10, gap: 8 },
   resendText: { textAlign: 'center', color: '#7b2cff', fontSize: 12, fontWeight: '700' },
-  successCard: {
-    marginTop: 16,
-    padding: 16,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: '#e2d7ff',
-    backgroundColor: '#fff',
-    alignItems: 'center',
-  },
-  successTitle: { fontSize: 20, color: '#212121', fontWeight: '900' },
-  successSub: { marginTop: 6, fontSize: 12, color: '#6a6a6a' },
   historyWrap: { marginTop: 18 },
   emptyHistory: { color: '#777', fontSize: 12, marginTop: 4 },
   historyRow: {
@@ -747,4 +774,70 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
   },
   secondaryBtnText: { color: '#7b2cff', fontSize: 14, fontWeight: '800' },
+  modalOverlay: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 28,
+  },
+  modalBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(17, 17, 17, 0.45)',
+  },
+  modalCard: {
+    width: '100%',
+    maxWidth: 340,
+    borderRadius: 22,
+    backgroundColor: '#fff',
+    paddingHorizontal: 22,
+    paddingTop: 28,
+    paddingBottom: 20,
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOpacity: 0.18,
+    shadowRadius: 24,
+    shadowOffset: { width: 0, height: 10 },
+    elevation: 10,
+  },
+  modalIconWrap: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 14,
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: '900',
+    color: '#111',
+    textAlign: 'center',
+  },
+  modalAmount: {
+    marginTop: 8,
+    fontSize: 28,
+    fontWeight: '900',
+    color: '#7b2cff',
+    textAlign: 'center',
+  },
+  modalSubtitle: {
+    marginTop: 10,
+    fontSize: 13,
+    lineHeight: 19,
+    color: '#666',
+    textAlign: 'center',
+  },
+  modalCta: {
+    marginTop: 20,
+    alignSelf: 'stretch',
+    borderRadius: 12,
+    overflow: 'hidden',
+  },
+  modalCtaInner: {
+    minHeight: 46,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 16,
+  },
+  modalCtaText: { color: '#fff', fontSize: 15, fontWeight: '800' },
 });

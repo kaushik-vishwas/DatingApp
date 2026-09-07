@@ -5,7 +5,7 @@ exports.computeReceiverWithdrawalBreakdown = computeReceiverWithdrawalBreakdown;
 exports.isValidReceiverWithdrawalAmount = isValidReceiverWithdrawalAmount;
 exports.resolveWithdrawalPayoutAmount = resolveWithdrawalPayoutAmount;
 exports.resolveWithdrawalWalletDebitAmount = resolveWithdrawalWalletDebitAmount;
-exports.RECEIVER_MIN_WITHDRAWAL_INR = 200;
+exports.RECEIVER_MIN_WITHDRAWAL_INR = 100;
 /** Deducted from the requested withdrawal; remainder is paid to receiver UPI. */
 exports.RECEIVER_WITHDRAWAL_PLATFORM_FEE_PERCENT = 5;
 function roundInr(n) {

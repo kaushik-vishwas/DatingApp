@@ -9,6 +9,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
 
 import { resolveProfileImageSource } from '../../utils/avatarSource';
 
@@ -68,7 +69,13 @@ export default function RandomCallMatchingOverlay({
 
   return (
     <Modal visible={visible} animationType="fade" statusBarTranslucent onRequestClose={onCancel}>
-      <View style={styles.matchOverlay}>
+      <LinearGradient
+        colors={['#3b0764', '#1e3a5f', '#064e3b']}
+        locations={[0, 0.48, 1]}
+        start={{ x: 0.1, y: 0 }}
+        end={{ x: 0.9, y: 1 }}
+        style={styles.matchOverlay}
+      >
         <TouchableOpacity style={styles.cancelBtn} onPress={onCancel} activeOpacity={0.85}>
           <Text style={styles.cancelBtnText}>Cancel</Text>
         </TouchableOpacity>
@@ -148,7 +155,7 @@ export default function RandomCallMatchingOverlay({
           )}
           <Text style={styles.matchYouLabel}>You</Text>
         </View>
-      </View>
+      </LinearGradient>
     </Modal>
   );
 }
@@ -156,7 +163,6 @@ export default function RandomCallMatchingOverlay({
 const styles = StyleSheet.create({
   matchOverlay: {
     flex: 1,
-    backgroundColor: '#121018',
     paddingHorizontal: 24,
     paddingTop: Platform.OS === 'ios' ? 56 : 40,
     paddingBottom: 40,
@@ -168,8 +174,8 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     borderRadius: 20,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.35)',
-    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderColor: 'rgba(255,255,255,0.4)',
+    backgroundColor: 'rgba(255,255,255,0.12)',
   },
   cancelBtnText: {
     color: '#fff',
@@ -200,14 +206,14 @@ const styles = StyleSheet.create({
     marginTop: -52,
     borderRadius: 52,
     borderWidth: 2.5,
-    borderColor: 'rgba(174,140,255,0.9)',
+    borderColor: 'rgba(167, 243, 208, 0.75)',
     backgroundColor: 'transparent',
   },
   matchRippleCore: {
     width: 14,
     height: 14,
     borderRadius: 7,
-    backgroundColor: '#c4b5fd',
+    backgroundColor: '#a7f3d0',
     zIndex: 2,
   },
   matchTitle: {

@@ -60,7 +60,6 @@ const receiverPresence_1 = require("../services/receiverPresence");
 const callQueue_1 = require("../services/callQueue");
 const email_1 = require("../config/email");
 const superAdminSync_1 = require("../services/superAdminSync");
-const razorpayXPayoutService_1 = require("../services/razorpayXPayoutService");
 const otpBypass_1 = require("../utils/otpBypass");
 const socketRegistry_1 = require("../socket/socketRegistry");
 const authSessionService_1 = require("../services/authSessionService");
@@ -1739,9 +1738,9 @@ const listWithdrawals = async (req, res) => {
             .lean();
         const receiverIds = [...new Set(rows.map((row) => String(row.receiverId)))];
         const receivers = await Receiver_1.default.find({ _id: { $in: receiverIds } })
-            .select('_id name')
+            .select('_id name nameAsPerAadhaar upiId bankAccountHolderName bankAccountNumber bankIfsc bankName bankAccountType')
             .lean();
-        const receiverNameById = new Map(receivers.map((r) => [String(r._id), r.name]));
+        const receiverById = new Map(receivers.map((r) => [String(r._id), r]));
         res.status(200).json({
             stats: {
                 pendingCount,
@@ -1754,16 +1753,44 @@ const listWithdrawals = async (req, res) => {
                 processedTodayAmount,
             },
             rows: rows.map((row) => {
-                const isUpi = String(row.bankName ?? '').trim().toUpperCase() === 'UPI';
+                const receiver = receiverById.get(String(row.receiverId));
+                const upiId = String(receiver?.upiId ?? '').trim() || null;
+                const bankAccountNumber = String(receiver?.bankAccountNumber ?? '').trim() || null;
+                const bankIfsc = String(receiver?.bankIfsc ?? '').trim().toUpperCase() || null;
+                const bankAccountType = String(receiver?.bankAccountType ?? '').trim() || null;
+                const receiverBankName = String(receiver?.bankName ?? '').trim() || null;
+                const payoutMethod = row.payoutMethod === 'upi' || row.payoutMethod === 'bank'
+                    ? row.payoutMethod
+                    : upiId
+                        ? 'upi'
+                        : bankAccountNumber
+                            ? 'bank'
+                            : String(row.bankName ?? '').trim().toUpperCase() === 'UPI'
+                                ? 'upi'
+                                : 'bank';
+                const platformFee = Number(row.platformFee ?? 0);
+                const payoutAmount = typeof row.payoutAmount === 'number' && Number.isFinite(row.payoutAmount) && row.payoutAmount > 0
+                    ? row.payoutAmount
+                    : Math.max(0, Number(row.amount || 0) - platformFee);
                 return {
                     _id: String(row._id),
                     withdrawalId: `W-${String(row._id).slice(-6).toUpperCase()}`,
-                    receiverName: receiverNameById.get(String(row.receiverId)) ?? 'Receiver',
+                    receiverName: receiver?.name ?? 'Receiver',
                     amount: row.amount,
-                    payoutMethod: isUpi ? 'upi' : 'bank',
-                    bankName: row.bankName,
-                    accountHolderName: row.accountHolderName,
-                    accountMasked: row.accountMasked,
+                    platformFee,
+                    payoutAmount,
+                    payoutMethod,
+                    bankName: payoutMethod === 'upi' ? 'UPI' : receiverBankName || row.bankName || 'Bank',
+                    accountHolderName: row.accountHolderName ||
+                        receiver?.bankAccountHolderName ||
+                        receiver?.nameAsPerAadhaar ||
+                        receiver?.name ||
+                        '',
+                    // Full payout destination for admin (never use masked **** values for payment).
+                    upiId,
+                    bankAccountNumber,
+                    bankIfsc,
+                    bankAccountType,
                     createdAt: row.createdAt.toISOString(),
                     status: row.status,
                     payoutStatus: row.payoutStatus && row.payoutStatus !== 'none' ? row.payoutStatus : undefined,
@@ -1798,7 +1825,9 @@ const resolveWithdrawal = async (req, res) => {
             return;
         }
         const nextStatus = action === 'approve' ? 'approved' : 'rejected';
-        let payoutShouldStart = false;
+        let didMutate = false;
+        let notifyReceiverId = null;
+        let notifyAmount = 0;
         const session = await mongoose_1.default.startSession();
         try {
             await session.withTransaction(async () => {
@@ -1807,11 +1836,34 @@ const resolveWithdrawal = async (req, res) => {
                     // Throwing to escape transaction cleanly; handled below.
                     throw new Error('WithdrawalNotFound');
                 }
-                if (withdrawal.payoutStatus === 'processing' || withdrawal.payoutStatus === 'success') {
-                    throw new Error('WithdrawalAutoManaged');
+                if (withdrawal.payoutStatus === 'success') {
+                    throw new Error('WithdrawalAlreadyPaid');
                 }
                 const previousStatus = withdrawal.status;
+                // Already approved but still processing/failed from old auto-payout: allow manual mark-as-paid.
                 if (previousStatus === nextStatus) {
+                    if (nextStatus === 'approved') {
+                        withdrawal.payoutStatus = 'success';
+                        withdrawal.payoutError = null;
+                        withdrawal.walletRefundedAt = null;
+                        if (!withdrawal.payoutReferenceId) {
+                            withdrawal.payoutReferenceId = `manual_${String(withdrawal._id).slice(-10)}`;
+                        }
+                        withdrawal.reviewedAt = new Date();
+                        withdrawal.reviewedByAdminId = req.admin?._id
+                            ? new mongoose_1.default.Types.ObjectId(String(req.admin._id))
+                            : null;
+                        const note = String(req.body.note ?? '').trim();
+                        if (note)
+                            withdrawal.adminNote = note;
+                        await withdrawal.save();
+                        didMutate = true;
+                        notifyReceiverId = String(withdrawal.receiverId);
+                        notifyAmount =
+                            typeof withdrawal.payoutAmount === 'number' && Number.isFinite(withdrawal.payoutAmount)
+                                ? withdrawal.payoutAmount
+                                : Math.max(0, Number(withdrawal.amount ?? 0) - Number(withdrawal.platformFee ?? 0));
+                    }
                     return;
                 }
                 const receiver = await Receiver_1.default.findById(withdrawal.receiverId).session(session).select('walletBalance');
@@ -1823,6 +1875,9 @@ const resolveWithdrawal = async (req, res) => {
                     }
                     receiver.walletBalance = Math.round((receiver.walletBalance - withdrawal.amount) * 100) / 100;
                     await receiver.save();
+                    if (!withdrawal.walletDebitedAt) {
+                        withdrawal.walletDebitedAt = new Date();
+                    }
                 }
                 else if (previousStatus === 'rejected' && nextStatus === 'approved') {
                     if (receiver.walletBalance < withdrawal.amount) {
@@ -1830,6 +1885,9 @@ const resolveWithdrawal = async (req, res) => {
                     }
                     receiver.walletBalance = Math.round((receiver.walletBalance - withdrawal.amount) * 100) / 100;
                     await receiver.save();
+                    if (!withdrawal.walletDebitedAt) {
+                        withdrawal.walletDebitedAt = new Date();
+                    }
                 }
                 withdrawal.status = nextStatus;
                 withdrawal.reviewedAt = new Date();
@@ -1839,18 +1897,15 @@ const resolveWithdrawal = async (req, res) => {
                 const note = String(req.body.note ?? '').trim();
                 withdrawal.adminNote = note ? note : null;
                 if (nextStatus === 'approved') {
-                    // Start RazorpayX payout after admin approval.
-                    withdrawal.payoutStatus = 'processing';
-                    withdrawal.payoutId = null;
-                    withdrawal.payoutUtr = null;
+                    // Manual payout: admin pays outside the app (no RazorpayX).
+                    withdrawal.payoutStatus = 'success';
                     withdrawal.payoutError = null;
                     withdrawal.walletRefundedAt = null;
-                    // Stable per withdrawal record to avoid duplicate payout attempts.
-                    withdrawal.payoutReferenceId = `wd_${String(withdrawal._id).slice(-10)}`;
-                    payoutShouldStart = true;
+                    if (!withdrawal.payoutReferenceId) {
+                        withdrawal.payoutReferenceId = `manual_${String(withdrawal._id).slice(-10)}`;
+                    }
                 }
                 else if (previousStatus === 'pending' && nextStatus === 'rejected') {
-                    // Rejection from the initial request stage: clear payout fields.
                     withdrawal.payoutStatus = 'none';
                     withdrawal.payoutId = null;
                     withdrawal.payoutUtr = null;
@@ -1859,19 +1914,27 @@ const resolveWithdrawal = async (req, res) => {
                     withdrawal.payoutReferenceId = null;
                 }
                 await withdrawal.save();
+                didMutate = true;
+                notifyReceiverId = String(withdrawal.receiverId);
+                notifyAmount =
+                    typeof withdrawal.payoutAmount === 'number' && Number.isFinite(withdrawal.payoutAmount)
+                        ? withdrawal.payoutAmount
+                        : Math.max(0, Number(withdrawal.amount ?? 0) - Number(withdrawal.platformFee ?? 0));
             });
         }
         finally {
             await session.endSession();
         }
-        // Only start payout after DB is updated.
-        if (payoutShouldStart) {
-            void (0, razorpayXPayoutService_1.trackAndFinalizeRazorpayXPayout)(req.params.id).catch((e) => {
-                const msg = e instanceof Error ? e.message : String(e);
-                console.error('RazorpayX payout tracker error:', msg);
+        if (didMutate && notifyReceiverId) {
+            (0, socketRegistry_1.emitReceiverWithdrawalUpdate)(notifyReceiverId, {
+                withdrawalId: String(req.params.id),
+                amount: Math.round(notifyAmount * 100) / 100,
+                payoutStatus: nextStatus === 'approved' ? 'success' : 'failed',
+                message: nextStatus === 'approved'
+                    ? 'Withdrawal approved and marked as paid by admin.'
+                    : 'Withdrawal request was rejected by admin.',
             });
         }
-        // Transaction may throw for known errors; map them to responses.
         res.status(200).json({ ok: true });
     }
     catch (err) {
@@ -1888,11 +1951,11 @@ const resolveWithdrawal = async (req, res) => {
         if (msg === 'CannotApprove:InsufficientRefundBalance') {
             res
                 .status(400)
-                .json({ message: 'Cannot approve now: receiver wallet balance is lower than refund amount' });
+                .json({ message: 'Cannot approve now: receiver wallet balance is lower than withdrawal amount' });
             return;
         }
-        if (msg === 'WithdrawalAutoManaged') {
-            res.status(400).json({ message: 'This withdrawal is auto-managed by payout flow' });
+        if (msg === 'WithdrawalAlreadyPaid') {
+            res.status(400).json({ message: 'This withdrawal was already paid' });
             return;
         }
         res.status(500).json({ message: msg || 'Server error' });

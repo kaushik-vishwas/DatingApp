@@ -59,7 +59,6 @@ const receiverPresence_1 = require("../services/receiverPresence");
 const socketRegistry_1 = require("../socket/socketRegistry");
 const callerVoiceGenderVerifier_1 = require("../services/callerVoiceGenderVerifier");
 const receiverScore_1 = require("../services/receiverScore");
-const razorpayXPayoutService_1 = require("../services/razorpayXPayoutService");
 const smsOtp_1 = require("../services/smsOtp");
 const messageCentral_1 = require("../services/messageCentral");
 const socketRegistry_2 = require("../socket/socketRegistry");
@@ -1421,26 +1420,30 @@ const verifyReceiverWithdrawalOtpAndCreate = async (req, res) => {
         pendingVerification.verifiedAt = new Date();
         pendingVerification.verificationCodeHash = null;
         pendingVerification.verificationExpiresAt = null;
-        pendingVerification.payoutStatus = 'processing';
+        pendingVerification.payoutStatus = 'none';
         pendingVerification.payoutId = null;
         pendingVerification.payoutUtr = null;
         pendingVerification.payoutError = null;
         pendingVerification.walletDebitedAt = null;
         pendingVerification.walletRefundedAt = null;
-        pendingVerification.payoutReferenceId = `wd_${String(pendingVerification._id).slice(-10)}`;
+        pendingVerification.payoutReferenceId = null;
         await pendingVerification.save();
         (0, socketRegistry_2.emitReceiverWithdrawalUpdate)(rid, {
             withdrawalId: String(pendingVerification._id),
             amount: roundInr((0, receiverWithdrawalFees_1.resolveWithdrawalPayoutAmount)(pendingVerification)),
-            payoutStatus: 'processing',
-            message: 'Please wait, payment is processing',
+            payoutStatus: 'none',
+            message: 'Withdrawal request submitted. Waiting for admin approval.',
         });
-        void (0, razorpayXPayoutService_1.trackAndFinalizeRazorpayXPayout)(String(pendingVerification._id)).catch((e) => {
-            const msg = e instanceof Error ? e.message : String(e);
-            console.error('auto payout tracker error:', msg);
+        (0, socketRegistry_2.emitAdminWithdrawalRequested)({
+            withdrawalId: String(pendingVerification._id),
+            amount: roundInr(pendingVerification.amount),
+            payoutAmount: roundInr((0, receiverWithdrawalFees_1.resolveWithdrawalPayoutAmount)(pendingVerification)),
+            receiverName: String(receiver.name ?? 'Receiver'),
+            payoutMethod: pendingVerification.payoutMethod ?? null,
+            message: 'New withdrawal request awaiting review.',
         });
         res.status(200).json({
-            message: 'Please wait, payment is processing',
+            message: 'Withdrawal request submitted. Waiting for admin approval.',
             withdrawal: {
                 id: String(pendingVerification._id),
                 amount: roundInr(pendingVerification.amount),
