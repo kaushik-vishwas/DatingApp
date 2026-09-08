@@ -408,19 +408,15 @@ export default function ReceiverHomeDashboard(): React.JSX.Element {
     </View>
   );
 
-  const totalEarningsLifetime = useMemo(() => {
+  const availableBalance = useMemo(() => {
     if (!walletSummary) return 0;
     if (
-      typeof walletSummary.totalEarningsLifetime === 'number' &&
-      Number.isFinite(walletSummary.totalEarningsLifetime)
+      typeof walletSummary.withdrawableBalance === 'number' &&
+      Number.isFinite(walletSummary.withdrawableBalance)
     ) {
-      return walletSummary.totalEarningsLifetime;
+      return walletSummary.withdrawableBalance;
     }
-    const call =
-      typeof walletSummary.callEarningsLifetime === 'number' ? walletSummary.callEarningsLifetime : 0;
-    const chat =
-      typeof walletSummary.chatEarningsLifetime === 'number' ? walletSummary.chatEarningsLifetime : 0;
-    return call + chat;
+    return 0;
   }, [walletSummary]);
 
   return (
@@ -485,7 +481,7 @@ export default function ReceiverHomeDashboard(): React.JSX.Element {
                     adjustsFontSizeToFit
                     minimumFontScale={0.7}
                   >
-                    {formatInr(totalEarningsLifetime)}
+                    {formatInr(availableBalance)}
                   </Text>
                   {/* <View style={styles.plusIconWrapper}>
     <View style={styles.plusCircle}>

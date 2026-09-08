@@ -12,6 +12,12 @@ export type RazorpayNativeCheckoutResult =
   | { type: 'cancel' }
   | { type: 'error'; message: string };
 
+export type RazorpayCheckoutPrefill = {
+  name?: string | null;
+  contact?: string | null;
+  email?: string | null;
+};
+
 type RazorpaySuccess = {
   razorpay_payment_id?: string;
   razorpay_order_id?: string;
@@ -56,18 +62,38 @@ function loadRazorpayCheckout(): RazorpayCheckoutModule | null {
   }
 }
 
+/** Razorpay Checkout expects a 10-digit Indian mobile (no +91). */
+export function normalizeRazorpayContact(raw: string | null | undefined): string | null {
+  const digits = String(raw ?? '').replace(/\D/g, '');
+  if (digits.length === 10) return digits;
+  if (digits.length === 12 && digits.startsWith('91')) return digits.slice(2);
+  if (digits.length === 11 && digits.startsWith('0')) return digits.slice(1);
+  return null;
+}
+
 /**
  * Build Standard Checkout options for maximum instrument coverage.
  *
- * Notes:
- * - Do not pass a restrictive `method` filter — let Razorpay show everything enabled on the account.
- * - UPI QR is requested via config; Razorpay still hides QR on phone screens under ~485px
- *   (official limitation) and shows UPI apps / UPI ID instead — that is the correct mobile path.
- * - Never prefill phone/email; bad values can block instruments.
+ * Prefill contact/name from the logged-in caller so Razorpay does not ask for mobile every time.
+ * UPI Intent first so installed apps (GPay, PhonePe, Paytm, Amazon Pay, …) list and open on tap.
  */
 function buildCheckoutOptions(
   order: Pick<RazorpayOrderResponse, 'orderId' | 'amount' | 'currency' | 'keyId' | 'businessName'>,
+  prefill?: RazorpayCheckoutPrefill,
 ): Record<string, unknown> {
+  const contact = normalizeRazorpayContact(prefill?.contact);
+  const name = String(prefill?.name ?? '').trim();
+  const email = String(prefill?.email ?? '').trim();
+
+  const prefillPayload: Record<string, string> = {};
+  if (contact) prefillPayload.contact = contact;
+  if (name) prefillPayload.name = name;
+  if (email && email.includes('@')) prefillPayload.email = email;
+
+  const readonly: Record<string, boolean> = {};
+  if (contact) readonly.contact = true;
+  if (name) readonly.name = true;
+
   return {
     key: order.keyId,
     amount: order.amount,
@@ -78,26 +104,33 @@ function buildCheckoutOptions(
     theme: { color: '#7b2cff' },
     retry: { enabled: true, max_count: 4 },
     send_sms_hash: true,
-    remember_customer: false,
+    remember_customer: true,
+    ...(Object.keys(prefillPayload).length > 0 ? { prefill: prefillPayload } : {}),
+    ...(Object.keys(readonly).length > 0 ? { readonly } : {}),
     config: {
       display: {
-        // Highlight common methods first; keep Razorpay defaults for the rest.
         blocks: {
-          popular: {
-            name: 'Pay using',
+          upi_apps: {
+            name: 'Pay with UPI apps',
             instruments: [
               {
                 method: 'upi',
-                // intent = UPI apps (phones); collect = UPI ID; qr = shown only on wide screens
-                flows: ['intent', 'collect', 'qr'],
+                // intent = open GPay / PhonePe / Paytm / Amazon Pay / BHIM etc. directly
+                flows: ['intent'],
               },
+            ],
+          },
+          other: {
+            name: 'Other ways to pay',
+            instruments: [
+              { method: 'upi', flows: ['collect', 'qr'] },
               { method: 'card' },
               { method: 'netbanking' },
               { method: 'wallet' },
             ],
           },
         },
-        sequence: ['block.popular', 'upi', 'card', 'netbanking', 'wallet'],
+        sequence: ['block.upi_apps', 'block.other'],
         preferences: {
           show_default_blocks: true,
         },
@@ -112,6 +145,7 @@ function buildCheckoutOptions(
  */
 export async function openRazorpayWalletCheckoutInApp(
   order: Pick<RazorpayOrderResponse, 'orderId' | 'amount' | 'currency' | 'keyId' | 'businessName'>,
+  prefill?: RazorpayCheckoutPrefill,
 ): Promise<RazorpayNativeCheckoutResult> {
   const RazorpayCheckout = loadRazorpayCheckout();
   if (!RazorpayCheckout?.open) {
@@ -123,7 +157,7 @@ export async function openRazorpayWalletCheckoutInApp(
   }
 
   try {
-    const raw = (await RazorpayCheckout.open(buildCheckoutOptions(order))) as RazorpaySuccess;
+    const raw = (await RazorpayCheckout.open(buildCheckoutOptions(order, prefill))) as RazorpaySuccess;
 
     const paymentId = String(raw.razorpay_payment_id ?? '').trim();
     const orderId = String(raw.razorpay_order_id ?? '').trim();

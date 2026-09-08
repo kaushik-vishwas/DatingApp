@@ -12,6 +12,7 @@ import {
 
 import { getErrorMessage, walletApi } from '../../services/api';
 import type { WalletOfferRow } from '../../types/api';
+import { useAuth } from '../../context/AuthContext';
 import { logMetaWalletPurchase } from '../../utils/metaAppEvents';
 import { openRazorpayWalletCheckoutInApp } from '../../utils/openRazorpayWalletCheckout';
 import {
@@ -36,6 +37,7 @@ export default function InCallTalktimeRechargeModal({
   onClose,
   onRechargeSuccess,
 }: Props): React.JSX.Element {
+  const { user } = useAuth();
   const [offers, setOffers] = useState<WalletOfferRow[]>([]);
   const [loadingOffers, setLoadingOffers] = useState(false);
   const [selected, setSelected] = useState<WalletOfferRow | null>(null);
@@ -84,7 +86,10 @@ export default function InCallTalktimeRechargeModal({
         walletAmount: breakdown.walletAmount,
       });
 
-      const checkout = await openRazorpayWalletCheckoutInApp(data);
+      const checkout = await openRazorpayWalletCheckoutInApp(data, {
+        name: user?.name,
+        contact: user?.phone,
+      });
       if (checkout.type === 'cancel') {
         return;
       }

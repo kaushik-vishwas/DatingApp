@@ -156,15 +156,13 @@ export default function AppNavigator(): React.JSX.Element {
           ) : (
             <Stack.Screen name="UnderReview" component={UnderReviewScreen} />
           )
-        ) : !user.isVerified ||
-          accountStatus === 'pending_review' ||
-          accountStatus === 'rejected' ? (
+        ) : accountStatus === 'rejected' ? (
           <Stack.Screen name="UnderReview" component={UnderReviewScreen} />
         ) : (
           <Stack.Screen
             name="Home"
             children={() => {
-              if (accountStatus === 'approved') {
+              if (accountStatus === 'approved' || accountStatus === 'pending_review') {
                 return <ReceiverAppNavigator initialRouteName="ReceiverMainTabs" />;
               }
               if (accountStatus === 'pending_profile') {

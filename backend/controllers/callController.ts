@@ -720,6 +720,11 @@ export const syncVoiceSession = async (
     if (light) {
       const talkFields = callTalkApiFields(current as CallSessionDocument);
       const durationSec = callTalkDurationSec(current as CallTalkTimingFields);
+      // Receivers need caller wallet during light sync to show remaining talk time after both join.
+      const callerWalletBalanceInr =
+        accountKind === 'receiver'
+          ? await readCallerWalletBalanceInr(String(current.callerId))
+          : undefined;
       res.status(200).json({
         ok: true,
         durationSec,
@@ -728,6 +733,7 @@ export const syncVoiceSession = async (
         canRate: durationSec >= MISSED_OR_INCOMPLETE_MAX_SEC,
         status: current.status,
         callRatePerMinute: Math.max(0, Number(current.ratePerMinute) || 0),
+        ...(callerWalletBalanceInr !== undefined ? { callerWalletBalanceInr } : {}),
         ...talkFields,
       });
       return;

@@ -797,6 +797,7 @@ export const verifyOtp = async (
         const hasUserAudio = receiverDoc.userAudio && receiverDoc.userAudio.trim();
         if (hasName && hasProfileImage && hasUserAudio) {
           doc.accountStatus = 'approved';
+          (doc as ReceiverDocument).voiceVerificationApproved = true;
         }
       }
 

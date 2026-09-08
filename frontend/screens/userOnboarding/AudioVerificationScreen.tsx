@@ -61,8 +61,7 @@ export default function AudioVerificationScreen({ navigation }: Props): React.JS
 
       <Text style={styles.title}>Audio verification</Text>
       <Text style={styles.subtitle}>
-        Read the paragraph in your clear voice. We will automatically verify this voice sample with your selected
-        gender.
+        Read the paragraph in your clear voice. This sample is saved with your profile.
       </Text>
 
       <VoiceVerificationRecorder scriptText={CALLER_AUDIO_VERIFICATION_SCRIPT} onUploadComplete={onUploadComplete} />

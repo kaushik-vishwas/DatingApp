@@ -62,16 +62,6 @@ function activityIso(r: ReceiverRecord): string {
   return r.updatedAt || r.createdAt;
 }
 
-function idTypeLabel(u: ReceiverRecord): string {
-  const docUrls = (u.documents ?? []).filter((x): x is string => typeof x === 'string' && x.trim().length > 0);
-  const known = new Set([u.profileImage, u.aadhaarFront, u.aadhaarBack].filter(Boolean) as string[]);
-  const hasPanDoc = Boolean(u.panFront) || docUrls.some((url) => !known.has(url));
-  if ((u.aadhaarFront || u.aadhaarBack) && hasPanDoc) return 'Aadhaar + PAN';
-  if (u.aadhaarFront || u.aadhaarBack) return 'Aadhaar';
-  if (hasPanDoc) return 'PAN';
-  return '—';
-}
-
 export function KycApprovalsPage() {
   const [rows, setRows] = useState<ReceiverRecord[]>([]);
   const [loading, setLoading] = useState(true);
@@ -189,8 +179,7 @@ export function KycApprovalsPage() {
         <div>
           <h1 className="text-2xl font-bold text-neutral-900">KYC Approvals</h1>
           <p className="mt-1 text-sm text-neutral-500">
-            Review receiver KYC here. Pending app users with voice verification are approved under{' '}
-            <strong className="font-semibold text-neutral-700">User management</strong>.
+            Review receiver documents and voice samples here before approving access.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
@@ -286,7 +275,7 @@ export function KycApprovalsPage() {
                   <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-neutral-500">
                     Receiver name
                   </th>
-                  <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-neutral-500">ID type</th>
+                  <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-neutral-500">Audio</th>
                   <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-neutral-500">
                     Last activity
                   </th>
@@ -326,7 +315,13 @@ export function KycApprovalsPage() {
                     <tr key={r._id} className="border-b border-neutral-100 last:border-0">
                       <td className="px-4 py-3 font-mono text-xs font-medium text-neutral-800">{kycCode(i)}</td>
                       <td className="px-4 py-3 font-medium text-neutral-900">{r.name}</td>
-                      <td className="px-4 py-3 text-neutral-700">{idTypeLabel(r)}</td>
+                      <td className="px-4 py-3">
+                        {r.userAudio ? (
+                          <audio controls preload="none" src={r.userAudio} className="h-9 max-w-[220px]" />
+                        ) : (
+                          <span className="text-neutral-400">—</span>
+                        )}
+                      </td>
                       <td className="px-4 py-3 text-neutral-600">{formatSubmitted(activity)}</td>
                       <td className="px-4 py-3">
                         <div className="flex flex-wrap gap-1">

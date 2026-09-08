@@ -643,6 +643,7 @@ const verifyOtp = async (req, res) => {
                 const hasUserAudio = receiverDoc.userAudio && receiverDoc.userAudio.trim();
                 if (hasName && hasProfileImage && hasUserAudio) {
                     doc.accountStatus = 'approved';
+                    doc.voiceVerificationApproved = true;
                 }
             }
             await doc.save();

@@ -35,7 +35,7 @@ export default function PaymentMethodScreen({ navigation, route }: Props): React
     totalAmount,
     walletAmount,
   } = route.params;
-  const { refreshUser } = useAuth();
+  const { refreshUser, user } = useAuth();
   const [busy, setBusy] = useState(false);
 
   const onConfirm = async () => {
@@ -48,7 +48,10 @@ export default function PaymentMethodScreen({ navigation, route }: Props): React
         walletAmount,
       });
 
-      const checkout = await openRazorpayWalletCheckoutInApp(data);
+      const checkout = await openRazorpayWalletCheckoutInApp(data, {
+        name: user?.name,
+        contact: user?.phone,
+      });
       if (checkout.type === 'cancel') {
         return;
       }

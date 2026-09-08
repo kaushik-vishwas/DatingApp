@@ -1,6 +1,5 @@
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import axios from 'axios';
 import React, { useCallback, useState } from 'react';
 import {
   ActivityIndicator,
@@ -17,11 +16,9 @@ import { LinearGradient } from 'expo-linear-gradient';
 
 import VoiceVerificationRecorder from '../../components/VoiceVerificationRecorder';
 import OnboardingLogoutButton from '../../components/auth/OnboardingLogoutButton';
-import VoiceUploadDebugPanel from '../../components/VoiceUploadDebugPanel';
 import type { ReceiverStackParamList } from '../../navigation/ReceiverStackParamList';
 import { getErrorMessage, profileApi } from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
-import type { VoiceVerificationResult } from '../../types/api';
 import type { CloudinaryUploadDebugEntry } from '../../lib/cloudinary';
 
 type Nav = NativeStackNavigationProp<ReceiverStackParamList, 'ReceiverAutoVerification'>;
@@ -51,41 +48,14 @@ const LANGUAGE_TAB_LABELS: Record<(typeof AUDIO_VERIFICATION_LANGUAGES)[number],
 
 type Language = (typeof AUDIO_VERIFICATION_LANGUAGES)[number];
 
-function voiceVerificationFailureMessage(
-  apiMessage?: string,
-  result?: VoiceVerificationResult
-): string {
-  if (apiMessage?.trim()) return apiMessage.trim();
-  if (!result) {
-    return 'Your voice sample could not be verified. Please record again in a clear, natural voice.';
-  }
-  if (result.failureKind === 'gender_mismatch') {
-    return `Voice sounds like ${result.predictedGender}, but your profile gender is ${result.profileGender ?? 'unknown'}. Please record again or update your profile gender if it is wrong.`;
-  }
-  if (result.failureKind === 'low_confidence') {
-    return `Voice check was unclear (${Math.round(result.confidence * 100)}% confidence, need ${Math.round(result.threshold * 100)}%). Record again in a quiet place, speaking clearly for 8–12 seconds.`;
-  }
-  if (result.failureKind === 'misconfigured') {
-    return 'Voice verification is not configured on the server (HF_API_TOKEN missing).';
-  }
-  if (result.failureKind === 'service_unavailable') {
-    return result.reason || 'Voice verification service is unavailable. This is not a gender mismatch — the AI provider failed.';
-  }
-  if (result.reason?.includes('HF_API_TOKEN')) {
-    return 'Voice verification is temporarily unavailable. Please try again later or contact support.';
-  }
-  return result.reason || 'Voice verification failed. Please try again.';
-}
-
 export default function ReceiverAutoVerificationScreen(): React.JSX.Element {
   const navigation = useNavigation<Nav>();
   const { applyServerUser } = useAuth();
   const [selectedLanguage, setSelectedLanguage] = useState<Language>('english');
   const [userAudio, setUserAudio] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  const [uploadDebugLog, setUploadDebugLog] = useState<CloudinaryUploadDebugEntry[]>([]);
-  const [lastUploadError, setLastUploadError] = useState<string | null>(null);
-  const [lastVerification, setLastVerification] = useState<VoiceVerificationResult | null>(null);
+  const [, setUploadDebugLog] = useState<CloudinaryUploadDebugEntry[]>([]);
+  const [, setLastUploadError] = useState<string | null>(null);
 
   const appendUploadDebug = useCallback((entry: CloudinaryUploadDebugEntry) => {
     setUploadDebugLog((prev) => [...prev.slice(-24), entry]);
@@ -106,23 +76,9 @@ export default function ReceiverAutoVerificationScreen(): React.JSX.Element {
     try {
       const { data } = await profileApi.completeReceiverAudioOnboarding({ userAudio });
       applyServerUser(data.user);
-      setLastVerification(data.voiceVerification ?? null);
       navigation.replace('ReceiverMainTabs', { screen: 'ReceiverHome' });
     } catch (e: unknown) {
-      if (axios.isAxiosError(e) && e.response?.status === 422) {
-        const body = e.response.data as {
-          message?: string;
-          voiceVerification?: VoiceVerificationResult;
-        };
-        setLastVerification(body.voiceVerification ?? null);
-        setUserAudio(null);
-        Alert.alert(
-          'Verification failed',
-          voiceVerificationFailureMessage(body.message, body.voiceVerification)
-        );
-      } else {
-        Alert.alert('Could not continue', getErrorMessage(e));
-      }
+      Alert.alert('Could not continue', getErrorMessage(e));
     } finally {
       setSubmitting(false);
     }
@@ -143,8 +99,8 @@ export default function ReceiverAutoVerificationScreen(): React.JSX.Element {
 
         <Text style={styles.title}>Audio verification</Text>
         <Text style={styles.subTitle}>
-          Read the paragraph in your clear voice. We verify it matches the gender on your profile when
-          you continue.
+          Read the paragraph in a clear voice. When you continue, your sample is saved and you can open
+          the dashboard.
         </Text>
 
         <View style={styles.languageTabsContainer}>
@@ -184,17 +140,11 @@ export default function ReceiverAutoVerificationScreen(): React.JSX.Element {
             onUploadError={setLastUploadError}
           />
 
-          {/* <VoiceUploadDebugPanel
-            entries={uploadDebugLog}
-            lastError={lastUploadError}
-            verification={lastVerification}
-          /> */}
-
           {userAudio ? (
             <View style={styles.uploadedBadge}>
               <Icon name="check-circle" size={18} color="#059669" />
               <Text style={styles.uploadedText}>
-                Voice uploaded — tap Continue to verify and open the dashboard
+                Voice uploaded — tap Continue to open the dashboard
               </Text>
             </View>
           ) : null}

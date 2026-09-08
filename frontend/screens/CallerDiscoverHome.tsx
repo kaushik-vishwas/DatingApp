@@ -296,10 +296,16 @@ const DiscoverReceiverRow = React.memo(function DiscoverReceiverRow({
         </View>
         <View style={styles.infoSection}>
           <View style={styles.nameInterestWrapper}>
-            <Text style={styles.cardName} numberOfLines={1}>
-              {item.name}
-              {item.age != null ? `, ${item.age} Y` : ''}
-            </Text>
+            <View style={styles.nameAgeRow}>
+              <Text style={styles.cardName} numberOfLines={1}>
+                {item.name}
+              </Text>
+              {item.age != null ? (
+                <Text style={styles.cardAgeInline} numberOfLines={1}>
+                  {`, ${item.age}Y`}
+                </Text>
+              ) : null}
+            </View>
             <Text style={styles.cardInterests} numberOfLines={1}>
               {interestStr}
             </Text>
@@ -1164,10 +1170,10 @@ const styles = StyleSheet.create({
     elevation: 2,
   },
   filterBarSearchBtn: {
-    backgroundColor: '#B8326A',
+    backgroundColor: NOTICE_RIGHT_BG,
   },
   filterBarSearchBtnActive: {
-    backgroundColor: '#A02458',
+    backgroundColor: '#e08512',
   },
   filterBarFilterBtn: {
     backgroundColor: '#1A73E8',
@@ -1259,7 +1265,7 @@ const styles = StyleSheet.create({
   },
   promoTitle: {
     color: '#7b2cff',
-    fontSize: 14,
+    fontSize: 17,
     fontWeight: '800',
     letterSpacing: -0.2,
     textAlign: 'center',
@@ -1379,7 +1385,8 @@ const styles = StyleSheet.create({
   adminNoticeBtnWrap: {
     width: '100%',
     maxWidth: 168,
-    borderRadius: 14,
+    borderRadius: 999,
+    overflow: 'hidden',
     backgroundColor: SHARE_BTN_GRADIENT_END,
     shadowColor: '#831843',
     shadowOffset: { width: 0, height: 4 },
@@ -1390,10 +1397,10 @@ const styles = StyleSheet.create({
   adminNoticeBtn: {
     width: '100%',
     minHeight: 48,
-    borderRadius: 14,
+    borderRadius: 999,
     borderWidth: 2,
     borderColor: 'rgba(255, 255, 255, 0.55)',
-    paddingHorizontal: 5,
+    paddingHorizontal: 10,
     paddingVertical: 9,
     justifyContent: 'center',
   },
@@ -1407,7 +1414,7 @@ const styles = StyleSheet.create({
   adminNoticeBtnIconWrap: {
     width: 24,
     height: 24,
-    borderRadius: 7,
+    borderRadius: 12,
     backgroundColor: 'rgba(255, 255, 255, 0.22)',
     alignItems: 'center',
     justifyContent: 'center',
@@ -1557,17 +1564,25 @@ const styles = StyleSheet.create({
   },
 
   // Update cardName to allow flex
+  nameAgeRow: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    flexWrap: 'nowrap',
+    minWidth: 0,
+  },
   cardName: {
     fontSize: 15,
     fontWeight: '600',
     color: '#111',
-    flex: 1, // ADD THIS
+    flexShrink: 1,
   },
-
-  // Remove or comment out these styles (no longer needed):
-  // callButtonTopRight
-  // callButtonTopRightDisabled
-  // callButtonIcon (keep if not conflicting, but the inline one uses same name)
+  cardAgeInline: {
+    fontSize: 11,
+    color: '#666',
+    lineHeight: 14,
+    fontWeight: '400',
+    flexShrink: 0,
+  },
 
   // Keep all other existing styles unchanged
   cardInterests: {

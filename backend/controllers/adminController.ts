@@ -1499,6 +1499,7 @@ export const approveReceiver = async (req: Request<{ id: string }>, res: Respons
 
     receiver.accountStatus = 'approved';
     receiver.isVerified = true;
+    receiver.voiceVerificationApproved = true;
     receiver.suspended = false;
     receiver.rejectionReason = null;
     await receiver.save();
@@ -1539,6 +1540,7 @@ export const rejectReceiver = async (
 
     receiver.accountStatus = 'rejected';
     receiver.isVerified = false;
+    receiver.voiceVerificationApproved = false;
     receiver.suspended = true;
     receiver.rejectionReason = reason;
     await receiver.save();

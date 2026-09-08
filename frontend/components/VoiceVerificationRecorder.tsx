@@ -231,14 +231,14 @@ export default function VoiceVerificationRecorder({
 
   const ringStyle = (progress: Animated.Value) => ({
     opacity: progress.interpolate({
-      inputRange: [0, 0.15, 1],
-      outputRange: [0.45, 0.28, 0],
+      inputRange: [0, 0.2, 1],
+      outputRange: [0.55, 0.3, 0],
     }),
     transform: [
       {
         scale: progress.interpolate({
           inputRange: [0, 1],
-          outputRange: [1, 1.55],
+          outputRange: [1, 1.72],
         }),
       },
     ],
@@ -262,35 +262,37 @@ export default function VoiceVerificationRecorder({
       ) : null}
 
       <View style={styles.micSection}>
-        {isRecording ? (
-          <>
-            <Animated.View style={[styles.pulseRing, ringStyle(ring1)]} pointerEvents="none" />
-            <Animated.View style={[styles.pulseRing, ringStyle(ring2)]} pointerEvents="none" />
-          </>
-        ) : null}
+        <View style={styles.micStage}>
+          {isRecording ? (
+            <>
+              <Animated.View style={[styles.pulseRing, ringStyle(ring1)]} pointerEvents="none" />
+              <Animated.View style={[styles.pulseRing, ringStyle(ring2)]} pointerEvents="none" />
+            </>
+          ) : null}
 
-        <Animated.View style={isRecording ? { transform: [{ scale: breathe }] } : undefined}>
-          <TouchableOpacity
-            style={[styles.micCircle, isRecording && styles.micCircleLive]}
-            onPress={onMicPress}
-            activeOpacity={0.85}
-            disabled={busy}
-            accessibilityRole="button"
-            accessibilityLabel={hint}
-          >
-            {busy ? (
-              <ActivityIndicator color="#fff" />
-            ) : isRecording ? (
-              <View style={styles.stopGlyph} />
-            ) : (
-              <View style={styles.micGlyph}>
-                <View style={styles.micHead} />
-                <View style={styles.micStem} />
-                <View style={styles.micBase} />
-              </View>
-            )}
-          </TouchableOpacity>
-        </Animated.View>
+          <Animated.View style={isRecording ? { transform: [{ scale: breathe }] } : undefined}>
+            <TouchableOpacity
+              style={[styles.micCircle, isRecording && styles.micCircleLive]}
+              onPress={onMicPress}
+              activeOpacity={0.85}
+              disabled={busy}
+              accessibilityRole="button"
+              accessibilityLabel={hint}
+            >
+              {busy ? (
+                <ActivityIndicator color="#fff" />
+              ) : isRecording ? (
+                <View style={styles.stopGlyph} />
+              ) : (
+                <View style={styles.micGlyph}>
+                  <View style={styles.micHead} />
+                  <View style={styles.micStem} />
+                  <View style={styles.micBase} />
+                </View>
+              )}
+            </TouchableOpacity>
+          </Animated.View>
+        </View>
 
         {isRecording && !busy ? (
           <View style={styles.liveRow}>
@@ -315,6 +317,10 @@ export default function VoiceVerificationRecorder({
   );
 }
 
+const MIC_SIZE = 88;
+/** Room for expanding rings (~1.72×) around the button. */
+const STAGE_SIZE = Math.ceil(MIC_SIZE * 1.85);
+
 const styles = StyleSheet.create({
   scriptBox: {
     backgroundColor: '#f8f8f9',
@@ -335,23 +341,31 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     marginTop: 8,
-    minHeight: 200,
+    minHeight: STAGE_SIZE + 72,
+  },
+  micStage: {
+    width: STAGE_SIZE,
+    height: STAGE_SIZE,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   pulseRing: {
     position: 'absolute',
-    width: 88,
-    height: 88,
-    borderRadius: 44,
-    borderWidth: 1.5,
+    width: MIC_SIZE,
+    height: MIC_SIZE,
+    borderRadius: MIC_SIZE / 2,
+    borderWidth: 2,
     borderColor: PURPLE,
+    backgroundColor: 'rgba(123, 44, 255, 0.12)',
   },
   micCircle: {
-    width: 88,
-    height: 88,
-    borderRadius: 44,
+    width: MIC_SIZE,
+    height: MIC_SIZE,
+    borderRadius: MIC_SIZE / 2,
     backgroundColor: PURPLE,
     alignItems: 'center',
     justifyContent: 'center',
+    zIndex: 2,
   },
   micCircleLive: {
     backgroundColor: '#111',
@@ -391,7 +405,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    marginTop: 18,
+    marginTop: 4,
   },
   liveDot: {
     width: 6,

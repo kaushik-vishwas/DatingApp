@@ -860,21 +860,44 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
     callerWalletBalanceInr?: number;
     callRatePerMinute?: number;
   }): void => {
-    if (talkActiveRef.current) return;
+    const hadCallerWallet = sessionCallerWalletInrRef.current !== null;
+    let nextWallet = sessionCallerWalletInrRef.current;
+    let gotCallerWallet = false;
+
     if (
       typeof payload.callerWalletBalanceInr === 'number' &&
       Number.isFinite(payload.callerWalletBalanceInr)
     ) {
-      const nextWallet = Math.max(0, payload.callerWalletBalanceInr);
+      nextWallet = Math.max(0, payload.callerWalletBalanceInr);
       setSessionCallerWalletInr(nextWallet);
       sessionCallerWalletInrRef.current = nextWallet;
+      gotCallerWallet = true;
     }
     if (typeof payload.callRatePerMinute === 'number' && Number.isFinite(payload.callRatePerMinute)) {
       const nextRate = Math.max(0, payload.callRatePerMinute);
       setSessionCallRatePerMinute(nextRate);
       sessionCallRatePerMinuteRef.current = nextRate;
     }
-    snapRemainingTalkBudgetRef.current();
+
+    if (!talkActiveRef.current) {
+      snapRemainingTalkBudgetRef.current();
+      return;
+    }
+
+    // Talk already running: seed remaining countdown the first time we learn the caller's wallet
+    // (receivers have no local wallet; Stream can connect before session billing arrives).
+    if (!hadCallerWallet && gotCallerWallet && nextWallet !== null) {
+      const rate =
+        sessionCallRatePerMinuteRef.current ?? getReceiverChargeRatePerMinute(callParams);
+      if (rate > 0) {
+        const anchorMs = talkAnchorMsRef.current;
+        const elapsed =
+          anchorMs != null && Number.isFinite(anchorMs)
+            ? Math.max(0, Math.floor((Date.now() - anchorMs) / 1000))
+            : elapsedSecRef.current;
+        remainingTalkBudgetSecRef.current = Math.floor((nextWallet / rate) * 60) + elapsed;
+      }
+    }
   };
 
   const snapRemainingTalkBudgetRef = useRef<() => void>(() => {});
@@ -1876,20 +1899,19 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
         return false;
       }
       const started = applyTalkTimingFromServer(data);
-      if (!talkActiveRef.current) {
-        applySessionBillingFromServer(data);
-        if (
-          typeof data.receiverEarnedInr === 'number' &&
-          Number.isFinite(data.receiverEarnedInr) &&
-          data.receiverEarnedInr >= 0
-        ) {
-          setLiveSettledAmountInr((prev) =>
-            data.receiverEarnedInr > prev ? data.receiverEarnedInr : prev
-          );
-        }
-        if (user?.role === 'receiver') {
-          void refreshReceiverEarningMeta();
-        }
+      // Always apply billing — receivers need caller wallet even after talk starts.
+      applySessionBillingFromServer(data);
+      if (
+        typeof data.receiverEarnedInr === 'number' &&
+        Number.isFinite(data.receiverEarnedInr) &&
+        data.receiverEarnedInr >= 0
+      ) {
+        setLiveSettledAmountInr((prev) =>
+          data.receiverEarnedInr > prev ? data.receiverEarnedInr : prev
+        );
+      }
+      if (user?.role === 'receiver') {
+        void refreshReceiverEarningMeta();
       }
       return started;
     } catch {
@@ -2027,6 +2049,14 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
       if (timeoutId !== undefined) clearTimeout(timeoutId);
     };
   }, [ready, talkActive, streamBothConnected, updateElapsedFromAnchor]);
+
+  // Receiver: if talk connected before billing sync, pull caller wallet for remaining talk time UI.
+  useEffect(() => {
+    if (user?.role !== 'receiver') return;
+    if (!ready || !talkActive || !streamBothConnected) return;
+    if (sessionCallerWalletInr !== null) return;
+    void syncTalkTimingOnceRef.current();
+  }, [user?.role, ready, talkActive, streamBothConnected, sessionCallerWalletInr]);
 
   useEffect(() => {
     if (!ready || endingRef.current || talkActiveRef.current) return;

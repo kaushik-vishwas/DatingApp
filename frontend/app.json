@@ -3,7 +3,7 @@
     "name": "Selecto",
     "slug": "frontend",
     "scheme": "nestham",
-    "version": "1.0.28",
+    "version": "1.0.29",
     "orientation": "portrait",
     "icon": "./assets/installed-logo.png",
     "userInterfaceStyle": "light",
@@ -18,13 +18,38 @@
       "infoPlist": {
         "NSPhotoLibraryUsageDescription": "This app needs access to your photos to upload a profile picture and documents.",
         "NSCameraUsageDescription": "This app may use the camera for profile or document photos.",
-        "NSMicrophoneUsageDescription": "This app needs the microphone to record your voice verification."
+        "NSMicrophoneUsageDescription": "This app needs the microphone to record your voice verification.",
+        "LSApplicationQueriesSchemes": [
+          "tez",
+          "phonepe",
+          "paytmmp",
+          "credpay",
+          "mobikwik",
+          "in.fampay.app",
+          "bhim",
+          "amazonpay",
+          "navi",
+          "kiwi",
+          "payzapp",
+          "jupiter",
+          "omnicard",
+          "icici",
+          "popclubapp",
+          "sbiyono",
+          "myjio",
+          "slice-upi",
+          "bobupi",
+          "shriramone",
+          "indusmobile",
+          "whatsapp",
+          "kotakbank"
+        ]
       }
     },
     "android": {
       "package": "com.selecto.app",
       "googleServicesFile": "./google-services.json",
-      "versionCode": 28,
+      "versionCode": 29,
       "permissions": [
         "android.permission.RECORD_AUDIO",
         "android.permission.USE_FULL_SCREEN_INTENT",
@@ -78,7 +103,8 @@
           "sounds": ["./assets/sounds/receiver_ringtone.mp3"]
         }
       ],
-      "./plugins/withIncomingCallFcm.js"
+      "./plugins/withIncomingCallFcm.js",
+      "./plugins/withRazorpayUpiIntent.js"
     ],
     "web": {
       "favicon": "./assets/SelectoLogo.png"

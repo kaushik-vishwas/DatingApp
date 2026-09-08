@@ -59,7 +59,7 @@ function statusModalCopy(step: StatusModalStep): {
         iconBg: '#FFF7ED',
         title: 'Request submitted',
         subtitle:
-          'Your withdrawal is pending admin review. Money will be sent to your account after approval.',
+          'Withdrawal request received. The amount will be credited to your account shortly',
         cta: 'Done',
       };
     case 'processing':
@@ -180,6 +180,18 @@ export default function WithdrawEarningsScreen(): React.JSX.Element {
       setError('Withdrawal amount is greater than your available wallet.');
       return;
     }
+    const requestable = Math.max(
+      0,
+      Math.round((overview.walletBalance - (overview.pendingAmount || 0)) * 100) / 100
+    );
+    if (parsedAmount > requestable) {
+      setError(
+        overview.pendingAmount > 0
+          ? 'You already have a pending withdrawal. Wait until it is paid or rejected before requesting more.'
+          : 'Withdrawal amount is greater than your available wallet.'
+      );
+      return;
+    }
 
     setBusy(true);
     setError(null);
@@ -205,7 +217,7 @@ export default function WithdrawEarningsScreen(): React.JSX.Element {
       const { data } = await profileApi.verifyReceiverWithdrawalOtp(otp.trim());
       setCurrentWithdrawalId(data.withdrawal.id);
       await loadOverview({ silent: true });
-      setStatusMessage('Your withdrawal is pending admin approval. Money will be sent after review.');
+      setStatusMessage('Withdrawal request received. The amount will be credited to your account shortly.');
       setStep('pending');
     } catch (e) {
       const msg = getErrorMessage(e);

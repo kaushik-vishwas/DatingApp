@@ -374,8 +374,11 @@ export interface CallerNotificationResponse {
 }
 
 export interface ReceiverWalletSummaryResponse {
-  /** Withdrawable balance (e.g. chat message credits credited to wallet). */
+  /** Raw chat/credits wallet field on the receiver document. */
   walletBalance: number;
+  /** Same as Withdraw screen “Available Balance” (earnings − paid; pending does not reduce this). */
+  withdrawableBalance?: number;
+  pendingWithdrawalAmount?: number;
   /** Paid chat (and same rules as billing) since local midnight on the server. */
   chatToday: number;
   /** Same, since the first day of this calendar month (server local). */

@@ -44,6 +44,20 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
+/** Prefer backend `{ message }` over generic Axios "Request failed with status code …". */
+export function getApiErrorMessage(e: unknown, fallback = 'Request failed'): string {
+  if (axios.isAxiosError(e)) {
+    const data = e.response?.data as { message?: unknown; error?: unknown } | undefined;
+    const fromMessage = typeof data?.message === 'string' ? data.message.trim() : '';
+    if (fromMessage) return fromMessage;
+    const fromError = typeof data?.error === 'string' ? data.error.trim() : '';
+    if (fromError) return fromError;
+    if (e.message?.trim()) return e.message.trim();
+  }
+  if (e instanceof Error && e.message.trim()) return e.message.trim();
+  return fallback;
+}
+
 /** ================= TYPES ================= */
 
 export type ReceiverRecord = {

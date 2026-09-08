@@ -210,17 +210,6 @@ const start = async (): Promise<void> => {
     await dropLegacyEmailIndexes();
     await syncSuperAdminFromEnv();
 
-    try {
-      const { warmVoiceGenderWorkerInBackground } = await import(
-        './services/voiceGenderLocalClassifier'
-      );
-      void warmVoiceGenderWorkerInBackground().catch((err) => {
-        console.warn('[voice-gender-worker] warmup failed:', err);
-      });
-    } catch (err) {
-      console.warn('[voice-gender] worker bootstrap check failed:', err);
-    }
-
     void verifyEmailConfig().then((r) => {
       if (!r.ok && !otpBypassEnabled()) {
         console.warn('[email] OTP mail may fail until SMTP is fixed:', r.error);

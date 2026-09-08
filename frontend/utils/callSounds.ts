@@ -219,22 +219,9 @@ export async function startOutgoingCallTone(): Promise<() => Promise<void>> {
 export async function startRandomMatchingTone(): Promise<() => Promise<void>> {
   await ensureAudioMode();
   const sound = new Audio.Sound();
-  await sound.loadAsync({ uri: OUTGOING_BEEP_URL }, { shouldPlay: false, isLooping: false, volume: 0.38 });
-
-  let disposed = false;
-  void (async () => {
-    while (!disposed) {
-      try {
-        await sound.replayAsync();
-      } catch {
-        break;
-      }
-      await wait(950);
-    }
-  })();
+  await sound.loadAsync(CALLER_RINGTONE, { shouldPlay: true, isLooping: true, volume: 0.85 });
 
   return async () => {
-    disposed = true;
     try {
       await sound.stopAsync();
     } catch {

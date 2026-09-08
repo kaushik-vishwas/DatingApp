@@ -2,6 +2,7 @@ import { Check, Copy } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   fetchWithdrawals,
+  getApiErrorMessage,
   resolveWithdrawal,
   type AdminWithdrawalRow,
   type AdminWithdrawalStats,
@@ -178,8 +179,7 @@ export function WithdrawalsPage() {
       setStats(data.stats);
       setRows(data.rows);
     } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : 'Failed to load withdrawals';
-      setError(msg);
+      setError(getApiErrorMessage(e, 'Failed to load withdrawals'));
     } finally {
       setLoading(false);
     }
@@ -199,8 +199,7 @@ export function WithdrawalsPage() {
       setConfirm(null);
       await load();
     } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : 'Action failed';
-      setError(msg);
+      setError(getApiErrorMessage(e, 'Action failed'));
     } finally {
       setBusyId(null);
     }
@@ -424,6 +423,12 @@ export function WithdrawalsPage() {
                 <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[12px] leading-relaxed text-amber-900">
                   Complete the transfer to the account above, then mark as Paid. This will debit the
                   receiver wallet and close the request.
+                </p>
+              ) : null}
+
+              {error ? (
+                <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-[12px] leading-relaxed text-red-800">
+                  {error}
                 </p>
               ) : null}
             </div>

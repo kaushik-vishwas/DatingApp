@@ -57,11 +57,11 @@ const chatPricing_1 = require("../constants/chatPricing");
 const receiverAvailabilityNotifier_1 = require("../services/receiverAvailabilityNotifier");
 const receiverPresence_1 = require("../services/receiverPresence");
 const socketRegistry_1 = require("../socket/socketRegistry");
-const callerVoiceGenderVerifier_1 = require("../services/callerVoiceGenderVerifier");
 const receiverScore_1 = require("../services/receiverScore");
 const smsOtp_1 = require("../services/smsOtp");
 const messageCentral_1 = require("../services/messageCentral");
 const socketRegistry_2 = require("../socket/socketRegistry");
+const email_1 = require("../config/email");
 const receiverWithdrawalFees_1 = require("../constants/receiverWithdrawalFees");
 const apiTraceLog_1 = require("../utils/apiTraceLog");
 const callerMessageEligibility_1 = require("../utils/callerMessageEligibility");
@@ -317,6 +317,7 @@ const completeProfile = async (req, res) => {
         receiver.audioCallRate = Receiver_1.RECEIVER_AUDIO_CALL_RATE_INR_PER_MIN;
         receiver.userAudio = receiverVoiceUrl ?? null;
         receiver.accountStatus = 'approved';
+        receiver.voiceVerificationApproved = true;
         log('before_save', { receiverId: String(receiver._id), nextAccountStatus: 'approved' });
         await receiver.save();
         log('save_success', { receiverId: String(receiver._id) });
@@ -595,10 +596,10 @@ const saveReceiverKycBankFinalize = async (req, res) => {
         receiver.bankIfsc = String(bankIfsc).trim().toUpperCase();
         receiver.bankName = String(bankName).trim();
         receiver.audioCallRate = Receiver_1.RECEIVER_AUDIO_CALL_RATE_INR_PER_MIN;
-        receiver.accountStatus = 'approved';
+        // Stay in onboarding until voice sample is submitted for admin KYC review.
         await receiver.save();
         t.log('kyc_bank_finalize_ok');
-        t.json(200, { message: 'Profile completed successfully', user: (0, authController_1.toApiReceiver)(receiver) });
+        t.json(200, { message: 'Bank details saved', user: (0, authController_1.toApiReceiver)(receiver) });
     }
     catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
@@ -704,38 +705,9 @@ const saveReceiverUserAudio = async (req, res) => {
     }
 };
 exports.saveReceiverUserAudio = saveReceiverUserAudio;
-function buildVoiceVerificationPayload(expectedGender, result) {
-    return {
-        provider: result.model.startsWith('Xenova/') ||
-            result.model === 'voice-gender-worker' ||
-            result.model === 'warmup'
-            ? 'local'
-            : 'huggingface',
-        approved: result.ok,
-        predictedGender: result.predictedGender,
-        confidence: result.confidence,
-        threshold: (0, callerVoiceGenderVerifier_1.voiceGenderThreshold)(expectedGender),
-        model: result.model,
-        profileGender: expectedGender,
-        ...(result.failureKind ? { failureKind: result.failureKind } : {}),
-        ...(result.reason ? { reason: result.reason } : {}),
-    };
-}
-function readReceiverVoiceVerificationMode() {
-    const raw = String(process.env.RECEIVER_VOICE_GENDER_VERIFICATION_MODE ?? '')
-        .trim()
-        .toLowerCase();
-    if (raw === 'disabled' || raw === 'off' || raw === 'skip')
-        return 'disabled';
-    if (raw === 'required' || raw === 'on' || raw === 'enabled')
-        return 'required';
-    return (0, callerVoiceGenderVerifier_1.getVoiceVerificationMode)();
-}
 /**
  * POST /profile/complete-caller
- * App user profile (`users` collection):
- * - male/other: direct access (`approved`, not suspended)
- * - female: auto-verify by voice classifier (`approved` or `rejected`)
+ * App user profile (`users` collection) — completes onboarding and grants access (`approved`).
  */
 const completeCallerProfile = async (req, res) => {
     const t = (0, apiTraceLog_1.beginApiTrace)('POST /profile/complete-caller', req, res);
@@ -792,8 +764,6 @@ const completeCallerProfile = async (req, res) => {
             return;
         }
         const voiceUrl = parseCallerAudioHttpsUrl(req.body);
-        const requiresVerification = false;
-        const voiceVerification = undefined;
         const updated = await User_1.default.findOneAndUpdate({ _id: authUser._id, accountStatus: 'pending_profile' }, {
             $set: {
                 name: String(name).trim(),
@@ -819,7 +789,6 @@ const completeCallerProfile = async (req, res) => {
         t.json(200, {
             message: 'Profile completed successfully',
             user: (0, authController_1.toApiUser)(updated),
-            ...(voiceVerification ? { voiceVerification } : {}),
         });
     }
     catch (err) {
@@ -931,8 +900,8 @@ async function computeReceiverCallEarningsLifetime(receiverObjectId) {
     return roundInr(total);
 }
 /**
- * Withdrawable INR = (voice call earnings + chat credits in wallet + already paid out) − paid out − pending.
- * Voice earnings live on CallSession; chat credits use `receiver.walletBalance` (debited only after payout success).
+ * Available balance = voice call earnings + chat wallet − paid withdrawals.
+ * Pending requests stay visible in history but do not reduce Available until admin marks Paid.
  */
 async function computeReceiverWithdrawableSnapshot(receiverId, receiverWalletBalance) {
     const ridObj = new mongoose_1.default.Types.ObjectId(receiverId);
@@ -945,8 +914,9 @@ async function computeReceiverWithdrawableSnapshot(receiverId, receiverWalletBal
         getPendingWithdrawalAmount(receiverId),
     ]);
     const totalEarnings = roundInr(callEarnings + wallet + totalWithdrawn);
-    const withdrawableBalance = roundInr(Math.max(0, totalEarnings - totalWithdrawn - pendingAmount));
-    return { withdrawableBalance, pendingAmount, totalEarnings, totalWithdrawn };
+    const withdrawableBalance = roundInr(Math.max(0, totalEarnings - totalWithdrawn));
+    const requestableBalance = roundInr(Math.max(0, withdrawableBalance - pendingAmount));
+    return { withdrawableBalance, requestableBalance, pendingAmount, totalEarnings, totalWithdrawn };
 }
 const IST_OFFSET_MINUTES = 330;
 function toIstDate(d) {
@@ -1149,8 +1119,12 @@ const getReceiverWalletSummary = async (req, res) => {
             .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
             .slice(0, 20);
         const receiverWelcome = await (0, receiverWelcome_1.getReceiverWelcomeSettings)();
+        const withdrawable = await computeReceiverWithdrawableSnapshot(String(rid), walletBalance);
         res.status(200).json({
             walletBalance,
+            /** Same number as Withdraw screen “Available Balance”. */
+            withdrawableBalance: withdrawable.withdrawableBalance,
+            pendingWithdrawalAmount: withdrawable.pendingAmount,
             chatToday,
             chatThisMonth,
             chatEarningsLifetime,
@@ -1269,8 +1243,12 @@ const sendReceiverWithdrawalOtp = async (req, res) => {
             return;
         }
         const withdrawable = await computeReceiverWithdrawableSnapshot(rid, receiver.walletBalance ?? 0);
-        if (breakdown.requestedAmount > withdrawable.withdrawableBalance) {
-            res.status(400).json({ message: 'Insufficient wallet balance' });
+        if (breakdown.requestedAmount > withdrawable.requestableBalance) {
+            res.status(400).json({
+                message: withdrawable.pendingAmount > 0
+                    ? 'You already have a pending withdrawal. Wait until it is paid or rejected before requesting more.'
+                    : 'Insufficient wallet balance',
+            });
             return;
         }
         if (!(0, receiverPaymentDetails_1.receiverPaymentDetailsComplete)(receiver)) {
@@ -1354,7 +1332,7 @@ const verifyReceiverWithdrawalOtpAndCreate = async (req, res) => {
         }
         const rid = String(req.receiver._id);
         const [receiver, pendingVerification] = await Promise.all([
-            Receiver_1.default.findById(rid).select('walletBalance name nameAsPerAadhaar bankAccountHolderName upiId bankAccountNumber'),
+            Receiver_1.default.findById(rid).select('walletBalance name nameAsPerAadhaar bankAccountHolderName upiId bankAccountNumber bankIfsc bankName'),
             WithdrawalRequest_1.default.findOne({ receiverId: rid, status: 'verification_pending' }),
         ]);
         if (!receiver) {
@@ -1394,8 +1372,12 @@ const verifyReceiverWithdrawalOtpAndCreate = async (req, res) => {
             throw e;
         }
         const withdrawable = await computeReceiverWithdrawableSnapshot(rid, receiver.walletBalance ?? 0);
-        if (pendingVerification.amount > withdrawable.withdrawableBalance) {
-            res.status(400).json({ message: 'Insufficient wallet balance. Please reduce amount and retry' });
+        if (pendingVerification.amount > withdrawable.requestableBalance) {
+            res.status(400).json({
+                message: withdrawable.pendingAmount > 0
+                    ? 'You already have a pending withdrawal. Wait until it is paid or rejected before requesting more.'
+                    : 'Insufficient wallet balance. Please reduce amount and retry',
+            });
             return;
         }
         if (!pendingVerification.accountHolderName?.trim()) {
@@ -1441,6 +1423,23 @@ const verifyReceiverWithdrawalOtpAndCreate = async (req, res) => {
             receiverName: String(receiver.name ?? 'Receiver'),
             payoutMethod: pendingVerification.payoutMethod ?? null,
             message: 'New withdrawal request awaiting review.',
+        });
+        void (0, email_1.sendWithdrawalRequestAdminEmail)({
+            withdrawalId: `W-${String(pendingVerification._id).slice(-6).toUpperCase()}`,
+            receiverName: String(receiver.name ?? 'Receiver'),
+            amount: roundInr(pendingVerification.amount),
+            payoutAmount: roundInr((0, receiverWithdrawalFees_1.resolveWithdrawalPayoutAmount)(pendingVerification)),
+            platformFee: roundInr(pendingVerification.platformFee ?? 0),
+            payoutMethod: pendingVerification.payoutMethod ?? null,
+            accountHolderName: pendingVerification.accountHolderName ||
+                receiver.bankAccountHolderName ||
+                receiver.nameAsPerAadhaar ||
+                receiver.name ||
+                null,
+            upiId: receiver.upiId ?? null,
+            bankAccountNumber: receiver.bankAccountNumber ?? null,
+            bankIfsc: receiver.bankIfsc ?? null,
+            bankName: receiver.bankName ?? pendingVerification.bankName ?? null,
         });
         res.status(200).json({
             message: 'Withdrawal request submitted. Waiting for admin approval.',
@@ -2042,6 +2041,7 @@ const updateReceiverProfile = async (req, res) => {
             const audioOk = Boolean(receiver.userAudio?.trim()) && /^https?:\/\//i.test(String(receiver.userAudio).trim());
             if (receiverOnboardingProfileFieldsComplete(receiver) && audioOk) {
                 receiver.accountStatus = 'approved';
+                receiver.voiceVerificationApproved = true;
             }
         }
         await receiver.save();
@@ -2204,7 +2204,7 @@ const updateCallerExpoPushToken = async (req, res) => {
 exports.updateCallerExpoPushToken = updateCallerExpoPushToken;
 /**
  * POST /profile/receiver/complete-audio-onboarding
- * Saves voice URL (from body if provided), runs gender verification, then approves.
+ * Saves voice URL and grants dashboard access. Admin can still review audio in KYC.
  */
 const completeReceiverAudioOnboarding = async (req, res) => {
     try {
@@ -2232,71 +2232,6 @@ const completeReceiverAudioOnboarding = async (req, res) => {
             });
             return;
         }
-        const profileGender = receiver.gender;
-        if (profileGender !== 'male' && profileGender !== 'female' && profileGender !== 'other') {
-            res.status(400).json({
-                message: 'Complete your profile gender before voice verification',
-                error: 'RECEIVER_GENDER_MISSING',
-            });
-            return;
-        }
-        const receiverVoiceVerificationMode = readReceiverVoiceVerificationMode();
-        let voiceVerification;
-        if (receiverVoiceVerificationMode === 'required') {
-            console.log('[receiver-audio-onboarding] voice verification starting', {
-                receiverId,
-                profileGender,
-                voiceUrl,
-            });
-            const verification = await (0, callerVoiceGenderVerifier_1.verifyVoiceGender)(voiceUrl, profileGender);
-            console.log('[receiver-audio-onboarding] voice verification finished', {
-                receiverId,
-                ok: verification.ok,
-                predictedGender: verification.predictedGender,
-                confidence: verification.confidence,
-                model: verification.model,
-                failureKind: verification.failureKind,
-            });
-            voiceVerification = buildVoiceVerificationPayload(profileGender, verification);
-            if (!verification.ok) {
-                const failMessage = verification.failureKind === 'gender_mismatch'
-                    ? `Voice sounds like ${verification.predictedGender}, but your profile gender is ${profileGender}.`
-                    : verification.failureKind === 'low_confidence'
-                        ? `Voice check was unclear (confidence ${(verification.confidence * 100).toFixed(0)}%). Please record again in a quiet place.`
-                        : verification.failureKind === 'misconfigured'
-                            ? 'Voice verification is not configured on the server yet.'
-                            : verification.failureKind === 'audio_fetch_failed'
-                                ? 'Could not download your voice sample for verification. Please record again.'
-                                : verification.reason ||
-                                    'Voice verification service error. Please try again later.';
-                console.log('[receiver-audio-onboarding]', JSON.stringify({
-                    receiverId,
-                    voiceUrl,
-                    profileGender,
-                    httpStatus: 422,
-                    message: failMessage,
-                    voiceVerification,
-                }, null, 2));
-                res.status(422).json({
-                    message: failMessage,
-                    error: 'RECEIVER_VOICE_VERIFICATION_FAILED',
-                    voiceVerification,
-                });
-                return;
-            }
-        }
-        else {
-            voiceVerification = {
-                provider: 'local',
-                approved: true,
-                predictedGender: profileGender,
-                confidence: 1,
-                threshold: 0,
-                model: 'disabled',
-                profileGender,
-                reason: 'Receiver voice-gender verification skipped (RECEIVER_VOICE_GENDER_VERIFICATION_MODE=disabled)',
-            };
-        }
         const wasAvailable = Boolean(receiver.isAvailable);
         receiver.accountStatus = 'approved';
         receiver.voiceVerificationApproved = true;
@@ -2309,18 +2244,9 @@ const completeReceiverAudioOnboarding = async (req, res) => {
                 console.error('receiver availability notify error:', msg);
             });
         }
-        console.log('[receiver-audio-onboarding]', JSON.stringify({
-            receiverId,
-            voiceUrl,
-            profileGender,
-            httpStatus: 200,
-            message: 'Voice verified successfully',
-            voiceVerification,
-        }, null, 2));
         res.status(200).json({
-            message: 'Voice verified successfully',
+            message: 'Voice sample saved',
             user: (0, authController_1.toApiReceiver)(receiver),
-            voiceVerification,
         });
     }
     catch (err) {
