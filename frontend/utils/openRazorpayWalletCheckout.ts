@@ -72,10 +72,12 @@ export function normalizeRazorpayContact(raw: string | null | undefined): string
 }
 
 /**
- * Build Standard Checkout options for maximum instrument coverage.
+ * Build Standard Checkout options.
  *
- * Prefill contact/name from the logged-in caller so Razorpay does not ask for mobile every time.
- * UPI Intent first so installed apps (GPay, PhonePe, Paytm, Amazon Pay, …) list and open on tap.
+ * Prefill contact/name from the logged-in caller.
+ *
+ * UPI on phones: Razorpay hides the QR below ~485px width, so Checkout offers UPI apps
+ * (intent) and UPI ID (collect) instead. A scannable QR needs the separate QR Code API.
  */
 function buildCheckoutOptions(
   order: Pick<RazorpayOrderResponse, 'orderId' | 'amount' | 'currency' | 'keyId' | 'businessName'>,
@@ -107,36 +109,9 @@ function buildCheckoutOptions(
     remember_customer: true,
     ...(Object.keys(prefillPayload).length > 0 ? { prefill: prefillPayload } : {}),
     ...(Object.keys(readonly).length > 0 ? { readonly } : {}),
-    config: {
-      display: {
-        blocks: {
-          upi_apps: {
-            name: 'Pay with UPI apps',
-            instruments: [
-              {
-                method: 'upi',
-                // intent = open GPay / PhonePe / Paytm / Amazon Pay / BHIM etc. directly
-                flows: ['intent'],
-              },
-            ],
-          },
-          other: {
-            name: 'Other ways to pay',
-            instruments: [
-              { method: 'upi', flows: ['collect', 'qr'] },
-              { method: 'card' },
-              { method: 'netbanking' },
-              { method: 'wallet' },
-            ],
-          },
-        },
-        sequence: ['block.upi_apps', 'block.other'],
-        preferences: {
-          show_default_blocks: true,
-        },
-        hide: [],
-      },
-    },
+    // No `config.display` blocks: a custom UPI block (esp. with an `apps` filter) makes the
+    // instrument invalid on mobile and Razorpay then drops UPI from Checkout entirely.
+    // Default Checkout already lists UPI apps + UPI ID first for this MID.
   };
 }
 
