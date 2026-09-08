@@ -97,7 +97,7 @@ export type WithdrawalRequestEmailPayload = {
 
 const WITHDRAWALS_ADMIN_URL = 'https://admin.nesthamapp.com/withdrawals';
 
-/** Notify admin inbox when a receiver submits a withdrawal (best-effort; does not throw). */
+/**  Notify admin inbox when a receiver submits a withdrawal (best-effort; does not throw). */
 export const sendWithdrawalRequestAdminEmail = async (
   payload: WithdrawalRequestEmailPayload
 ): Promise<void> => {
