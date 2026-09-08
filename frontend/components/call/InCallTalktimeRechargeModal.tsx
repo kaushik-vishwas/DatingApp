@@ -10,11 +10,12 @@ import {
   View,
 } from 'react-native';
 
+import RazorpayWebCheckoutModal from '../RazorpayWebCheckoutModal';
 import { getErrorMessage, walletApi } from '../../services/api';
-import type { WalletOfferRow } from '../../types/api';
+import type { RazorpayOrderResponse, WalletOfferRow } from '../../types/api';
 import { useAuth } from '../../context/AuthContext';
 import { logMetaWalletPurchase } from '../../utils/metaAppEvents';
-import { openRazorpayWalletCheckoutInApp } from '../../utils/openRazorpayWalletCheckout';
+import type { RazorpayNativeCheckoutResult } from '../../utils/openRazorpayWalletCheckout';
 import {
   computeWalletRechargeBreakdown,
   walletCreditForRecharge,
@@ -42,15 +43,23 @@ export default function InCallTalktimeRechargeModal({
   const [loadingOffers, setLoadingOffers] = useState(false);
   const [selected, setSelected] = useState<WalletOfferRow | null>(null);
   const [busy, setBusy] = useState(false);
+  const [checkoutOrder, setCheckoutOrder] = useState<RazorpayOrderResponse | null>(null);
+  const [pendingBreakdown, setPendingBreakdown] = useState<{
+    totalPayable: number;
+    walletAmount: number;
+    bonusPercent: number;
+  } | null>(null);
 
   const handleClose = useCallback(() => {
-    if (busy) return;
+    if (busy || checkoutOrder) return;
     onClose();
-  }, [busy, onClose]);
+  }, [busy, checkoutOrder, onClose]);
 
   useEffect(() => {
     if (!visible) {
       setSelected(null);
+      setCheckoutOrder(null);
+      setPendingBreakdown(null);
       return;
     }
     let mounted = true;
@@ -72,38 +81,33 @@ export default function InCallTalktimeRechargeModal({
     };
   }, [visible]);
 
-  const onProceedToPay = async () => {
-    if (!selected) {
-      Alert.alert('Select a plan', 'Choose a recharge pack to continue.');
+  const finishCheckout = async (checkout: RazorpayNativeCheckoutResult) => {
+    const breakdown = pendingBreakdown;
+    setCheckoutOrder(null);
+    setPendingBreakdown(null);
+    if (checkout.type === 'cancel') {
+      setBusy(false);
       return;
     }
+    if (checkout.type === 'error') {
+      setBusy(false);
+      Alert.alert('Checkout error', checkout.message);
+      return;
+    }
+    if (!breakdown) {
+      setBusy(false);
+      Alert.alert('Payment failed', 'Missing recharge details. Try again.');
+      return;
+    }
+
     setBusy(true);
     try {
-      const breakdown = computeWalletRechargeBreakdown(selected.amount);
-      const { data } = await walletApi.createRazorpayOrder({
-        payAmount: breakdown.totalPayable,
-        bonusPercent: selected.bonusPercent,
-        walletAmount: breakdown.walletAmount,
-      });
-
-      const checkout = await openRazorpayWalletCheckoutInApp(data, {
-        name: user?.name,
-        contact: user?.phone,
-      });
-      if (checkout.type === 'cancel') {
-        return;
-      }
-      if (checkout.type === 'error') {
-        Alert.alert('Checkout error', checkout.message);
-        return;
-      }
-
       const { data: verified } = await walletApi.verifyRazorpayPayment({
         razorpay_order_id: checkout.razorpay_order_id,
         razorpay_payment_id: checkout.razorpay_payment_id,
         razorpay_signature: checkout.razorpay_signature,
         payAmount: breakdown.totalPayable,
-        bonusPercent: selected.bonusPercent,
+        bonusPercent: breakdown.bonusPercent,
         walletAmount: breakdown.walletAmount,
       });
       void logMetaWalletPurchase({
@@ -128,64 +132,100 @@ export default function InCallTalktimeRechargeModal({
     }
   };
 
+  const onProceedToPay = async () => {
+    if (!selected) {
+      Alert.alert('Select a plan', 'Choose a recharge pack to continue.');
+      return;
+    }
+    setBusy(true);
+    try {
+      const breakdown = computeWalletRechargeBreakdown(selected.amount);
+      const { data } = await walletApi.createRazorpayOrder({
+        payAmount: breakdown.totalPayable,
+        bonusPercent: selected.bonusPercent,
+        walletAmount: breakdown.walletAmount,
+      });
+      setPendingBreakdown({
+        totalPayable: breakdown.totalPayable,
+        walletAmount: breakdown.walletAmount,
+        bonusPercent: selected.bonusPercent,
+      });
+      setCheckoutOrder(data);
+    } catch (e: unknown) {
+      setBusy(false);
+      Alert.alert('Payment failed', getErrorMessage(e));
+    }
+  };
+
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={handleClose}>
-      <View style={styles.overlay}>
-        <View style={styles.card}>
-          <View style={styles.header}>
-            <Text style={styles.title}>Add talktime</Text>
-            <TouchableOpacity onPress={handleClose} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
-              <Text style={styles.close}>✕</Text>
+    <>
+      <Modal visible={visible} transparent animationType="fade" onRequestClose={handleClose}>
+        <View style={styles.overlay}>
+          <View style={styles.card}>
+            <View style={styles.header}>
+              <Text style={styles.title}>Add talktime</Text>
+              <TouchableOpacity onPress={handleClose} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+                <Text style={styles.close}>✕</Text>
+              </TouchableOpacity>
+            </View>
+            <Text style={styles.subtitle}>Recharge without ending your call. Choose a plan:</Text>
+
+            {loadingOffers ? (
+              <ActivityIndicator color={PURPLE} style={{ marginVertical: 24 }} />
+            ) : offers.length === 0 ? (
+              <Text style={styles.empty}>No recharge plans available right now.</Text>
+            ) : (
+              <ScrollView style={styles.scroll} showsVerticalScrollIndicator={false}>
+                {Array.from({ length: Math.ceil(offers.length / 2) }, (_, row) => (
+                  <View key={row} style={styles.row}>
+                    {offers.slice(row * 2, row * 2 + 2).map((item) => {
+                      const active = selected?.id === item.id;
+                      const credit = creditForOffer(item.amount, item.bonusPercent);
+                      return (
+                        <TouchableOpacity
+                          key={item.id ?? `${item.amount}-${item.bonusPercent}`}
+                          style={[styles.pkg, active && styles.pkgActive]}
+                          onPress={() => setSelected(item)}
+                          activeOpacity={0.9}
+                        >
+                          {item.popular ? (
+                            <View style={styles.popular}>
+                              <Text style={styles.popularTxt}>Popular</Text>
+                            </View>
+                          ) : null}
+                          <Text style={styles.pkgPay}>₹ {item.amount}</Text>
+                          <Text style={styles.pkgBonus}>+{item.bonusPercent}% Extra</Text>
+                          <Text style={styles.pkgCredit}>Credit ₹{credit.toLocaleString('en-IN')}</Text>
+                        </TouchableOpacity>
+                      );
+                    })}
+                    {offers.slice(row * 2, row * 2 + 2).length === 1 ? <View style={styles.pkgSpacer} /> : null}
+                  </View>
+                ))}
+              </ScrollView>
+            )}
+
+            <TouchableOpacity
+              style={[styles.cta, (busy || !selected || offers.length === 0) && styles.ctaDisabled]}
+              onPress={() => void onProceedToPay()}
+              disabled={busy || !selected || offers.length === 0}
+              activeOpacity={0.9}
+            >
+              {busy ? <ActivityIndicator color="#fff" /> : <Text style={styles.ctaTxt}>Proceed to Pay</Text>}
             </TouchableOpacity>
           </View>
-          <Text style={styles.subtitle}>Recharge without ending your call. Choose a plan:</Text>
-
-          {loadingOffers ? (
-            <ActivityIndicator color={PURPLE} style={{ marginVertical: 24 }} />
-          ) : offers.length === 0 ? (
-            <Text style={styles.empty}>No recharge plans available right now.</Text>
-          ) : (
-            <ScrollView style={styles.scroll} showsVerticalScrollIndicator={false}>
-              {Array.from({ length: Math.ceil(offers.length / 2) }, (_, row) => (
-                <View key={row} style={styles.row}>
-                  {offers.slice(row * 2, row * 2 + 2).map((item) => {
-                    const active = selected?.id === item.id;
-                    const credit = creditForOffer(item.amount, item.bonusPercent);
-                    return (
-                      <TouchableOpacity
-                        key={item.id ?? `${item.amount}-${item.bonusPercent}`}
-                        style={[styles.pkg, active && styles.pkgActive]}
-                        onPress={() => setSelected(item)}
-                        activeOpacity={0.9}
-                      >
-                        {item.popular ? (
-                          <View style={styles.popular}>
-                            <Text style={styles.popularTxt}>Popular</Text>
-                          </View>
-                        ) : null}
-                        <Text style={styles.pkgPay}>₹ {item.amount}</Text>
-                        <Text style={styles.pkgBonus}>+{item.bonusPercent}% Extra</Text>
-                        <Text style={styles.pkgCredit}>Credit ₹{credit.toLocaleString('en-IN')}</Text>
-                      </TouchableOpacity>
-                    );
-                  })}
-                  {offers.slice(row * 2, row * 2 + 2).length === 1 ? <View style={styles.pkgSpacer} /> : null}
-                </View>
-              ))}
-            </ScrollView>
-          )}
-
-          <TouchableOpacity
-            style={[styles.cta, (busy || !selected || offers.length === 0) && styles.ctaDisabled]}
-            onPress={() => void onProceedToPay()}
-            disabled={busy || !selected || offers.length === 0}
-            activeOpacity={0.9}
-          >
-            {busy ? <ActivityIndicator color="#fff" /> : <Text style={styles.ctaTxt}>Proceed to Pay</Text>}
-          </TouchableOpacity>
         </View>
-      </View>
-    </Modal>
+      </Modal>
+
+      <RazorpayWebCheckoutModal
+        visible={Boolean(checkoutOrder)}
+        order={checkoutOrder}
+        prefill={{ name: user?.name, contact: user?.phone }}
+        onResult={(result) => {
+          void finishCheckout(result);
+        }}
+      />
+    </>
   );
 }
 

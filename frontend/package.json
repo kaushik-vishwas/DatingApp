@@ -3,7 +3,8 @@
   "version": "1.0.0",
   "main": "index.ts",
   "scripts": {
-    "start": "expo start",
+    "start": "expo start --go",
+    "start:dev": "expo start --dev-client",
     "android": "expo run:android",
     "prebuild:android": "npx expo prebuild --platform android --clean && node scripts/ensureAndroidLocalProperties.js",
     "android:apk:prebuild": "npm run prebuild:android",

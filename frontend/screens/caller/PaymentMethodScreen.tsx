@@ -12,11 +12,13 @@ import {
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 
+import RazorpayWebCheckoutModal from '../../components/RazorpayWebCheckoutModal';
 import { useAuth } from '../../context/AuthContext';
 import type { CallerStackParamList } from '../../navigation/CallerStackParamList';
 import { getErrorMessage, walletApi } from '../../services/api';
+import type { RazorpayOrderResponse } from '../../types/api';
 import { logMetaWalletPurchase } from '../../utils/metaAppEvents';
-import { openRazorpayWalletCheckoutInApp } from '../../utils/openRazorpayWalletCheckout';
+import type { RazorpayNativeCheckoutResult } from '../../utils/openRazorpayWalletCheckout';
 import { WALLET_RECHARGE_GST_PERCENT } from '../../utils/walletRechargeFees';
 
 const PURPLE = '#7b2cff';
@@ -37,29 +39,23 @@ export default function PaymentMethodScreen({ navigation, route }: Props): React
   } = route.params;
   const { refreshUser, user } = useAuth();
   const [busy, setBusy] = useState(false);
+  const [checkoutOrder, setCheckoutOrder] = useState<RazorpayOrderResponse | null>(null);
+  const paymentAmount = totalAmount || payAmount;
 
-  const onConfirm = async () => {
+  const finishCheckout = async (checkout: RazorpayNativeCheckoutResult) => {
+    setCheckoutOrder(null);
+    if (checkout.type === 'cancel') {
+      setBusy(false);
+      return;
+    }
+    if (checkout.type === 'error') {
+      setBusy(false);
+      Alert.alert('Checkout error', checkout.message);
+      return;
+    }
+
     setBusy(true);
     try {
-      const paymentAmount = totalAmount || payAmount;
-      const { data } = await walletApi.createRazorpayOrder({
-        payAmount: paymentAmount,
-        bonusPercent,
-        walletAmount,
-      });
-
-      const checkout = await openRazorpayWalletCheckoutInApp(data, {
-        name: user?.name,
-        contact: user?.phone,
-      });
-      if (checkout.type === 'cancel') {
-        return;
-      }
-      if (checkout.type === 'error') {
-        Alert.alert('Checkout error', checkout.message);
-        return;
-      }
-
       const { data: verified } = await walletApi.verifyRazorpayPayment({
         razorpay_order_id: checkout.razorpay_order_id,
         razorpay_payment_id: checkout.razorpay_payment_id,
@@ -83,6 +79,21 @@ export default function PaymentMethodScreen({ navigation, route }: Props): React
       Alert.alert('Payment failed', getErrorMessage(e));
     } finally {
       setBusy(false);
+    }
+  };
+
+  const onConfirm = async () => {
+    setBusy(true);
+    try {
+      const { data } = await walletApi.createRazorpayOrder({
+        payAmount: paymentAmount,
+        bonusPercent,
+        walletAmount,
+      });
+      setCheckoutOrder(data);
+    } catch (e: unknown) {
+      setBusy(false);
+      Alert.alert('Payment failed', getErrorMessage(e));
     }
   };
 
@@ -158,8 +169,7 @@ export default function PaymentMethodScreen({ navigation, route }: Props): React
         <View style={styles.opt}>
           <Text style={styles.optTitle}>Payment options</Text>
           <Text style={styles.optSub}>
-            Opens Razorpay in-app: UPI apps / UPI ID, cards, netbanking and wallets. On phones Razorpay
-            shows UPI apps instead of a QR code.
+            Opens Razorpay web Checkout (not the native SDK): UPI, cards, netbanking and wallets.
           </Text>
         </View>
 
@@ -177,6 +187,15 @@ export default function PaymentMethodScreen({ navigation, route }: Props): React
           )}
         </TouchableOpacity>
       </ScrollView>
+
+      <RazorpayWebCheckoutModal
+        visible={Boolean(checkoutOrder)}
+        order={checkoutOrder}
+        prefill={{ name: user?.name, contact: user?.phone }}
+        onResult={(result) => {
+          void finishCheckout(result);
+        }}
+      />
     </SafeAreaView>
   );
 }

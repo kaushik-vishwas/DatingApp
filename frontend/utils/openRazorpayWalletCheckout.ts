@@ -1,4 +1,4 @@
-import { NativeModules } from 'react-native';
+import { Alert, Linking, Platform } from 'react-native';
 
 import type { RazorpayOrderResponse } from '../types/api';
 
@@ -18,50 +18,6 @@ export type RazorpayCheckoutPrefill = {
   email?: string | null;
 };
 
-type RazorpaySuccess = {
-  razorpay_payment_id?: string;
-  razorpay_order_id?: string;
-  razorpay_signature?: string;
-};
-
-type RazorpayFailure = {
-  code?: number | string;
-  description?: string;
-  message?: string;
-  error?: { code?: number | string; description?: string; reason?: string };
-};
-
-type RazorpayCheckoutModule = {
-  open: (options: Record<string, unknown>) => Promise<RazorpaySuccess>;
-};
-
-function isUserCancel(err: RazorpayFailure): boolean {
-  const code = String(err.code ?? err.error?.code ?? '');
-  const desc = String(err.description ?? err.error?.description ?? err.message ?? err.error?.reason ?? '');
-  // Razorpay RN: 0 / 2 often mean dismissed / cancelled
-  if (code === '0' || code === '2') return true;
-  return /cancel|dismiss|back.?press/i.test(desc);
-}
-
-function isRazorpayNativeAvailable(): boolean {
-  return Boolean(NativeModules.RNRazorpayCheckout || NativeModules.RazorpayEventEmitter);
-}
-
-/**
- * Lazily load react-native-razorpay only when the native module is linked.
- * A static import crashes Expo Go (NativeEventEmitter with a missing module).
- */
-function loadRazorpayCheckout(): RazorpayCheckoutModule | null {
-  if (!isRazorpayNativeAvailable()) return null;
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const mod = require('react-native-razorpay') as { default?: RazorpayCheckoutModule } & RazorpayCheckoutModule;
-    return mod.default ?? mod;
-  } catch {
-    return null;
-  }
-}
-
 /** Razorpay Checkout expects a 10-digit Indian mobile (no +91). */
 export function normalizeRazorpayContact(raw: string | null | undefined): string | null {
   const digits = String(raw ?? '').replace(/\D/g, '');
@@ -72,14 +28,11 @@ export function normalizeRazorpayContact(raw: string | null | undefined): string
 }
 
 /**
- * Build Standard Checkout options.
- *
- * Prefill contact/name from the logged-in caller.
- *
- * UPI on phones: Razorpay hides the QR below ~485px width, so Checkout offers UPI apps
- * (intent) and UPI ID (collect) instead. A scannable QR needs the separate QR Code API.
+ * Build Standard Checkout options for Checkout.js (web).
+ * Single flat block. Do NOT set UPI `flows` — forcing `qr` on mobile hides
+ * Enter UPI ID (collect) and can leave no usable UPI instruments.
  */
-function buildCheckoutOptions(
+export function buildWebCheckoutOptions(
   order: Pick<RazorpayOrderResponse, 'orderId' | 'amount' | 'currency' | 'keyId' | 'businessName'>,
   prefill?: RazorpayCheckoutPrefill,
 ): Record<string, unknown> {
@@ -109,49 +62,184 @@ function buildCheckoutOptions(
     remember_customer: true,
     ...(Object.keys(prefillPayload).length > 0 ? { prefill: prefillPayload } : {}),
     ...(Object.keys(readonly).length > 0 ? { readonly } : {}),
-    // No `config.display` blocks: a custom UPI block (esp. with an `apps` filter) makes the
-    // instrument invalid on mobile and Razorpay then drops UPI from Checkout entirely.
-    // Default Checkout already lists UPI apps + UPI ID first for this MID.
+    config: {
+      display: {
+        blocks: {
+          all: {
+            name: 'Payment options',
+            instruments: [
+              { method: 'upi' },
+              { method: 'card' },
+              { method: 'netbanking' },
+              { method: 'wallet' },
+            ],
+          },
+        },
+        sequence: ['block.all'],
+        preferences: {
+          show_default_blocks: false,
+        },
+      },
+    },
   };
 }
 
 /**
- * In-app Razorpay Checkout via native SDK (not WebView / not external browser).
+ * Minimal HTML that immediately opens Razorpay Checkout (no extra "Complete payment" screen).
  */
-export async function openRazorpayWalletCheckoutInApp(
+export function buildRazorpayCheckoutHtml(
   order: Pick<RazorpayOrderResponse, 'orderId' | 'amount' | 'currency' | 'keyId' | 'businessName'>,
   prefill?: RazorpayCheckoutPrefill,
-): Promise<RazorpayNativeCheckoutResult> {
-  const RazorpayCheckout = loadRazorpayCheckout();
-  if (!RazorpayCheckout?.open) {
-    return {
-      type: 'error',
-      message:
-        'Razorpay needs a native app build (Expo Go is not supported). Run: npx expo run:android',
-    };
+): string {
+  const options = buildWebCheckoutOptions(order, prefill);
+  const optionsJson = JSON.stringify(options);
+
+  return `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <title>Selecto Pay</title>
+  <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
+  <style>
+    html, body { margin: 0; padding: 0; background: #ffffff; height: 100%; }
+  </style>
+</head>
+<body>
+  <script>
+    (function () {
+      var options = ${optionsJson};
+      var closed = false;
+
+      function post(payload) {
+        try {
+          if (window.ReactNativeWebView && window.ReactNativeWebView.postMessage) {
+            window.ReactNativeWebView.postMessage(JSON.stringify(payload));
+          }
+        } catch (e) {}
+      }
+
+      function openCheckout() {
+        if (typeof Razorpay === 'undefined') {
+          post({ type: 'error', message: 'Razorpay Checkout.js failed to load' });
+          return;
+        }
+
+        options.handler = function (response) {
+          closed = true;
+          post({
+            type: 'success',
+            razorpay_payment_id: response.razorpay_payment_id,
+            razorpay_order_id: response.razorpay_order_id,
+            razorpay_signature: response.razorpay_signature
+          });
+        };
+
+        options.modal = {
+          ondismiss: function () {
+            if (closed) return;
+            closed = true;
+            post({ type: 'cancel' });
+          }
+        };
+
+        try {
+          var rzp = new Razorpay(options);
+          rzp.on('payment.failed', function (response) {
+            var desc =
+              (response && response.error && (response.error.description || response.error.reason)) ||
+              'Payment failed';
+            post({ type: 'error', message: String(desc) });
+          });
+          rzp.open();
+        } catch (err) {
+          post({ type: 'error', message: String((err && err.message) || err || 'Could not open checkout') });
+        }
+      }
+
+      if (document.readyState === 'complete') openCheckout();
+      else window.addEventListener('load', openCheckout);
+    })();
+  </script>
+</body>
+</html>`;
+}
+
+/** True for UPI / wallet app deep links that must leave the WebView. */
+export function isExternalPaymentUrl(url: string): boolean {
+  const u = String(url || '').trim().toLowerCase();
+  if (!u) return false;
+  if (
+    u.startsWith('http://') ||
+    u.startsWith('https://') ||
+    u.startsWith('about:') ||
+    u.startsWith('data:') ||
+    u.startsWith('blob:')
+  ) {
+    return false;
+  }
+  return true;
+}
+
+/**
+ * Convert Android `intent://...#Intent;scheme=upi;package=...;end` into an openable URL.
+ */
+export function resolvePaymentDeepLink(url: string): string {
+  const raw = String(url || '').trim();
+  if (!raw) return raw;
+  if (!/^intent:/i.test(raw)) return raw;
+
+  const fallback = /S\.browser_fallback_url=([^;]+)/i.exec(raw)?.[1];
+  if (fallback) {
+    try {
+      return decodeURIComponent(fallback);
+    } catch {
+      return fallback;
+    }
   }
 
-  try {
-    const raw = (await RazorpayCheckout.open(buildCheckoutOptions(order, prefill))) as RazorpaySuccess;
+  const scheme = /;scheme=([^;]+)/i.exec(raw)?.[1]?.trim();
+  if (scheme) {
+    // intent://host/path?query#Intent;scheme=upi;... → upi://host/path?query
+    return raw.replace(/^intent:/i, `${scheme}:`).replace(/#Intent;.*$/i, '');
+  }
 
-    const paymentId = String(raw.razorpay_payment_id ?? '').trim();
-    const orderId = String(raw.razorpay_order_id ?? '').trim();
-    const signature = String(raw.razorpay_signature ?? '').trim();
-    if (!paymentId || !orderId || !signature) {
-      return { type: 'error', message: 'Incomplete payment response from Razorpay' };
+  return raw;
+}
+
+/**
+ * Open GPay / PhonePe / UPI intent. Does not fail the checkout on error.
+ * Note: Expo Go often cannot open UPI apps (missing Android package queries).
+ * A Selecto native build with the UPI queries plugin is required for reliable intent.
+ */
+export async function openPaymentAppUrl(url: string): Promise<boolean> {
+  const target = resolvePaymentDeepLink(url);
+  if (!target) return false;
+
+  try {
+    if (Platform.OS === 'android' && /^intent:/i.test(url) && target === url) {
+      // Unresolved intent:// — try opening as-is anyway
     }
-    return {
-      type: 'success',
-      razorpay_payment_id: paymentId,
-      razorpay_order_id: orderId,
-      razorpay_signature: signature,
-    };
-  } catch (e: unknown) {
-    const err = (e ?? {}) as RazorpayFailure;
-    if (isUserCancel(err)) return { type: 'cancel' };
-    const message = String(
-      err.description ?? err.error?.description ?? err.message ?? err.error?.reason ?? 'Payment failed',
-    );
-    return { type: 'error', message };
+    const can = await Linking.canOpenURL(target).catch(() => true);
+    if (!can) {
+      Alert.alert(
+        'Payment app',
+        'Could not open that UPI app. Install Google Pay / PhonePe / Paytm, or use Enter UPI ID. If you are on Expo Go, install the Selecto app build for UPI apps to open.',
+      );
+      return false;
+    }
+    await Linking.openURL(target);
+    return true;
+  } catch {
+    try {
+      await Linking.openURL(target);
+      return true;
+    } catch {
+      Alert.alert(
+        'Payment app',
+        'Could not open that UPI app. Try another app, Enter UPI ID, or card. Expo Go often blocks UPI app links — use a Selecto APK for full UPI Intent.',
+      );
+      return false;
+    }
   }
 }

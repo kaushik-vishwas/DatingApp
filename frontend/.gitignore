@@ -47,6 +47,9 @@ GoogleService-Info.plist
 /ios
 /android
 
+# Local build caches (Gradle/npm/tmp kept on D: to avoid filling C:)
+.build-cache/
+
 # Local Expo module Android build outputs (Gradle paths exceed Windows MAX_PATH)
 modules/**/android/build/
 modules/**/android/.gradle/
