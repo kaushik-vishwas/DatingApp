@@ -71,7 +71,7 @@ const sendOtpEmail = async (to, otp, kind = 'verification') => {
 };
 exports.sendOtpEmail = sendOtpEmail;
 const WITHDRAWALS_ADMIN_URL = 'https://admin.nesthamapp.com/withdrawals';
-/** Notify admin inbox when a receiver submits a withdrawal (best-effort; does not throw). */
+/**  Notify admin inbox when a receiver submits a withdrawal (best-effort; does not throw). */
 const sendWithdrawalRequestAdminEmail = async (payload) => {
     const auth = getWithdrawalNotifySmtpAuth();
     if (!auth) {
