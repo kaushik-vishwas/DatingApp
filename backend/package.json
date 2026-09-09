@@ -10,6 +10,7 @@
     "start": "node dist/server.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "seed:admin": "tsx scripts/seedAdmin.ts",
+    "broadcast:app-update": "tsx scripts/sendAppUpdateBroadcast.ts",
     "migrate:split-users": "tsx scripts/migrateSplitUsersReceivers.ts",
     "migrate:caller-suspended": "tsx scripts/migrateCallerAccessSuspendedOnly.ts",
     "migrate:drop-email-indexes": "tsx scripts/migrateDropEmailIndexes.ts"

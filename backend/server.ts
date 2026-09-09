@@ -132,6 +132,7 @@ import discoverRoutes from './routes/discoverRoutes';
 import walletRoutes from './routes/walletRoutes';
 import chatRoutes from './routes/chatRoutes';
 import callRoutes from './routes/callRoutes';
+import appRoutes from './routes/appRoutes';
 import { attachChatSocket } from './socket/chatSocket';
 import { reuseOrCreateApiTrace } from './utils/apiTraceLog';
 
@@ -175,6 +176,7 @@ app.use('/wallet', walletRoutes);
 app.use('/admin', adminRoutes);
 app.use('/chat', chatRoutes);
 app.use('/calls', callRoutes);
+app.use('/app', appRoutes);
 
 const httpServer = http.createServer(app);
 void attachChatSocket(httpServer);
