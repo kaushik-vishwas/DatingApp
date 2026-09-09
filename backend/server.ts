@@ -144,7 +144,17 @@ app.use(cors({
   credentials: true
 }));
 
-app.use(express.json());
+app.use(
+  express.json({
+    verify: (req, _res, buf) => {
+      // Razorpay webhook HMAC must use the exact raw body bytes.
+      const url = String((req as express.Request).originalUrl || req.url || '');
+      if (url.includes('/wallet/razorpay-webhook')) {
+        (req as express.Request & { rawBody?: Buffer }).rawBody = Buffer.from(buf);
+      }
+    },
+  })
+);
 
 app.use((req, res, next) => {
   console.log("URL:", req.method, req.url);

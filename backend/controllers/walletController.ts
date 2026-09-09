@@ -5,6 +5,7 @@ import Razorpay from 'razorpay';
 import User, { type UserDocument } from '../models/User';
 import WalletTopup from '../models/WalletTopup';
 import WalletCredit from '../models/WalletCredit';
+import WalletOffer from '../models/WalletOffer';
 import { toApiUser } from './authController';
 import { blockCallerUntilApproved } from '../utils/accountAccess';
 import {
@@ -22,6 +23,10 @@ type LeanWalletTopup = {
   createdAt: Date;
 };
 
+type CreditCapturedResult =
+  | { ok: true; creditAdded: number; alreadyCredited: boolean; userId: string }
+  | { ok: false; reason: string };
+
 function getRazorpay(): Razorpay | null {
   const key_id = process.env.RAZORPAY_KEY_ID?.trim();
   const key_secret = process.env.RAZORPAY_KEY_SECRET?.trim();
@@ -35,6 +40,16 @@ function verifyPaymentSignature(orderId: string, paymentId: string, signature: s
   if (signature.length !== expected.length) return false;
   try {
     return crypto.timingSafeEqual(Buffer.from(expected, 'utf8'), Buffer.from(signature, 'utf8'));
+  } catch {
+    return false;
+  }
+}
+
+function verifyWebhookSignature(rawBody: string, signature: string, secret: string): boolean {
+  const expected = crypto.createHmac('sha256', secret).update(rawBody).digest('hex');
+  if (!signature || signature.length !== expected.length) return false;
+  try {
+    return crypto.timingSafeEqual(Buffer.from(signature, 'utf8'), Buffer.from(expected, 'utf8'));
   } catch {
     return false;
   }
@@ -55,6 +70,102 @@ function resolveWalletRecharge(
     walletAmount: Math.round(walletAmount),
     credit: walletCreditForRecharge(walletAmount, bonusPercent),
   };
+}
+
+/** When older orders lack notes.walletAmount, infer pack from offers + payable. */
+async function inferWalletAmountFromPay(
+  payAmount: number,
+  bonusPercent: number
+): Promise<number | null> {
+  const bonus = Math.round(bonusPercent);
+  const offers = await WalletOffer.find({ bonusPercent: bonus }).select('amount bonusPercent').lean();
+  for (const o of offers) {
+    const amount = Number(o.amount);
+    if (!Number.isFinite(amount) || amount <= 0) continue;
+    if (payableMatchesWalletPack(amount, payAmount)) return Math.round(amount);
+  }
+  return null;
+}
+
+/**
+ * Idempotent wallet credit for a captured/authorized Razorpay payment.
+ * Shared by app verify + webhook so UPI Intent misses still get credited.
+ */
+async function creditCapturedWalletPayment(input: {
+  orderId: string;
+  paymentId: string;
+  userId: string;
+  payAmount: number;
+  bonusPercent: number;
+  walletAmount: number;
+}): Promise<CreditCapturedResult> {
+  const { orderId, paymentId, userId, payAmount, bonusPercent, walletAmount } = input;
+
+  const existing = await WalletTopup.findOne({ razorpayPaymentId: paymentId });
+  if (existing) {
+    if (String(existing.userId) !== String(userId)) {
+      return { ok: false, reason: 'Payment does not belong to this account' };
+    }
+    return {
+      ok: true,
+      creditAdded: existing.creditAdded,
+      alreadyCredited: true,
+      userId: String(existing.userId),
+    };
+  }
+
+  const { validateOfferForCredit } = await import('./walletOffersController');
+  const isValidOffer = await validateOfferForCredit(walletAmount, bonusPercent);
+  if (!isValidOffer) {
+    return { ok: false, reason: 'Invalid wallet offer' };
+  }
+
+  const credit = walletCreditForRecharge(walletAmount, bonusPercent);
+  const payRounded = Math.round(payAmount * 100) / 100;
+  const bonusRounded = Math.round(bonusPercent * 100) / 100;
+
+  const userRow = await User.findById(userId);
+  if (!userRow) {
+    return { ok: false, reason: 'User not found' };
+  }
+
+  const session = await mongoose.startSession();
+  try {
+    await session.withTransaction(async () => {
+      await WalletTopup.create(
+        [
+          {
+            userId: userRow._id,
+            razorpayOrderId: orderId,
+            razorpayPaymentId: paymentId,
+            payAmount: payRounded,
+            bonusPercent: bonusRounded,
+            creditAdded: credit,
+          },
+        ],
+        { session }
+      );
+      await User.updateOne({ _id: userRow._id }, { $inc: { walletBalance: credit } }, { session });
+    });
+  } catch (e: unknown) {
+    const code = (e as { code?: number })?.code;
+    if (code === 11000) {
+      const dup = await WalletTopup.findOne({ razorpayPaymentId: paymentId });
+      if (dup && String(dup.userId) === String(userId)) {
+        return {
+          ok: true,
+          creditAdded: dup.creditAdded,
+          alreadyCredited: true,
+          userId: String(dup.userId),
+        };
+      }
+    }
+    throw e;
+  } finally {
+    await session.endSession();
+  }
+
+  return { ok: true, creditAdded: credit, alreadyCredited: false, userId: String(userRow._id) };
 }
 
 /**
@@ -207,6 +318,7 @@ export const createRazorpayWalletOrder = async (
         userId: uid,
         payAmount: String(Math.round(payAmount)),
         bonusPercent: String(Math.round(bonusPercent)),
+        walletAmount: String(resolved.walletAmount),
       },
     });
 
@@ -281,34 +393,8 @@ export const verifyRazorpayWalletPayment = async (req: Request<{}, {}, VerifyBod
       return;
     }
 
-    const { validateOfferForCredit } = await import('./walletOffersController');
-    const isValidOffer = await validateOfferForCredit(resolved.walletAmount, bonusPercent);
-    if (!isValidOffer) {
-      res.status(400).json({ message: 'Invalid wallet offer' });
-      return;
-    }
-
     if (!verifyPaymentSignature(orderId, paymentId, signature, secret)) {
       res.status(400).json({ message: 'Invalid payment signature' });
-      return;
-    }
-
-    const existing = await WalletTopup.findOne({ razorpayPaymentId: paymentId });
-    if (existing) {
-      if (String(existing.userId) !== String(authUser._id)) {
-        res.status(403).json({ message: 'Payment does not belong to this account' });
-        return;
-      }
-      const user = await User.findById(authUser._id);
-      if (!user) {
-        res.status(404).json({ message: 'User not found' });
-        return;
-      }
-      res.status(200).json({
-        message: 'Wallet already credited for this payment',
-        creditAdded: existing.creditAdded,
-        user: toApiUser(user),
-      });
       return;
     }
 
@@ -333,53 +419,18 @@ export const verifyRazorpayWalletPayment = async (req: Request<{}, {}, VerifyBod
       return;
     }
 
-    // Calculate credit using the helper function
-    const credit = resolved.credit;
-
-    const userRow = await User.findById(authUser._id);
-    if (!userRow) {
-      res.status(404).json({ message: 'User not found' });
+    const credited = await creditCapturedWalletPayment({
+      orderId,
+      paymentId,
+      userId: String(authUser._id),
+      payAmount,
+      bonusPercent,
+      walletAmount: resolved.walletAmount,
+    });
+    if (!credited.ok) {
+      const status = credited.reason === 'User not found' ? 404 : 400;
+      res.status(status).json({ message: credited.reason });
       return;
-    }
-
-    const payRounded = Math.round(payAmount * 100) / 100;
-    const bonusRounded = Math.round(bonusPercent * 100) / 100;
-
-    const session = await mongoose.startSession();
-    try {
-      await session.withTransaction(async () => {
-        await WalletTopup.create(
-          [
-            {
-              userId: userRow._id,
-              razorpayOrderId: orderId,
-              razorpayPaymentId: paymentId,
-              payAmount: payRounded,
-              bonusPercent: bonusRounded,
-              creditAdded: credit,
-            },
-          ],
-          { session }
-        );
-        await User.updateOne({ _id: authUser._id }, { $inc: { walletBalance: credit } }, { session });
-      });
-    } catch (e: unknown) {
-      const code = (e as { code?: number })?.code;
-      if (code === 11000) {
-        const dup = await WalletTopup.findOne({ razorpayPaymentId: paymentId });
-        const u2 = await User.findById(authUser._id);
-        if (dup && u2 && String(dup.userId) === String(authUser._id)) {
-          res.status(200).json({
-            message: 'Wallet already credited for this payment',
-            creditAdded: dup.creditAdded,
-            user: toApiUser(u2),
-          });
-          return;
-        }
-      }
-      throw e;
-    } finally {
-      await session.endSession();
     }
 
     const fresh = await User.findById(authUser._id);
@@ -389,8 +440,8 @@ export const verifyRazorpayWalletPayment = async (req: Request<{}, {}, VerifyBod
     }
 
     res.status(200).json({
-      message: 'Wallet credited',
-      creditAdded: credit,
+      message: credited.alreadyCredited ? 'Wallet already credited for this payment' : 'Wallet credited',
+      creditAdded: credited.creditAdded,
       user: toApiUser(fresh),
     });
   } catch (err) {
@@ -400,6 +451,139 @@ export const verifyRazorpayWalletPayment = async (req: Request<{}, {}, VerifyBod
       res.status(400).json({ message: msg || 'Invalid Razorpay request' });
       return;
     }
+    res.status(500).json({ message: msg || 'Server error' });
+  }
+};
+
+type RazorpayWebhookRequest = Request & { rawBody?: Buffer | string };
+
+/**
+ * POST /wallet/razorpay-webhook — Razorpay `payment.captured` safety net (no app auth).
+ * Credits wallet when Checkout success never reaches the app (common with UPI Intent).
+ * Configure in Razorpay Dashboard → Webhooks with RAZORPAY_WEBHOOK_SECRET.
+ */
+export const razorpayWalletWebhook = async (req: RazorpayWebhookRequest, res: Response): Promise<void> => {
+  try {
+    const webhookSecret = process.env.RAZORPAY_WEBHOOK_SECRET?.trim();
+    if (!webhookSecret) {
+      console.error('razorpayWalletWebhook: RAZORPAY_WEBHOOK_SECRET is not set');
+      res.status(503).json({ message: 'Webhook not configured' });
+      return;
+    }
+
+    const signature = String(req.headers['x-razorpay-signature'] ?? '');
+    const rawBody =
+      typeof req.rawBody === 'string'
+        ? req.rawBody
+        : Buffer.isBuffer(req.rawBody)
+          ? req.rawBody.toString('utf8')
+          : '';
+    if (!rawBody || !verifyWebhookSignature(rawBody, signature, webhookSecret)) {
+      res.status(400).json({ message: 'Invalid webhook signature' });
+      return;
+    }
+
+    const event = String((req.body as { event?: unknown })?.event ?? '');
+    if (event !== 'payment.captured' && event !== 'payment.authorized') {
+      res.status(200).json({ ok: true, ignored: true, event });
+      return;
+    }
+
+    const paymentEntity = (req.body as {
+      payload?: { payment?: { entity?: Record<string, unknown> } };
+    })?.payload?.payment?.entity;
+    if (!paymentEntity) {
+      res.status(400).json({ message: 'Missing payment entity' });
+      return;
+    }
+
+    const paymentId = String(paymentEntity.id ?? '').trim();
+    const orderId = String(paymentEntity.order_id ?? '').trim();
+    const status = String(paymentEntity.status ?? '').trim();
+    if (!paymentId || !orderId) {
+      res.status(400).json({ message: 'Missing payment/order id' });
+      return;
+    }
+    if (status !== 'captured' && status !== 'authorized') {
+      res.status(200).json({ ok: true, ignored: true, status });
+      return;
+    }
+
+    const rz = getRazorpay();
+    if (!rz) {
+      res.status(503).json({ message: 'Wallet payments are not configured on the server' });
+      return;
+    }
+
+    const order = await rz.orders.fetch(orderId);
+    const notes = (order?.notes ?? {}) as Record<string, unknown>;
+    const userId = String(notes.userId ?? '').trim();
+    const payAmount = Number(notes.payAmount);
+    const bonusPercent = Number(notes.bonusPercent);
+    let walletAmount = Number(notes.walletAmount);
+
+    if (!userId || !mongoose.isValidObjectId(userId)) {
+      console.error('razorpayWalletWebhook: missing/invalid userId on order', orderId);
+      res.status(200).json({ ok: false, reason: 'missing_user' });
+      return;
+    }
+    if (!Number.isFinite(payAmount) || !Number.isFinite(bonusPercent)) {
+      console.error('razorpayWalletWebhook: missing payAmount/bonus on order', orderId);
+      res.status(200).json({ ok: false, reason: 'missing_notes' });
+      return;
+    }
+
+    if (!Number.isFinite(walletAmount) || walletAmount <= 0) {
+      const inferred = await inferWalletAmountFromPay(payAmount, bonusPercent);
+      if (!inferred) {
+        console.error('razorpayWalletWebhook: cannot resolve walletAmount', orderId);
+        res.status(200).json({ ok: false, reason: 'missing_wallet_amount' });
+        return;
+      }
+      walletAmount = inferred;
+    }
+
+    const expectedPaise = Math.round(payAmount * 100);
+    if (Number(order.amount) !== expectedPaise) {
+      console.error('razorpayWalletWebhook: order amount mismatch', orderId);
+      res.status(200).json({ ok: false, reason: 'amount_mismatch' });
+      return;
+    }
+
+    if (!payableMatchesWalletPack(walletAmount, payAmount)) {
+      console.error('razorpayWalletWebhook: pack mismatch', orderId);
+      res.status(200).json({ ok: false, reason: 'pack_mismatch' });
+      return;
+    }
+
+    const credited = await creditCapturedWalletPayment({
+      orderId,
+      paymentId,
+      userId,
+      payAmount,
+      bonusPercent,
+      walletAmount: Math.round(walletAmount),
+    });
+
+    if (!credited.ok) {
+      console.error('razorpayWalletWebhook credit failed:', credited.reason, paymentId);
+      res.status(200).json({ ok: false, reason: credited.reason });
+      return;
+    }
+
+    console.log(
+      `razorpayWalletWebhook: ${credited.alreadyCredited ? 'already credited' : 'credited'} ${credited.creditAdded} for ${paymentId}`
+    );
+    res.status(200).json({
+      ok: true,
+      alreadyCredited: credited.alreadyCredited,
+      creditAdded: credited.creditAdded,
+      paymentId,
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error('razorpayWalletWebhook error:', msg);
+    // Return 200 sparingly only for business skips; infrastructure errors should retry.
     res.status(500).json({ message: msg || 'Server error' });
   }
 };
