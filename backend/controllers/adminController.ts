@@ -2148,18 +2148,14 @@ export const resolveWithdrawal = async (
         if (!receiver) throw new Error('ReceiverNotFound');
 
         if (previousStatus === 'pending' && nextStatus === 'approved') {
-          if (receiver.walletBalance < withdrawal.amount) {
-            throw new Error('CannotApprove:InsufficientRefundBalance');
-          }
+          // Admin may approve even if walletBalance < amount (manual override).
           receiver.walletBalance = Math.round((receiver.walletBalance - withdrawal.amount) * 100) / 100;
           await receiver.save();
           if (!withdrawal.walletDebitedAt) {
             withdrawal.walletDebitedAt = new Date();
           }
         } else if (previousStatus === 'rejected' && nextStatus === 'approved') {
-          if (receiver.walletBalance < withdrawal.amount) {
-            throw new Error('CannotApprove:InsufficientRefundBalance');
-          }
+          // Admin may approve even if walletBalance < amount (manual override).
           receiver.walletBalance = Math.round((receiver.walletBalance - withdrawal.amount) * 100) / 100;
           await receiver.save();
           if (!withdrawal.walletDebitedAt) {
@@ -2226,12 +2222,6 @@ export const resolveWithdrawal = async (
     }
     if (msg === 'ReceiverNotFound') {
       res.status(404).json({ message: 'Receiver not found' });
-      return;
-    }
-    if (msg === 'CannotApprove:InsufficientRefundBalance') {
-      res
-        .status(400)
-        .json({ message: 'Cannot approve now: receiver wallet balance is lower than withdrawal amount' });
       return;
     }
     if (msg === 'WithdrawalAlreadyPaid') {
