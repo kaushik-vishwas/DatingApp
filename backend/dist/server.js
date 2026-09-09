@@ -129,7 +129,15 @@ app.use((0, cors_1.default)({
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
     credentials: true
 }));
-app.use(express_1.default.json());
+app.use(express_1.default.json({
+    verify: (req, _res, buf) => {
+        // Razorpay webhook HMAC must use the exact raw body bytes.
+        const url = String(req.originalUrl || req.url || '');
+        if (url.includes('/wallet/razorpay-webhook')) {
+            req.rawBody = Buffer.from(buf);
+        }
+    },
+}));
 app.use((req, res, next) => {
     console.log("URL:", req.method, req.url);
     console.log("BODY:", req.body);
