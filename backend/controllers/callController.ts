@@ -33,6 +33,7 @@ import { getLivePendingIncomingCall } from '../services/pendingIncomingCall';
 import {
   releaseReceiverReservation,
   syncReceiverQueueState,
+  tryReserveReceiver,
 } from '../services/callQueue';
 
 function roundInr(n: number): number {
@@ -587,6 +588,7 @@ export const startVoiceSession = async (
       recordVoiceParticipantJoined(callId, accountKind),
       readCallerWalletBalanceInr(callerId),
     ]);
+    tryReserveReceiver(receiverId);
 
     res.status(200).json({
       ok: true,

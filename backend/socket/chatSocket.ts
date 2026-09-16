@@ -425,7 +425,7 @@ export function attachChatSocket(httpServer: HTTPServer): Server {
           if (!stillConnected) {
             void (async () => {
               await markReceiverDiscoverGraceIfAvailable(leavingId);
-              releaseReceiverReservation(leavingId);
+              await releaseIfStaleReceiverBusy(leavingId);
             })();
           }
         }, 300);

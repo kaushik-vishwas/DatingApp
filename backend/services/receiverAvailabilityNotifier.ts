@@ -5,6 +5,7 @@ import ReceiverAvailabilityNotification from '../models/ReceiverAvailabilityNoti
 import User from '../models/User';
 import { sendOnlinePresencePush } from './expoPush';
 import { emitReceiverOnlineToCaller, isReceiverSocketConnected } from '../socket/socketRegistry';
+import { getBusyReceiverIdSet } from './callQueue';
 
 const RECENT_CALL_WINDOW_DAYS = 14;
 const USER_RECEIVER_COOLDOWN_MS = 30 * 60 * 1000;
@@ -138,6 +139,9 @@ export async function scheduleReceiverAvailabilityNotifications(
   ) {
     return;
   }
+
+  const busySet = await getBusyReceiverIdSet([receiverId]);
+  if (busySet.has(receiverId)) return;
 
   const since = new Date(Date.now() - RECENT_CALL_WINDOW_DAYS * 24 * 60 * 60 * 1000);
   const callerIds = (await CallSession.distinct('callerId', {
