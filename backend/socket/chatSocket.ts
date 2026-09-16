@@ -14,7 +14,7 @@ import { CHAT_TEXT_CHARGE_INR, CHAT_TEXT_EARN_INR } from '../constants/chatPrici
 import { recordReceiverCallScore } from '../services/receiverScore';
 import { scheduleCallerOnlineNotifications } from '../services/callerOnlineNotifier';
 import { scheduleReceiverAvailabilityNotifications } from '../services/receiverAvailabilityNotifier';
-import { registerPendingCallInvite, unregisterPendingCallInvite, hasPendingCallInviteForReceiver } from '../services/callInviteRegistry';
+import { registerPendingCallInvite, unregisterPendingCallInvite } from '../services/callInviteRegistry';
 import { clearPendingIncomingCall, setPendingIncomingCall } from '../services/pendingIncomingCall';
 import {
   ensureCallEndedAndSettled,
@@ -425,20 +425,7 @@ export function attachChatSocket(httpServer: HTTPServer): Server {
           if (!stillConnected) {
             void (async () => {
               await markReceiverDiscoverGraceIfAvailable(leavingId);
-              // Do not clear busy while ringing / on an ongoing call — socket often drops mid-call
-              // while keep-alive still renews discover grace (would wrongly show Available).
-              const stillOnCall =
-                hasPendingCallInviteForReceiver(leavingId) ||
-                (mongoose.Types.ObjectId.isValid(leavingId) &&
-                  Boolean(
-                    await CallSession.exists({
-                      receiverId: new mongoose.Types.ObjectId(leavingId),
-                      status: 'ongoing',
-                    })
-                  ));
-              if (!stillOnCall) {
-                releaseReceiverReservation(leavingId);
-              }
+              releaseReceiverReservation(leavingId);
             })();
           }
         }, 300);

@@ -120,7 +120,6 @@ const discoverRoutes_1 = __importDefault(require("./routes/discoverRoutes"));
 const walletRoutes_1 = __importDefault(require("./routes/walletRoutes"));
 const chatRoutes_1 = __importDefault(require("./routes/chatRoutes"));
 const callRoutes_1 = __importDefault(require("./routes/callRoutes"));
-const appRoutes_1 = __importDefault(require("./routes/appRoutes"));
 const chatSocket_1 = require("./socket/chatSocket");
 const apiTraceLog_1 = require("./utils/apiTraceLog");
 const app = (0, express_1.default)();
@@ -156,7 +155,6 @@ app.use('/wallet', walletRoutes_1.default);
 app.use('/admin', adminRoutes_1.default);
 app.use('/chat', chatRoutes_1.default);
 app.use('/calls', callRoutes_1.default);
-app.use('/app', appRoutes_1.default);
 const httpServer = http_1.default.createServer(app);
 void (0, chatSocket_1.attachChatSocket)(httpServer);
 // 404
