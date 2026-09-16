@@ -150,14 +150,18 @@ export async function pickRandomQueuedReceiverForCaller(callerId: string): Promi
   });
   if (eligibleRows.length === 0) return null;
 
-  const eligibleIds = eligibleRows.map((r) => r._id);
+  const busyOnCall = await getBusyReceiverIdSet(eligibleRows.map((r) => String(r._id)));
+  const freeRows = eligibleRows.filter((r) => !busyOnCall.has(String(r._id)));
+  if (freeRows.length === 0) return null;
+
+  const eligibleIds = freeRows.map((r) => r._id);
   const blockedIds = await ChatBlock.distinct('receiverId', {
     userId: new mongoose.Types.ObjectId(cid),
     receiverId: { $in: eligibleIds },
   });
   const blockedSet = new Set((blockedIds as mongoose.Types.ObjectId[]).map((id) => String(id)));
 
-  const eligible = eligibleRows.filter((r) => !blockedSet.has(String(r._id)));
+  const eligible = freeRows.filter((r) => !blockedSet.has(String(r._id)));
   if (eligible.length === 0) return null;
   const eligibleById = new Map(eligible.map((r) => [String(r._id), r]));
   const priorityRows = await ReceiverPriorityNotification.find({

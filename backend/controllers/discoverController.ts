@@ -56,6 +56,7 @@ function toCard(
   const rating = ratingByReceiverId.get(String(r._id));
   const id = String(r._id);
   const switchOn = Boolean(o.isAvailable);
+  const busy = busyByReceiverId.has(id);
   const discoverOnline = isReceiverLoggedInAndAvailable({
     receiverId: id,
     isAvailable: switchOn,
@@ -74,8 +75,9 @@ function toCard(
     gender:
       o.gender === 'male' || o.gender === 'female' || o.gender === 'other' ? o.gender : null,
     isAvailable: switchOn,
-    isOnline: discoverOnline,
-    isBusyOnCall: busyByReceiverId.has(id),
+    // Never show as online/callable while on another call (or ringing).
+    isOnline: discoverOnline && !busy,
+    isBusyOnCall: busy,
     ratingAvg: rating ? Math.round(rating.avg * 10) / 10 : 0,
     ratingCount: rating?.count ?? 0,
   };
