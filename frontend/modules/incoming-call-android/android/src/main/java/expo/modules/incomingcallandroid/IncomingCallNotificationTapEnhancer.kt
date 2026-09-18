@@ -379,6 +379,9 @@ object IncomingCallNotificationTapEnhancer {
     var preserved = false
     var wrapped = false
     existing.actions?.forEach { action ->
+      if (isDuplicateCallNotificationAction(action.title)) {
+        return@forEach
+      }
       val actionIntent = action.actionIntent ?: return@forEach
       preserved = true
       val actionTarget =
@@ -462,9 +465,40 @@ object IncomingCallNotificationTapEnhancer {
     builder.setDefaults(0)
   }
 
+  /** CallStyle already renders Decline/Answer — copying those titles duplicates them on some OEMs. */
+  private fun isDuplicateCallNotificationAction(title: CharSequence?): Boolean {
+    val t = title?.toString()?.trim()?.lowercase() ?: return false
+    if (t.isEmpty()) return false
+    return t == "decline" ||
+      t == "reject" ||
+      t == "hang up" ||
+      t == "hangup" ||
+      t == "dismiss" ||
+      t == "answer" ||
+      t == "accept" ||
+      t.contains("decline") ||
+      t.contains("reject") ||
+      t.contains("answer")
+  }
+
   private fun copyExtras(builder: NotificationCompat.Builder, existing: Notification) {
     val extras = existing.extras ?: return
-    builder.setExtras(android.os.Bundle(extras))
+    builder.setExtras(sanitizeIncomingCallExtras(extras))
+  }
+
+  private fun sanitizeIncomingCallExtras(src: android.os.Bundle): android.os.Bundle {
+    val out = android.os.Bundle(src)
+    val drop =
+      out.keySet().filter { key ->
+        val k = key.lowercase()
+        k.contains("callstyle") ||
+          k.contains("android.call") ||
+          k.contains("callperson") ||
+          k.contains("calltype") ||
+          k.contains("callisvideo")
+      }
+    drop.forEach { out.remove(it) }
+    return out
   }
 
   private fun requestCode(tag: String, slot: Int): Int {

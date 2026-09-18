@@ -66,6 +66,7 @@ export type IncomingCallAndroidModule = {
     route?: string;
   };
   releaseVoiceCallAudioRoute(): void;
+  dismissIncomingCallTrayByCallId(callId: string): boolean;
 };
 
 let cachedModule: IncomingCallAndroidModule | null | undefined;

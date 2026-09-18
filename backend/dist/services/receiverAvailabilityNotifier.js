@@ -11,6 +11,7 @@ const ReceiverAvailabilityNotification_1 = __importDefault(require("../models/Re
 const User_1 = __importDefault(require("../models/User"));
 const expoPush_1 = require("./expoPush");
 const socketRegistry_1 = require("../socket/socketRegistry");
+const callQueue_1 = require("./callQueue");
 const RECENT_CALL_WINDOW_DAYS = 14;
 const USER_RECEIVER_COOLDOWN_MS = 30 * 60 * 1000;
 const GROUP_WINDOW_MS = 20 * 1000;
@@ -124,6 +125,9 @@ async function scheduleReceiverAvailabilityNotifications(receiverId) {
         !(0, socketRegistry_1.isReceiverSocketConnected)(receiverId)) {
         return;
     }
+    const busySet = await (0, callQueue_1.getBusyReceiverIdSet)([receiverId]);
+    if (busySet.has(receiverId))
+        return;
     const since = new Date(Date.now() - RECENT_CALL_WINDOW_DAYS * 24 * 60 * 60 * 1000);
     const callerIds = (await CallSession_1.default.distinct('callerId', {
         receiverId: rid,

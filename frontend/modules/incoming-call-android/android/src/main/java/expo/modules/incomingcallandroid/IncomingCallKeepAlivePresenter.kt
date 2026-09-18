@@ -10,7 +10,6 @@ import android.os.Build
 import android.os.PowerManager
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
-import androidx.core.app.Person
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
 
@@ -102,17 +101,6 @@ object IncomingCallKeepAlivePresenter {
     }
     if (!nativeRingOk) {
       IncomingCallNotificationChannels.resolveRingtoneUri(appContext)?.let { builder.setSound(it) }
-    }
-
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-      try {
-        val caller = Person.Builder().setName(name).setImportant(true).build()
-        builder.setStyle(
-          NotificationCompat.CallStyle.forIncomingCall(caller, contentPending, contentPending)
-        )
-      } catch (_: Exception) {
-        // CATEGORY_CALL is enough.
-      }
     }
 
     return try {

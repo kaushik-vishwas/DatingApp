@@ -41,6 +41,8 @@ import {
   setReceiverIncomingCallUiEnabled,
   alertReceiverIncomingCallInBackground,
   showIncomingCallNotification,
+  dismissIncomingCallNotification,
+  shouldPresentIncomingCallUi,
 } from '../utils/incomingCallNotifications';
 import {
   bindOnlinePresenceCallHandler,
@@ -450,7 +452,11 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
   const openIncomingCall = useCallback((incoming: IncomingCallRequest) => {
     if (userRoleRef.current !== 'receiver') return;
-    if (!canNavigateToIncomingCall(incoming.callId)) return;
+    if (!shouldPresentIncomingCallUi(incoming.callId)) {
+      void dismissIncomingCallNotification(incoming.callId);
+      return;
+    }
+    void dismissIncomingCallNotification(incoming.callId);
     const navigate = () => {
       const nav = navigationRef.current;
       if (!nav || !nav.isReady()) return false;
@@ -1019,6 +1025,7 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   const confirmIncomingCallSeenOnScreen = useCallback((callId: string) => {
     const id = callId.trim();
     if (!id || userRoleRef.current !== 'receiver') return;
+    void dismissIncomingCallNotification(id);
     const socket = socketRef.current;
     if (!socket?.connected) return;
     try {
@@ -1409,7 +1416,7 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         const pending = pendingIncomingCallRequestRef.current;
         if (
           pending &&
-          canNavigateToIncomingCall(pending.callId) &&
+          shouldPresentIncomingCallUi(pending.callId) &&
           activeIncomingCallUiCallIdRef.current === pending.callId &&
           !acceptedIncomingCallIdsRef.current.has(pending.callId) &&
           !rejectedIncomingCallIdsRef.current.has(pending.callId) &&
@@ -1443,7 +1450,8 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         !rejectedIncomingCallIdsRef.current.has(callId)
     );
     const unbind = bindIncomingCallNotificationHandlers((incoming) => {
-      if (!canNavigateToIncomingCall(incoming.callId)) return;
+      if (acceptedIncomingCallIdsRef.current.has(incoming.callId)) return;
+      if (rejectedIncomingCallIdsRef.current.has(incoming.callId)) return;
       const req: IncomingCallRequest = {
         callId: incoming.callId,
         fromType: incoming.fromType,
@@ -1452,8 +1460,11 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         peerImage: incoming.peerImage,
       };
       if (incomingCallHandlerRef.current) {
-        activeIncomingCallUiCallIdRef.current = req.callId;
         incomingCallHandlerRef.current(req);
+        return;
+      }
+      if (!shouldPresentIncomingCallUi(incoming.callId)) {
+        void dismissIncomingCallNotification(incoming.callId);
         return;
       }
       activeIncomingCallUiCallIdRef.current = req.callId;
@@ -1738,8 +1749,12 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         };
 
         if (incomingCallHandlerRef.current) {
-          activeIncomingCallUiCallIdRef.current = incoming.callId;
           incomingCallHandlerRef.current(incoming);
+          return;
+        }
+
+        if (!shouldPresentIncomingCallUi(incoming.callId)) {
+          void dismissIncomingCallNotification(incoming.callId);
           return;
         }
 

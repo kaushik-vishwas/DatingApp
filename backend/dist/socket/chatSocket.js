@@ -364,7 +364,7 @@ function attachChatSocket(httpServer) {
                     if (!stillConnected) {
                         void (async () => {
                             await markReceiverDiscoverGraceIfAvailable(leavingId);
-                            (0, callQueue_1.releaseReceiverReservation)(leavingId);
+                            await (0, callQueue_1.releaseIfStaleReceiverBusy)(leavingId);
                         })();
                     }
                 }, 300);

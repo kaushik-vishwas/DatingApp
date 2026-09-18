@@ -10,6 +10,7 @@ import {
 } from '../utils/incomingCallNotifications';
 import { logIncomingCallNotif } from '../utils/incomingCallNotificationDebug';
 import { readPendingIncomingCallTap } from '../utils/pendingIncomingCallTapStorage';
+import { isReceiverOnVoiceCallScreen } from './receiverCallNavigation';
 
 const APP_PREFIXES = ['nestham://', 'com.selecto.app://'];
 
@@ -50,13 +51,13 @@ export const appLinking: LinkingOptions<RootStackParamList> = {
   async getInitialURL() {
     const initialUrl = await Linking.getInitialURL();
     const fromLink = initialUrl ? parseIncomingCallDeepLink(initialUrl) : null;
-    if (fromLink && canNavigateToIncomingCall(fromLink.callId)) {
+    if (fromLink && canNavigateToIncomingCall(fromLink.callId) && !isReceiverOnVoiceCallScreen()) {
       return initialUrl;
     }
 
     if (Platform.OS !== 'web') {
       const persisted = await readPendingIncomingCallTap();
-      if (persisted && canNavigateToIncomingCall(persisted.callId)) {
+      if (persisted && canNavigateToIncomingCall(persisted.callId) && !isReceiverOnVoiceCallScreen()) {
         return incomingCallDeepLink(persisted);
       }
 
@@ -69,7 +70,7 @@ export const appLinking: LinkingOptions<RootStackParamList> = {
         const fromNotif = urlFromNotificationResponse(last);
         if (fromNotif) {
           const parsed = parseIncomingCallDeepLink(fromNotif);
-          if (parsed && canNavigateToIncomingCall(parsed.callId)) {
+          if (parsed && canNavigateToIncomingCall(parsed.callId) && !isReceiverOnVoiceCallScreen()) {
             return fromNotif;
           }
         }
@@ -93,6 +94,7 @@ export const appLinking: LinkingOptions<RootStackParamList> = {
           if (!url) return;
           const parsed = parseIncomingCallDeepLink(url);
           if (!parsed || !canNavigateToIncomingCall(parsed.callId)) return;
+          if (isReceiverOnVoiceCallScreen()) return;
           logIncomingCallNotif('linking.url', {
             url,
             identifier: response.notification.request.identifier ?? '',

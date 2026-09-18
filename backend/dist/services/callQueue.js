@@ -30,6 +30,12 @@ function normalizeId(id) {
 function isReceiverBusy(receiverId) {
     return busyReceiverIds.has(normalizeId(receiverId));
 }
+function persistReceiverBusyFlag(receiverId, busy) {
+    const rid = normalizeId(receiverId);
+    if (!rid || !mongoose_1.default.Types.ObjectId.isValid(rid))
+        return;
+    void Receiver_1.default.updateOne({ _id: rid }, { $set: { isBusyOnCall: busy } }).exec();
+}
 /** In-memory invite/reservation, plus an actual ongoing voice session. */
 async function getBusyReceiverIdSet(receiverIds) {
     const set = new Set();
@@ -45,14 +51,24 @@ async function getBusyReceiverIdSet(receiverIds) {
     }
     if (oids.length === 0)
         return set;
-    const ongoing = await CallSession_1.default.find({
-        receiverId: { $in: oids },
-        status: 'ongoing',
-    })
-        .select('receiverId')
-        .lean();
+    const [ongoing, busyRows] = await Promise.all([
+        CallSession_1.default.find({
+            receiverId: { $in: oids },
+            status: 'ongoing',
+        })
+            .select('receiverId')
+            .lean(),
+        Receiver_1.default.find({
+            _id: { $in: oids },
+            isBusyOnCall: true,
+        })
+            .select('_id')
+            .lean(),
+    ]);
     for (const row of ongoing)
         set.add(String(row.receiverId));
+    for (const row of busyRows)
+        set.add(String(row._id));
     return set;
 }
 function tryReserveReceiver(receiverId) {
@@ -61,10 +77,13 @@ function tryReserveReceiver(receiverId) {
         return false;
     busyReceiverIds.add(rid);
     waitingReceiverIds.delete(rid);
+    persistReceiverBusyFlag(rid, true);
     return true;
 }
 function releaseReceiverReservation(receiverId) {
-    busyReceiverIds.delete(normalizeId(receiverId));
+    const rid = normalizeId(receiverId);
+    busyReceiverIds.delete(rid);
+    persistReceiverBusyFlag(rid, false);
 }
 /** Clears in-memory "busy" when it is not backed by an ongoing session or an active socket invite. */
 async function releaseIfStaleReceiverBusy(receiverId) {
@@ -81,6 +100,7 @@ async function releaseIfStaleReceiverBusy(receiverId) {
     });
     if (!ongoing) {
         busyReceiverIds.delete(rid);
+        persistReceiverBusyFlag(rid, false);
     }
 }
 async function releaseStaleReceiverBusyFlags() {
@@ -138,6 +158,7 @@ async function pickRandomQueuedReceiverForCaller(callerId) {
         suspended: { $ne: true },
         isOnline: true,
         isAvailable: true,
+        isBusyOnCall: { $ne: true },
     };
     const candidates = await Receiver_1.default.find(baseFilter)
         .select('_id name profileImage audioCallRate')

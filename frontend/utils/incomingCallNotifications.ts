@@ -23,6 +23,7 @@ import {
 import { applyIncomingCallFullScreenIntent } from './incomingCallAndroidFullScreen';
 import { ensureIncomingCallNativeTapDebugListener } from './incomingCallAndroidTapDebug';
 import { getIncomingCallAndroidNativeModule } from '../modules/incoming-call-android';
+import { isReceiverAlreadyOnCallScreen, isReceiverOnVoiceCallScreen } from '../navigation/receiverCallNavigation';
 
 export type IncomingCallNotificationPayload = {
   callId: string;
@@ -40,7 +41,7 @@ const INCOMING_CALL_NOTIFICATION_SOUND_ANDROID = 'receiver_ringtone';
 /** Bundled via expo-notifications plugin (iOS). */
 const INCOMING_CALL_NOTIFICATION_SOUND_IOS = 'receiver_ringtone.mp3';
 /** expo-notifications: `categoryIdentifier` (iOS + Android action category). */
-const INCOMING_CALL_CATEGORY_ID = 'call';
+const INCOMING_CALL_CATEGORY_ID = 'call_open_v2';
 const INCOMING_CALL_NOTIFICATION_ID_PREFIX = 'incoming-';
 export const INCOMING_CALL_DEEP_LINK_PREFIX = 'nestham://incoming-call/';
 
@@ -92,6 +93,14 @@ export function canNavigateToIncomingCall(callId: string): boolean {
   if (!id) return false;
   if (handledIncomingCallIds.has(id)) return false;
   if (incomingCallNavigationGuard && !incomingCallNavigationGuard(id)) return false;
+  return true;
+}
+
+/** True only while the invite is still unanswered and IncomingCall is not already covered by VoiceCall. */
+export function shouldPresentIncomingCallUi(callId: string): boolean {
+  if (!canNavigateToIncomingCall(callId)) return false;
+  if (isReceiverOnVoiceCallScreen()) return false;
+  if (isReceiverAlreadyOnCallScreen(callId)) return false;
   return true;
 }
 
@@ -323,7 +332,7 @@ export function parseIncomingFromNotificationRequest(request: {
 }
 
 function queuePendingOpen(incoming: IncomingCallNotificationPayload): void {
-  if (!canNavigateToIncomingCall(incoming.callId)) return;
+  if (!shouldPresentIncomingCallUi(incoming.callId)) return;
   pendingOpens.set(incoming.callId, incoming);
   void persistPendingIncomingCallTap(incoming);
 }
@@ -361,6 +370,10 @@ function dispatchIncomingOpen(incoming: IncomingCallNotificationPayload): void {
     peerImage: incoming.peerImage ?? null,
   };
   if (!merged.callId) return;
+  if (!shouldPresentIncomingCallUi(merged.callId)) {
+    void dismissIncomingCallNotification(merged.callId);
+    return;
+  }
   if (shouldSkipDuplicateTap(merged.callId)) {
     return;
   }
@@ -376,8 +389,9 @@ function dispatchIncomingOpen(incoming: IncomingCallNotificationPayload): void {
 async function openIncomingFromNotificationTap(
   incoming: IncomingCallNotificationPayload
 ): Promise<void> {
-  if (!canNavigateToIncomingCall(incoming.callId)) {
+  if (!shouldPresentIncomingCallUi(incoming.callId)) {
     logIncomingCallNotif('nav.blocked', { callId: incoming.callId, reason: 'tap_pipeline' });
+    void dismissIncomingCallNotification(incoming.callId);
     return;
   }
   logIncomingCallNotif('tap.open_start', {
@@ -396,9 +410,7 @@ async function openIncomingFromNotificationTap(
   }
   dispatchIncomingOpen(incoming);
   void persistPendingIncomingCallTap(incoming);
-  setTimeout(() => {
-    void dismissIncomingCallNotification(incoming.callId);
-  }, 600);
+  void dismissIncomingCallNotification(incoming.callId);
 
   // Direct handler navigation is reliable on Android; Linking.openURL can race with
   // NotificationForwarderActivity on Samsung and drop the deep link.
@@ -520,7 +532,7 @@ async function resumeIncomingFromTrayIfNeeded(msSinceResponse: number | null): P
   if (msSinceResponse != null && msSinceResponse < 2000) return;
 
   const shown = await readShownIncomingCallNotification();
-  if (!shown || !canNavigateToIncomingCall(shown.callId)) return;
+  if (!shown || !shouldPresentIncomingCallUi(shown.callId)) return;
 
   const Notifications = await loadNotificationsModule();
   if (!Notifications?.getPresentedNotificationsAsync) {
@@ -602,7 +614,7 @@ async function collapseIncomingCallTrayToSingle(
 export function consumePendingNotificationTap(): void {
   void (async () => {
     const persisted = await readPendingIncomingCallTap();
-    if (persisted && canNavigateToIncomingCall(persisted.callId)) {
+    if (persisted && shouldPresentIncomingCallUi(persisted.callId)) {
       logIncomingCallNotif('consume.pending', { callId: persisted.callId });
       if (openHandler) {
         openHandler(persisted);
@@ -906,6 +918,13 @@ export async function showIncomingCallNotification(
     }
     logIncomingCallNotif('show.start', { callId, showSessionId });
     prefetchIncomingCallBootstrapFromNotification(incoming);
+    if (Platform.OS === 'android') {
+      try {
+        getIncomingCallAndroidNativeModule()?.dismissIncomingCallTrayByCallId?.(callId);
+      } catch {
+        // Expo collapse below still runs.
+      }
+    }
     await collapseIncomingCallTrayToSingle(incoming);
 
     const visualOnly = Boolean(options?.visualOnly);
@@ -946,11 +965,31 @@ export async function showIncomingCallNotification(
 export async function dismissIncomingCallNotification(callId?: string): Promise<void> {
   const id = callId?.trim();
   if (id) notifiedCallIds.delete(id);
+  if (id && Platform.OS === 'android') {
+    try {
+      getIncomingCallAndroidNativeModule()?.dismissIncomingCallTrayByCallId?.(id);
+    } catch {
+      // ignore — Expo dismiss below still runs
+    }
+  }
   if (!canUseLocalNotifications()) return;
   try {
     const Notifications = await loadNotificationsModule();
     if (!Notifications || !id) return;
     await Notifications.dismissNotificationAsync(`${INCOMING_CALL_NOTIFICATION_ID_PREFIX}${id}`);
+    const presented = await Notifications.getPresentedNotificationsAsync?.();
+    if (presented?.length) {
+      await Promise.all(
+        presented
+          .filter((n) => {
+            const identifier = n.request.identifier ?? '';
+            if (identifier === `${INCOMING_CALL_NOTIFICATION_ID_PREFIX}${id}`) return false;
+            const parsed = parseIncomingFromNotificationRequest(n.request);
+            return parsed?.callId === id || identifier.includes(id);
+          })
+          .map((n) => Notifications.dismissNotificationAsync(n.request.identifier).catch(() => {}))
+      );
+    }
     void clearShownIncomingCallNotification();
   } catch {
     // ignore

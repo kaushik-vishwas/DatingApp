@@ -21,7 +21,17 @@ export function getReceiverPresenceInfo(receiver: DiscoverReceiverSummary): Rece
   const acceptingCalls = Boolean(receiver.isAvailable);
   const loggedIn = Boolean(receiver.isOnline);
 
-  if (acceptingCalls && loggedIn && !Boolean(receiver.isBusyOnCall)) {
+  if (Boolean(receiver.isBusyOnCall)) {
+    return {
+      status: 'busy',
+      label: 'Busy',
+      color: STATUS_YELLOW,
+      canCall: false,
+      canMessage: true,
+    };
+  }
+
+  if (acceptingCalls && loggedIn) {
     return {
       status: 'available',
       label: 'Available',

@@ -232,6 +232,11 @@ class IncomingCallAndroidModule : Module() {
       val context = appContext.reactContext ?: return@Function Unit
       VoiceCallAudioRoute.release(context)
     }
+
+    Function("dismissIncomingCallTrayByCallId") { callId: String ->
+      val context = appContext.reactContext?.applicationContext ?: return@Function false
+      IncomingCallTrayDismiss.dismissByCallId(context, callId)
+    }
   }
 
   private fun EnhanceTapResult.toLogMap(): Map<String, Any?> =

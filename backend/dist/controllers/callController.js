@@ -493,6 +493,7 @@ const startVoiceSession = async (req, res) => {
             recordVoiceParticipantJoined(callId, accountKind),
             readCallerWalletBalanceInr(callerId),
         ]);
+        (0, callQueue_2.tryReserveReceiver)(receiverId);
         res.status(200).json({
             ok: true,
             ...callTalkApiFields(session),

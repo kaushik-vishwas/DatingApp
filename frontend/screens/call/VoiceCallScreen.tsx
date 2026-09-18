@@ -332,6 +332,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
   const [incomingReq, setIncomingReq] = useState<IncomingCallRequest | null>(null);
   const incomingReqRef = useRef<IncomingCallRequest | null>(null);
   const [incomingResponding, setIncomingResponding] = useState(false);
+  const incomingRespondingRef = useRef(false);
   const [sdk, setSdk] = useState<StreamSdkModule | null>(() => loadStreamSdkModule());
   const [client, setClient] = useState<{
     call: (type: string, id: string) => {
@@ -1275,6 +1276,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
     remainingTalkBudgetSecRef.current = null;
     setElapsedSec(0);
     elapsedSecRef.current = 0;
+    incomingRespondingRef.current = false;
     setIncomingReq(null);
     setReceiverSessionPhase('waiting');
     (navigation as { replace: (name: 'VoiceCall', params: VoiceCallScreenParams) => void }).replace(
@@ -1398,6 +1400,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
     void stopIncomingRingtone();
     setIncomingReq(null);
     setReceiverSessionPhase('waiting');
+    incomingRespondingRef.current = false;
     setIncomingResponding(false);
   }, [stopIncomingRingtone]);
   const dismissIncomingOnSessionRef = useRef(dismissIncomingOnSession);
@@ -1465,6 +1468,10 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
     if (!receiverAvailabilitySession) return;
     setIncomingCallDismissHandler(dismissIncomingOnSession);
       setIncomingCallHandler((incoming) => {
+      if (endingRef.current || incomingRespondingRef.current) return;
+      if (talkActiveRef.current || readyRef.current) return;
+      const activeId = callIdRef.current.trim();
+      if (activeId && activeId === incoming.callId) return;
       setIncomingReq(incoming);
       incomingReqRef.current = incoming;
       setReceiverSessionPhase('incoming');
@@ -1505,6 +1512,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
 
   const onAcceptIncomingOnSession = () => {
     if (!incomingReq || incomingResponding) return;
+    incomingRespondingRef.current = true;
     setIncomingResponding(true);
     void (async () => {
       try {
@@ -1520,6 +1528,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
         });
       } catch (e) {
         Alert.alert('Call failed', getErrorMessage(e));
+        incomingRespondingRef.current = false;
         setReceiverSessionPhase('waiting');
         setIncomingReq(null);
       } finally {
@@ -2899,9 +2908,14 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
       </Modal>
     ) : null;
 
+  const callerPostCallBackdrop =
+    user?.role === 'caller' && (ratingOpen || postCallOpen);
+
   let screenBody: React.JSX.Element;
 
-  if (error && !showStreamChrome) {
+  if (callerPostCallBackdrop) {
+    screenBody = <View style={styles.container} />;
+  } else if (error && !showStreamChrome) {
     screenBody = (
       <View style={styles.center}>
         <LinearGradient
@@ -3081,19 +3095,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
                   {`${String(Math.floor(elapsedSec / 60)).padStart(2, '0')}:${String(elapsedSec % 60).padStart(2, '0')}`}
                 </Text>
               </>
-            ) : user?.role === 'caller' ? (
-              <>
-                <Text style={styles.durationLabel}>Talk time</Text>
-                <Text style={styles.durationValue}>Connecting…</Text>
-              </>
-            ) : receiverAvailabilitySession ? (
-              <Text style={styles.waitingHint}>Talk time starts when you are both connected.</Text>
-            ) : (
-              <>
-                <Text style={styles.durationLabel}>Talk time</Text>
-                <Text style={styles.durationValue}>Connecting…</Text>
-              </>
-            )}
+            ) : null}
             {remainingTalkCountdownEl}
             {addTalktimeButtonEl}
             {showLiveEarning ? (

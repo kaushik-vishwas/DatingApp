@@ -1,4 +1,5 @@
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
+import { useFocusEffect } from '@react-navigation/native';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Animated, Image, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
@@ -7,6 +8,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useCallSignals, type IncomingCallRequest } from '../../context/CallSignalContext';
 import type { ReceiverStackParamList } from '../../navigation/ReceiverStackParamList';
 import { resolveProfileImageSource } from '../../utils/avatarSource';
+import { canNavigateToIncomingCall } from '../../utils/incomingCallNotifications';
 
 type Props = NativeStackScreenProps<ReceiverStackParamList, 'IncomingCall'>;
 
@@ -39,6 +41,15 @@ export default function IncomingCallScreen({ navigation, route }: Props): React.
   useEffect(() => {
     confirmIncomingCallSeenOnScreen(callId);
   }, [callId, confirmIncomingCallSeenOnScreen]);
+
+  useFocusEffect(
+    useCallback(() => {
+      if (respondedRef.current) return;
+      if (!canNavigateToIncomingCall(callId)) {
+        if (navigation.canGoBack()) navigation.goBack();
+      }
+    }, [callId, navigation])
+  );
 
   useEffect(() => {
     void (async () => {

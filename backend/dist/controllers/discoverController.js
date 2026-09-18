@@ -121,7 +121,7 @@ const listReceiversForCaller = async (req, res) => {
             ? { _id: { $nin: blockedReceiverIds } }
             : {};
         const receivers = await Receiver_1.default.find({ ...filter, ...blockClause })
-            .select('name age state interests languages profileImage audioCallRate updatedAt gender isAvailable isOnline discoverGraceUntil expoPushToken fcmDeviceToken')
+            .select('name age state interests languages profileImage audioCallRate updatedAt gender isAvailable isOnline isBusyOnCall discoverGraceUntil expoPushToken fcmDeviceToken')
             .sort({ updatedAt: -1 })
             .limit(limit)
             .exec();
