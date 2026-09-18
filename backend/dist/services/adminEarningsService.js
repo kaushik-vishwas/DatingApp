@@ -57,71 +57,64 @@ async function aggregateReferralRewardsPaid(since) {
     return roundInr(agg?.total ?? 0);
 }
 function finalizeBreakdown(parts) {
-    const callEarnings = roundInr(Math.max(0, parts.callEarnings));
-    const messageEarnings = roundInr(Math.max(0, parts.messageEarnings));
+    const callerCallGross = roundInr(Math.max(0, parts.callerCallGross));
+    const callerMessageGross = roundInr(Math.max(0, parts.callerMessageGross));
+    const receiverCallPayout = roundInr(Math.max(0, parts.receiverCallPayout));
+    const receiverMessagePayout = roundInr(Math.max(0, parts.receiverMessagePayout));
+    const totalRevenue = roundInr(callerCallGross + callerMessageGross);
+    const totalPayout = roundInr(receiverCallPayout + receiverMessagePayout);
+    const callEarnings = roundInr(Math.max(0, callerCallGross - receiverCallPayout));
+    const messageEarnings = roundInr(Math.max(0, callerMessageGross - receiverMessagePayout));
     const withdrawalFeeEarnings = roundInr(Math.max(0, parts.withdrawalFeeEarnings));
     const referralRewardsPaid = roundInr(Math.max(0, parts.referralRewardsPaid));
-    const grossAdmin = roundInr(callEarnings + messageEarnings + withdrawalFeeEarnings);
     return {
         callEarnings,
         messageEarnings,
-        totalEarnings: roundInr(Math.max(0, grossAdmin - referralRewardsPaid)),
+        totalRevenue,
+        totalPayout,
+        /** Admin usage margin: caller spend − receiver payout. Changes with payout rates. */
+        totalEarnings: roundInr(Math.max(0, totalRevenue - totalPayout)),
         calls: parts.calls,
         messages: parts.messages,
-        callerCallGross: roundInr(Math.max(0, parts.callerCallGross)),
-        callerMessageGross: roundInr(Math.max(0, parts.callerMessageGross)),
-        receiverCallPayout: roundInr(Math.max(0, parts.receiverCallPayout)),
-        receiverMessagePayout: roundInr(Math.max(0, parts.receiverMessagePayout)),
+        callerCallGross,
+        callerMessageGross,
+        receiverCallPayout,
+        receiverMessagePayout,
+        withdrawalFeeEarnings,
+        referralRewardsPaid,
     };
 }
 async function aggregateAdminEarnings(since) {
-    const callerSpendMatch = {
-        status: 'completed',
-        settledAmountInr: { $gt: 0 },
-    };
-    const payoutCallMatch = { status: 'completed', durationSec: { $gt: 0 } };
-    if (since) {
-        callerSpendMatch.startedAt = { $gte: since };
-        payoutCallMatch.startedAt = { $gte: since };
-    }
-    const [callerSpendRows, callPayoutRows] = await Promise.all([
-        CallSession_1.default.aggregate([
-            { $match: callerSpendMatch },
-            {
-                $group: {
-                    _id: null,
-                    callerGross: { $sum: '$settledAmountInr' },
-                    calls: { $sum: 1 },
-                },
+    const callMatch = { status: 'completed' };
+    if (since)
+        callMatch.startedAt = { $gte: since };
+    const [callAgg] = await CallSession_1.default.aggregate([
+        { $match: callMatch },
+        {
+            $addFields: {
+                settled: { $ifNull: ['$settledAmountInr', 0] },
+                resolvedReceiverPayout: receiverCallEarnings_1.RESOLVED_RECEIVER_CALL_EARNING_EXPR,
             },
-        ]),
-        CallSession_1.default.aggregate([
-            { $match: payoutCallMatch },
-            {
-                $addFields: {
-                    settled: { $ifNull: ['$settledAmountInr', 0] },
-                    resolvedReceiverPayout: receiverCallEarnings_1.RESOLVED_RECEIVER_CALL_EARNING_EXPR,
-                },
-            },
-            {
-                $addFields: {
-                    callMargin: {
-                        $max: [0, { $subtract: ['$settled', '$resolvedReceiverPayout'] }],
+        },
+        {
+            $group: {
+                _id: null,
+                callerGross: { $sum: '$settled' },
+                receiverPayout: { $sum: '$resolvedReceiverPayout' },
+                calls: {
+                    $sum: {
+                        $cond: [
+                            {
+                                $or: [{ $gt: ['$settled', 0] }, { $gt: [{ $ifNull: ['$durationSec', 0] }, 0] }],
+                            },
+                            1,
+                            0,
+                        ],
                     },
                 },
             },
-            {
-                $group: {
-                    _id: null,
-                    receiverPayout: { $sum: '$resolvedReceiverPayout' },
-                    callEarnings: { $sum: '$callMargin' },
-                    calls: { $sum: 1 },
-                },
-            },
-        ]),
+        },
     ]);
-    const callerSpendAgg = callerSpendRows[0];
-    const callAgg = callPayoutRows[0];
     const chatMatch = { senderType: 'u', feeInr: { $gt: 0 } };
     if (since)
         chatMatch.createdAt = { $gte: since };
@@ -149,13 +142,13 @@ async function aggregateAdminEarnings(since) {
         aggregateReferralRewardsPaid(since),
     ]);
     return finalizeBreakdown({
-        callEarnings: callAgg?.callEarnings ?? 0,
+        callEarnings: 0,
         messageEarnings: chatAgg?.messageEarnings ?? 0,
         withdrawalFeeEarnings,
         referralRewardsPaid,
-        calls: callerSpendAgg?.calls ?? callAgg?.calls ?? 0,
+        calls: callAgg?.calls ?? 0,
         messages: chatAgg?.messages ?? 0,
-        callerCallGross: callerSpendAgg?.callerGross ?? 0,
+        callerCallGross: callAgg?.callerGross ?? 0,
         callerMessageGross: chatAgg?.callerMessageGross ?? 0,
         receiverCallPayout: callAgg?.receiverPayout ?? 0,
         receiverMessagePayout: chatAgg?.receiverPayout ?? 0,
@@ -172,8 +165,8 @@ async function computeReservedAdminEarningsInr() {
 async function getPlatformRevenueForRange(since) {
     const breakdown = await aggregateAdminEarnings(since);
     const adminEarnings = breakdown.totalEarnings;
-    const receiverRevenue = roundInr(breakdown.receiverCallPayout + breakdown.receiverMessagePayout);
-    const callerGross = roundInr(breakdown.callerCallGross + breakdown.callerMessageGross);
+    const receiverRevenue = breakdown.totalPayout;
+    const callerGross = breakdown.totalRevenue;
     const totalRevenue = callerGross;
     return {
         totalRevenue,
@@ -193,7 +186,8 @@ async function getAdminEarningsSnapshot() {
         computeReservedAdminEarningsInr(),
     ]);
     const withdrawnInr = reservedInr;
-    const withdrawableInr = roundInr(Math.max(0, lifetime.totalEarnings - reservedInr));
+    const platformNet = roundInr(lifetime.totalEarnings + lifetime.withdrawalFeeEarnings - lifetime.referralRewardsPaid);
+    const withdrawableInr = roundInr(Math.max(0, platformNet - reservedInr));
     return {
         lifetime,
         today,

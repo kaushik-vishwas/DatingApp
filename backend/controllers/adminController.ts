@@ -19,7 +19,6 @@ import {
   publicEarningSchedulePayload,
 } from '../services/receiverEarningModel';
 import {
-  aggregateReferralRewardsPaid,
   getPlatformRevenueForRange,
   getRevenueDashboardMetrics,
 } from '../services/adminEarningsService';
@@ -814,12 +813,8 @@ export const getOverviewDashboard = async (
       return;
     }
     const start = toRangeStart(range);
-    const todayStart = new Date();
-    todayStart.setHours(0, 0, 0, 0);
-    const weekStart = toRangeStart('7d') ?? todayStart;
-    const monthStart = toRangeStart('30d') ?? todayStart;
 
-    const [platformRevenue, calls, chats, activeReceivers, activeUsers, pendingKycApprovals, pendingWithdrawals, flaggedReports, allReceiverIds, referralRewardsPaid] =
+    const [platformRevenue, calls, chats, activeReceivers, activeUsers, pendingKycApprovals, pendingWithdrawals, flaggedReports] =
       await Promise.all([
         getPlatformRevenueForRange(start),
         CallSession.find({
@@ -840,22 +835,11 @@ export const getOverviewDashboard = async (
         Receiver.countDocuments({ accountStatus: 'pending_review' }),
         WithdrawalRequest.countDocuments({ status: 'pending' }),
         UserReport.countDocuments({ status: 'pending' }),
-        Receiver.find({}).select('_id').lean<{ _id: mongoose.Types.ObjectId }[]>(),
-        aggregateReferralRewardsPaid(start),
       ]);
 
-    const earningsRollups = await aggregateReceiverEarningsByReceiver(
-      allReceiverIds.map((r) => r._id),
-      todayStart,
-      weekStart,
-      monthStart
-    );
-    const earningsPeriod =
-      range === 'all' ? 'lifetime' : range === '30d' ? 'last30Days' : 'last7Days';
-    const receiverEarningsSum = sumReceiverEarningsRollup(earningsRollups.values(), earningsPeriod).earnings;
-
-    const totalRevenue = platformRevenue.callerGross;
-    const adminEarnings = roundInr(Math.max(0, totalRevenue - receiverEarningsSum - referralRewardsPaid));
+    const totalRevenue = platformRevenue.totalRevenue;
+    const adminEarnings = platformRevenue.adminEarnings;
+    const receiverRevenue = platformRevenue.receiverRevenue;
     const totalCalls = calls.length;
     const trendByDay = new Map<string, number>();
 
@@ -885,8 +869,8 @@ export const getOverviewDashboard = async (
       cards: {
         totalRevenue,
         adminEarnings,
-        receiverRevenue: receiverEarningsSum,
-        receiverEarningsSum,
+        receiverRevenue,
+        receiverEarningsSum: receiverRevenue,
         totalCalls,
         activeReceivers,
         activeUsers,
