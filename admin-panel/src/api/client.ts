@@ -658,12 +658,16 @@ export type AdminEarningsBreakdown = {
   callEarnings: number;
   messageEarnings: number;
   totalEarnings: number;
+  totalRevenue?: number;
+  totalPayout?: number;
   calls: number;
   messages: number;
   callerCallGross: number;
   callerMessageGross: number;
   receiverCallPayout: number;
   receiverMessagePayout: number;
+  withdrawalFeeEarnings?: number;
+  referralRewardsPaid?: number;
 };
 
 export type AdminEarningsDashboardResponse = {
