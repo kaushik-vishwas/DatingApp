@@ -669,7 +669,7 @@ function toRangeStart(range) {
  */
 const getRevenueDashboard = async (req, res) => {
     try {
-        const range = String(req.query.range ?? '7d').toLowerCase();
+        const range = String(req.query.range ?? 'all').toLowerCase();
         if (range !== '7d' && range !== '30d' && range !== 'all') {
             res.status(400).json({ message: 'range must be 7d, 30d, or all' });
             return;

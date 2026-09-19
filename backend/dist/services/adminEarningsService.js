@@ -263,13 +263,6 @@ function localDateKey(d) {
     const day = String(x.getDate()).padStart(2, '0');
     return `${y}-${m}-${day}`;
 }
-function bumpDailyUsage(map, date, revenue, payout) {
-    const key = localDateKey(date);
-    const row = map.get(key) ?? { revenue: 0, payout: 0 };
-    row.revenue = roundInr(row.revenue + revenue);
-    row.payout = roundInr(row.payout + payout);
-    map.set(key, row);
-}
 /** Platform fee applies only when the paid total includes the fee (post-fee recharge packs). */
 function resolveWalletTopupPlatformFee(row) {
     const credit = Number(row.creditAdded) || 0;
@@ -298,63 +291,88 @@ async function aggregateCallerRechargePlatformFees(since) {
     }
     return roundInr(total);
 }
-/** Admin revenue dashboard — actual caller spend, receiver payout, and platform fees. */
+/** Admin revenue dashboard — wallet collections, paid withdrawals, and platform fees. */
 async function getRevenueDashboardMetrics(since) {
+    const topupMatch = {};
+    const withdrawalMatch = (0, receiverWithdrawalFees_1.paidWithdrawalMatch)(since);
     const callMatch = {
         status: 'completed',
         settledAmountInr: { $gt: 0 },
     };
     const chatMatch = { senderType: 'u', feeInr: { $gt: 0 } };
     if (since) {
+        topupMatch.createdAt = { $gte: since };
         callMatch.startedAt = { $gte: since };
         chatMatch.createdAt = { $gte: since };
     }
-    const [calls, chats, callerRechargeCommission, receiverWithdrawalCommission] = await Promise.all([
+    const [topups, paidWithdrawals, referralRewardsPaid, calls, chats] = await Promise.all([
+        WalletTopup_1.default.find(topupMatch)
+            .select('payAmount bonusPercent creditAdded createdAt')
+            .lean(),
+        WithdrawalRequest_1.default.find(withdrawalMatch)
+            .select('receiverId amount payoutAmount platformFee reviewedAt walletDebitedAt')
+            .lean(),
+        aggregateReferralRewardsPaid(since),
         CallSession_1.default.find(callMatch)
-            .select('receiverId startedAt settledAmountInr receiverEarnedInr receiverPayoutRatePerMinute durationSec')
+            .select('settledAmountInr receiverEarnedInr receiverPayoutRatePerMinute durationSec')
             .lean(),
-        ChatMessage_1.default.find(chatMatch)
-            .select('receiverId createdAt feeInr')
-            .lean(),
-        aggregateCallerRechargePlatformFees(since),
-        aggregateWithdrawalPlatformFees(since),
+        ChatMessage_1.default.find(chatMatch).select('feeInr').lean(),
     ]);
     const dailyMap = new Map();
-    const receiverGross = new Map();
-    let grossCalls = 0;
-    let grossChat = 0;
-    let payoutCalls = 0;
-    let payoutChat = 0;
-    for (const row of calls) {
-        const revenue = roundInr(Number(row.settledAmountInr || 0));
-        const payout = (0, receiverCallEarnings_2.effectiveCallReceiverEarnedInr)(row);
-        grossCalls += revenue;
-        payoutCalls += payout;
-        bumpDailyUsage(dailyMap, row.startedAt, revenue, payout);
+    const receiverPaid = new Map();
+    let grossRevenue = 0;
+    let callerRechargeCommission = 0;
+    for (const row of topups) {
+        const payAmount = roundInr(Number(row.payAmount) || 0);
+        const rechargeFee = resolveWalletTopupPlatformFee(row);
+        grossRevenue += payAmount;
+        callerRechargeCommission += rechargeFee;
+        const key = localDateKey(row.createdAt);
+        const daily = dailyMap.get(key) ?? { revenue: 0, payout: 0, commission: 0 };
+        daily.revenue = roundInr(daily.revenue + payAmount);
+        daily.commission = roundInr(daily.commission + rechargeFee);
+        dailyMap.set(key, daily);
+    }
+    grossRevenue = roundInr(grossRevenue);
+    callerRechargeCommission = roundInr(callerRechargeCommission);
+    let netPayout = 0;
+    let receiverWithdrawalCommission = 0;
+    for (const row of paidWithdrawals) {
+        const net = (0, receiverWithdrawalFees_1.resolveWithdrawalPayoutAmount)(row);
+        const fee = roundInr(Number(row.platformFee) || 0);
+        netPayout += net;
+        receiverWithdrawalCommission += fee;
+        const paidAt = row.reviewedAt ?? row.walletDebitedAt;
+        if (paidAt) {
+            const key = localDateKey(paidAt);
+            const daily = dailyMap.get(key) ?? { revenue: 0, payout: 0, commission: 0 };
+            daily.payout = roundInr(daily.payout + net);
+            daily.commission = roundInr(daily.commission + fee);
+            dailyMap.set(key, daily);
+        }
         const rid = String(row.receiverId);
-        const agg = receiverGross.get(rid) ?? { gross: 0, payout: 0, calls: 0 };
-        agg.gross = roundInr(agg.gross + revenue);
-        agg.payout = roundInr(agg.payout + payout);
-        agg.calls += 1;
-        receiverGross.set(rid, agg);
+        const agg = receiverPaid.get(rid) ?? { withdrawals: 0, gross: 0, net: 0 };
+        agg.withdrawals += 1;
+        agg.gross = roundInr(agg.gross + Number(row.amount) || 0);
+        agg.net = roundInr(agg.net + net);
+        receiverPaid.set(rid, agg);
+    }
+    netPayout = roundInr(netPayout);
+    receiverWithdrawalCommission = roundInr(receiverWithdrawalCommission);
+    let usageGross = 0;
+    let usagePayout = 0;
+    for (const row of calls) {
+        usageGross += roundInr(Number(row.settledAmountInr || 0));
+        usagePayout += (0, receiverCallEarnings_2.effectiveCallReceiverEarnedInr)(row);
     }
     for (const row of chats) {
-        const revenue = roundInr(chatPricing_1.CHAT_TEXT_CHARGE_INR);
-        const payout = roundInr(Number(row.feeInr || 0));
-        grossChat += revenue;
-        payoutChat += payout;
-        bumpDailyUsage(dailyMap, row.createdAt, revenue, payout);
-        const rid = String(row.receiverId);
-        const agg = receiverGross.get(rid) ?? { gross: 0, payout: 0, calls: 0 };
-        agg.gross = roundInr(agg.gross + revenue);
-        agg.payout = roundInr(agg.payout + payout);
-        receiverGross.set(rid, agg);
+        usageGross += chatPricing_1.CHAT_TEXT_CHARGE_INR;
+        usagePayout += roundInr(Number(row.feeInr || 0));
     }
-    const grossRevenue = roundInr(grossCalls + grossChat);
-    const netPayout = roundInr(payoutCalls + payoutChat);
-    const usageCommission = roundInr(Math.max(0, grossRevenue - netPayout));
+    const callerUsageSpend = roundInr(usageGross);
+    const usageCommission = roundInr(Math.max(0, usageGross - usagePayout));
     const platformCommission = roundInr(callerRechargeCommission + receiverWithdrawalCommission);
-    const platformProfit = usageCommission;
+    const platformProfit = computeAdminTotalEarned(grossRevenue, netPayout, receiverWithdrawalCommission, referralRewardsPaid);
     const dailyBreakdown = [...dailyMap.entries()]
         .sort((a, b) => (a[0] > b[0] ? -1 : 1))
         .slice(0, since ? undefined : 90)
@@ -362,10 +380,10 @@ async function getRevenueDashboardMetrics(since) {
         date,
         revenue: row.revenue,
         payout: row.payout,
-        commission: roundInr(Math.max(0, row.revenue - row.payout)),
+        commission: row.commission,
     }));
-    const topReceiverIds = [...receiverGross.entries()]
-        .sort((a, b) => b[1].payout - a[1].payout)
+    const topReceiverIds = [...receiverPaid.entries()]
+        .sort((a, b) => b[1].net - a[1].net)
         .slice(0, 10)
         .map(([rid]) => new mongoose_1.default.Types.ObjectId(rid));
     const receiverRows = topReceiverIds.length > 0
@@ -374,15 +392,15 @@ async function getRevenueDashboardMetrics(since) {
             .lean()
         : [];
     const receiverNameById = new Map(receiverRows.map((r) => [String(r._id), r.name]));
-    const topEarners = [...receiverGross.entries()]
-        .sort((a, b) => b[1].payout - a[1].payout)
+    const topEarners = [...receiverPaid.entries()]
+        .sort((a, b) => b[1].net - a[1].net)
         .slice(0, 5)
         .map(([rid, v]) => ({
         receiverId: rid,
         name: receiverNameById.get(rid) ?? 'Receiver',
-        calls: v.calls,
+        calls: v.withdrawals,
         earnings: roundInr(v.gross),
-        payout: roundInr(v.payout),
+        payout: roundInr(v.net),
     }));
     return {
         cards: {
@@ -391,8 +409,10 @@ async function getRevenueDashboardMetrics(since) {
             netPayout,
             platformProfit,
             usageCommission,
+            callerUsageSpend,
             callerRechargeCommission,
             receiverWithdrawalCommission,
+            referralRewardsPaid,
         },
         dailyBreakdown,
         topEarners,
