@@ -5,6 +5,8 @@ exports.computeReceiverWithdrawalBreakdown = computeReceiverWithdrawalBreakdown;
 exports.isValidReceiverWithdrawalAmount = isValidReceiverWithdrawalAmount;
 exports.resolveWithdrawalPayoutAmount = resolveWithdrawalPayoutAmount;
 exports.resolveWithdrawalWalletDebitAmount = resolveWithdrawalWalletDebitAmount;
+exports.paidWithdrawalMatch = paidWithdrawalMatch;
+exports.isWithdrawalPaidInUi = isWithdrawalPaidInUi;
 exports.RECEIVER_MIN_WITHDRAWAL_INR = 100;
 /** Deducted from the requested withdrawal; remainder is paid to receiver UPI. */
 exports.RECEIVER_WITHDRAWAL_PLATFORM_FEE_PERCENT = 5;
@@ -39,4 +41,21 @@ function resolveWithdrawalPayoutAmount(row) {
 /** Wallet debit INR on successful payout; legacy rows debit full `amount`. */
 function resolveWithdrawalWalletDebitAmount(row) {
     return roundInr(row.amount);
+}
+/** Mongo match for withdrawals that were actually paid out (excludes pending / failed / processing). */
+function paidWithdrawalMatch(since) {
+    const match = {
+        payoutStatus: 'success',
+        status: 'approved',
+        walletDebitedAt: { $ne: null },
+    };
+    if (since)
+        match.reviewedAt = { $gte: since };
+    return match;
+}
+/** Same as UI "Paid" badge: approved + payout success + wallet debited. */
+function isWithdrawalPaidInUi(row) {
+    return (row.status === 'approved' &&
+        row.payoutStatus === 'success' &&
+        row.walletDebitedAt != null);
 }

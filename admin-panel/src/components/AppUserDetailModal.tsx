@@ -44,7 +44,7 @@ export function AppUserDetailModal({ user, onClose, onChanged, onEdit }: Props) 
   };
 
   const onReject = async () => {
-    if (!window.confirm('Pause this user’s access? They will stay in the app as paused until you enable access again.'))
+    if (!window.confirm('Pause this caller’s access? They will stay in the app as paused until you enable access again.'))
       return;
     setBusy(true);
     setErr(null);

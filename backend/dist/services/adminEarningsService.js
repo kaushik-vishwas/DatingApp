@@ -3,10 +3,15 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.aggregateReceiverWithdrawalPayouts = aggregateReceiverWithdrawalPayouts;
+exports.countPaidReceiverWithdrawals = countPaidReceiverWithdrawals;
+exports.computeAdminTotalEarned = computeAdminTotalEarned;
 exports.aggregateReferralRewardsPaid = aggregateReferralRewardsPaid;
 exports.computeReservedAdminEarningsInr = computeReservedAdminEarningsInr;
+exports.aggregateWalletTopupCollections = aggregateWalletTopupCollections;
 exports.getPlatformRevenueForRange = getPlatformRevenueForRange;
 exports.getAdminEarningsSnapshot = getAdminEarningsSnapshot;
+exports.resolveWalletTopupPlatformFee = resolveWalletTopupPlatformFee;
 exports.getRevenueDashboardMetrics = getRevenueDashboardMetrics;
 const CallSession_1 = __importDefault(require("../models/CallSession"));
 const ChatMessage_1 = __importDefault(require("../models/ChatMessage"));
@@ -18,6 +23,7 @@ const Referral_1 = __importDefault(require("../models/Referral"));
 const mongoose_1 = __importDefault(require("mongoose"));
 const chatPricing_1 = require("../constants/chatPricing");
 const walletRechargeFees_1 = require("../constants/walletRechargeFees");
+const receiverWithdrawalFees_1 = require("../constants/receiverWithdrawalFees");
 const receiverCallEarnings_1 = require("../utils/receiverCallEarnings");
 const receiverCallEarnings_2 = require("../utils/receiverCallEarnings");
 function roundInr(n) {
@@ -35,10 +41,27 @@ function startOfLocalWeek(d = new Date()) {
     x.setDate(x.getDate() - diff);
     return x;
 }
+/** Net amount actually paid to receivers — only payoutStatus success (not pending / failed / processing). */
+async function aggregateReceiverWithdrawalPayouts(since, extraMatch = {}) {
+    const rows = await WithdrawalRequest_1.default.find({ ...(0, receiverWithdrawalFees_1.paidWithdrawalMatch)(since), ...extraMatch })
+        .select('amount payoutAmount')
+        .lean();
+    let total = 0;
+    for (const row of rows) {
+        total += (0, receiverWithdrawalFees_1.resolveWithdrawalPayoutAmount)(row);
+    }
+    return roundInr(total);
+}
+/** Count of withdrawals actually paid out. */
+async function countPaidReceiverWithdrawals(since, extraMatch = {}) {
+    return WithdrawalRequest_1.default.countDocuments({ ...(0, receiverWithdrawalFees_1.paidWithdrawalMatch)(since), ...extraMatch });
+}
+/** Admin total earned = caller revenue − receiver withdrawals paid + withdrawal fees − referral rewards. */
+function computeAdminTotalEarned(totalRevenue, receiverWithdrawalPayout, withdrawalFeeEarnings, referralRewardsPaid) {
+    return roundInr(Math.max(0, totalRevenue - receiverWithdrawalPayout + withdrawalFeeEarnings - referralRewardsPaid));
+}
 async function aggregateWithdrawalPlatformFees(since) {
-    const match = { payoutStatus: 'success' };
-    if (since)
-        match.createdAt = { $gte: since };
+    const match = (0, receiverWithdrawalFees_1.paidWithdrawalMatch)(since);
     const [agg] = await WithdrawalRequest_1.default.aggregate([
         { $match: match },
         { $group: { _id: null, total: { $sum: { $ifNull: ['$platformFee', 0] } } } },
@@ -161,37 +184,73 @@ async function computeReservedAdminEarningsInr() {
     ]);
     return roundInr(agg?.total ?? 0);
 }
-/** Total revenue = actual caller wallet debits (call settlements + chat charges). */
+/** Sum of successful wallet recharges (`WalletTopup.payAmount`) — matches Transactions / Razorpay collections. */
+async function aggregateWalletTopupCollections(since) {
+    const match = {};
+    if (since)
+        match.createdAt = { $gte: since };
+    const [agg] = await WalletTopup_1.default.aggregate([
+        { $match: match },
+        { $group: { _id: null, total: { $sum: { $ifNull: ['$payAmount', 0] } } } },
+    ]);
+    return roundInr(agg?.total ?? 0);
+}
+/** Platform snapshot — total revenue = wallet collections (money in), not call/chat usage. */
 async function getPlatformRevenueForRange(since) {
-    const breakdown = await aggregateAdminEarnings(since);
-    const adminEarnings = breakdown.totalEarnings;
-    const receiverRevenue = breakdown.totalPayout;
-    const callerGross = breakdown.totalRevenue;
-    const totalRevenue = callerGross;
+    const [breakdown, receiverWithdrawalPayout, walletCollections] = await Promise.all([
+        aggregateAdminEarnings(since),
+        aggregateReceiverWithdrawalPayouts(since ?? null),
+        aggregateWalletTopupCollections(since ?? null),
+    ]);
+    const callerUsageSpend = breakdown.totalRevenue;
+    const adminEarnings = computeAdminTotalEarned(walletCollections, receiverWithdrawalPayout, breakdown.withdrawalFeeEarnings, breakdown.referralRewardsPaid);
     return {
-        totalRevenue,
+        totalRevenue: walletCollections,
+        walletCollections,
+        callerUsageSpend,
         adminEarnings,
-        receiverRevenue,
-        callerGross,
+        receiverRevenue: receiverWithdrawalPayout,
+        callerGross: callerUsageSpend,
         breakdown,
     };
 }
 async function getAdminEarningsSnapshot() {
     const todayStart = startOfLocalDay();
     const weekStart = startOfLocalWeek();
-    const [lifetime, today, thisWeek, reservedInr] = await Promise.all([
+    const [lifetime, today, thisWeek, reservedInr, collectionsLifetime, collectionsToday, collectionsWeek, withdrawalPayoutLifetime, withdrawalPayoutToday, withdrawalPayoutWeek,] = await Promise.all([
         aggregateAdminEarnings(null),
         aggregateAdminEarnings(todayStart),
         aggregateAdminEarnings(weekStart),
         computeReservedAdminEarningsInr(),
+        aggregateWalletTopupCollections(null),
+        aggregateWalletTopupCollections(todayStart),
+        aggregateWalletTopupCollections(weekStart),
+        aggregateReceiverWithdrawalPayouts(null),
+        aggregateReceiverWithdrawalPayouts(todayStart),
+        aggregateReceiverWithdrawalPayouts(weekStart),
     ]);
     const withdrawnInr = reservedInr;
-    const platformNet = roundInr(lifetime.totalEarnings + lifetime.withdrawalFeeEarnings - lifetime.referralRewardsPaid);
-    const withdrawableInr = roundInr(Math.max(0, platformNet - reservedInr));
+    const totalEarned = {
+        lifetime: computeAdminTotalEarned(collectionsLifetime, withdrawalPayoutLifetime, lifetime.withdrawalFeeEarnings, lifetime.referralRewardsPaid),
+        today: computeAdminTotalEarned(collectionsToday, withdrawalPayoutToday, today.withdrawalFeeEarnings, today.referralRewardsPaid),
+        thisWeek: computeAdminTotalEarned(collectionsWeek, withdrawalPayoutWeek, thisWeek.withdrawalFeeEarnings, thisWeek.referralRewardsPaid),
+    };
+    const withdrawableInr = roundInr(Math.max(0, totalEarned.lifetime - reservedInr));
     return {
         lifetime,
         today,
         thisWeek,
+        walletCollections: {
+            lifetime: collectionsLifetime,
+            today: collectionsToday,
+            thisWeek: collectionsWeek,
+        },
+        receiverWithdrawalPayout: {
+            lifetime: withdrawalPayoutLifetime,
+            today: withdrawalPayoutToday,
+            thisWeek: withdrawalPayoutWeek,
+        },
+        totalEarned,
         reservedInr,
         withdrawnInr,
         withdrawableInr,

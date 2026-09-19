@@ -333,14 +333,18 @@ export async function updateAdminRole(adminId: string, role: AdminRole) {
 
 export type OverviewDashboardResponse = {
   cards: {
-    /** Caller wallet spend (calls + chat charges) in range. */
-    callerSpend?: number;
+    /** Caller wallet recharges (Razorpay collections) — matches Transactions tab. */
     totalRevenue: number;
+    walletCollections?: number;
+    /** Internal caller spend on calls + chat (usage). */
+    callerUsageSpend?: number;
     adminEarnings: number;
     /** Receiver share in range (calls + chat credits). */
     receiverRevenue: number;
     /** Sum of per-receiver earnings — matches Receivers module for same period. */
     receiverEarningsSum?: number;
+    /** Net amount paid to receivers via successful withdrawals in range. */
+    receiverWithdrawalPayout?: number;
     totalCalls: number;
     activeReceivers: number;
     activeUsers: number;
@@ -581,6 +585,53 @@ export async function fetchRevenueDashboard(params?: { range?: '7d' | '30d' | 'a
   return data;
 }
 
+/** ================= TRANSACTIONS ================= */
+
+export type AdminTransactionStats = {
+  totalCount: number;
+  totalPaid: number;
+  totalCredit: number;
+  todayCount: number;
+  todayPaid: number;
+};
+
+export type AdminTransactionRow = {
+  _id: string;
+  transactionId: string;
+  userId: string;
+  userName: string;
+  userEmail: string;
+  userPhone: string;
+  payAmount: number;
+  bonusPercent: number;
+  creditAdded: number;
+  platformFee: number;
+  razorpayOrderId: string;
+  razorpayPaymentId: string;
+  createdAt: string;
+};
+
+export async function fetchTransactions(params?: {
+  q?: string;
+  range?: '7d' | '30d' | 'all';
+  page?: number;
+}) {
+  const { data } = await api.get<{
+    stats: AdminTransactionStats;
+    rows: AdminTransactionRow[];
+    total: number;
+    page: number;
+    limit: number;
+  }>('/admin/transactions', {
+    params: {
+      q: params?.q?.trim() || undefined,
+      range: params?.range ?? '7d',
+      page: params?.page ?? 1,
+    },
+  });
+  return data;
+}
+
 /** ================= WITHDRAWALS ================= */
 
 export type AdminWithdrawalStatus = 'pending' | 'approved' | 'rejected';
@@ -611,6 +662,7 @@ export type AdminWithdrawalRow = {
   payoutStatus?: 'processing' | 'success' | 'failed';
   payoutUtr?: string | null;
   payoutError?: string | null;
+  walletDebitedAt?: string | null;
 };
 
 export type AdminWithdrawalStats = {
@@ -622,13 +674,22 @@ export type AdminWithdrawalStats = {
   rejectedTodayAmount: number;
   processedCount: number;
   processedTodayAmount: number;
+  /** Net paid to receivers in selected range (paid only). */
+  totalSuccessfulPayoutAmount: number;
+  tabCounts?: {
+    all: number;
+    pending: number;
+    paid: number;
+    rejected: number;
+  };
 };
 
 export async function fetchWithdrawals(params?: {
   q?: string;
   range?: '7d' | '30d' | 'all';
-  status?: 'all' | 'pending' | 'approved' | 'rejected';
+  status?: 'all' | 'pending' | 'paid' | 'approved' | 'rejected';
   page?: number;
+  limit?: number;
 }) {
   const { data } = await api.get<{
     stats: AdminWithdrawalStats;
@@ -639,9 +700,10 @@ export async function fetchWithdrawals(params?: {
   }>('/admin/withdrawals', {
     params: {
       q: params?.q?.trim() || undefined,
-      range: params?.range ?? '7d',
+      range: params?.range ?? 'all',
       status: params?.status ?? 'all',
       page: params?.page ?? 1,
+      limit: params?.limit ?? 20,
     },
   });
   return data;
@@ -675,6 +737,9 @@ export type AdminEarningsDashboardResponse = {
     lifetime: AdminEarningsBreakdown;
     today: AdminEarningsBreakdown;
     thisWeek: AdminEarningsBreakdown;
+    walletCollections: { lifetime: number; today: number; thisWeek: number };
+    receiverWithdrawalPayout: { lifetime: number; today: number; thisWeek: number };
+    totalEarned: { lifetime: number; today: number; thisWeek: number };
     withdrawableInr: number;
     withdrawnInr: number;
     reservedInr: number;

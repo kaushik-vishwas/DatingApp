@@ -7,15 +7,24 @@ import {
   type AdminEarningsDashboardResponse,
 } from '../api/client';
 
-/** Platform earnings — usage margin plus withdrawal fees minus referral payouts. */
-function earningsTotals(b: AdminEarningsBreakdown) {
-  const totalRevenue = roundInr(b.totalRevenue ?? b.callerCallGross + b.callerMessageGross);
-  const totalPayout = roundInr(b.totalPayout ?? b.receiverCallPayout + b.receiverMessagePayout);
-  const usageMargin = roundInr(Math.max(0, totalRevenue - totalPayout));
+/** Platform earnings — revenue minus receiver withdrawals, plus fees, minus referrals. */
+function earningsTotals(
+  b: AdminEarningsBreakdown,
+  walletCollections: number,
+  receiverWithdrawalPayout: number,
+  totalEarnedFromApi?: number
+) {
+  const totalRevenue = roundInr(walletCollections);
+  const callerUsageSpend = roundInr(b.totalRevenue ?? b.callerCallGross + b.callerMessageGross);
+  const totalPayout = roundInr(receiverWithdrawalPayout);
+  const platformMargin = roundInr(Math.max(0, totalRevenue - totalPayout));
   const withdrawalFees = roundInr(Math.max(0, b.withdrawalFeeEarnings ?? 0));
   const referralPaid = roundInr(Math.max(0, b.referralRewardsPaid ?? 0));
-  const totalEarned = roundInr(Math.max(0, usageMargin + withdrawalFees - referralPaid));
-  return { totalRevenue, totalPayout, usageMargin, withdrawalFees, referralPaid, totalEarned };
+  const totalEarned =
+    typeof totalEarnedFromApi === 'number' && Number.isFinite(totalEarnedFromApi)
+      ? roundInr(totalEarnedFromApi)
+      : roundInr(Math.max(0, platformMargin + withdrawalFees - referralPaid));
+  return { totalRevenue, callerUsageSpend, totalPayout, platformMargin, withdrawalFees, referralPaid, totalEarned };
 }
 
 function roundInr(v: number): number {
@@ -64,10 +73,28 @@ export function AdminEarningsPage() {
 
   const breakdown = useMemo(() => {
     if (!data) return null;
+    const payout = data.earnings.receiverWithdrawalPayout;
+    const earned = data.earnings.totalEarned;
+    const collections = data.earnings.walletCollections;
     return {
-      lifetime: earningsTotals(data.earnings.lifetime),
-      today: earningsTotals(data.earnings.today),
-      thisWeek: earningsTotals(data.earnings.thisWeek),
+      lifetime: earningsTotals(
+        data.earnings.lifetime,
+        collections?.lifetime ?? 0,
+        payout?.lifetime ?? 0,
+        earned?.lifetime
+      ),
+      today: earningsTotals(
+        data.earnings.today,
+        collections?.today ?? 0,
+        payout?.today ?? 0,
+        earned?.today
+      ),
+      thisWeek: earningsTotals(
+        data.earnings.thisWeek,
+        collections?.thisWeek ?? 0,
+        payout?.thisWeek ?? 0,
+        earned?.thisWeek
+      ),
     };
   }, [data]);
 
@@ -78,19 +105,19 @@ export function AdminEarningsPage() {
       {
         label: 'Total Revenue',
         value: inr(totalRevenue),
-        note: 'Total spend from all callers (calls + chat)',
+        note: 'Caller wallet recharges (Razorpay) — matches Transactions',
         tone: 'text-emerald-600',
       },
       {
         label: 'Total Payout to Receivers',
         value: inr(totalPayout),
-        note: 'Call + message payouts to receivers',
+        note: 'Successful receiver withdrawals paid out',
         tone: 'text-sky-600',
       },
       {
         label: 'Total Earned',
         value: inr(totalEarned),
-        note: 'Usage margin + withdrawal fees − referral rewards',
+        note: 'Revenue − receiver withdrawals + fees − referrals',
         tone: 'text-[#7b2cff]',
       },
     ];
@@ -102,7 +129,7 @@ export function AdminEarningsPage() {
         <div>
           <h1 className="text-2xl font-bold text-neutral-900">Admin Earnings & Withdraw</h1>
           <p className="mt-1 text-sm text-neutral-500">
-            Total earned = (caller spend − receiver payout) + withdrawal fees − referral rewards paid.
+            Total earned = collections − receiver withdrawals paid + withdrawal fees − referral rewards.
           </p>
         </div>
         <button
@@ -143,16 +170,20 @@ export function AdminEarningsPage() {
               {breakdown ? (
                 <>
               <div className="flex justify-between">
-                <span className="text-neutral-600">Total revenue (caller spend)</span>
+                <span className="text-neutral-600">Total collections (Razorpay recharges)</span>
                 <span className="font-semibold text-neutral-900">{inr(breakdown.lifetime.totalRevenue)}</span>
               </div>
+              <div className="flex justify-between text-xs text-neutral-500">
+                <span>Caller usage (calls + chat)</span>
+                <span>{inr(breakdown.lifetime.callerUsageSpend)}</span>
+              </div>
               <div className="flex justify-between">
-                <span className="text-neutral-600">Total payout to receivers</span>
-                <span className="font-semibold text-sky-700">−{inr(breakdown.lifetime.totalPayout)}</span>
+                <span className="text-neutral-600">Receiver withdrawals paid</span>
+                <span className="font-semibold text-sky-700">{inr(breakdown.lifetime.totalPayout)}</span>
               </div>
               <div className="flex justify-between border-t border-neutral-100 pt-3">
-                <span className="text-neutral-600">Earned from usage (calls + chat)</span>
-                <span className="font-semibold text-neutral-800">{inr(breakdown.lifetime.usageMargin)}</span>
+                <span className="text-neutral-600">After receiver payouts</span>
+                <span className="font-semibold text-neutral-800">{inr(breakdown.lifetime.platformMargin)}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-neutral-600">Withdrawal fees (extra)</span>

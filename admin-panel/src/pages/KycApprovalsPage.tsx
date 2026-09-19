@@ -47,7 +47,11 @@ function isApprovedAndVerified(r: ReceiverRecord): boolean {
 }
 
 function isPendingVerification(r: ReceiverRecord): boolean {
-  return r.accountStatus === 'pending_review' || (r.accountStatus === 'approved' && !r.isVerified);
+  return (
+    r.accountStatus === 'pending_review' ||
+    r.accountStatus === 'pending_profile' ||
+    (r.accountStatus === 'approved' && !r.isVerified)
+  );
 }
 
 function canApproveReceiver(r: ReceiverRecord): boolean {

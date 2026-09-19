@@ -9,6 +9,7 @@ import { KycApprovalsPage } from './pages/KycApprovalsPage';
 import { AppUsersPage } from './pages/AppUsersPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { RevenuePage } from './pages/RevenuePage';
+import { TransactionsPage } from './pages/TransactionsPage';
 import { AdminEarningsPage } from './pages/AdminEarningsPage';
 import { WithdrawalsPage } from './pages/WithdrawalsPage';
 import { ReportsPage } from './pages/ReportsPage';
@@ -54,6 +55,7 @@ function AppRoutes() {
           <Route path="/receivers" element={<ReceiversPage />} />
           <Route path="/kyc" element={<KycApprovalsPage />} />
           <Route path="/revenue" element={<RevenuePage />} />
+          <Route path="/transactions" element={<TransactionsPage />} />
           <Route path="/admin-earnings" element={<AdminEarningsPage />} />
           <Route path="/withdrawals" element={<WithdrawalsPage />} />
           <Route path="/wallet-offers" element={<WalletOffersPage />} />

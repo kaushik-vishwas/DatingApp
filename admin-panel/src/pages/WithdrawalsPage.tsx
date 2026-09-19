@@ -9,6 +9,17 @@ import {
 } from '../api/client';
 
 type ActionStatus = 'pending' | 'paid' | 'rejected';
+type WithdrawalTab = 'all' | 'pending' | 'paid' | 'rejected';
+
+const PAGE_SIZE = 20;
+
+function isPaidWithdrawal(row: AdminWithdrawalRow): boolean {
+  return (
+    row.status === 'approved' &&
+    row.payoutStatus === 'success' &&
+    Boolean(row.walletDebitedAt)
+  );
+}
 
 const emptyStats: AdminWithdrawalStats = {
   pendingCount: 0,
@@ -19,6 +30,7 @@ const emptyStats: AdminWithdrawalStats = {
   rejectedTodayAmount: 0,
   processedCount: 0,
   processedTodayAmount: 0,
+  totalSuccessfulPayoutAmount: 0,
 };
 
 const statusClass = (status: string) => {
@@ -29,7 +41,8 @@ const statusClass = (status: string) => {
 
 const prettyStatus = (row: AdminWithdrawalRow) => {
   if (row.status === 'pending') return 'Pending';
-  if (row.status === 'approved') return row.payoutStatus === 'success' ? 'Paid' : 'Approved';
+  if (isPaidWithdrawal(row)) return 'Paid';
+  if (row.status === 'approved') return 'Approved';
   if (row.status === 'rejected') return 'Rejected';
   return String(row.status);
 };
@@ -60,7 +73,7 @@ const destinationSummary = (row: AdminWithdrawalRow): string => {
 
 const rowActionStatus = (row: AdminWithdrawalRow): ActionStatus => {
   if (row.status === 'rejected') return 'rejected';
-  if (row.status === 'approved' && row.payoutStatus === 'success') return 'paid';
+  if (isPaidWithdrawal(row)) return 'paid';
   return 'pending';
 };
 
@@ -165,29 +178,41 @@ function PayoutDestinationCard({ row }: { row: AdminWithdrawalRow }) {
 export function WithdrawalsPage() {
   const [stats, setStats] = useState<AdminWithdrawalStats>(emptyStats);
   const [rows, setRows] = useState<AdminWithdrawalRow[]>([]);
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(1);
+  const [tab, setTab] = useState<WithdrawalTab>('all');
+  const [tabCounts, setTabCounts] = useState({ all: 0, pending: 0, paid: 0, rejected: 0 });
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
-  const [range, setRange] = useState<'7d' | '30d' | 'all'>('7d');
+  const [range, setRange] = useState<'7d' | '30d' | 'all'>('all');
   const [busyId, setBusyId] = useState<string | null>(null);
   const [confirm, setConfirm] = useState<ConfirmState | null>(null);
+
+  useEffect(() => {
+    setPage(1);
+  }, [range, tab]);
 
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const data = await fetchWithdrawals({ range, status: 'all', page: 1 });
+      const data = await fetchWithdrawals({ range, status: tab, page, limit: PAGE_SIZE });
       setStats(data.stats);
       setRows(data.rows);
+      setTotal(data.total);
+      setTabCounts(data.stats.tabCounts ?? { all: 0, pending: 0, paid: 0, rejected: 0 });
     } catch (e: unknown) {
       setError(getApiErrorMessage(e, 'Failed to load withdrawals'));
     } finally {
       setLoading(false);
     }
-  }, [range]);
+  }, [range, tab, page]);
 
   useEffect(() => {
     void load();
   }, [load]);
+
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   const onConfirmAction = async () => {
     if (!confirm) return;
@@ -213,9 +238,9 @@ export function WithdrawalsPage() {
       tone: 'text-amber-600',
     },
     {
-      label: 'Approved Today',
+      label: 'Paid Today',
       value: String(stats.approvedTodayCount),
-      note: `${formatInr(stats.approvedTodayAmount)} total`,
+      note: `${formatInr(stats.approvedTodayAmount)} net paid`,
       tone: 'text-emerald-600',
     },
     {
@@ -225,10 +250,16 @@ export function WithdrawalsPage() {
       tone: 'text-red-600',
     },
     {
-      label: 'Processed',
+      label: 'Paid Count',
       value: String(stats.processedCount),
-      note: `${formatInr(stats.processedTodayAmount)} today`,
+      note: `Matches Paid tab (${tabCounts.paid}) in selected range`,
       tone: 'text-[#7b2cff]',
+    },
+    {
+      label: 'Total Payout',
+      value: formatInr(stats.totalSuccessfulPayoutAmount),
+      note: 'Net paid to receivers (paid only, not pending/failed)',
+      tone: 'text-sky-600',
     },
   ];
 
@@ -279,7 +310,31 @@ export function WithdrawalsPage() {
         <p className="mt-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">{error}</p>
       ) : null}
 
-      <div className="mt-6 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+      <div className="mt-6 flex flex-wrap gap-2">
+        {(
+          [
+            ['all', 'All', tabCounts.all],
+            ['pending', 'Pending', tabCounts.pending],
+            ['paid', 'Paid', tabCounts.paid],
+            ['rejected', 'Rejected', tabCounts.rejected],
+          ] as const
+        ).map(([key, label, count]) => (
+          <button
+            key={key}
+            type="button"
+            onClick={() => setTab(key)}
+            className={`rounded-full px-4 py-2 text-sm font-semibold transition-colors ${
+              tab === key
+                ? 'bg-[var(--color-brand-muted)] text-[#7b2cff]'
+                : 'bg-white text-neutral-600 ring-1 ring-neutral-200 hover:bg-neutral-50'
+            }`}
+          >
+            {label} ({count})
+          </button>
+        ))}
+      </div>
+
+      <div className="mt-6 grid gap-3 md:grid-cols-2 xl:grid-cols-5">
         {cards.map((card) => (
           <div key={card.label} className="rounded-xl border border-neutral-200 bg-white p-4">
             <p className="text-[11px] font-medium text-neutral-500">{card.label}</p>
@@ -374,6 +429,32 @@ export function WithdrawalsPage() {
             <p className="px-3 py-6 text-center text-sm text-neutral-500">No withdrawals found.</p>
           ) : null}
         </div>
+
+        {totalPages > 1 ? (
+          <div className="mt-4 flex items-center justify-between text-xs text-neutral-600">
+            <p>
+              Page {page} of {totalPages} · {total} total
+            </p>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                disabled={page <= 1 || loading}
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                className="rounded-lg border border-neutral-200 px-3 py-1.5 font-semibold disabled:opacity-40"
+              >
+                Previous
+              </button>
+              <button
+                type="button"
+                disabled={page >= totalPages || loading}
+                onClick={() => setPage((p) => p + 1)}
+                className="rounded-lg border border-neutral-200 px-3 py-1.5 font-semibold disabled:opacity-40"
+              >
+                Next
+              </button>
+            </div>
+          </div>
+        ) : null}
       </div>
 
       {confirm && confirmCopy ? (

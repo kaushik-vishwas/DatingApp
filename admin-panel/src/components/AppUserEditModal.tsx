@@ -110,7 +110,7 @@ export function AppUserEditModal({ user, onClose, onSaved }: Props) {
         onClick={(e) => e.stopPropagation()}
       >
         <div className="sticky top-0 flex items-center justify-between border-b border-neutral-200 bg-white px-6 py-4">
-          <h2 className="text-lg font-bold text-neutral-900">Edit user</h2>
+          <h2 className="text-lg font-bold text-neutral-900">Edit caller</h2>
           <button type="button" onClick={onClose} className="rounded-lg p-1 hover:bg-neutral-100">
             <X className="h-5 w-5 text-neutral-500" />
           </button>

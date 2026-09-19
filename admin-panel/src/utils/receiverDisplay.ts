@@ -75,3 +75,16 @@ export function receiverCode(index: number): string {
 export function kycCode(index: number): string {
   return `KYC${String(index + 1).padStart(3, '0')}`;
 }
+
+export function isReceiverApproved(r: { accountStatus: string }): boolean {
+  return r.accountStatus === 'approved';
+}
+
+/** Awaiting admin review or still completing onboarding/KYC. */
+export function isReceiverPendingKyc(r: { accountStatus: string }): boolean {
+  return r.accountStatus === 'pending_review' || r.accountStatus === 'pending_profile';
+}
+
+export function isReceiverRejected(r: { accountStatus: string }): boolean {
+  return r.accountStatus === 'rejected';
+}

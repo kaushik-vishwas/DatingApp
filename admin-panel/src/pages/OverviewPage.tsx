@@ -8,7 +8,7 @@ function inr(v: number): string {
 }
 
 export function OverviewPage() {
-  const [range, setRange] = useState<'7d' | '30d' | 'all'>('7d');
+  const [range, setRange] = useState<'7d' | '30d' | 'all'>('all');
   const [data, setData] = useState<OverviewDashboardResponse | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
@@ -39,7 +39,7 @@ export function OverviewPage() {
         label: 'Total Revenue',
         value: data ? inr(data.cards.totalRevenue) : '…',
         note: data
-          ? `${rangeLabel} · Admin ${inr(data.cards.adminEarnings)} + Receiver ${inr(data.cards.receiverEarningsSum ?? data.cards.receiverRevenue)}`
+          ? `${rangeLabel} · Caller recharges (Razorpay) · matches Transactions`
           : rangeLabel,
         icon: IndianRupee,
         tone: 'text-violet-600',
@@ -58,7 +58,7 @@ export function OverviewPage() {
         tone: 'text-emerald-600',
       },
       {
-        label: 'Active Users',
+        label: 'Active Callers',
         value: data ? data.cards.activeUsers.toLocaleString('en-IN') : '…',
         icon: Users,
         tone: 'text-amber-600',
@@ -111,7 +111,7 @@ export function OverviewPage() {
 
       <div className="mt-8 grid gap-6 lg:grid-cols-2">
         <div className="rounded-2xl border border-neutral-200 bg-white p-6 shadow-sm">
-          <h2 className="text-sm font-bold text-neutral-900">Revenue Trend (Last 7 Days)</h2>
+          <h2 className="text-sm font-bold text-neutral-900">Collections Trend (Last 7 Days)</h2>
           <div className="mt-6 flex h-40 items-end justify-between gap-2">
             {(data?.trend ?? []).map((row, idx) => (
               <div key={`${row.label}-${idx}`} className="flex flex-1 flex-col items-center gap-2">

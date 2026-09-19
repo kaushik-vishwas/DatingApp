@@ -29,6 +29,7 @@ import {
   updateAdminCallerNotification,
   updateAdminRole,
   listWithdrawals,
+  listAdminTransactions,
   resolveModerationReport,
   resolveWithdrawal,
 } from '../controllers/adminController';
@@ -81,6 +82,7 @@ router.get('/revenue', adminProtect, getRevenueDashboard);
 router.use('/earnings', adminEarningsRoutes);
 router.get('/withdrawals', adminProtect, listWithdrawals);
 router.patch('/withdrawals/:id', adminProtect, resolveWithdrawal);
+router.get('/transactions', adminProtect, listAdminTransactions);
 
 // Wallet offers (recharge packs)
 router.get('/wallet/offers', adminProtect, listAdminWalletOffers);

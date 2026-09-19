@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Edit2, Eye, Mic, RefreshCw, Star, Trash2 } from 'lucide-react';
+import { Edit2, Eye, Mic, RefreshCw, Search, Star, Trash2 } from 'lucide-react';
 import {
   deleteReceiverPermanently,
   fetchAllReceivers,
@@ -9,6 +9,9 @@ import { ReceiverDetailModal } from '../components/ReceiverDetailModal';
 import { ReceiverEditModal } from '../components/ReceiverEditModal';
 import {
   formatINR,
+  isReceiverApproved,
+  isReceiverPendingKyc,
+  isReceiverRejected,
   receiverAvailabilityState,
   receiverCode,
   receiverIsLiveAvailable,
@@ -16,12 +19,34 @@ import {
   receiverVoiceVerificationSucceeded,
 } from '../utils/receiverDisplay';
 
-type Tab = 'all' | 'approved' | 'pending';
+type Tab = 'all' | 'approved' | 'pending' | 'rejected';
+type ReceiverRange = '7d' | '30d' | 'all';
+
+function matchesReceiverSearch(r: ReceiverRecord, q: string): boolean {
+  if (!q) return true;
+  const needle = q.toLowerCase();
+  const name = r.name?.toLowerCase() ?? '';
+  const email = r.email?.toLowerCase() ?? '';
+  const phone = r.phone?.replace(/\s+/g, '') ?? '';
+  const phoneQ = q.replace(/\s+/g, '');
+  return name.includes(needle) || email.includes(needle) || phone.includes(phoneQ);
+}
+
+function matchesReceiverRange(r: ReceiverRecord, range: ReceiverRange): boolean {
+  if (range === 'all') return true;
+  const created = r.createdAt ? new Date(r.createdAt).getTime() : 0;
+  if (!created) return false;
+  const days = range === '7d' ? 7 : 30;
+  const since = Date.now() - days * 24 * 60 * 60 * 1000;
+  return created >= since;
+}
 
 function kycLabel(status: string): { label: string; className: string } {
   if (status === 'approved') return { label: 'Approved', className: 'bg-emerald-100 text-emerald-800' };
   if (status === 'pending_review')
-    return { label: 'Pending', className: 'bg-amber-100 text-amber-800' };
+    return { label: 'Pending review', className: 'bg-amber-100 text-amber-800' };
+  if (status === 'pending_profile')
+    return { label: 'Profile incomplete', className: 'bg-sky-100 text-sky-800' };
   if (status === 'rejected') return { label: 'Rejected', className: 'bg-red-100 text-red-800' };
   return { label: status.replace(/_/g, ' '), className: 'bg-neutral-100 text-neutral-700' };
 }
@@ -31,6 +56,9 @@ export function ReceiversPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>('all');
+  const [range, setRange] = useState<ReceiverRange>('all');
+  const [search, setSearch] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
   const [detail, setDetail] = useState<ReceiverRecord | null>(null);
   const [editReceiver, setEditReceiver] = useState<ReceiverRecord | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -55,6 +83,11 @@ export function ReceiversPage() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    const t = window.setTimeout(() => setDebouncedSearch(search.trim()), 350);
+    return () => window.clearTimeout(t);
+  }, [search]);
 
   const onDeletePermanently = async (r: ReceiverRecord) => {
     if (
@@ -96,20 +129,28 @@ export function ReceiversPage() {
     return m;
   }, [sorted]);
 
+  const rangeSearchFiltered = useMemo(() => {
+    return sorted.filter(
+      (r) => matchesReceiverRange(r, range) && matchesReceiverSearch(r, debouncedSearch)
+    );
+  }, [sorted, range, debouncedSearch]);
+
   const filtered = useMemo(() => {
-    if (tab === 'approved') return sorted.filter((r) => r.accountStatus === 'approved');
-    if (tab === 'pending') return sorted.filter((r) => r.accountStatus === 'pending_review');
-    return sorted;
-  }, [sorted, tab]);
+    if (tab === 'approved') return rangeSearchFiltered.filter((r) => isReceiverApproved(r));
+    if (tab === 'pending') return rangeSearchFiltered.filter((r) => isReceiverPendingKyc(r));
+    if (tab === 'rejected') return rangeSearchFiltered.filter((r) => isReceiverRejected(r));
+    return rangeSearchFiltered;
+  }, [rangeSearchFiltered, tab]);
 
   const stats = useMemo(() => {
-    const total = sorted.length;
-    const pendingKyc = sorted.filter((r) => r.accountStatus === 'pending_review').length;
+    const total = rangeSearchFiltered.length;
+    const pendingKyc = rangeSearchFiltered.filter((r) => isReceiverPendingKyc(r)).length;
+    const rejected = rangeSearchFiltered.filter((r) => isReceiverRejected(r)).length;
     let online = 0;
     let voiceVerified = 0;
     let ratingWeightedSum = 0;
     let ratingWeightedN = 0;
-    for (const r of sorted) {
+    for (const r of rangeSearchFiltered) {
       if (receiverIsLiveAvailable(r)) online += 1;
       if (receiverVoiceVerificationSucceeded(r)) voiceVerified += 1;
       if (r.accountStatus === 'approved' && typeof r.ratingAvg === 'number' && (r.ratingCount ?? 0) > 0) {
@@ -120,17 +161,20 @@ export function ReceiversPage() {
     }
     const avgRating =
       ratingWeightedN > 0 ? Math.round((ratingWeightedSum / ratingWeightedN) * 10) / 10 : null;
-    return { total, online, pendingKyc, voiceVerified, avgRating };
-  }, [sorted]);
+    return { total, online, pendingKyc, rejected, voiceVerified, avgRating };
+  }, [rangeSearchFiltered]);
 
   const tabCounts = useMemo(
     () => ({
-      all: sorted.length,
-      approved: sorted.filter((r) => r.accountStatus === 'approved').length,
-      pending: sorted.filter((r) => r.accountStatus === 'pending_review').length,
+      all: rangeSearchFiltered.length,
+      approved: rangeSearchFiltered.filter((r) => isReceiverApproved(r)).length,
+      pending: rangeSearchFiltered.filter((r) => isReceiverPendingKyc(r)).length,
+      rejected: rangeSearchFiltered.filter((r) => isReceiverRejected(r)).length,
     }),
-    [sorted]
+    [rangeSearchFiltered]
   );
+
+  const rangeLabel = range === 'all' ? 'All time' : range === '30d' ? 'Last 30 days' : 'Last 7 days';
 
   return (
     <div className="p-8">
@@ -141,14 +185,35 @@ export function ReceiversPage() {
             View receivers, KYC status, and activity. Approve or reject from the KYC Approvals page.
           </p>
         </div>
-        <button
-          type="button"
-          onClick={() => void load()}
-          className="inline-flex items-center gap-2 rounded-xl border border-neutral-200 bg-white px-4 py-2 text-sm font-semibold text-neutral-700 shadow-sm hover:bg-neutral-50"
-        >
-          <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
-          Refresh
-        </button>
+        <div className="flex flex-wrap items-center gap-3">
+          <select
+            value={range}
+            onChange={(e) => setRange(e.target.value as ReceiverRange)}
+            className="rounded-xl border border-neutral-200 bg-white px-3 py-2 text-sm font-semibold text-neutral-800 shadow-sm"
+          >
+            <option value="7d">Last 7 days</option>
+            <option value="30d">Last 30 days</option>
+            <option value="all">All time</option>
+          </select>
+          <div className="relative">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-neutral-400" />
+            <input
+              type="search"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search name, phone, email…"
+              className="w-52 rounded-xl border border-neutral-200 bg-white py-2 pl-9 pr-3 text-sm outline-none ring-[#7b2cff]/20 focus:ring-2 md:w-64"
+            />
+          </div>
+          <button
+            type="button"
+            onClick={() => void load()}
+            className="inline-flex items-center gap-2 rounded-xl border border-neutral-200 bg-white px-4 py-2 text-sm font-semibold text-neutral-700 shadow-sm hover:bg-neutral-50"
+          >
+            <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+            Refresh
+          </button>
+        </div>
       </div>
 
       {error ? (
@@ -157,10 +222,11 @@ export function ReceiversPage() {
         </div>
       ) : null}
 
-      <div className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+      <div className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
         <div className="rounded-2xl border border-neutral-200 bg-white p-5 shadow-sm">
           <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">Total Receivers</p>
           <p className="mt-2 text-3xl font-bold text-neutral-900">{stats.total}</p>
+          <p className="mt-1 text-xs text-neutral-400">{rangeLabel}{debouncedSearch ? ' · filtered' : ''}</p>
         </div>
         <div className="rounded-2xl border border-neutral-200 bg-white p-5 shadow-sm">
           <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">Online Now</p>
@@ -170,6 +236,11 @@ export function ReceiversPage() {
         <div className="rounded-2xl border border-neutral-200 bg-white p-5 shadow-sm">
           <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">Pending KYC</p>
           <p className="mt-2 text-3xl font-bold text-amber-600">{stats.pendingKyc}</p>
+          <p className="mt-1 text-xs text-neutral-400">Review + profile incomplete</p>
+        </div>
+        <div className="rounded-2xl border border-neutral-200 bg-white p-5 shadow-sm">
+          <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">Rejected</p>
+          <p className="mt-2 text-3xl font-bold text-red-600">{stats.rejected}</p>
         </div>
         <div className="rounded-2xl border border-neutral-200 bg-white p-5 shadow-sm">
           <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">Voice Verified</p>
@@ -195,6 +266,7 @@ export function ReceiversPage() {
             ['all', 'All Receivers', tabCounts.all],
             ['approved', 'Approved', tabCounts.approved],
             ['pending', 'Pending KYC', tabCounts.pending],
+            ['rejected', 'Rejected', tabCounts.rejected],
           ] as const
         ).map(([key, label, count]) => (
           <button
@@ -216,7 +288,11 @@ export function ReceiversPage() {
         {loading ? (
           <p className="p-8 text-center text-sm text-neutral-500">Loading…</p>
         ) : filtered.length === 0 ? (
-          <p className="p-12 text-center text-sm text-neutral-500">No receivers in this view.</p>
+          <p className="p-12 text-center text-sm text-neutral-500">
+            {debouncedSearch || range !== 'all'
+              ? 'No receivers match your search or date filter.'
+              : 'No receivers in this view.'}
+          </p>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full min-w-[1000px] text-left text-sm">

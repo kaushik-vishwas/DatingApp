@@ -21,7 +21,12 @@ import {
 import {
   getPlatformRevenueForRange,
   getRevenueDashboardMetrics,
+  resolveWalletTopupPlatformFee,
+  aggregateReceiverWithdrawalPayouts,
+  countPaidReceiverWithdrawals,
 } from '../services/adminEarningsService';
+import { paidWithdrawalMatch } from '../constants/receiverWithdrawalFees';
+import WalletTopup from '../models/WalletTopup';
 import { aggregateReceiverEarningsByReceiver, sumReceiverEarningsRollup } from '../services/receiverEarningsAggregate';
 import { CHAT_TEXT_CHARGE_INR } from '../constants/chatPricing';
 import { normalizeReceiverWelcome } from '../services/receiverWelcome';
@@ -814,25 +819,28 @@ export const getOverviewDashboard = async (
     }
     const start = toRangeStart(range);
 
-    const [platformRevenue, calls, chats, activeReceivers, activeUsers, pendingKycApprovals, pendingWithdrawals, flaggedReports] =
+    const trendSince = new Date();
+    trendSince.setDate(trendSince.getDate() - 6);
+    trendSince.setHours(0, 0, 0, 0);
+
+    const [platformRevenue, receiverWithdrawalPayout, calls, topupsForTrend, activeReceivers, activeUsers, pendingKycApprovals, pendingWithdrawals, flaggedReports] =
       await Promise.all([
         getPlatformRevenueForRange(start),
+        aggregateReceiverWithdrawalPayouts(start),
         CallSession.find({
           status: 'completed',
           ...(start ? { startedAt: { $gte: start } } : {}),
         })
           .select('startedAt settledAmountInr')
           .lean<{ startedAt: Date; settledAmountInr?: number }[]>(),
-        ChatMessage.find({
-          senderType: 'u',
-          feeInr: { $gt: 0 },
-          ...(start ? { createdAt: { $gte: start } } : {}),
-        })
-          .select('createdAt')
-          .lean<{ createdAt: Date }[]>(),
+        WalletTopup.find({ createdAt: { $gte: trendSince } })
+          .select('payAmount createdAt')
+          .lean<{ payAmount: number; createdAt: Date }[]>(),
         Receiver.countDocuments({ accountStatus: 'approved', suspended: { $ne: true } }),
         User.countDocuments({ accountStatus: 'approved', suspended: { $ne: true } }),
-        Receiver.countDocuments({ accountStatus: 'pending_review' }),
+        Receiver.countDocuments({
+          accountStatus: { $in: ['pending_review', 'pending_profile'] },
+        }),
         WithdrawalRequest.countDocuments({ status: 'pending' }),
         UserReport.countDocuments({ status: 'pending' }),
       ]);
@@ -843,14 +851,9 @@ export const getOverviewDashboard = async (
     const totalCalls = calls.length;
     const trendByDay = new Map<string, number>();
 
-    for (const c of calls) {
-      const gross = roundInr(Number(c.settledAmountInr || 0));
-      const day = new Date(c.startedAt).toISOString().slice(0, 10);
-      trendByDay.set(day, roundInr((trendByDay.get(day) || 0) + gross));
-    }
-    for (const m of chats) {
-      const gross = roundInr(CHAT_TEXT_CHARGE_INR);
-      const day = new Date(m.createdAt).toISOString().slice(0, 10);
+    for (const topup of topupsForTrend) {
+      const gross = roundInr(Number(topup.payAmount || 0));
+      const day = new Date(topup.createdAt).toISOString().slice(0, 10);
       trendByDay.set(day, roundInr((trendByDay.get(day) || 0) + gross));
     }
 
@@ -868,9 +871,12 @@ export const getOverviewDashboard = async (
     res.status(200).json({
       cards: {
         totalRevenue,
+        walletCollections: platformRevenue.walletCollections,
+        callerUsageSpend: platformRevenue.callerUsageSpend,
         adminEarnings,
         receiverRevenue,
         receiverEarningsSum: receiverRevenue,
+        receiverWithdrawalPayout,
         totalCalls,
         activeReceivers,
         activeUsers,
@@ -1415,7 +1421,9 @@ export const getKycStats = async (_req: Request, res: Response): Promise<void> =
     const callerAwaitingAccess = { accountStatus: 'pending_review' };
 
     const [pendingApprovals, pendingCallerApprovals, approvedToday, rejectedToday] = await Promise.all([
-      Receiver.countDocuments({ accountStatus: 'pending_review' }),
+      Receiver.countDocuments({
+        accountStatus: { $in: ['pending_review', 'pending_profile'] },
+      }),
       User.countDocuments(callerAwaitingAccess),
       Receiver.countDocuments({
         accountStatus: 'approved',
@@ -1872,8 +1880,12 @@ export const listWithdrawals = async (
     const skip = (page - 1) * limit;
 
     const statusFilter: Record<string, unknown> = { status: { $ne: 'verification_pending' } };
-    if (status === 'pending' || status === 'approved' || status === 'rejected') {
+    if (status === 'pending' || status === 'rejected') {
       statusFilter.status = status;
+    } else if (status === 'approved') {
+      statusFilter.status = 'approved';
+    } else if (status === 'paid') {
+      Object.assign(statusFilter, paidWithdrawalMatch(null));
     }
 
     const now = new Date();
@@ -1886,34 +1898,47 @@ export const listWithdrawals = async (
 
     const baseFilter = { ...statusFilter, ...periodFilter } as Record<string, unknown>;
 
-    const [pendingRows, approvedTodayRows, rejectedTodayRows, approvedAllRows, totalBase] = await Promise.all([
+    const todayStart = new Date(new Date().setHours(0, 0, 0, 0));
+
+    const [
+      pendingRows,
+      rejectedTodayRows,
+      totalBase,
+      totalSuccessfulPayoutAmount,
+      paidTodayCount,
+      paidTodayAmount,
+      paidInRangeCount,
+      tabAllCount,
+      tabPendingCount,
+      tabPaidCount,
+      tabRejectedCount,
+    ] = await Promise.all([
       WithdrawalRequest.find({ status: 'pending' }).select('amount').lean<{ amount: number }[]>(),
       WithdrawalRequest.find({
-        status: 'approved',
-        reviewedAt: { $gte: new Date(new Date().setHours(0, 0, 0, 0)) },
-      })
-        .select('amount')
-        .lean<{ amount: number }[]>(),
-      WithdrawalRequest.find({
         status: 'rejected',
-        reviewedAt: { $gte: new Date(new Date().setHours(0, 0, 0, 0)) },
+        reviewedAt: { $gte: todayStart },
       })
         .select('amount')
         .lean<{ amount: number }[]>(),
-      WithdrawalRequest.find({ status: 'approved' }).select('amount reviewedAt').lean<{ amount: number; reviewedAt?: Date }[]>(),
       WithdrawalRequest.countDocuments(baseFilter),
+      aggregateReceiverWithdrawalPayouts(null, periodFilter),
+      countPaidReceiverWithdrawals(todayStart),
+      aggregateReceiverWithdrawalPayouts(todayStart),
+      countPaidReceiverWithdrawals(null, periodFilter),
+      WithdrawalRequest.countDocuments({ status: { $ne: 'verification_pending' }, ...periodFilter }),
+      WithdrawalRequest.countDocuments({ status: 'pending', ...periodFilter }),
+      countPaidReceiverWithdrawals(null, periodFilter),
+      WithdrawalRequest.countDocuments({ status: 'rejected', ...periodFilter }),
     ]);
 
     const pendingCount = pendingRows.length;
     const pendingAmount = pendingRows.reduce((sum, row) => sum + Number(row.amount || 0), 0);
-    const approvedTodayCount = approvedTodayRows.length;
-    const approvedTodayAmount = approvedTodayRows.reduce((sum, row) => sum + Number(row.amount || 0), 0);
+    const approvedTodayCount = paidTodayCount;
+    const approvedTodayAmount = paidTodayAmount;
     const rejectedTodayCount = rejectedTodayRows.length;
     const rejectedTodayAmount = rejectedTodayRows.reduce((sum, row) => sum + Number(row.amount || 0), 0);
-    const processedCount = approvedAllRows.length;
-    const processedTodayAmount = approvedAllRows
-      .filter((row) => row.reviewedAt && row.reviewedAt >= new Date(new Date().setHours(0, 0, 0, 0)))
-      .reduce((sum, row) => sum + Number(row.amount || 0), 0);
+    const processedCount = paidInRangeCount;
+    const processedTodayAmount = paidTodayAmount;
 
     const receiverCandidates =
       q.length === 0
@@ -1941,6 +1966,13 @@ export const listWithdrawals = async (
             rejectedTodayAmount,
             processedCount,
             processedTodayAmount,
+            totalSuccessfulPayoutAmount,
+            tabCounts: {
+              all: tabAllCount,
+              pending: tabPendingCount,
+              paid: tabPaidCount,
+              rejected: tabRejectedCount,
+            },
           },
           rows: [],
           total: 0,
@@ -1971,6 +2003,7 @@ export const listWithdrawals = async (
           payoutStatus?: string;
           payoutUtr?: string | null;
           payoutError?: string | null;
+          walletDebitedAt?: Date | null;
           createdAt: Date;
         }[]
       >();
@@ -2005,6 +2038,13 @@ export const listWithdrawals = async (
         rejectedTodayAmount,
         processedCount,
         processedTodayAmount,
+        totalSuccessfulPayoutAmount,
+        tabCounts: {
+          all: tabAllCount,
+          pending: tabPendingCount,
+          paid: tabPaidCount,
+          rejected: tabRejectedCount,
+        },
       },
       rows: rows.map((row) => {
         const receiver = receiverById.get(String(row.receiverId));
@@ -2053,6 +2093,7 @@ export const listWithdrawals = async (
           payoutStatus: row.payoutStatus && row.payoutStatus !== 'none' ? row.payoutStatus : undefined,
           payoutUtr: row.payoutUtr,
           payoutError: row.payoutError ?? undefined,
+          walletDebitedAt: row.walletDebitedAt ? row.walletDebitedAt.toISOString() : null,
         };
       }),
       total: totalBase,
@@ -2212,6 +2253,135 @@ export const resolveWithdrawal = async (
       res.status(400).json({ message: 'This withdrawal was already paid' });
       return;
     }
+    res.status(500).json({ message: msg || 'Server error' });
+  }
+};
+
+/**
+ * GET /admin/transactions — caller wallet recharge (top-up) history for admin.
+ */
+export const listAdminTransactions = async (
+  req: Request<{}, {}, {}, { range?: string; q?: string; page?: string; limit?: string }>,
+  res: Response
+): Promise<void> => {
+  try {
+    const range = String(req.query.range ?? '7d').toLowerCase();
+    const q = String(req.query.q ?? '').trim();
+    const page = Math.max(1, Number(req.query.page ?? 1) || 1);
+    const limit = Math.min(100, Math.max(1, Number(req.query.limit ?? 20) || 20));
+    const skip = (page - 1) * limit;
+
+    const now = new Date();
+    const since = new Date(now);
+    if (range === '7d') since.setDate(now.getDate() - 7);
+    else if (range === '30d') since.setDate(now.getDate() - 30);
+
+    const periodFilter = range === 'all' ? {} : { createdAt: { $gte: since } };
+    const todayStart = new Date(new Date().setHours(0, 0, 0, 0));
+
+    const [allRowsForStats, todayRows] = await Promise.all([
+      WalletTopup.find(periodFilter)
+        .select('payAmount creditAdded')
+        .lean<{ payAmount: number; creditAdded: number }[]>(),
+      WalletTopup.find({ createdAt: { $gte: todayStart } })
+        .select('payAmount creditAdded')
+        .lean<{ payAmount: number; creditAdded: number }[]>(),
+    ]);
+
+    const stats = {
+      totalCount: allRowsForStats.length,
+      totalPaid: allRowsForStats.reduce((sum, row) => sum + Number(row.payAmount || 0), 0),
+      totalCredit: allRowsForStats.reduce((sum, row) => sum + Number(row.creditAdded || 0), 0),
+      todayCount: todayRows.length,
+      todayPaid: todayRows.reduce((sum, row) => sum + Number(row.payAmount || 0), 0),
+    };
+
+    const listFilter: Record<string, unknown> = { ...periodFilter };
+
+    if (q.length > 0) {
+      const escaped = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const userCandidates = await User.find({
+        $or: [
+          { name: new RegExp(escaped, 'i') },
+          { email: new RegExp(escaped, 'i') },
+          { phone: new RegExp(escaped, 'i') },
+        ],
+      })
+        .select('_id')
+        .lean<{ _id: mongoose.Types.ObjectId }[]>();
+
+      const userIds = userCandidates.map((u) => u._id);
+      const paymentOr: Record<string, unknown>[] = [
+        { razorpayOrderId: new RegExp(escaped, 'i') },
+        { razorpayPaymentId: new RegExp(escaped, 'i') },
+      ];
+      if (userIds.length > 0) {
+        paymentOr.push({ userId: { $in: userIds } });
+      }
+      listFilter.$or = paymentOr;
+    }
+
+    const [total, rows] = await Promise.all([
+      WalletTopup.countDocuments(listFilter),
+      WalletTopup.find(listFilter)
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit)
+        .lean<
+          {
+            _id: mongoose.Types.ObjectId;
+            userId: mongoose.Types.ObjectId;
+            razorpayOrderId: string;
+            razorpayPaymentId: string;
+            payAmount: number;
+            bonusPercent: number;
+            creditAdded: number;
+            createdAt: Date;
+          }[]
+        >(),
+    ]);
+
+    const userIds = [...new Set(rows.map((row) => String(row.userId)))];
+    const users = await User.find({ _id: { $in: userIds } })
+      .select('_id name email phone')
+      .lean<
+        {
+          _id: mongoose.Types.ObjectId;
+          name: string;
+          email?: string;
+          phone: string;
+        }[]
+      >();
+    const userById = new Map(users.map((u) => [String(u._id), u]));
+
+    res.status(200).json({
+      stats,
+      rows: rows.map((row) => {
+        const user = userById.get(String(row.userId));
+        const platformFee = resolveWalletTopupPlatformFee(row);
+        return {
+          _id: String(row._id),
+          transactionId: `T-${String(row._id).slice(-6).toUpperCase()}`,
+          userId: String(row.userId),
+          userName: user?.name ?? 'User',
+          userEmail: user?.email ?? '',
+          userPhone: user?.phone ?? '',
+          payAmount: row.payAmount,
+          bonusPercent: row.bonusPercent,
+          creditAdded: row.creditAdded,
+          platformFee,
+          razorpayOrderId: row.razorpayOrderId,
+          razorpayPaymentId: row.razorpayPaymentId,
+          createdAt: row.createdAt.toISOString(),
+        };
+      }),
+      total,
+      page,
+      limit,
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error('listAdminTransactions error:', msg);
     res.status(500).json({ message: msg || 'Server error' });
   }
 };

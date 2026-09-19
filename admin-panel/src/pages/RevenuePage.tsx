@@ -7,7 +7,7 @@ function inr(v: number): string {
 }
 
 export function RevenuePage() {
-  const [range, setRange] = useState<'7d' | '30d' | 'all'>('7d');
+  const [range, setRange] = useState<'7d' | '30d' | 'all'>('all');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [data, setData] = useState<RevenueDashboardResponse | null>(null);

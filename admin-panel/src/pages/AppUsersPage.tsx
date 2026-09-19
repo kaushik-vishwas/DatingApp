@@ -29,7 +29,7 @@ function downloadCsv(filename: string, rows: string[][]) {
 
 export function AppUsersPage() {
   const [tab, setTab] = useState<AppUserStatusTab>('all');
-  const [range, setRange] = useState<AppUserRange>('7d');
+  const [range, setRange] = useState<AppUserRange>('all');
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [page, setPage] = useState(1);
@@ -105,7 +105,7 @@ export function AppUsersPage() {
         p += 1;
       } while (collected.length < lastTotal && p <= 60);
 
-      const header = ['User ID', 'Name', 'Phone', 'Wallet (INR)', 'Access', 'Profile status', 'Joined'];
+      const header = ['Caller ID', 'Name', 'Phone', 'Wallet (INR)', 'Access', 'Profile status', 'Joined'];
       const rows: string[][] = [header];
       collected.forEach((u, i) => {
         const access = u.suspended ? 'Suspended' : 'Active';
@@ -119,7 +119,7 @@ export function AppUsersPage() {
           formatJoinedDate(u.createdAt),
         ]);
       });
-      downloadCsv(`nesthama-users-${tab}-${new Date().toISOString().slice(0, 10)}.csv`, rows);
+      downloadCsv(`nesthama-callers-${tab}-${new Date().toISOString().slice(0, 10)}.csv`, rows);
     } catch (err: unknown) {
       const msg =
         err && typeof err === 'object' && 'response' in err
@@ -211,9 +211,9 @@ export function AppUsersPage() {
     <div className="p-8">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-neutral-900">User Management</h1>
+          <h1 className="text-2xl font-bold text-neutral-900">Caller Management</h1>
           <p className="mt-1 text-sm text-neutral-500">
-            Selecto app users — search, filter, export. Status matches access: Active (not suspended) or Inactive
+            Selecto callers — search, filter, export. Status matches access: Active (not suspended) or Inactive
             (suspended). ✓ approve or restore; ✕ suspend.
           </p>
         </div>
@@ -233,7 +233,7 @@ export function AppUsersPage() {
               type="search"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search…"
+              placeholder="Search name, phone, email…"
               className="w-52 rounded-xl border border-neutral-200 bg-white py-2 pl-9 pr-3 text-sm outline-none ring-[#7b2cff]/20 focus:ring-2 md:w-64"
             />
           </div>
@@ -266,7 +266,7 @@ export function AppUsersPage() {
       <div className="mt-8 flex flex-wrap gap-2">
         {(
           [
-            ['all', 'All Users', tabCounts.all],
+            ['all', 'All Callers', tabCounts.all],
             ['active', 'Active', tabCounts.active],
             ['suspended', 'Suspended', tabCounts.suspended],
           ] as const
@@ -290,13 +290,13 @@ export function AppUsersPage() {
         {loading ? (
           <p className="p-8 text-center text-sm text-neutral-500">Loading…</p>
         ) : users.length === 0 ? (
-          <p className="p-12 text-center text-sm text-neutral-500">No users in this view.</p>
+          <p className="p-12 text-center text-sm text-neutral-500">No callers in this view.</p>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full min-w-[900px] text-left text-sm">
               <thead>
                 <tr className="border-b border-neutral-100 bg-neutral-50/80">
-                  <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-neutral-500">User ID</th>
+                  <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-neutral-500">Caller ID</th>
                   <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-neutral-500">Name</th>
                   <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-neutral-500">Phone</th>
                   <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-neutral-500">Wallet</th>
@@ -355,7 +355,7 @@ export function AppUsersPage() {
                             type="button"
                             onClick={() => setEditUser(u)}
                             className="inline-flex h-10 w-10 items-center justify-center rounded-full border-2 border-[#e9ddff] bg-[var(--color-brand-muted)] text-[#7b2cff] shadow-sm hover:bg-[#ede5ff]"
-                            title="Edit user"
+                            title="Edit caller"
                           >
                             <Edit2 className="h-4 w-4" />
                           </button>

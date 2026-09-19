@@ -44,6 +44,7 @@ router.get('/revenue', adminAuth_1.adminProtect, adminController_1.getRevenueDas
 router.use('/earnings', adminEarningsRoutes_1.default);
 router.get('/withdrawals', adminAuth_1.adminProtect, adminController_1.listWithdrawals);
 router.patch('/withdrawals/:id', adminAuth_1.adminProtect, adminController_1.resolveWithdrawal);
+router.get('/transactions', adminAuth_1.adminProtect, adminController_1.listAdminTransactions);
 // Wallet offers (recharge packs)
 router.get('/wallet/offers', adminAuth_1.adminProtect, walletOffersController_1.listAdminWalletOffers);
 router.post('/wallet/reconcile', adminAuth_1.adminProtect, walletController_1.adminReconcileRazorpayWalletPayment);

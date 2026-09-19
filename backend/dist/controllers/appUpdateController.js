@@ -13,7 +13,7 @@ const getAppUpdatePolicy = async (_req, res) => {
             minAndroidVersionCode);
         const force = process.env.APP_UPDATE_FORCE?.trim().toLowerCase() !== 'false' && minAndroidVersionCode > 0;
         const message = process.env.APP_UPDATE_MESSAGE?.trim() ||
-            'A new version of Selecto is available on the Play Store. Please update.';
+            'Some bugs are fixed in the latest version. Please update the app from the Play Store to continue.';
         const playStoreUrl = process.env.APP_UPDATE_PLAY_STORE_URL?.trim() ||
             'https://play.google.com/store/apps/details?id=com.selecto.app';
         const title = process.env.APP_UPDATE_TITLE?.trim() || 'Update Selecto';

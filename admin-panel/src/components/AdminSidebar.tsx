@@ -14,6 +14,7 @@ import {
   Star,
   MessageSquareHeart,
   Megaphone,
+  ArrowLeftRight,
 } from 'lucide-react';
 import { useAdminAuth } from '../context/AdminAuthContext';
 
@@ -26,10 +27,11 @@ const linkClass = ({ isActive }: { isActive: boolean }) =>
 
 const items = [
   { to: '/overview', label: 'Overview', icon: LayoutDashboard },
-  { to: '/users', label: 'Users', icon: Users },
+  { to: '/users', label: 'Callers', icon: Users },
   { to: '/receivers', label: 'Receivers', icon: RadioReceiver },
   { to: '/kyc', label: 'KYC Approvals', icon: FileCheck2 },
   { to: '/revenue', label: 'Revenue', icon: IndianRupee },
+  { to: '/transactions', label: 'Transactions', icon: ArrowLeftRight },
   { to: '/admin-earnings', label: 'Admin Earnings', icon: Landmark },
   { to: '/withdrawals', label: 'Receiver Withdrawals', icon: Wallet },
   { to: '/wallet-offers', label: 'Wallet Offers', icon: Tag },

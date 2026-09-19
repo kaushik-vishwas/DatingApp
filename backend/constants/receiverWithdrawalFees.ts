@@ -49,3 +49,27 @@ export function resolveWithdrawalWalletDebitAmount(row: {
 }): number {
   return roundInr(row.amount);
 }
+
+/** Mongo match for withdrawals that were actually paid out (excludes pending / failed / processing). */
+export function paidWithdrawalMatch(since?: Date | null): Record<string, unknown> {
+  const match: Record<string, unknown> = {
+    payoutStatus: 'success',
+    status: 'approved',
+    walletDebitedAt: { $ne: null },
+  };
+  if (since) match.reviewedAt = { $gte: since };
+  return match;
+}
+
+/** Same as UI "Paid" badge: approved + payout success + wallet debited. */
+export function isWithdrawalPaidInUi(row: {
+  status: string;
+  payoutStatus?: string | null;
+  walletDebitedAt?: Date | null;
+}): boolean {
+  return (
+    row.status === 'approved' &&
+    row.payoutStatus === 'success' &&
+    row.walletDebitedAt != null
+  );
+}
