@@ -94,23 +94,11 @@ async function resolveOrderWalletMeta(
 ): Promise<ResolvedOrderWalletMeta | { error: string }> {
   const notes = (order?.notes ?? {}) as Record<string, unknown>;
   const userId = String(notes.userId ?? '').trim();
-  const payAmount = Number(notes.payAmount);
-  const bonusPercent = Number(notes.bonusPercent);
-  let walletAmount = Number(notes.walletAmount);
+  const notesBonusPercent = Number(notes.bonusPercent);
+  const notesWalletAmount = Number(notes.walletAmount);
 
   if (!userId || !mongoose.isValidObjectId(userId)) {
     return { error: 'missing_user' };
-  }
-  if (!Number.isFinite(payAmount) || !Number.isFinite(bonusPercent)) {
-    return { error: 'missing_notes' };
-  }
-
-  if (!Number.isFinite(walletAmount) || walletAmount <= 0) {
-    const inferred = await inferWalletAmountFromPay(payAmount, bonusPercent);
-    if (!inferred) {
-      return { error: 'missing_wallet_amount' };
-    }
-    walletAmount = inferred;
   }
 
   const orderAmountPaise = Number(order.amount);
@@ -118,33 +106,49 @@ async function resolveOrderWalletMeta(
     return { error: 'amount_mismatch' };
   }
 
-  let effectivePayAmount = roundPayAmountInr(payAmount);
-  if (payAmountToPaise(effectivePayAmount) !== orderAmountPaise) {
-    const payFromOrder = roundPayAmountInr(orderAmountPaise / 100);
-    if (payableMatchesWalletPack(walletAmount, payFromOrder)) {
-      effectivePayAmount = payFromOrder;
-    } else {
-      const legacyPay = Math.round(payAmount);
-      if (
-        orderAmountPaise === legacyPay * 100 &&
-        payableMatchesWalletPack(walletAmount, legacyPay)
-      ) {
-        effectivePayAmount = legacyPay;
-      } else {
-        return { error: 'amount_mismatch' };
-      }
-    }
+  const effectivePayAmount = roundPayAmountInr(orderAmountPaise / 100);
+  let bonusPercent = Number.isFinite(notesBonusPercent) ? Math.round(notesBonusPercent) : NaN;
+  let walletAmount =
+    Number.isFinite(notesWalletAmount) && notesWalletAmount > 0 ? Math.round(notesWalletAmount) : NaN;
+
+  if (
+    Number.isFinite(walletAmount) &&
+    Number.isFinite(bonusPercent) &&
+    payableMatchesWalletPack(walletAmount, effectivePayAmount)
+  ) {
+    return {
+      userId,
+      payAmount: effectivePayAmount,
+      bonusPercent,
+      walletAmount,
+    };
   }
 
-  if (!payableMatchesWalletPack(walletAmount, effectivePayAmount)) {
+  const inferredWithBonus = Number.isFinite(bonusPercent)
+    ? await inferWalletAmountFromPay(effectivePayAmount, bonusPercent)
+    : null;
+  if (inferredWithBonus != null && Number.isFinite(bonusPercent)) {
+    return {
+      userId,
+      payAmount: effectivePayAmount,
+      bonusPercent,
+      walletAmount: inferredWithBonus,
+    };
+  }
+
+  const inferredAny = await inferWalletPackFromOrderAmount(
+    effectivePayAmount,
+    Number.isFinite(bonusPercent) ? bonusPercent : undefined
+  );
+  if (!inferredAny) {
     return { error: 'pack_mismatch' };
   }
 
   return {
     userId,
     payAmount: effectivePayAmount,
-    bonusPercent,
-    walletAmount: Math.round(walletAmount),
+    bonusPercent: inferredAny.bonusPercent,
+    walletAmount: inferredAny.walletAmount,
   };
 }
 
@@ -176,6 +180,32 @@ async function inferWalletAmountFromPay(
     if (payableMatchesWalletPack(amount, payAmount)) return Math.round(amount);
   }
   return null;
+}
+
+/** Match payable to any active offer when notes bonus/wallet are stale. */
+async function inferWalletPackFromOrderAmount(
+  payAmount: number,
+  preferredBonusPercent?: number
+): Promise<{ walletAmount: number; bonusPercent: number } | null> {
+  const offers = await WalletOffer.find({}).select('amount bonusPercent').lean();
+  const preferred = Number.isFinite(preferredBonusPercent)
+    ? Math.round(preferredBonusPercent as number)
+    : null;
+
+  const matches: { walletAmount: number; bonusPercent: number }[] = [];
+  for (const o of offers) {
+    const amount = Number(o.amount);
+    const bonus = Math.round(Number(o.bonusPercent) || 0);
+    if (!Number.isFinite(amount) || amount <= 0) continue;
+    if (!payableMatchesWalletPack(amount, payAmount)) continue;
+    matches.push({ walletAmount: Math.round(amount), bonusPercent: bonus });
+  }
+  if (matches.length === 0) return null;
+  if (preferred != null) {
+    const hit = matches.find((m) => m.bonusPercent === preferred);
+    if (hit) return hit;
+  }
+  return matches[0] ?? null;
 }
 
 /**
