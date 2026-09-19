@@ -45,6 +45,14 @@ function verifyPaymentSignature(orderId: string, paymentId: string, signature: s
   }
 }
 
+function roundPayAmountInr(n: number): number {
+  return Math.round(n * 100) / 100;
+}
+
+function payAmountToPaise(payAmount: number): number {
+  return Math.round(roundPayAmountInr(payAmount) * 100);
+}
+
 function verifyWebhookSignature(rawBody: string, signature: string, secret: string): boolean {
   const expected = crypto.createHmac('sha256', secret).update(rawBody).digest('hex');
   if (!signature || signature.length !== expected.length) return false;
@@ -105,18 +113,36 @@ async function resolveOrderWalletMeta(
     walletAmount = inferred;
   }
 
-  const expectedPaise = Math.round(payAmount * 100);
-  if (Number(order.amount) !== expectedPaise) {
+  const orderAmountPaise = Number(order.amount);
+  if (!Number.isFinite(orderAmountPaise) || orderAmountPaise <= 0) {
     return { error: 'amount_mismatch' };
   }
 
-  if (!payableMatchesWalletPack(walletAmount, payAmount)) {
+  let effectivePayAmount = roundPayAmountInr(payAmount);
+  if (payAmountToPaise(effectivePayAmount) !== orderAmountPaise) {
+    const payFromOrder = roundPayAmountInr(orderAmountPaise / 100);
+    if (payableMatchesWalletPack(walletAmount, payFromOrder)) {
+      effectivePayAmount = payFromOrder;
+    } else {
+      const legacyPay = Math.round(payAmount);
+      if (
+        orderAmountPaise === legacyPay * 100 &&
+        payableMatchesWalletPack(walletAmount, legacyPay)
+      ) {
+        effectivePayAmount = legacyPay;
+      } else {
+        return { error: 'amount_mismatch' };
+      }
+    }
+  }
+
+  if (!payableMatchesWalletPack(walletAmount, effectivePayAmount)) {
     return { error: 'pack_mismatch' };
   }
 
   return {
     userId,
-    payAmount,
+    payAmount: effectivePayAmount,
     bonusPercent,
     walletAmount: Math.round(walletAmount),
   };
@@ -366,7 +392,7 @@ export const createRazorpayWalletOrder = async (
       return;
     }
 
-    const amountPaise = Math.round(payAmount * 100);
+    const amountPaise = payAmountToPaise(payAmount);
     if (amountPaise < 100) {
       res.status(400).json({ message: 'Amount too small' });
       return;
@@ -374,6 +400,7 @@ export const createRazorpayWalletOrder = async (
 
     const uid = String(authUser._id);
     const receipt = `w${uid.slice(-10)}${Date.now()}`.replace(/[^a-zA-Z0-9]/g, '').slice(0, 40);
+    const payAmountNote = roundPayAmountInr(payAmount);
 
     const order = await rz.orders.create({
       amount: amountPaise,
@@ -381,7 +408,7 @@ export const createRazorpayWalletOrder = async (
       receipt,
       notes: {
         userId: uid,
-        payAmount: String(Math.round(payAmount)),
+        payAmount: String(payAmountNote),
         bonusPercent: String(Math.round(bonusPercent)),
         walletAmount: String(resolved.walletAmount),
       },
@@ -468,8 +495,8 @@ export const verifyRazorpayWalletPayment = async (req: Request<{}, {}, VerifyBod
       res.status(400).json({ message: 'Order does not match your account' });
       return;
     }
-    const expectedPaise = Math.round(payAmount * 100);
-    if (Number(order.amount) !== expectedPaise) {
+    const meta = await resolveOrderWalletMeta(order, orderId);
+    if ('error' in meta) {
       res.status(400).json({ message: 'Order amount mismatch' });
       return;
     }
@@ -488,9 +515,9 @@ export const verifyRazorpayWalletPayment = async (req: Request<{}, {}, VerifyBod
       orderId,
       paymentId,
       userId: String(authUser._id),
-      payAmount,
-      bonusPercent,
-      walletAmount: resolved.walletAmount,
+      payAmount: meta.payAmount,
+      bonusPercent: meta.bonusPercent,
+      walletAmount: meta.walletAmount,
     });
     if (!credited.ok) {
       const status = credited.reason === 'User not found' ? 404 : 400;

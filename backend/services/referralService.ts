@@ -15,6 +15,20 @@ import { getReferralLandingBaseUrl } from '../constants/referralLanding';
 const REFERRAL_CODE_LENGTH = 8;
 const REFERRAL_CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 
+/** Play/Meta install referrer strings that match code format but are not referrals. */
+const IGNORED_REFERRAL_CODES = new Set([
+  'ORGANIC',
+  'ORGANIC_INSTALL',
+  'GOOGLE_PLAY',
+  'PLAY_STORE',
+  'NONE',
+  'NULL',
+  'UNDEFINED',
+  'FACEBOOK',
+  'INSTAGRAM',
+  'GOOGLE',
+]);
+
 export type ReferralLookupResult =
   | { kind: 'user'; id: mongoose.Types.ObjectId; phone: string; role: ReferralPartyRole }
   | { kind: 'receiver'; id: mongoose.Types.ObjectId; phone: string; role: ReferralPartyRole };
@@ -151,6 +165,9 @@ export async function applyReferralRewardOnSignup(params: {
 }): Promise<ApplyReferralRewardResult> {
   const code = normalizeReferralCode(params.referralCode);
   if (!code) {
+    return { applied: false, reason: 'no_code' };
+  }
+  if (IGNORED_REFERRAL_CODES.has(code)) {
     return { applied: false, reason: 'no_code' };
   }
   if (!isValidReferralCodeFormat(code)) {
