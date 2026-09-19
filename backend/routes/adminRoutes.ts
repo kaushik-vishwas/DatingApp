@@ -40,6 +40,7 @@ import {
   updateAdminWalletOffer,
 } from '../controllers/walletOffersController';
 import { listCallerAppStoreReviews } from '../controllers/adminCallerAppReviewController';
+import { adminReconcileRazorpayWalletPayment } from '../controllers/walletController';
 import adminEarningsRoutes from './adminEarningsRoutes';
 
 const router = Router();
@@ -83,6 +84,7 @@ router.patch('/withdrawals/:id', adminProtect, resolveWithdrawal);
 
 // Wallet offers (recharge packs)
 router.get('/wallet/offers', adminProtect, listAdminWalletOffers);
+router.post('/wallet/reconcile', adminProtect, adminReconcileRazorpayWalletPayment);
 router.post('/wallet/offers', adminProtect, createAdminWalletOffer);
 router.patch('/wallet/offers/:id', adminProtect, updateAdminWalletOffer);
 router.delete('/wallet/offers/:id', adminProtect, deleteAdminWalletOffer);

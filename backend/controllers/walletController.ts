@@ -72,6 +72,71 @@ function resolveWalletRecharge(
   };
 }
 
+type ResolvedOrderWalletMeta = {
+  userId: string;
+  payAmount: number;
+  bonusPercent: number;
+  walletAmount: number;
+};
+
+/** Parse Razorpay order notes into wallet recharge fields (shared by webhook + reconcile). */
+async function resolveOrderWalletMeta(
+  order: { amount?: number | string; notes?: Record<string, unknown> | null },
+  orderId: string
+): Promise<ResolvedOrderWalletMeta | { error: string }> {
+  const notes = (order?.notes ?? {}) as Record<string, unknown>;
+  const userId = String(notes.userId ?? '').trim();
+  const payAmount = Number(notes.payAmount);
+  const bonusPercent = Number(notes.bonusPercent);
+  let walletAmount = Number(notes.walletAmount);
+
+  if (!userId || !mongoose.isValidObjectId(userId)) {
+    return { error: 'missing_user' };
+  }
+  if (!Number.isFinite(payAmount) || !Number.isFinite(bonusPercent)) {
+    return { error: 'missing_notes' };
+  }
+
+  if (!Number.isFinite(walletAmount) || walletAmount <= 0) {
+    const inferred = await inferWalletAmountFromPay(payAmount, bonusPercent);
+    if (!inferred) {
+      return { error: 'missing_wallet_amount' };
+    }
+    walletAmount = inferred;
+  }
+
+  const expectedPaise = Math.round(payAmount * 100);
+  if (Number(order.amount) !== expectedPaise) {
+    return { error: 'amount_mismatch' };
+  }
+
+  if (!payableMatchesWalletPack(walletAmount, payAmount)) {
+    return { error: 'pack_mismatch' };
+  }
+
+  return {
+    userId,
+    payAmount,
+    bonusPercent,
+    walletAmount: Math.round(walletAmount),
+  };
+}
+
+type RazorpayPaymentRow = {
+  id?: string;
+  order_id?: string;
+  status?: string;
+};
+
+/** Pick the latest captured/authorized payment for an order. */
+function pickSuccessfulPayment(rows: RazorpayPaymentRow[]): RazorpayPaymentRow | null {
+  const ok = rows.filter((p) => {
+    const status = String(p.status ?? '').trim();
+    return status === 'captured' || status === 'authorized';
+  });
+  return ok.length > 0 ? ok[ok.length - 1]! : null;
+}
+
 /** When older orders lack notes.walletAmount, infer pack from offers + payable. */
 async function inferWalletAmountFromPay(
   payAmount: number,
@@ -516,53 +581,20 @@ export const razorpayWalletWebhook = async (req: RazorpayWebhookRequest, res: Re
     }
 
     const order = await rz.orders.fetch(orderId);
-    const notes = (order?.notes ?? {}) as Record<string, unknown>;
-    const userId = String(notes.userId ?? '').trim();
-    const payAmount = Number(notes.payAmount);
-    const bonusPercent = Number(notes.bonusPercent);
-    let walletAmount = Number(notes.walletAmount);
-
-    if (!userId || !mongoose.isValidObjectId(userId)) {
-      console.error('razorpayWalletWebhook: missing/invalid userId on order', orderId);
-      res.status(200).json({ ok: false, reason: 'missing_user' });
-      return;
-    }
-    if (!Number.isFinite(payAmount) || !Number.isFinite(bonusPercent)) {
-      console.error('razorpayWalletWebhook: missing payAmount/bonus on order', orderId);
-      res.status(200).json({ ok: false, reason: 'missing_notes' });
-      return;
-    }
-
-    if (!Number.isFinite(walletAmount) || walletAmount <= 0) {
-      const inferred = await inferWalletAmountFromPay(payAmount, bonusPercent);
-      if (!inferred) {
-        console.error('razorpayWalletWebhook: cannot resolve walletAmount', orderId);
-        res.status(200).json({ ok: false, reason: 'missing_wallet_amount' });
-        return;
-      }
-      walletAmount = inferred;
-    }
-
-    const expectedPaise = Math.round(payAmount * 100);
-    if (Number(order.amount) !== expectedPaise) {
-      console.error('razorpayWalletWebhook: order amount mismatch', orderId);
-      res.status(200).json({ ok: false, reason: 'amount_mismatch' });
-      return;
-    }
-
-    if (!payableMatchesWalletPack(walletAmount, payAmount)) {
-      console.error('razorpayWalletWebhook: pack mismatch', orderId);
-      res.status(200).json({ ok: false, reason: 'pack_mismatch' });
+    const meta = await resolveOrderWalletMeta(order, orderId);
+    if ('error' in meta) {
+      console.error('razorpayWalletWebhook:', meta.error, orderId);
+      res.status(200).json({ ok: false, reason: meta.error });
       return;
     }
 
     const credited = await creditCapturedWalletPayment({
       orderId,
       paymentId,
-      userId,
-      payAmount,
-      bonusPercent,
-      walletAmount: Math.round(walletAmount),
+      userId: meta.userId,
+      payAmount: meta.payAmount,
+      bonusPercent: meta.bonusPercent,
+      walletAmount: meta.walletAmount,
     });
 
     if (!credited.ok) {
@@ -584,6 +616,232 @@ export const razorpayWalletWebhook = async (req: RazorpayWebhookRequest, res: Re
     const msg = err instanceof Error ? err.message : String(err);
     console.error('razorpayWalletWebhook error:', msg);
     // Return 200 sparingly only for business skips; infrastructure errors should retry.
+    res.status(500).json({ message: msg || 'Server error' });
+  }
+};
+
+type ReconcileBody = {
+  razorpay_order_id?: unknown;
+  razorpay_payment_id?: unknown;
+};
+
+/**
+ * POST /wallet/razorpay-reconcile — credit wallet from Razorpay order when app verify was missed (UPI Intent).
+ * Server fetches order + payment from Razorpay API (no client signature). Idempotent by payment id.
+ */
+export const reconcileRazorpayWalletPayment = async (
+  req: Request<{}, {}, ReconcileBody>,
+  res: Response
+): Promise<void> => {
+  try {
+    if (req.accountKind !== 'user') {
+      res.status(403).json({ message: 'Only app users can reconcile wallet payments' });
+      return;
+    }
+    const authUser = req.user as UserDocument | undefined;
+    if (!authUser?._id) {
+      res.status(401).json({ message: 'Not authorized' });
+      return;
+    }
+    if (blockCallerUntilApproved(req, res)) return;
+
+    const rz = getRazorpay();
+    if (!rz) {
+      res.status(503).json({ message: 'Wallet payments are not configured on the server' });
+      return;
+    }
+
+    const orderId =
+      typeof req.body.razorpay_order_id === 'string' ? req.body.razorpay_order_id.trim() : '';
+    const paymentIdHint =
+      typeof req.body.razorpay_payment_id === 'string' ? req.body.razorpay_payment_id.trim() : '';
+    if (!orderId) {
+      res.status(400).json({ message: 'razorpay_order_id is required' });
+      return;
+    }
+
+    const order = await rz.orders.fetch(orderId);
+    const meta = await resolveOrderWalletMeta(order, orderId);
+    if ('error' in meta) {
+      res.status(400).json({ message: 'Invalid or incomplete Razorpay order for wallet recharge' });
+      return;
+    }
+    if (String(meta.userId) !== String(authUser._id)) {
+      res.status(403).json({ message: 'Order does not match your account' });
+      return;
+    }
+
+    let payment: RazorpayPaymentRow | null = null;
+    if (paymentIdHint) {
+      const fetched = await rz.payments.fetch(paymentIdHint);
+      if (String(fetched.order_id) !== orderId) {
+        res.status(400).json({ message: 'Payment does not match order' });
+        return;
+      }
+      payment = fetched as RazorpayPaymentRow;
+    } else {
+      const collection = await rz.orders.fetchPayments(orderId);
+      const items = Array.isArray((collection as { items?: RazorpayPaymentRow[] }).items)
+        ? (collection as { items: RazorpayPaymentRow[] }).items
+        : [];
+      payment = pickSuccessfulPayment(items);
+    }
+
+    if (!payment?.id) {
+      res.status(200).json({
+        message: 'Payment not completed yet on Razorpay',
+        pending: true,
+        credited: false,
+      });
+      return;
+    }
+
+    const status = String(payment.status ?? '').trim();
+    if (status !== 'captured' && status !== 'authorized') {
+      res.status(200).json({
+        message: `Payment not complete (status: ${status || 'unknown'})`,
+        pending: true,
+        credited: false,
+      });
+      return;
+    }
+
+    const credited = await creditCapturedWalletPayment({
+      orderId,
+      paymentId: String(payment.id),
+      userId: meta.userId,
+      payAmount: meta.payAmount,
+      bonusPercent: meta.bonusPercent,
+      walletAmount: meta.walletAmount,
+    });
+    if (!credited.ok) {
+      const statusCode = credited.reason === 'User not found' ? 404 : 400;
+      res.status(statusCode).json({ message: credited.reason });
+      return;
+    }
+
+    const fresh = await User.findById(authUser._id);
+    if (!fresh) {
+      res.status(500).json({ message: 'User missing after credit' });
+      return;
+    }
+
+    res.status(200).json({
+      message: credited.alreadyCredited
+        ? 'Wallet already credited for this payment'
+        : 'Wallet credited from Razorpay',
+      credited: true,
+      pending: false,
+      alreadyCredited: credited.alreadyCredited,
+      creditAdded: credited.creditAdded,
+      user: toApiUser(fresh),
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error('reconcileRazorpayWalletPayment error:', msg);
+    if ((err as { error?: { code?: string } })?.error?.code === 'BAD_REQUEST_ERROR') {
+      res.status(400).json({ message: msg || 'Invalid Razorpay request' });
+      return;
+    }
+    res.status(500).json({ message: msg || 'Server error' });
+  }
+};
+
+type AdminReconcileBody = {
+  razorpay_order_id?: unknown;
+  razorpay_payment_id?: unknown;
+};
+
+/**
+ * POST /admin/wallet/reconcile — support tool to credit a captured Razorpay payment (idempotent).
+ */
+export const adminReconcileRazorpayWalletPayment = async (
+  req: Request<{}, {}, AdminReconcileBody>,
+  res: Response
+): Promise<void> => {
+  try {
+    const rz = getRazorpay();
+    if (!rz) {
+      res.status(503).json({ message: 'Wallet payments are not configured on the server' });
+      return;
+    }
+
+    let orderId =
+      typeof req.body.razorpay_order_id === 'string' ? req.body.razorpay_order_id.trim() : '';
+    const paymentIdHint =
+      typeof req.body.razorpay_payment_id === 'string' ? req.body.razorpay_payment_id.trim() : '';
+
+    if (!orderId && paymentIdHint) {
+      const fetched = await rz.payments.fetch(paymentIdHint);
+      orderId = String(fetched.order_id ?? '').trim();
+    }
+    if (!orderId) {
+      res.status(400).json({ message: 'razorpay_order_id or razorpay_payment_id is required' });
+      return;
+    }
+
+    const order = await rz.orders.fetch(orderId);
+    const meta = await resolveOrderWalletMeta(order, orderId);
+    if ('error' in meta) {
+      res.status(400).json({ message: `Cannot reconcile order (${meta.error})` });
+      return;
+    }
+
+    let payment: RazorpayPaymentRow | null = null;
+    if (paymentIdHint) {
+      const fetched = await rz.payments.fetch(paymentIdHint);
+      if (String(fetched.order_id) !== orderId) {
+        res.status(400).json({ message: 'Payment does not match order' });
+        return;
+      }
+      payment = fetched as RazorpayPaymentRow;
+    } else {
+      const collection = await rz.orders.fetchPayments(orderId);
+      const items = Array.isArray((collection as { items?: RazorpayPaymentRow[] }).items)
+        ? (collection as { items: RazorpayPaymentRow[] }).items
+        : [];
+      payment = pickSuccessfulPayment(items);
+    }
+
+    if (!payment?.id) {
+      res.status(404).json({ message: 'No captured payment found for this order' });
+      return;
+    }
+
+    const status = String(payment.status ?? '').trim();
+    if (status !== 'captured' && status !== 'authorized') {
+      res.status(400).json({ message: `Payment not complete (status: ${status || 'unknown'})` });
+      return;
+    }
+
+    const credited = await creditCapturedWalletPayment({
+      orderId,
+      paymentId: String(payment.id),
+      userId: meta.userId,
+      payAmount: meta.payAmount,
+      bonusPercent: meta.bonusPercent,
+      walletAmount: meta.walletAmount,
+    });
+    if (!credited.ok) {
+      res.status(400).json({ message: credited.reason });
+      return;
+    }
+
+    const fresh = await User.findById(meta.userId);
+    res.status(200).json({
+      message: credited.alreadyCredited
+        ? 'Wallet already credited for this payment'
+        : 'Wallet credited from Razorpay',
+      alreadyCredited: credited.alreadyCredited,
+      creditAdded: credited.creditAdded,
+      userId: meta.userId,
+      razorpayOrderId: orderId,
+      razorpayPaymentId: String(payment.id),
+      walletBalance: fresh?.walletBalance ?? null,
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error('adminReconcileRazorpayWalletPayment error:', msg);
     res.status(500).json({ message: msg || 'Server error' });
   }
 };

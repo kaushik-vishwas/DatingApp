@@ -8,6 +8,7 @@ const adminController_1 = require("../controllers/adminController");
 const adminAuth_1 = require("../middleware/adminAuth");
 const walletOffersController_1 = require("../controllers/walletOffersController");
 const adminCallerAppReviewController_1 = require("../controllers/adminCallerAppReviewController");
+const walletController_1 = require("../controllers/walletController");
 const adminEarningsRoutes_1 = __importDefault(require("./adminEarningsRoutes"));
 const router = (0, express_1.Router)();
 router.post('/auth/login', adminController_1.adminLogin);
@@ -45,6 +46,7 @@ router.get('/withdrawals', adminAuth_1.adminProtect, adminController_1.listWithd
 router.patch('/withdrawals/:id', adminAuth_1.adminProtect, adminController_1.resolveWithdrawal);
 // Wallet offers (recharge packs)
 router.get('/wallet/offers', adminAuth_1.adminProtect, walletOffersController_1.listAdminWalletOffers);
+router.post('/wallet/reconcile', adminAuth_1.adminProtect, walletController_1.adminReconcileRazorpayWalletPayment);
 router.post('/wallet/offers', adminAuth_1.adminProtect, walletOffersController_1.createAdminWalletOffer);
 router.patch('/wallet/offers/:id', adminAuth_1.adminProtect, walletOffersController_1.updateAdminWalletOffer);
 router.delete('/wallet/offers/:id', adminAuth_1.adminProtect, walletOffersController_1.deleteAdminWalletOffer);

@@ -11,6 +11,7 @@ router.get('/credits', auth_1.protect, walletController_1.listWalletCredits);
 router.get('/offers', auth_1.protect, walletOffersController_1.listWalletOffers);
 router.post('/razorpay-order', auth_1.protect, walletController_1.createRazorpayWalletOrder);
 router.post('/razorpay-verify', auth_1.protect, walletController_1.verifyRazorpayWalletPayment);
+router.post('/razorpay-reconcile', auth_1.protect, walletController_1.reconcileRazorpayWalletPayment);
 /** Public Razorpay webhook — do not put behind `protect`. */
 router.post('/razorpay-webhook', walletController_1.razorpayWalletWebhook);
 router.post('/credit', auth_1.protect, walletController_1.creditWallet);

@@ -228,6 +228,12 @@ const start = async (): Promise<void> => {
       }
     });
 
+    if (process.env.RAZORPAY_KEY_ID?.trim() && !process.env.RAZORPAY_WEBHOOK_SECRET?.trim()) {
+      console.warn(
+        '[razorpay] RAZORPAY_WEBHOOK_SECRET is not set — /wallet/razorpay-webhook is disabled. UPI payments that miss app verify will not auto-credit until webhook is configured.'
+      );
+    }
+
     httpServer.listen(PORT, '0.0.0.0');
   } catch (error) {
     console.error('❌ Failed to start:', error);
