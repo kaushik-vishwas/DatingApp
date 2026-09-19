@@ -34,9 +34,11 @@ export function RevenuePage() {
   const statCards = useMemo(
     () => [
       {
-        label: 'Gross Revenue',
+        label: 'Total Revenue',
         value: data ? inr(data.cards.grossRevenue) : '…',
-        note: `${rangeLabel} · Caller spend on calls + chat`,
+        note: data
+          ? `${rangeLabel} · Wallet recharges collected · Caller usage ${inr(data.cards.callerUsageSpend)}`
+          : `${rangeLabel} · Wallet recharges collected`,
         tone: 'text-emerald-600',
       },
       {
@@ -50,13 +52,15 @@ export function RevenuePage() {
       {
         label: 'Net Payout',
         value: data ? inr(data.cards.netPayout) : '…',
-        note: 'Total receiver earnings (calls + chat)',
+        note: 'Successful receiver bank withdrawals paid',
         tone: 'text-sky-600',
       },
       {
         label: 'Platform Profit',
         value: data ? inr(data.cards.platformProfit) : '…',
-        note: 'Gross revenue − net payout (usage margin)',
+        note: data
+          ? `Collections − payouts + withdrawal fees − referrals (${inr(data.cards.referralRewardsPaid)})`
+          : 'Collections − payouts + withdrawal fees − referrals',
         tone: 'text-emerald-600',
       },
     ],
@@ -101,16 +105,16 @@ export function RevenuePage() {
         <div className="rounded-xl border border-neutral-200 bg-white p-4">
           <h2 className="text-sm font-bold text-neutral-800">Daily Revenue Breakdown</h2>
           <p className="mt-1 text-[11px] text-neutral-500">
-            Revenue = caller spend · Commission = revenue − receiver payout · Payout = receiver earnings
+            Collections = wallet top-ups · Platform fees = recharge + withdrawal fees · Payout = bank withdrawals paid
           </p>
           <div className="mt-3 overflow-hidden rounded-lg border border-neutral-200">
             <table className="w-full text-left text-xs">
               <thead className="bg-neutral-50 text-[11px] uppercase tracking-wide text-neutral-500">
                 <tr>
                   <th className="px-3 py-2">Date</th>
-                  <th className="px-3 py-2">Revenue (call + chat)</th>
-                  <th className="px-3 py-2">Commission</th>
-                  <th className="px-3 py-2">Payout</th>
+                  <th className="px-3 py-2">Collections</th>
+                  <th className="px-3 py-2">Platform Fees</th>
+                  <th className="px-3 py-2">Withdrawals Paid</th>
                 </tr>
               </thead>
               <tbody>
@@ -131,26 +135,26 @@ export function RevenuePage() {
         </div>
 
         <div className="rounded-xl border border-neutral-200 bg-white p-4">
-          <h2 className="text-sm font-bold text-neutral-800">Top Earning Receivers</h2>
+          <h2 className="text-sm font-bold text-neutral-800">Top Receivers by Withdrawals</h2>
           <div className="mt-3 space-y-3">
             {(data?.topEarners ?? []).map((item) => (
               <div key={item.receiverId} className="rounded-lg border border-neutral-100 bg-neutral-50 px-3 py-2.5">
                 <div className="flex items-center justify-between">
                   <p className="text-xs font-semibold text-neutral-800">{item.name}</p>
-                  <p className="text-[11px] text-neutral-500">{item.calls} calls</p>
+                  <p className="text-[11px] text-neutral-500">{item.calls} paid</p>
                 </div>
                 <div className="mt-1 text-[11px] text-neutral-500">
                   <p>
-                    Caller spend: <span className="font-medium text-neutral-700">{inr(item.earnings)}</span>
+                    Wallet debited: <span className="font-medium text-neutral-700">{inr(item.earnings)}</span>
                   </p>
                   <p>
-                    Receiver payout: <span className="font-semibold text-emerald-600">{inr(item.payout)}</span>
+                    Bank paid: <span className="font-semibold text-emerald-600">{inr(item.payout)}</span>
                   </p>
                 </div>
               </div>
             ))}
             {!loading && (data?.topEarners.length ?? 0) === 0 ? (
-              <p className="text-xs text-neutral-500">No earning receivers in selected range.</p>
+              <p className="text-xs text-neutral-500">No paid withdrawals in selected range.</p>
             ) : null}
           </div>
         </div>

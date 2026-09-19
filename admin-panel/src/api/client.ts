@@ -560,8 +560,10 @@ export type RevenueDashboardResponse = {
     netPayout: number;
     platformProfit: number;
     usageCommission: number;
+    callerUsageSpend: number;
     callerRechargeCommission: number;
     receiverWithdrawalCommission: number;
+    referralRewardsPaid: number;
   };
   dailyBreakdown: Array<{
     date: string;
@@ -580,7 +582,7 @@ export type RevenueDashboardResponse = {
 
 export async function fetchRevenueDashboard(params?: { range?: '7d' | '30d' | 'all' }) {
   const { data } = await api.get<RevenueDashboardResponse>('/admin/revenue', {
-    params: { range: params?.range ?? '7d' },
+    params: { range: params?.range ?? 'all' },
   });
   return data;
 }

@@ -252,13 +252,13 @@ export function WithdrawalsPage() {
     {
       label: 'Paid Count',
       value: String(stats.processedCount),
-      note: `Matches Paid tab (${tabCounts.paid}) in selected range`,
+      note: 'Paid in selected range',
       tone: 'text-[#7b2cff]',
     },
     {
       label: 'Total Payout',
       value: formatInr(stats.totalSuccessfulPayoutAmount),
-      note: 'Net paid to receivers (paid only, not pending/failed)',
+      note: 'Net paid to receivers',
       tone: 'text-sky-600',
     },
   ];
