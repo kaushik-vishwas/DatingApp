@@ -22,6 +22,19 @@ const phoneNormalize_1 = require("../utils/phoneNormalize");
 const referralLanding_1 = require("../constants/referralLanding");
 const REFERRAL_CODE_LENGTH = 8;
 const REFERRAL_CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+/** Play/Meta install referrer strings that match code format but are not referrals. */
+const IGNORED_REFERRAL_CODES = new Set([
+    'ORGANIC',
+    'ORGANIC_INSTALL',
+    'GOOGLE_PLAY',
+    'PLAY_STORE',
+    'NONE',
+    'NULL',
+    'UNDEFINED',
+    'FACEBOOK',
+    'INSTAGRAM',
+    'GOOGLE',
+]);
 function roundInr(n) {
     return Math.round(n * 100) / 100;
 }
@@ -125,6 +138,9 @@ function referredRoleFromKind(kind) {
 async function applyReferralRewardOnSignup(params) {
     const code = normalizeReferralCode(params.referralCode);
     if (!code) {
+        return { applied: false, reason: 'no_code' };
+    }
+    if (IGNORED_REFERRAL_CODES.has(code)) {
         return { applied: false, reason: 'no_code' };
     }
     if (!isValidReferralCodeFormat(code)) {

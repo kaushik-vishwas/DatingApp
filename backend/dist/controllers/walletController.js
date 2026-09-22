@@ -66,6 +66,12 @@ function verifyPaymentSignature(orderId, paymentId, signature, secret) {
         return false;
     }
 }
+function roundPayAmountInr(n) {
+    return Math.round(n * 100) / 100;
+}
+function payAmountToPaise(payAmount) {
+    return Math.round(roundPayAmountInr(payAmount) * 100);
+}
 function verifyWebhookSignature(rawBody, signature, secret) {
     const expected = crypto_1.default.createHmac('sha256', secret).update(rawBody).digest('hex');
     if (!signature || signature.length !== expected.length)
@@ -95,34 +101,48 @@ function resolveWalletRecharge(payAmount, bonusPercent, walletAmountRaw) {
 async function resolveOrderWalletMeta(order, orderId) {
     const notes = (order?.notes ?? {});
     const userId = String(notes.userId ?? '').trim();
-    const payAmount = Number(notes.payAmount);
-    const bonusPercent = Number(notes.bonusPercent);
-    let walletAmount = Number(notes.walletAmount);
+    const notesBonusPercent = Number(notes.bonusPercent);
+    const notesWalletAmount = Number(notes.walletAmount);
     if (!userId || !mongoose_1.default.isValidObjectId(userId)) {
         return { error: 'missing_user' };
     }
-    if (!Number.isFinite(payAmount) || !Number.isFinite(bonusPercent)) {
-        return { error: 'missing_notes' };
-    }
-    if (!Number.isFinite(walletAmount) || walletAmount <= 0) {
-        const inferred = await inferWalletAmountFromPay(payAmount, bonusPercent);
-        if (!inferred) {
-            return { error: 'missing_wallet_amount' };
-        }
-        walletAmount = inferred;
-    }
-    const expectedPaise = Math.round(payAmount * 100);
-    if (Number(order.amount) !== expectedPaise) {
+    const orderAmountPaise = Number(order.amount);
+    if (!Number.isFinite(orderAmountPaise) || orderAmountPaise <= 0) {
         return { error: 'amount_mismatch' };
     }
-    if (!(0, walletRechargeFees_1.payableMatchesWalletPack)(walletAmount, payAmount)) {
+    const effectivePayAmount = roundPayAmountInr(orderAmountPaise / 100);
+    let bonusPercent = Number.isFinite(notesBonusPercent) ? Math.round(notesBonusPercent) : NaN;
+    let walletAmount = Number.isFinite(notesWalletAmount) && notesWalletAmount > 0 ? Math.round(notesWalletAmount) : NaN;
+    if (Number.isFinite(walletAmount) &&
+        Number.isFinite(bonusPercent) &&
+        (0, walletRechargeFees_1.payableMatchesWalletPack)(walletAmount, effectivePayAmount)) {
+        return {
+            userId,
+            payAmount: effectivePayAmount,
+            bonusPercent,
+            walletAmount,
+        };
+    }
+    const inferredWithBonus = Number.isFinite(bonusPercent)
+        ? await inferWalletAmountFromPay(effectivePayAmount, bonusPercent)
+        : null;
+    if (inferredWithBonus != null && Number.isFinite(bonusPercent)) {
+        return {
+            userId,
+            payAmount: effectivePayAmount,
+            bonusPercent,
+            walletAmount: inferredWithBonus,
+        };
+    }
+    const inferredAny = await inferWalletPackFromOrderAmount(effectivePayAmount, Number.isFinite(bonusPercent) ? bonusPercent : undefined);
+    if (!inferredAny) {
         return { error: 'pack_mismatch' };
     }
     return {
         userId,
-        payAmount,
-        bonusPercent,
-        walletAmount: Math.round(walletAmount),
+        payAmount: effectivePayAmount,
+        bonusPercent: inferredAny.bonusPercent,
+        walletAmount: inferredAny.walletAmount,
     };
 }
 /** Pick the latest captured/authorized payment for an order. */
@@ -145,6 +165,31 @@ async function inferWalletAmountFromPay(payAmount, bonusPercent) {
             return Math.round(amount);
     }
     return null;
+}
+/** Match payable to any active offer when notes bonus/wallet are stale. */
+async function inferWalletPackFromOrderAmount(payAmount, preferredBonusPercent) {
+    const offers = await WalletOffer_1.default.find({}).select('amount bonusPercent').lean();
+    const preferred = Number.isFinite(preferredBonusPercent)
+        ? Math.round(preferredBonusPercent)
+        : null;
+    const matches = [];
+    for (const o of offers) {
+        const amount = Number(o.amount);
+        const bonus = Math.round(Number(o.bonusPercent) || 0);
+        if (!Number.isFinite(amount) || amount <= 0)
+            continue;
+        if (!(0, walletRechargeFees_1.payableMatchesWalletPack)(amount, payAmount))
+            continue;
+        matches.push({ walletAmount: Math.round(amount), bonusPercent: bonus });
+    }
+    if (matches.length === 0)
+        return null;
+    if (preferred != null) {
+        const hit = matches.find((m) => m.bonusPercent === preferred);
+        if (hit)
+            return hit;
+    }
+    return matches[0] ?? null;
 }
 /**
  * Idempotent wallet credit for a captured/authorized Razorpay payment.
@@ -329,20 +374,21 @@ const createRazorpayWalletOrder = async (req, res) => {
             res.status(400).json({ message: 'Invalid wallet offer' });
             return;
         }
-        const amountPaise = Math.round(payAmount * 100);
+        const amountPaise = payAmountToPaise(payAmount);
         if (amountPaise < 100) {
             res.status(400).json({ message: 'Amount too small' });
             return;
         }
         const uid = String(authUser._id);
         const receipt = `w${uid.slice(-10)}${Date.now()}`.replace(/[^a-zA-Z0-9]/g, '').slice(0, 40);
+        const payAmountNote = roundPayAmountInr(payAmount);
         const order = await rz.orders.create({
             amount: amountPaise,
             currency: 'INR',
             receipt,
             notes: {
                 userId: uid,
-                payAmount: String(Math.round(payAmount)),
+                payAmount: String(payAmountNote),
                 bonusPercent: String(Math.round(bonusPercent)),
                 walletAmount: String(resolved.walletAmount),
             },
@@ -414,8 +460,8 @@ const verifyRazorpayWalletPayment = async (req, res) => {
             res.status(400).json({ message: 'Order does not match your account' });
             return;
         }
-        const expectedPaise = Math.round(payAmount * 100);
-        if (Number(order.amount) !== expectedPaise) {
+        const meta = await resolveOrderWalletMeta(order, orderId);
+        if ('error' in meta) {
             res.status(400).json({ message: 'Order amount mismatch' });
             return;
         }
@@ -432,9 +478,9 @@ const verifyRazorpayWalletPayment = async (req, res) => {
             orderId,
             paymentId,
             userId: String(authUser._id),
-            payAmount,
-            bonusPercent,
-            walletAmount: resolved.walletAmount,
+            payAmount: meta.payAmount,
+            bonusPercent: meta.bonusPercent,
+            walletAmount: meta.walletAmount,
         });
         if (!credited.ok) {
             const status = credited.reason === 'User not found' ? 404 : 400;
