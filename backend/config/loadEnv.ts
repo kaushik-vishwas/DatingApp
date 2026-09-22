@@ -4,8 +4,14 @@ import dotenv from 'dotenv';
 
 export type AppEnvName = 'production' | 'test';
 
+const BACKEND_ROOT = resolveBackendRoot();
+/** Resolved once when this module is first evaluated — before any dotenv load. */
+const LOCKED_ENV_FILE_PATH = resolveEnvFilePath(BACKEND_ROOT);
+
 let loadedEnvPath: string | null = null;
 let loadedAppEnv: AppEnvName | null = null;
+let snapshottedPort: number | null = null;
+let envLoadComplete = false;
 
 function resolveBackendRoot(): string {
   return path.basename(path.dirname(__dirname)) === 'dist'
@@ -21,26 +27,37 @@ function normalizeAppEnv(raw: string | undefined): AppEnvName | null {
   return null;
 }
 
+function readAppEnvFromProcess(): AppEnvName | null {
+  const fromAppEnv = normalizeAppEnv(process.env.APP_ENV ?? process.env.ENVIRONMENT);
+  if (fromAppEnv) return fromAppEnv;
+  // PM2 often sets NODE_ENV=test without APP_ENV — treat that as the test profile.
+  if (process.env.NODE_ENV?.trim().toLowerCase() === 'test') return 'test';
+  return null;
+}
+
 /**
  * Resolve which env file to load.
  *
  * Priority:
  * 1. `DOTENV_CONFIG_PATH` — absolute path or relative to backend root (PM2-friendly)
- * 2. `APP_ENV=test` (or `ENVIRONMENT=test`) → `.env.test`
+ * 2. `APP_ENV=test` / `ENVIRONMENT=test` / `NODE_ENV=test` → `.env.test`
  * 3. default → `.env` (production)
  */
-export function resolveEnvFilePath(backendRoot = resolveBackendRoot()): string {
+export function resolveEnvFilePath(backendRoot = BACKEND_ROOT): string {
   const explicit = process.env.DOTENV_CONFIG_PATH?.trim();
   if (explicit) {
     return path.isAbsolute(explicit) ? explicit : path.join(backendRoot, explicit);
   }
 
-  const appEnv = normalizeAppEnv(process.env.APP_ENV ?? process.env.ENVIRONMENT);
-  if (appEnv === 'test') {
+  if (readAppEnvFromProcess() === 'test') {
     return path.join(backendRoot, '.env.test');
   }
 
   return path.join(backendRoot, '.env');
+}
+
+export function getLockedEnvFilePath(): string {
+  return LOCKED_ENV_FILE_PATH;
 }
 
 export function getLoadedEnvPath(): string | null {
@@ -51,22 +68,48 @@ export function getLoadedAppEnv(): AppEnvName | null {
   return loadedAppEnv;
 }
 
+/** Port captured when the env file was loaded — immune to later dotenv reloads. */
+export function getServerPort(): number {
+  if (snapshottedPort != null) return snapshottedPort;
+  const raw = process.env.PORT?.trim();
+  const parsed = raw ? Number(raw) : NaN;
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 5000;
+}
+
+function patchDotenvAgainstReload(lockedPath: string): void {
+  const originalConfig = dotenv.config.bind(dotenv);
+  const locked = path.resolve(lockedPath);
+
+  dotenv.config = ((options?: dotenv.DotenvConfigOptions) => {
+    const requested = options?.path ? path.resolve(String(options.path)) : null;
+    if (envLoadComplete) {
+      if (!requested || requested === locked) {
+        return { parsed: {}, error: undefined };
+      }
+      console.warn(
+        `[env] Blocked dotenv reload of ${requested} — process is locked to ${locked}`
+      );
+      return { parsed: {}, error: undefined };
+    }
+    return originalConfig(options);
+  }) as typeof dotenv.config;
+}
+
 /**
  * Load backend environment once per process.
  * Production default: `backend/.env`
- * Test: set `APP_ENV=test` or `DOTENV_CONFIG_PATH=.env.test` before start (PM2 / npm script).
+ * Test: set `APP_ENV=test`, `NODE_ENV=test`, or `DOTENV_CONFIG_PATH=.env.test` before start.
  */
 export function loadEnv(): void {
-  if (loadedEnvPath) return;
+  if (envLoadComplete) return;
 
-  const backendRoot = resolveBackendRoot();
-  const envPath = resolveEnvFilePath(backendRoot);
-  const appEnv = normalizeAppEnv(process.env.APP_ENV ?? process.env.ENVIRONMENT);
+  const envPath = LOCKED_ENV_FILE_PATH;
+  const appEnv = readAppEnvFromProcess();
 
   if (!fs.existsSync(envPath)) {
-    if (appEnv === 'test') {
+    if (appEnv === 'test' || envPath.endsWith('.env.test')) {
       throw new Error(
-        `[env] APP_ENV=test but env file not found: ${envPath}. Create backend/.env.test or set DOTENV_CONFIG_PATH.`
+        `[env] Test env file not found: ${envPath}. Create backend/.env.test or set DOTENV_CONFIG_PATH.`
       );
     }
     console.warn(
@@ -74,6 +117,9 @@ export function loadEnv(): void {
     );
     loadedEnvPath = envPath;
     loadedAppEnv = 'production';
+    snapshottedPort = getServerPort();
+    envLoadComplete = true;
+    patchDotenvAgainstReload(envPath);
     return;
   }
 
@@ -83,13 +129,21 @@ export function loadEnv(): void {
   }
 
   loadedEnvPath = envPath;
-  loadedAppEnv = appEnv ?? (envPath.endsWith('.env.test') ? 'test' : 'production');
+  loadedAppEnv =
+    appEnv ?? (envPath.endsWith('.env.test') ? 'test' : 'production');
 
-  // Normalize flags that are often broken by Windows CRLF / trailing spaces in .env.
   if (typeof process.env.OTP_BYPASS === 'string') {
     process.env.OTP_BYPASS = process.env.OTP_BYPASS.trim();
   }
 
-  const port = process.env.PORT?.trim() || '5000';
-  console.log(`[env] Loaded ${envPath} (APP_ENV=${loadedAppEnv}, PORT=${port})`);
+  snapshottedPort = getServerPort();
+  envLoadComplete = true;
+  patchDotenvAgainstReload(envPath);
+
+  // Pin path for any code that re-resolves via DOTENV_CONFIG_PATH later in the same process.
+  process.env.DOTENV_CONFIG_PATH = envPath;
+
+  console.log(
+    `[env] Loaded ${envPath} (APP_ENV=${loadedAppEnv}, PORT=${snapshottedPort})`
+  );
 }

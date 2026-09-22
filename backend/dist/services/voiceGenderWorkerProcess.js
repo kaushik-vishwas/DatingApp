@@ -1,13 +1,16 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-require("../config/bootstrapEnv");
+/**
+ * Child process for local voice-gender classification.
+ * Inherits env from the parent API process (fork env: process.env) — do not load dotenv here.
+ */
 const voiceGenderLocalCore_1 = require("./voiceGenderLocalCore");
 process.on('message', (msg) => {
     void (async () => {
         try {
             if (msg.warmup) {
                 await (0, voiceGenderLocalCore_1.warmVoiceGenderModel)();
-                const out = {
+                process.send?.({
                     id: msg.id,
                     ok: true,
                     result: {
@@ -16,23 +19,19 @@ process.on('message', (msg) => {
                         confidence: 0,
                         model: 'warmup',
                     },
-                };
-                process.send?.(out);
+                });
                 return;
             }
             if (!msg.audioSource || !msg.expectedGender) {
-                const out = { id: msg.id, ok: false, error: 'Missing audioSource or expectedGender' };
-                process.send?.(out);
+                process.send?.({ id: msg.id, ok: false, error: 'Missing audioSource or expectedGender' });
                 return;
             }
             const result = await (0, voiceGenderLocalCore_1.classifyVoiceGenderLocallyCore)(msg.audioSource, msg.expectedGender);
-            const out = { id: msg.id, ok: true, result };
-            process.send?.(out);
+            process.send?.({ id: msg.id, ok: true, result });
         }
         catch (err) {
             const error = err instanceof Error ? err.message : String(err);
-            const out = { id: msg.id, ok: false, error };
-            process.send?.(out);
+            process.send?.({ id: msg.id, ok: false, error });
         }
     })();
 });

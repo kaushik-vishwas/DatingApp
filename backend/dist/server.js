@@ -24,7 +24,6 @@ const chatSocket_1 = require("./socket/chatSocket");
 const apiTraceLog_1 = require("./utils/apiTraceLog");
 const loadEnv_1 = require("./config/loadEnv");
 const app = (0, express_1.default)();
-const PORT = process.env.PORT ? Number(process.env.PORT) : 5000;
 app.use((0, cors_1.default)({
     origin: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
@@ -49,7 +48,7 @@ app.get('/health', (_req, res) => {
     res.json({
         ok: true,
         env: (0, loadEnv_1.getLoadedAppEnv)(),
-        port: PORT,
+        port: (0, loadEnv_1.getServerPort)(),
         envFile: (0, loadEnv_1.getLoadedEnvPath)(),
     });
 });
@@ -105,8 +104,9 @@ const start = async () => {
         if (process.env.RAZORPAY_KEY_ID?.trim() && !process.env.RAZORPAY_WEBHOOK_SECRET?.trim()) {
             console.warn('[razorpay] RAZORPAY_WEBHOOK_SECRET is not set — /wallet/razorpay-webhook is disabled. UPI payments that miss app verify will not auto-credit until webhook is configured.');
         }
-        httpServer.listen(PORT, '0.0.0.0', () => {
-            console.log(`[server] listening on 0.0.0.0:${PORT} (env=${(0, loadEnv_1.getLoadedAppEnv)() ?? 'unknown'}, file=${(0, loadEnv_1.getLoadedEnvPath)() ?? 'none'})`);
+        const port = (0, loadEnv_1.getServerPort)();
+        httpServer.listen(port, '0.0.0.0', () => {
+            console.log(`[server] listening on 0.0.0.0:${port} (env=${(0, loadEnv_1.getLoadedAppEnv)() ?? 'unknown'}, file=${(0, loadEnv_1.getLoadedEnvPath)() ?? 'none'})`);
         });
     }
     catch (error) {

@@ -17,10 +17,9 @@ import callRoutes from './routes/callRoutes';
 import appRoutes from './routes/appRoutes';
 import { attachChatSocket } from './socket/chatSocket';
 import { reuseOrCreateApiTrace } from './utils/apiTraceLog';
-import { getLoadedAppEnv, getLoadedEnvPath } from './config/loadEnv';
+import { getLoadedAppEnv, getLoadedEnvPath, getServerPort } from './config/loadEnv';
 
 const app = express();
-const PORT = process.env.PORT ? Number(process.env.PORT) : 5000;
 
 app.use(cors({
   origin: true,
@@ -51,7 +50,7 @@ app.get('/health', (_req, res) => {
   res.json({
     ok: true,
     env: getLoadedAppEnv(),
-    port: PORT,
+    port: getServerPort(),
     envFile: getLoadedEnvPath(),
   });
 });
@@ -122,9 +121,10 @@ const start = async (): Promise<void> => {
       );
     }
 
-    httpServer.listen(PORT, '0.0.0.0', () => {
+    const port = getServerPort();
+    httpServer.listen(port, '0.0.0.0', () => {
       console.log(
-        `[server] listening on 0.0.0.0:${PORT} (env=${getLoadedAppEnv() ?? 'unknown'}, file=${getLoadedEnvPath() ?? 'none'})`
+        `[server] listening on 0.0.0.0:${port} (env=${getLoadedAppEnv() ?? 'unknown'}, file=${getLoadedEnvPath() ?? 'none'})`
       );
     });
   } catch (error) {
