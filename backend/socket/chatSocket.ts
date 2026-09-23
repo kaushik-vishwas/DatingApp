@@ -18,6 +18,7 @@ import { registerPendingCallInvite, unregisterPendingCallInvite } from '../servi
 import { clearPendingIncomingCall, setPendingIncomingCall } from '../services/pendingIncomingCall';
 import {
   ensureCallEndedAndSettled,
+  getStaleOngoingCallMs,
   MISSED_OR_INCOMPLETE_MAX_SEC,
 } from '../controllers/callController';
 import {
@@ -58,7 +59,13 @@ type ActiveCallInvite = {
   invitedAt: Date;
   timeoutHandle: NodeJS.Timeout | null;
   ringSeen: 'unknown' | 'foreground' | 'background';
+  /** Set once the receiver accepts — the call is live and must survive socket drops (app minimized). */
+  accepted: boolean;
+  watchdogHandle: NodeJS.Timeout | null;
 };
+
+/** How often to re-check a live call whose participant socket dropped. */
+const ACCEPTED_CALL_WATCHDOG_MS = 30_000;
 
 /** Open receiver app: allow 5s auto-accept + Stream join before no-answer skip. */
 const RING_NO_ANSWER_FOREGROUND_MS = 20_000;
@@ -200,6 +207,8 @@ export function attachChatSocket(httpServer: HTTPServer): Server {
       const isTarget = invite.targetType === typ && invite.targetId === accountId;
       const isInviter = invite.inviterType === typ && invite.inviterId === accountId;
       if (!isTarget && !isInviter) continue;
+      // Live calls end only via call:end / REST end / the watchdog — not queue-off or socket drops.
+      if (invite.accepted) continue;
       if (invite.timeoutHandle) {
         clearTimeout(invite.timeoutHandle);
         invite.timeoutHandle = null;
@@ -217,6 +226,49 @@ export function attachChatSocket(httpServer: HTTPServer): Server {
         fromId: accountId,
       });
     }
+  };
+
+  /**
+   * A participant's socket dropped mid-call (usually the app was minimized). Keep the call up
+   * while either client keeps syncing the session (which bumps CallSession.updatedAt); end it
+   * only once it goes stale, i.e. both apps are really gone.
+   */
+  const watchAcceptedCall = (callId: string): void => {
+    const invite = activeCallInvites.get(callId);
+    if (!invite || !invite.accepted || invite.watchdogHandle) return;
+    invite.watchdogHandle = setTimeout(() => {
+      invite.watchdogHandle = null;
+      void (async () => {
+        if (activeCallInvites.get(callId) !== invite) return;
+        try {
+          const session = await CallSession.findOne({ callId })
+            .select('status updatedAt startedAt')
+            .lean<{ status?: string; updatedAt?: Date; startedAt?: Date } | null>();
+          if (activeCallInvites.get(callId) !== invite) return;
+          if (session?.status === 'completed') {
+            // Ended elsewhere (REST end) and already released there — just forget the invite.
+            activeCallInvites.delete(callId);
+            return;
+          }
+          const lastTouchMs =
+            session?.updatedAt?.getTime() ?? session?.startedAt?.getTime() ?? invite.invitedAt.getTime();
+          if (Date.now() - lastTouchMs <= getStaleOngoingCallMs()) {
+            watchAcceptedCall(callId);
+            return;
+          }
+          activeCallInvites.delete(callId);
+          console.info('[call:watchdog] ending abandoned call', { callId, lastTouchMs });
+          const payload = { callId, fromType: invite.targetType, fromId: invite.targetId };
+          io.to(accountRoom(invite.inviterType, invite.inviterId)).emit('call:ended', payload);
+          io.to(accountRoom(invite.targetType, invite.targetId)).emit('call:ended', payload);
+          await settleAndReleaseCall(callId, invite.receiverId, inviteCallerId(invite), invite.invitedAt);
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e);
+          console.error('[call:watchdog] error:', msg);
+          watchAcceptedCall(callId);
+        }
+      })();
+    }, ACCEPTED_CALL_WATCHDOG_MS);
   };
 
   io.use((socket, next) => {
@@ -404,6 +456,11 @@ export function attachChatSocket(httpServer: HTTPServer): Server {
               (invite.inviterId === leavingId && invite.inviterType === leavingType) ||
               (invite.targetId === leavingId && invite.targetType === leavingType)
             ) {
+              if (invite.accepted) {
+                // Minimized / backgrounded mid-call: voice runs over Stream, keep the call alive.
+                watchAcceptedCall(callId);
+                continue;
+              }
               if (invite.timeoutHandle) {
                 clearTimeout(invite.timeoutHandle);
                 invite.timeoutHandle = null;
@@ -948,6 +1005,8 @@ export function attachChatSocket(httpServer: HTTPServer): Server {
           invitedAt,
           timeoutHandle: null,
           ringSeen: 'unknown',
+          accepted: false,
+          watchdogHandle: null,
         };
         activeCallInvites.set(callId, invite);
         armInviteNoAnswerTimeout(invite, RING_NO_ANSWER_BACKGROUND_MS);
@@ -1091,7 +1150,9 @@ export function attachChatSocket(httpServer: HTTPServer): Server {
         fromType: responderType,
         fromId: responderId,
       });
-      if (!accepted) {
+      if (accepted) {
+        invite.accepted = true;
+      } else {
         activeCallInvites.delete(callId);
         void clearPendingIncomingCall(invite.receiverId, callId);
         void settleAndReleaseCall(
@@ -1311,6 +1372,10 @@ export function attachChatSocket(httpServer: HTTPServer): Server {
         if (invite.timeoutHandle) {
           clearTimeout(invite.timeoutHandle);
           invite.timeoutHandle = null;
+        }
+        if (invite.watchdogHandle) {
+          clearTimeout(invite.watchdogHandle);
+          invite.watchdogHandle = null;
         }
         io.to(accountRoom(invite.inviterType, invite.inviterId)).emit('call:ended', {
           callId,

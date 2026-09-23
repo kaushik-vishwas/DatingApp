@@ -319,6 +319,11 @@ export async function settleCallSession(
 /** Live calls hit sessionSync every ~5s, which bumps updatedAt. No updates for this long ⇒ abandoned. */
 const DEFAULT_STALE_ONGOING_MS = 90 * 1000;
 
+export function getStaleOngoingCallMs(): number {
+  const ms = Number(process.env.STALE_ONGOING_CALL_MS ?? DEFAULT_STALE_ONGOING_MS);
+  return Number.isFinite(ms) && ms > 0 ? ms : DEFAULT_STALE_ONGOING_MS;
+}
+
 /**
  * Ongoing CallSession rows persist in MongoDB; orphan "ongoing" blocks bootstrap forever.
  * - Same caller+receiver as the DB row → allow (reconnect / second bootstrap for same call).
