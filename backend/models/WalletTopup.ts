@@ -16,7 +16,7 @@ export type WalletTopupDocument = HydratedDocument<IWalletTopup>;
 const walletTopupSchema = new Schema<IWalletTopup>(
   {
     userId: { type: Schema.Types.ObjectId, ref: 'User', required: true, index: true },
-    razorpayOrderId: { type: String, required: true },
+    razorpayOrderId: { type: String, required: true, index: true },
     razorpayPaymentId: { type: String, required: true, unique: true },
     payAmount: { type: Number, required: true },
     bonusPercent: { type: Number, required: true },

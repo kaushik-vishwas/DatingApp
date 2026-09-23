@@ -9,6 +9,7 @@ import WalletOffer from '../models/WalletOffer';
 import { toApiUser } from './authController';
 import { blockCallerUntilApproved } from '../utils/accountAccess';
 import {
+  computeWalletRechargeBreakdown,
   payableMatchesWalletPack,
   walletCreditForRecharge,
 } from '../constants/walletRechargeFees';
@@ -115,6 +116,21 @@ async function resolveOrderWalletMeta(
     Number.isFinite(walletAmount) &&
     Number.isFinite(bonusPercent) &&
     payableMatchesWalletPack(walletAmount, effectivePayAmount)
+  ) {
+    return {
+      userId,
+      payAmount: effectivePayAmount,
+      bonusPercent,
+      walletAmount,
+    };
+  }
+
+  // Older orders stored notes.payAmount as a rounded rupee (e.g. "65" vs charged ₹64.90).
+  // Trust Razorpay order paise + pack notes when they are within ₹1.
+  if (
+    Number.isFinite(walletAmount) &&
+    Number.isFinite(bonusPercent) &&
+    payableMatchesWalletPack(walletAmount, effectivePayAmount, 1)
   ) {
     return {
       userId,
@@ -235,9 +251,23 @@ async function creditCapturedWalletPayment(input: {
     };
   }
 
+  const existingOrder = await WalletTopup.findOne({ razorpayOrderId: orderId });
+  if (existingOrder) {
+    if (String(existingOrder.userId) !== String(userId)) {
+      return { ok: false, reason: 'Payment does not belong to this account' };
+    }
+    return {
+      ok: true,
+      creditAdded: existingOrder.creditAdded,
+      alreadyCredited: true,
+      userId: String(existingOrder.userId),
+    };
+  }
+
   const { validateOfferForCredit } = await import('./walletOffersController');
   const isValidOffer = await validateOfferForCredit(walletAmount, bonusPercent);
-  if (!isValidOffer) {
+  const packMatchesCharge = payableMatchesWalletPack(walletAmount, payAmount, 1);
+  if (!isValidOffer && !packMatchesCharge) {
     return { ok: false, reason: 'Invalid wallet offer' };
   }
 
@@ -271,7 +301,9 @@ async function creditCapturedWalletPayment(input: {
   } catch (e: unknown) {
     const code = (e as { code?: number })?.code;
     if (code === 11000) {
-      const dup = await WalletTopup.findOne({ razorpayPaymentId: paymentId });
+      const dup =
+        (await WalletTopup.findOne({ razorpayPaymentId: paymentId })) ||
+        (await WalletTopup.findOne({ razorpayOrderId: orderId }));
       if (dup && String(dup.userId) === String(userId)) {
         return {
           ok: true,
@@ -287,6 +319,40 @@ async function creditCapturedWalletPayment(input: {
   }
 
   return { ok: true, creditAdded: credit, alreadyCredited: false, userId: String(userRow._id) };
+}
+
+/** Credit a captured Razorpay payment by id (idempotent). Used by backfill / support. */
+export async function creditRazorpayCapturedPayment(paymentIdRaw: string): Promise<
+  CreditCapturedResult & { paymentId: string; orderId?: string }
+> {
+  const paymentId = String(paymentIdRaw || '').trim();
+  const rz = getRazorpay();
+  if (!rz) {
+    return { ok: false, reason: 'Wallet payments are not configured on the server', paymentId };
+  }
+  const fetched = await rz.payments.fetch(paymentId);
+  const orderId = String(fetched.order_id ?? '').trim();
+  const status = String(fetched.status ?? '').trim();
+  if (!orderId) {
+    return { ok: false, reason: 'Missing order id', paymentId };
+  }
+  if (status !== 'captured' && status !== 'authorized') {
+    return { ok: false, reason: `Payment not complete (status: ${status || 'unknown'})`, paymentId, orderId };
+  }
+  const order = await rz.orders.fetch(orderId);
+  const meta = await resolveOrderWalletMeta(order, orderId);
+  if ('error' in meta) {
+    return { ok: false, reason: meta.error, paymentId, orderId };
+  }
+  const credited = await creditCapturedWalletPayment({
+    orderId,
+    paymentId,
+    userId: meta.userId,
+    payAmount: meta.payAmount,
+    bonusPercent: meta.bonusPercent,
+    walletAmount: meta.walletAmount,
+  });
+  return { ...credited, paymentId, orderId };
 }
 
 /**
@@ -402,27 +468,33 @@ export const createRazorpayWalletOrder = async (
       return;
     }
 
-    const payAmount = Number(req.body.payAmount);
     const bonusPercent = Number(req.body.bonusPercent);
-    if (!Number.isFinite(payAmount) || !Number.isFinite(bonusPercent)) {
-      res.status(400).json({ message: 'payAmount and bonusPercent must be numbers' });
+    const walletAmountRaw = Number(req.body.walletAmount);
+    if (!Number.isFinite(bonusPercent) || !Number.isFinite(walletAmountRaw) || walletAmountRaw <= 0) {
+      res.status(400).json({ message: 'walletAmount and bonusPercent must be numbers' });
       return;
     }
 
-    const resolved = resolveWalletRecharge(payAmount, bonusPercent, req.body.walletAmount);
-    if (!resolved) {
+    const walletAmount = Math.round(walletAmountRaw);
+    const breakdown = computeWalletRechargeBreakdown(walletAmount);
+    const chargedPayAmount = breakdown.totalPayable;
+    const clientPayAmount = Number(req.body.payAmount);
+    if (
+      Number.isFinite(clientPayAmount) &&
+      Math.abs(clientPayAmount - chargedPayAmount) > 1
+    ) {
       res.status(400).json({ message: 'Invalid wallet recharge amount' });
       return;
     }
 
     const { validateOfferForOrder } = await import('./walletOffersController');
-    const isValidOffer = await validateOfferForOrder(resolved.walletAmount, bonusPercent);
+    const isValidOffer = await validateOfferForOrder(walletAmount, bonusPercent);
     if (!isValidOffer) {
       res.status(400).json({ message: 'Invalid wallet offer' });
       return;
     }
 
-    const amountPaise = payAmountToPaise(payAmount);
+    const amountPaise = payAmountToPaise(chargedPayAmount);
     if (amountPaise < 100) {
       res.status(400).json({ message: 'Amount too small' });
       return;
@@ -430,7 +502,6 @@ export const createRazorpayWalletOrder = async (
 
     const uid = String(authUser._id);
     const receipt = `w${uid.slice(-10)}${Date.now()}`.replace(/[^a-zA-Z0-9]/g, '').slice(0, 40);
-    const payAmountNote = roundPayAmountInr(payAmount);
 
     const order = await rz.orders.create({
       amount: amountPaise,
@@ -438,9 +509,9 @@ export const createRazorpayWalletOrder = async (
       receipt,
       notes: {
         userId: uid,
-        payAmount: String(payAmountNote),
+        payAmount: (amountPaise / 100).toFixed(2),
         bonusPercent: String(Math.round(bonusPercent)),
-        walletAmount: String(resolved.walletAmount),
+        walletAmount: String(walletAmount),
       },
     });
 
@@ -497,21 +568,9 @@ export const verifyRazorpayWalletPayment = async (req: Request<{}, {}, VerifyBod
     const orderId = typeof req.body.razorpay_order_id === 'string' ? req.body.razorpay_order_id.trim() : '';
     const paymentId = typeof req.body.razorpay_payment_id === 'string' ? req.body.razorpay_payment_id.trim() : '';
     const signature = typeof req.body.razorpay_signature === 'string' ? req.body.razorpay_signature.trim() : '';
-    const payAmount = Number(req.body.payAmount);
-    const bonusPercent = Number(req.body.bonusPercent);
 
     if (!orderId || !paymentId || !signature) {
       res.status(400).json({ message: 'Missing Razorpay payment fields' });
-      return;
-    }
-    if (!Number.isFinite(payAmount) || !Number.isFinite(bonusPercent)) {
-      res.status(400).json({ message: 'payAmount and bonusPercent must be numbers' });
-      return;
-    }
-
-    const resolved = resolveWalletRecharge(payAmount, bonusPercent, req.body.walletAmount);
-    if (!resolved) {
-      res.status(400).json({ message: 'Invalid wallet recharge amount' });
       return;
     }
 
@@ -656,7 +715,9 @@ export const razorpayWalletWebhook = async (req: RazorpayWebhookRequest, res: Re
 
     if (!credited.ok) {
       console.error('razorpayWalletWebhook credit failed:', credited.reason, paymentId);
-      res.status(200).json({ ok: false, reason: credited.reason });
+      const permanent =
+        credited.reason === 'User not found' || credited.reason === 'Invalid wallet offer';
+      res.status(permanent ? 200 : 500).json({ ok: false, reason: credited.reason });
       return;
     }
 
