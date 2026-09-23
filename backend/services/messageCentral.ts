@@ -21,12 +21,14 @@ export type MessageCentralResponseCode =
   | 501
   | 505
   | 506
+  | 508
   | 511
   | 700
   | 702
   | 703
   | 705
-  | 800;
+  | 800
+  | 805;
 
 const RESPONSE_MESSAGES: Record<number, string> = {
   200: 'SUCCESS',
@@ -36,12 +38,14 @@ const RESPONSE_MESSAGES: Record<number, string> = {
   501: 'Invalid Message Central customer ID',
   505: 'Invalid or expired verification. Request a new OTP.',
   506: 'Request already exists. Wait before requesting another OTP.',
+  508: 'SMS service is temporarily unavailable. Please try again later.',
   511: 'Invalid country code',
   700: 'Verification failed',
   702: 'Wrong OTP. Please try again.',
   703: 'Already verified. Request a new OTP if needed.',
   705: 'OTP expired. Request a new code.',
   800: 'Maximum OTP attempts reached. Try again later.',
+  805: 'SMS service is temporarily unavailable. Please try again later.',
 };
 
 export class MessageCentralError extends Error {
@@ -225,6 +229,10 @@ export async function sendMessageCentralSmsOtp(mobileNumber: string): Promise<Se
     if (code === 800) {
       throw new MessageCentralError(800, RESPONSE_MESSAGES[800], 429);
     }
+    if (code === 508 || code === 805) {
+      console.error('[messageCentral] SMS credits exhausted (responseCode %s)', code);
+      throw new MessageCentralError(code, RESPONSE_MESSAGES[code], 503);
+    }
     throw new MessageCentralError(code, RESPONSE_MESSAGES[code], res.status >= 400 ? res.status : 400);
   };
 
@@ -300,6 +308,7 @@ export function httpStatusForMessageCentral(err: MessageCentralError): number {
   if (err.httpStatus >= 400 && err.httpStatus < 600) return err.httpStatus;
   if (err.responseCode === 800) return 429;
   if (err.responseCode === 409 || err.responseCode === 506) return 409;
+  if (err.responseCode === 508 || err.responseCode === 805) return 503;
   if (err.responseCode === 501) return 503;
   if (err.responseCode >= 700) return 400;
   return 400;
