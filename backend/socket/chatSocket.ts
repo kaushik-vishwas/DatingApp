@@ -18,6 +18,7 @@ import { registerPendingCallInvite, unregisterPendingCallInvite } from '../servi
 import { clearPendingIncomingCall, setPendingIncomingCall } from '../services/pendingIncomingCall';
 import {
   ensureCallEndedAndSettled,
+  getCallLastSyncAtMs,
   getStaleOngoingCallMs,
   MISSED_OR_INCOMPLETE_MAX_SEC,
 } from '../controllers/callController';
@@ -174,6 +175,7 @@ export function attachChatSocket(httpServer: HTTPServer): Server {
       clearTimeout(invite.timeoutHandle);
       invite.timeoutHandle = null;
     }
+    if (invite.accepted) return;
     activeCallInvites.delete(callId);
     void settleAndReleaseCall(callId, invite.receiverId, inviteCallerId(invite), invite.invitedAt);
     io.to(accountRoom(invite.inviterType, invite.inviterId)).emit('call:response', {
@@ -230,8 +232,8 @@ export function attachChatSocket(httpServer: HTTPServer): Server {
 
   /**
    * A participant's socket dropped mid-call (usually the app was minimized). Keep the call up
-   * while either client keeps syncing the session (which bumps CallSession.updatedAt); end it
-   * only once it goes stale, i.e. both apps are really gone.
+   * while either client is still connected or still syncing the session; end it only once
+   * neither is true for the stale window, i.e. both apps are really gone.
    */
   const watchAcceptedCall = (callId: string): void => {
     const invite = activeCallInvites.get(callId);
@@ -250,9 +252,21 @@ export function attachChatSocket(httpServer: HTTPServer): Server {
             activeCallInvites.delete(callId);
             return;
           }
-          const lastTouchMs =
-            session?.updatedAt?.getTime() ?? session?.startedAt?.getTime() ?? invite.invitedAt.getTime();
-          if (Date.now() - lastTouchMs <= getStaleOngoingCallMs()) {
+          const bothConnected =
+            hasActiveSocketForAccount(invite.inviterType, invite.inviterId) &&
+            hasActiveSocketForAccount(invite.targetType, invite.targetId);
+          if (bothConnected) return; // Recovered; a later disconnect re-arms the watchdog.
+          // Light syncs (used during talk) don't write to Mongo, so updatedAt alone goes stale.
+          const lastTouchMs = Math.max(
+            getCallLastSyncAtMs(callId) ?? 0,
+            session?.updatedAt?.getTime() ?? 0,
+            session?.startedAt?.getTime() ?? 0,
+            invite.invitedAt.getTime()
+          );
+          const eitherConnected =
+            hasActiveSocketForAccount(invite.inviterType, invite.inviterId) ||
+            hasActiveSocketForAccount(invite.targetType, invite.targetId);
+          if (eitherConnected || Date.now() - lastTouchMs <= getStaleOngoingCallMs()) {
             watchAcceptedCall(callId);
             return;
           }
@@ -1091,6 +1105,11 @@ export function attachChatSocket(httpServer: HTTPServer): Server {
           ack?.({ ok: false, error: 'Forbidden' });
           return;
         }
+        if (invite.accepted) {
+          // Never re-arm the no-answer timer on a live call — it would end it as "no_answer".
+          ack?.({ ok: true, alreadyAccepted: true });
+          return;
+        }
         const foreground =
           payload?.appState === 'active' ||
           payload?.appState === 'foreground' ||
@@ -1125,10 +1144,6 @@ export function attachChatSocket(httpServer: HTTPServer): Server {
         ack?.({ ok: false, error: 'Unknown call invite' });
         return;
       }
-      if (invite.timeoutHandle) {
-        clearTimeout(invite.timeoutHandle);
-        invite.timeoutHandle = null;
-      }
       const responderId = String(socket.data.accountId);
       const responderType = socket.data.typ as AccountType;
       const isExpectedResponder =
@@ -1136,6 +1151,16 @@ export function attachChatSocket(httpServer: HTTPServer): Server {
       if (!isExpectedResponder) {
         ack?.({ ok: false, error: 'Forbidden' });
         return;
+      }
+      if (invite.accepted) {
+        // Replayed answer (e.g. receiver reopened the app from the call notification). Re-broadcasting
+        // made the caller re-open/re-join the call; a late decline ended a live call. Live calls end via call:end.
+        ack?.({ ok: true, alreadyAccepted: true });
+        return;
+      }
+      if (invite.timeoutHandle) {
+        clearTimeout(invite.timeoutHandle);
+        invite.timeoutHandle = null;
       }
 
       io.to(accountRoom(invite.inviterType, invite.inviterId)).emit('call:response', {

@@ -313,11 +313,33 @@ export async function settleCallSession(
   if (!snapshot) {
     throw new Error('Call settlement failed');
   }
-  return snapshot;
+  const result = snapshot as SettledCallSnapshot;
+  if (result.status === 'completed') {
+    clearCallSyncActivity(callId);
+  }
+  return result;
 }
 
 /** Live calls hit sessionSync every ~5s, which bumps updatedAt. No updates for this long ⇒ abandoned. */
 const DEFAULT_STALE_ONGOING_MS = 90 * 1000;
+
+/**
+ * Last time a participant synced each live call (light syncs included — they don't write to Mongo,
+ * so CallSession.updatedAt alone goes stale mid-talk). In-memory: single-process server.
+ */
+const callLastSyncAtMs = new Map<string, number>();
+
+export function noteCallSyncActivity(callId: string): void {
+  callLastSyncAtMs.set(callId, Date.now());
+}
+
+export function getCallLastSyncAtMs(callId: string): number | null {
+  return callLastSyncAtMs.get(callId) ?? null;
+}
+
+export function clearCallSyncActivity(callId: string): void {
+  callLastSyncAtMs.delete(callId);
+}
 
 export function getStaleOngoingCallMs(): number {
   const ms = Number(process.env.STALE_ONGOING_CALL_MS ?? DEFAULT_STALE_ONGOING_MS);
@@ -352,10 +374,13 @@ async function receiverHasBlockingOngoingSession(receiverId: string, callerUserI
     return false;
   }
 
-  const touch =
-    (session.updatedAt && session.updatedAt.getTime()) ||
-    (session.startedAt && session.startedAt.getTime()) ||
-    0;
+  // Light syncs (used for the whole talk phase) don't write to Mongo — include in-memory sync time,
+  // otherwise any call >90s into talk looked "stale" and got force-ended when someone else dialed.
+  const touch = Math.max(
+    getCallLastSyncAtMs(session.callId) ?? 0,
+    (session.updatedAt && session.updatedAt.getTime()) || 0,
+    (session.startedAt && session.startedAt.getTime()) || 0
+  );
   if (Date.now() - touch <= staleMs) {
     return true;
   }
@@ -722,6 +747,12 @@ export const syncVoiceSession = async (
     if (!isParticipant) {
       res.status(403).json({ message: 'Not allowed for this call' });
       return;
+    }
+
+    if (current.status === 'ongoing') {
+      noteCallSyncActivity(callId);
+    } else {
+      clearCallSyncActivity(callId);
     }
 
     if (light) {
