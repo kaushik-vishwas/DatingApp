@@ -197,6 +197,17 @@ export function attachChatSocket(httpServer: HTTPServer): Server {
     });
   };
 
+  const isTargetInviteSentAfter = (
+    invite: ActiveCallInvite,
+    typ: AccountType,
+    accountId: string,
+    sinceMs: number | undefined
+  ): boolean =>
+    typeof sinceMs === 'number' &&
+    invite.targetType === typ &&
+    invite.targetId === accountId &&
+    invite.invitedAt.getTime() >= sinceMs;
+
   const armInviteNoAnswerTimeout = (invite: ActiveCallInvite, waitMs: number): void => {
     if (invite.timeoutHandle) {
       clearTimeout(invite.timeoutHandle);
@@ -204,13 +215,22 @@ export function attachChatSocket(httpServer: HTTPServer): Server {
     }
     invite.timeoutHandle = setTimeout(() => expireInviteNoAnswer(invite.callId), Math.max(0, waitMs));
   };
-  const cancelPendingInvitesFor = (typ: AccountType, accountId: string): void => {
+  /**
+   * `keepTargetInvitesSinceMs`: on a socket drop, keep invites that were sent to this account
+   * after it disconnected — they ring the closed app via push and end via the no-answer timer.
+   */
+  const cancelPendingInvitesFor = (
+    typ: AccountType,
+    accountId: string,
+    keepTargetInvitesSinceMs?: number
+  ): void => {
     for (const [callId, invite] of activeCallInvites) {
       const isTarget = invite.targetType === typ && invite.targetId === accountId;
       const isInviter = invite.inviterType === typ && invite.inviterId === accountId;
       if (!isTarget && !isInviter) continue;
       // Live calls end only via call:end / REST end / the watchdog — not queue-off or socket drops.
       if (invite.accepted) continue;
+      if (isTargetInviteSentAfter(invite, typ, accountId, keepTargetInvitesSinceMs)) continue;
       if (invite.timeoutHandle) {
         clearTimeout(invite.timeoutHandle);
         invite.timeoutHandle = null;
@@ -450,6 +470,8 @@ export function attachChatSocket(httpServer: HTTPServer): Server {
     socket.on('disconnect', () => {
       const leavingId = String(socket.data.accountId);
       const leavingType = socket.data.typ as AccountType;
+      // Receivers only: closed receiver apps are rung via FCM, so post-drop invites must survive.
+      const disconnectedAtMs = leavingType === 'r' ? Date.now() : undefined;
       if (leavingType === 'r') {
         armReceiverDiscoverGraceImmediate(leavingId);
         void markReceiverDiscoverGraceIfAvailable(leavingId);
@@ -464,7 +486,7 @@ export function attachChatSocket(httpServer: HTTPServer): Server {
           if (leavingType === 'r') {
             setReceiverQueuePresence(leavingId, false);
           }
-          cancelPendingInvitesFor(leavingType, leavingId);
+          cancelPendingInvitesFor(leavingType, leavingId, disconnectedAtMs);
           for (const [callId, invite] of activeCallInvites) {
             if (
               (invite.inviterId === leavingId && invite.inviterType === leavingType) ||
@@ -475,6 +497,8 @@ export function attachChatSocket(httpServer: HTTPServer): Server {
                 watchAcceptedCall(callId);
                 continue;
               }
+              // Pushed to the closed app after this disconnect — let it ring (no-answer timer ends it).
+              if (isTargetInviteSentAfter(invite, leavingType, leavingId, disconnectedAtMs)) continue;
               if (invite.timeoutHandle) {
                 clearTimeout(invite.timeoutHandle);
                 invite.timeoutHandle = null;
