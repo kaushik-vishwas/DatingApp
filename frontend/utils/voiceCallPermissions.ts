@@ -5,6 +5,8 @@ export type VoiceCallPermissionResult = {
   microphone: boolean;
   readPhoneState: boolean;
   bluetoothConnect: boolean;
+  /** Android 13+: Stream's keep-call-alive foreground service only starts when this is granted. */
+  notifications: boolean;
 };
 
 let inFlight: Promise<VoiceCallPermissionResult> | null = null;
@@ -31,7 +33,7 @@ async function requestAndroidIfNeeded(permission: string): Promise<boolean> {
 }
 
 /**
- * Ask for all voice-call runtime permissions up front (mic + Android phone-state + BT).
+ * Ask for all voice-call runtime permissions up front (mic + Android phone-state + BT + notifications).
  * Coalesces concurrent callers so the user sees one prompt sequence, not mid-call popups.
  */
 export async function ensureVoiceCallPermissions(): Promise<VoiceCallPermissionResult> {
@@ -54,6 +56,7 @@ export async function ensureVoiceCallPermissions(): Promise<VoiceCallPermissionR
 
     let readPhoneState = Platform.OS !== 'android';
     let bluetoothConnect = true;
+    let notifications = true;
 
     if (Platform.OS === 'android') {
       const phonePerm = PermissionsAndroid.PERMISSIONS.READ_PHONE_STATE;
@@ -66,9 +69,17 @@ export async function ensureVoiceCallPermissions(): Promise<VoiceCallPermissionR
       ]);
       readPhoneState = phoneOk;
       bluetoothConnect = btOk;
+
+      // Without POST_NOTIFICATIONS the Stream SDK skips its keep-call-alive foreground service,
+      // so Android freezes the app as soon as it is minimized and the call drops on both sides.
+      if (Platform.Version >= 33) {
+        notifications = await requestAndroidIfNeeded(
+          PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS
+        );
+      }
     }
 
-    return { microphone, readPhoneState, bluetoothConnect };
+    return { microphone, readPhoneState, bluetoothConnect, notifications };
   })();
 
   try {

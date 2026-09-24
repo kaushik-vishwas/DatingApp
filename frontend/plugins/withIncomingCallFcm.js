@@ -203,9 +203,11 @@ function withIncomingCallFcm(config) {
 
       const rawDir = path.join(projectRoot, 'android', 'app', 'src', 'main', 'res', 'raw');
       fs.mkdirSync(rawDir, { recursive: true });
-      const ringSrc = path.join(projectRoot, 'assets', 'sounds', 'receiver_ringtone.mp3');
-      if (fs.existsSync(ringSrc)) {
-        fs.copyFileSync(ringSrc, path.join(rawDir, 'receiver_ringtone.mp3'));
+      for (const soundFile of ['receiver_ringtone.mp3', 'caller_ringtone.mp3']) {
+        const ringSrc = path.join(projectRoot, 'assets', 'sounds', soundFile);
+        if (fs.existsSync(ringSrc)) {
+          fs.copyFileSync(ringSrc, path.join(rawDir, soundFile));
+        }
       }
 
       const appBuildGradlePath = path.join(projectRoot, 'android', 'app', 'build.gradle');

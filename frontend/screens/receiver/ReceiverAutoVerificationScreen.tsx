@@ -19,7 +19,6 @@ import OnboardingLogoutButton from '../../components/auth/OnboardingLogoutButton
 import type { ReceiverStackParamList } from '../../navigation/ReceiverStackParamList';
 import { getErrorMessage, profileApi } from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
-import type { CloudinaryUploadDebugEntry } from '../../lib/cloudinary';
 
 type Nav = NativeStackNavigationProp<ReceiverStackParamList, 'ReceiverAutoVerification'>;
 
@@ -54,16 +53,9 @@ export default function ReceiverAutoVerificationScreen(): React.JSX.Element {
   const [selectedLanguage, setSelectedLanguage] = useState<Language>('english');
   const [userAudio, setUserAudio] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  const [, setUploadDebugLog] = useState<CloudinaryUploadDebugEntry[]>([]);
-  const [, setLastUploadError] = useState<string | null>(null);
-
-  const appendUploadDebug = useCallback((entry: CloudinaryUploadDebugEntry) => {
-    setUploadDebugLog((prev) => [...prev.slice(-24), entry]);
-  }, []);
 
   const onUploadComplete = useCallback((url: string) => {
     setUserAudio(url);
-    setLastUploadError(null);
   }, []);
 
   const onProceed = async (): Promise<void> => {
@@ -76,7 +68,14 @@ export default function ReceiverAutoVerificationScreen(): React.JSX.Element {
     try {
       const { data } = await profileApi.completeReceiverAudioOnboarding({ userAudio });
       applyServerUser(data.user);
-      navigation.replace('ReceiverMainTabs', { screen: 'ReceiverHome' });
+      try {
+        navigation.reset({
+          index: 0,
+          routes: [{ name: 'ReceiverMainTabs', params: { screen: 'ReceiverHome' } }],
+        });
+      } catch {
+        navigation.replace('ReceiverMainTabs', { screen: 'ReceiverHome' });
+      }
     } catch (e: unknown) {
       Alert.alert('Could not continue', getErrorMessage(e));
     } finally {
@@ -136,8 +135,6 @@ export default function ReceiverAutoVerificationScreen(): React.JSX.Element {
             scriptText={currentScriptText}
             hideScript
             onUploadComplete={onUploadComplete}
-            onUploadDebug={appendUploadDebug}
-            onUploadError={setLastUploadError}
           />
 
           {userAudio ? (

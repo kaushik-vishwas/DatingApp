@@ -1,10 +1,12 @@
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import React, { useState } from 'react';
-import { Alert, ScrollView, StyleSheet, Text, TouchableOpacity, View, Image } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
+import React, { useCallback, useRef, useState } from 'react';
+import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, TouchableOpacity, View, Image } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { walletApi } from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
+import { reconcilePendingWalletCheckout } from '../../utils/pendingWalletCheckout';
 import { Ionicons } from '@expo/vector-icons';
 import type { CallerStackParamList } from '../../navigation/CallerStackParamList';
 import type { WalletOfferRow } from '../../types/api';
@@ -22,14 +24,45 @@ const WALLET_OFFER_BANNER_KEY = '@nesthama_wallet_offer_banner_seen';
 
 export default function WalletScreen({ navigation }: Props): React.JSX.Element {
   const insets = useSafeAreaInsets();
-  const { user } = useAuth();
+  const { user, refreshUser } = useAuth();
   const [selected, setSelected] = useState<WalletOfferRow | null>(null);
   const [offers, setOffers] = useState<WalletOfferRow[] | null>(null);
   const [loading, setLoading] = useState(false);
+  const [syncingPayment, setSyncingPayment] = useState(false);
+  const syncingRef = useRef(false);
   const [bannerImage, setBannerImage] = useState<string | null>(null);
   const [bannerOpen, setBannerOpen] = useState(false);
 
   const bal = typeof user?.walletBalance === 'number' && Number.isFinite(user.walletBalance) ? user.walletBalance : 0;
+
+  const syncPendingPayment = useCallback(async (silent = false) => {
+    if (syncingRef.current) return;
+    syncingRef.current = true;
+    setSyncingPayment(true);
+    try {
+      const result = await reconcilePendingWalletCheckout();
+      if (result.status === 'credited') {
+        await refreshUser();
+        if (!silent) {
+          Alert.alert(
+            'Wallet updated',
+            `₹${result.data.creditAdded.toLocaleString('en-IN')} has been added to your wallet.`,
+          );
+        }
+      } else if (!silent && result.status === 'error') {
+        Alert.alert('Could not sync payment', result.message);
+      }
+    } finally {
+      syncingRef.current = false;
+      setSyncingPayment(false);
+    }
+  }, [refreshUser]);
+
+  useFocusEffect(
+    useCallback(() => {
+      void syncPendingPayment(true);
+    }, [syncPendingPayment])
+  );
 
   const calculateCredit = (amount: number, bonusPercent: number): number => {
     return walletCreditForRecharge(amount, bonusPercent);
@@ -180,6 +213,18 @@ export default function WalletScreen({ navigation }: Props): React.JSX.Element {
         <View style={styles.balanceCard}>
           <Text style={styles.balanceLbl}>My Balance</Text>
           <Text style={styles.balanceAmt}>₹ {bal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</Text>
+          <TouchableOpacity
+            style={styles.syncBtn}
+            onPress={() => void syncPendingPayment(false)}
+            disabled={syncingPayment}
+            activeOpacity={0.85}
+          >
+            {syncingPayment ? (
+              <ActivityIndicator size="small" color={PURPLE} />
+            ) : (
+              <Text style={styles.syncBtnTxt}>Paid but balance not updated? Tap to sync</Text>
+            )}
+          </TouchableOpacity>
         </View>
 
         <Text style={styles.section}>Add Balance to Wallet</Text>
@@ -238,6 +283,8 @@ const styles = StyleSheet.create({
   },
   balanceLbl: { fontSize: 12, color: '#666', fontWeight: '700', marginBottom: 6 },
   balanceAmt: { fontSize: 28, fontWeight: '900', color: '#111' },
+  syncBtn: { marginTop: 12, alignSelf: 'flex-start' },
+  syncBtnTxt: { fontSize: 12, fontWeight: '700', color: PURPLE },
   section: { fontSize: 15, fontWeight: '900', color: '#111', marginBottom: 12 },
   row: { flexDirection: 'row', gap: 10, marginBottom: 10 },
   pkgCell: { flex: 1, minWidth: 0 },

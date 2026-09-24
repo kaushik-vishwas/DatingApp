@@ -59,13 +59,28 @@ export function getReceiverPresenceSortRank(receiver: DiscoverReceiverSummary): 
   return 2;
 }
 
-/** Online/available first, then higher ratings within each group. */
+function shuffleInPlace<T>(arr: T[]): void {
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    const tmp = arr[i];
+    arr[i] = arr[j];
+    arr[j] = tmp;
+  }
+}
+
+/** Available first, then busy, then offline — shuffled randomly within each group on every fetch. */
 export function sortDiscoverReceivers(rows: DiscoverReceiverSummary[]): DiscoverReceiverSummary[] {
-  return [...rows].sort((a, b) => {
-    const rankDiff = getReceiverPresenceSortRank(a) - getReceiverPresenceSortRank(b);
-    if (rankDiff !== 0) return rankDiff;
-    const ratingDiff = (b.ratingAvg ?? 0) - (a.ratingAvg ?? 0);
-    if (ratingDiff !== 0) return ratingDiff;
-    return (b.ratingCount ?? 0) - (a.ratingCount ?? 0);
-  });
+  const available: DiscoverReceiverSummary[] = [];
+  const busy: DiscoverReceiverSummary[] = [];
+  const offline: DiscoverReceiverSummary[] = [];
+  for (const row of rows) {
+    const rank = getReceiverPresenceSortRank(row);
+    if (rank === 0) available.push(row);
+    else if (rank === 1) busy.push(row);
+    else offline.push(row);
+  }
+  shuffleInPlace(available);
+  shuffleInPlace(busy);
+  shuffleInPlace(offline);
+  return [...available, ...busy, ...offline];
 }

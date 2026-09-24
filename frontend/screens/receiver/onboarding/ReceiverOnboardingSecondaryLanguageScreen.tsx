@@ -55,7 +55,12 @@ export default function ReceiverOnboardingSecondaryLanguageScreen({
         gender: resolvedGender,
       });
       applyServerUser(user);
-      goToReceiverAudioVerification();
+      const parent = navigation.getParent();
+      if (parent) {
+        parent.navigate('ReceiverAutoVerification');
+      } else {
+        goToReceiverAudioVerification();
+      }
     } catch (e) {
       Alert.alert('Could not save profile', getErrorMessage(e));
     } finally {

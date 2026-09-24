@@ -35,17 +35,32 @@ class IncomingCallAndroidModule : Module() {
     Function("startIncomingRingtone") {
       val context = appContext.reactContext ?: return@Function false
       IncomingCallNotificationChannels.ensureIncomingCallChannel(context)
-      IncomingCallRingtonePlayer.start(context)
+      IncomingCallRingtonePlayer.start(context, appContext.currentActivity)
     }
 
     Function("stopIncomingRingtone") {
       val context = appContext.reactContext
-      IncomingCallRingtonePlayer.stop(context)
+      IncomingCallRingtonePlayer.stop(context, appContext.currentActivity)
       true
     }
 
     Function("isIncomingRingtonePlaying") {
       IncomingCallRingtonePlayer.isPlaying()
+    }
+
+    Function("startOutboundRingtone") {
+      val context = appContext.reactContext ?: return@Function false
+      OutboundCallRingtonePlayer.start(context, appContext.currentActivity)
+    }
+
+    Function("stopOutboundRingtone") {
+      val context = appContext.reactContext
+      OutboundCallRingtonePlayer.stop(context, appContext.currentActivity)
+      true
+    }
+
+    Function("isOutboundRingtonePlaying") {
+      OutboundCallRingtonePlayer.isPlaying()
     }
 
     /** Persist receiver-only incoming-call UI flag for native FCM (caller must stay silent). */
@@ -55,6 +70,18 @@ class IncomingCallAndroidModule : Module() {
         .getSharedPreferences("selecto_app_prefs", Context.MODE_PRIVATE)
         .edit()
         .putBoolean("receiver_incoming_call_ui_enabled", enabled)
+        .apply()
+      true
+    }
+
+    Function("setInAppVoiceCallActive") { active: Boolean ->
+      val context = appContext.reactContext?.applicationContext ?: return@Function false
+      context
+        .getSharedPreferences("selecto_app_prefs", Context.MODE_PRIVATE)
+        .edit()
+        .putBoolean("in_app_voice_call_active", active)
+        // Flag is only valid for this process; a killed/restarted app must not stay "in call".
+        .putInt("in_app_voice_call_pid", android.os.Process.myPid())
         .apply()
       true
     }
@@ -236,6 +263,11 @@ class IncomingCallAndroidModule : Module() {
     Function("dismissIncomingCallTrayByCallId") { callId: String ->
       val context = appContext.reactContext?.applicationContext ?: return@Function false
       IncomingCallTrayDismiss.dismissByCallId(context, callId)
+    }
+
+    Function("isNativeIncomingCallTrayShowing") { callId: String ->
+      val context = appContext.reactContext?.applicationContext ?: return@Function false
+      IncomingCallTrayDismiss.isNativeShowing(context, callId)
     }
   }
 

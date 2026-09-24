@@ -17,7 +17,7 @@ function getCloudinaryConfig(): { cloudName: string; uploadPreset: string } {
   
   if (!cloudName || !uploadPreset) {
     throw new Error(
-      'Cloudinary is not configured. Add VITE_CLOUDINARY_CLOUD_NAME and VITE_CLOUDINARY_UPLOAD_PRESET to admin-panel/.env'
+      'Cloudinary is not configured. Add VITE_CLOUDINARY_CLOUD_NAME and VITE_CLOUDINARY_UPLOAD_PRESET to backend/.env'
     );
   }
   return { cloudName, uploadPreset };

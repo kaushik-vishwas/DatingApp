@@ -1,5 +1,6 @@
 package com.selecto.app.fcm
 
+import android.app.Activity
 import android.content.Context
 import android.media.AudioAttributes
 import android.media.MediaPlayer
@@ -40,7 +41,6 @@ object IncomingCallRingtonePlayer {
             AudioAttributes.Builder()
               .setUsage(AudioAttributes.USAGE_NOTIFICATION_RINGTONE)
               .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-              .setFlags(AudioAttributes.FLAG_AUDIBILITY_ENFORCED)
               .build()
           )
           setDataSource(appContext, uri)

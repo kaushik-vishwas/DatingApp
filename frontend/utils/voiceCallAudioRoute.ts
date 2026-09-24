@@ -4,6 +4,17 @@ import type { IncomingCallAndroidModule } from '../modules/incoming-call-android
 
 export type VoiceCallOutputRoute = 'speaker' | 'earpiece' | 'bluetooth';
 
+let voiceCallAudioSessionActive = false;
+
+/** True while Stream voice-call audio mode is applied (do not let ringtone FCM retune it). */
+export function isVoiceCallAudioSessionActive(): boolean {
+  return voiceCallAudioSessionActive;
+}
+
+export function setVoiceCallAudioSessionActive(active: boolean): void {
+  voiceCallAudioSessionActive = active;
+}
+
 let nativeModule: IncomingCallAndroidModule | null | undefined;
 
 function getIncomingCallAndroidModule(): IncomingCallAndroidModule | null {
@@ -29,6 +40,7 @@ async function hasBluetoothConnectPermission(): Promise<boolean> {
 }
 
 export async function applyVoiceCallOutputRoute(route: VoiceCallOutputRoute): Promise<void> {
+  setVoiceCallAudioSessionActive(true);
   await Audio.setAudioModeAsync({
     allowsRecordingIOS: true,
     playsInSilentModeIOS: true,
@@ -70,6 +82,7 @@ export async function isBluetoothVoiceOutputAvailable(): Promise<boolean> {
 }
 
 export function releaseVoiceCallOutputRoute(): void {
+  setVoiceCallAudioSessionActive(false);
   if (Platform.OS !== 'android') return;
   const mod = getIncomingCallAndroidModule();
   if (!mod) return;

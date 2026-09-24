@@ -21,11 +21,47 @@ import OtpScreen from '../screens/OtpScreen';
 import RegisterScreen from '../screens/RegisterScreen';
 import UserRegisterScreen from '../screens/UserRegisterScreen';
 import ReceiverAppNavigator from './ReceiverAppNavigator';
+import type { ReceiverStackParamList } from './ReceiverStackParamList';
 import UnderReviewScreen from '../screens/UnderReviewScreen';
 import CallerAppNavigator from './CallerAppNavigator';
 import UserOnboardingFlow from './UserOnboardingFlow';
+import type { UserProfile } from '../types/user';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
+
+function receiverSetupPhase(user: UserProfile): 'live' | 'setup' | 'edit' {
+  if (user.accountStatus === 'approved' || user.accountStatus === 'pending_review') return 'live';
+  if (user.accountStatus === 'pending_profile') return 'setup';
+  return 'edit';
+}
+
+function receiverInitialRoute(user: UserProfile): keyof ReceiverStackParamList {
+  const phase = receiverSetupPhase(user);
+  if (phase === 'live') return 'ReceiverMainTabs';
+  if (phase === 'edit') return 'ReceiverEditProfile';
+
+  const genderMissing = !user.gender || String(user.gender).trim().length === 0;
+  if (genderMissing) return 'ReceiverSelectGender';
+
+  const hasCoreProfile = Boolean(user.name?.trim()) && Boolean(user.profileImage);
+  const hasAudio = Boolean(user.userAudio && String(user.userAudio).trim());
+  if (hasCoreProfile && !hasAudio) return 'ReceiverAutoVerification';
+  return 'ReceiverOnboarding';
+}
+
+/** Stable tree so profile/audio saves do not remount and dump the user back to step 1. */
+function ReceiverSignedInRoot(): React.JSX.Element {
+  const { user } = useAuth();
+  if (!user) {
+    return (
+      <View style={styles.centered}>
+        <ActivityIndicator size="large" />
+      </View>
+    );
+  }
+  const phase = receiverSetupPhase(user);
+  return <ReceiverAppNavigator key={phase} initialRouteName={receiverInitialRoute(user)} />;
+}
 
 /** Signed-out tree: BrandSplash → welcome splash or mobile-first login. */
 function SignedOutNavigator(): React.JSX.Element {
@@ -159,25 +195,7 @@ export default function AppNavigator(): React.JSX.Element {
         ) : accountStatus === 'rejected' ? (
           <Stack.Screen name="UnderReview" component={UnderReviewScreen} />
         ) : (
-          <Stack.Screen
-            name="Home"
-            children={() => {
-              if (accountStatus === 'approved' || accountStatus === 'pending_review') {
-                return <ReceiverAppNavigator initialRouteName="ReceiverMainTabs" />;
-              }
-              if (accountStatus === 'pending_profile') {
-                const genderMissing = !user.gender || String(user.gender).trim().length === 0;
-                return (
-                  <ReceiverAppNavigator
-                    initialRouteName={
-                      genderMissing ? 'ReceiverSelectGender' : 'ReceiverOnboarding'
-                    }
-                  />
-                );
-              }
-              return <ReceiverAppNavigator initialRouteName="ReceiverEditProfile" />;
-            }}
-          />
+          <Stack.Screen name="Home" component={ReceiverSignedInRoot} />
         )}
       </Stack.Navigator>
     </NavigationContainer>

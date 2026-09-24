@@ -789,20 +789,8 @@ export function recordFailedAction(action: string, details?: Record<string, unkn
   push('error', { message: `failed:${action}`, action, ...details });
 }
 
-/** True when external phone hold may cause transient Stream participant gaps. */
-export function isCallHoldGuardActive(): boolean {
-  const now = Date.now();
-  return (
-    lastSystemHold ||
-    lastPeerHold ||
-    liveSnapshot.systemCallHold ||
-    liveSnapshot.peerCallHold ||
-    gsmInterruptPending ||
-    now < holdGraceUntilMs
-  );
-}
-
 let talkActiveReader: (() => boolean) | null = null;
+let appInBackgroundReader: (() => boolean) | null = null;
 
 /** Live talk flag for GSM suspect guards (diagnostics snapshot can lag one render). */
 export function registerTalkActiveReader(reader: (() => boolean) | null): void {
@@ -812,6 +800,35 @@ export function registerTalkActiveReader(reader: (() => boolean) | null): void {
 export function isTalkActiveForGsmGuard(): boolean {
   if (talkActiveReader?.()) return true;
   return liveSnapshot.talkActive;
+}
+
+/** VoiceCallScreen: true while this process is backgrounded/inactive during an active call. */
+export function registerAppInBackgroundReader(reader: (() => boolean) | null): void {
+  appInBackgroundReader = reader;
+}
+
+export function isAppMinimizedDuringCall(): boolean {
+  try {
+    if (appInBackgroundReader?.()) return true;
+  } catch {
+    // ignore
+  }
+  const state = AppState.currentState;
+  return (state === 'background' || state === 'inactive') && (isTalkActiveForGsmGuard() || liveSnapshot.ready);
+}
+
+/** True when external phone hold or app minimize may cause transient Stream participant gaps. */
+export function isCallHoldGuardActive(): boolean {
+  const now = Date.now();
+  return (
+    lastSystemHold ||
+    lastPeerHold ||
+    liveSnapshot.systemCallHold ||
+    liveSnapshot.peerCallHold ||
+    gsmInterruptPending ||
+    now < holdGraceUntilMs ||
+    isAppMinimizedDuringCall()
+  );
 }
 
 export function clearCallDiagnostics(): void {

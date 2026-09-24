@@ -1,5 +1,5 @@
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -13,17 +13,32 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { Ionicons } from '@expo/vector-icons';
 
 import RazorpayWebCheckoutModal from '../../components/RazorpayWebCheckoutModal';
+import { useWalletPaymentRecovery } from '../../hooks/useWalletPaymentRecovery';
 import { useAuth } from '../../context/AuthContext';
 import type { CallerStackParamList } from '../../navigation/CallerStackParamList';
 import { getErrorMessage, walletApi } from '../../services/api';
 import type { RazorpayOrderResponse } from '../../types/api';
 import { logMetaWalletPurchase } from '../../utils/metaAppEvents';
 import type { RazorpayNativeCheckoutResult } from '../../utils/openRazorpayWalletCheckout';
+import {
+  clearPendingWalletCheckout,
+  confirmWalletPaymentWithRetry,
+  PAYMENT_CONFIRMING_MESSAGE,
+  PAYMENT_CONFIRMING_TITLE,
+  reconcilePendingWalletCheckout,
+  savePendingWalletCheckout,
+  type PendingWalletCheckout,
+} from '../../utils/pendingWalletCheckout';
 import { WALLET_RECHARGE_GST_PERCENT } from '../../utils/walletRechargeFees';
 
 const PURPLE = '#7b2cff';
 
 type Props = NativeStackScreenProps<CallerStackParamList, 'PaymentMethod'>;
+
+function balanceFromUser(user: { walletBalance?: unknown } | null | undefined): number {
+  const b = user?.walletBalance;
+  return typeof b === 'number' && Number.isFinite(b) ? b : 0;
+}
 
 export default function PaymentMethodScreen({ navigation, route }: Props): React.JSX.Element {
   const insets = useSafeAreaInsets();
@@ -40,12 +55,51 @@ export default function PaymentMethodScreen({ navigation, route }: Props): React
   const { refreshUser, user } = useAuth();
   const [busy, setBusy] = useState(false);
   const [checkoutOrder, setCheckoutOrder] = useState<RazorpayOrderResponse | null>(null);
+  const [pendingCheckout, setPendingCheckout] = useState<PendingWalletCheckout | null>(null);
   const paymentAmount = totalAmount || payAmount;
+
+  /** Checkout success + foreground reconcile can both credit — only navigate once. */
+  const completedRef = useRef(false);
+  const startingOrderRef = useRef(false);
+
+  const completeWalletCredit = async (creditAdded: number, newBalance: number) => {
+    if (completedRef.current) return;
+    completedRef.current = true;
+    await clearPendingWalletCheckout();
+    setPendingCheckout(null);
+    setCheckoutOrder(null);
+    navigation.replace('WalletSuccess', { creditAdded, newBalance });
+  };
+
+  const { reconcileNow } = useWalletPaymentRecovery({
+    enabled: Boolean(checkoutOrder && pendingCheckout),
+    pending: pendingCheckout,
+    onCredited: (result) => {
+      const nb =
+        typeof result.data.user.walletBalance === 'number' && Number.isFinite(result.data.user.walletBalance)
+          ? result.data.user.walletBalance
+          : 0;
+      setBusy(true);
+      void refreshUser()
+        .then(() => completeWalletCredit(result.data.creditAdded, nb))
+        .finally(() => setBusy(false));
+    },
+  });
 
   const finishCheckout = async (checkout: RazorpayNativeCheckoutResult) => {
     setCheckoutOrder(null);
     if (checkout.type === 'cancel') {
-      setBusy(false);
+      // User may close checkout after paying in the UPI app, before Checkout.js saw the success.
+      setBusy(true);
+      try {
+        const recovered = await reconcilePendingWalletCheckout(pendingCheckout);
+        if (recovered.status === 'credited') {
+          await refreshUser();
+          await completeWalletCredit(recovered.data.creditAdded, balanceFromUser(recovered.data.user));
+        }
+      } finally {
+        setBusy(false);
+      }
       return;
     }
     if (checkout.type === 'error') {
@@ -74,15 +128,30 @@ export default function PaymentMethodScreen({ navigation, route }: Props): React
         typeof verified.user.walletBalance === 'number' && Number.isFinite(verified.user.walletBalance)
           ? verified.user.walletBalance
           : 0;
-      navigation.replace('WalletSuccess', { creditAdded: verified.creditAdded, newBalance: nb });
+      await completeWalletCredit(verified.creditAdded, nb);
     } catch (e: unknown) {
-      Alert.alert('Payment failed', getErrorMessage(e));
+      if (__DEV__) console.warn('[wallet] verify failed, reconciling:', getErrorMessage(e));
+      // Razorpay already reported success — money is likely taken, so never say "failed" here.
+      const recovered = await confirmWalletPaymentWithRetry(
+        pendingCheckout,
+        checkout.razorpay_payment_id
+      );
+      if (recovered.status === 'credited') {
+        await refreshUser();
+        await completeWalletCredit(recovered.data.creditAdded, balanceFromUser(recovered.data.user));
+        return;
+      }
+      Alert.alert(PAYMENT_CONFIRMING_TITLE, PAYMENT_CONFIRMING_MESSAGE);
     } finally {
       setBusy(false);
     }
   };
 
   const onConfirm = async () => {
+    // `busy` only disables the button after re-render — a fast double tap would create two orders.
+    if (startingOrderRef.current) return;
+    startingOrderRef.current = true;
+    completedRef.current = false;
     setBusy(true);
     try {
       const { data } = await walletApi.createRazorpayOrder({
@@ -90,10 +159,21 @@ export default function PaymentMethodScreen({ navigation, route }: Props): React
         bonusPercent,
         walletAmount,
       });
+      const pending: PendingWalletCheckout = {
+        orderId: data.orderId,
+        payAmount: paymentAmount,
+        bonusPercent,
+        walletAmount,
+        startedAt: Date.now(),
+      };
+      await savePendingWalletCheckout(pending);
+      setPendingCheckout(pending);
       setCheckoutOrder(data);
     } catch (e: unknown) {
       setBusy(false);
-      Alert.alert('Payment failed', getErrorMessage(e));
+      Alert.alert('Could not start payment', getErrorMessage(e));
+    } finally {
+      startingOrderRef.current = false;
     }
   };
 
@@ -192,6 +272,9 @@ export default function PaymentMethodScreen({ navigation, route }: Props): React
         visible={Boolean(checkoutOrder)}
         order={checkoutOrder}
         prefill={{ name: user?.name, contact: user?.phone }}
+        onAppForeground={() => {
+          void reconcileNow();
+        }}
         onResult={(result) => {
           void finishCheckout(result);
         }}

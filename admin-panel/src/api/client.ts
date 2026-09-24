@@ -1,29 +1,11 @@
 import axios, { AxiosHeaders } from 'axios';
+import { getAdminApiOrigin, logAdminApiOriginOnce } from './apiOrigin';
 
-/** Production API (Vite production build). */
-const PROD_API = 'https://backend.nesthamapp.com';
-
-function normalizeApiOrigin(raw: string): string {
-  let u = raw.trim().replace(/\/+$/, '');
-  if (u.endsWith('/auth')) {
-    u = u.slice(0, -5).replace(/\/+$/, '');
-  }
-  return u;
-}
-
-/** Local in dev (`npm run dev`); live URL when built for production or VITE_API_URL is set. */
-function getBaseURL(): string {
-  if (import.meta.env.PROD) {
-    return normalizeApiOrigin(PROD_API);
-  }
-  const fromEnv = import.meta.env.VITE_API_URL?.trim();
-  if (fromEnv) return normalizeApiOrigin(fromEnv);
-  return normalizeApiOrigin('http://127.0.0.1:5000');
-}
+logAdminApiOriginOnce();
 
 /** Axios instance */
 export const api = axios.create({
-  baseURL: getBaseURL(),
+  baseURL: getAdminApiOrigin(),
   headers: { 'Content-Type': 'application/json' },
 });
 

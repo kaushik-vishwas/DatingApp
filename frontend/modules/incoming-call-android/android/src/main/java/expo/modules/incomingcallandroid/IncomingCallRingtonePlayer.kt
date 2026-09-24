@@ -1,5 +1,6 @@
 package expo.modules.incomingcallandroid
 
+import android.app.Activity
 import android.content.Context
 import android.media.AudioAttributes
 import android.media.MediaPlayer
@@ -21,16 +22,23 @@ object IncomingCallRingtonePlayer {
   private var player: MediaPlayer? = null
   private var wakeLock: PowerManager.WakeLock? = null
   private val mainHandler = Handler(Looper.getMainLooper())
-  private val stopRunnable = Runnable { stopLocal() }
+  private var boundActivity: Activity? = null
+  private val stopRunnable = Runnable { stopLocal(boundActivity) }
 
   @JvmStatic
   @Synchronized
-  fun start(context: Context): Boolean {
+  fun start(context: Context, activity: Activity? = null): Boolean {
     val delegated = invokeFcm("start", context)
-    if (delegated is Boolean) return delegated
+    if (delegated is Boolean) {
+      if (delegated) {
+        boundActivity = activity
+        CallRingtoneVolumeControl.bind(CallRingtoneVolumeControl.OWNER_INCOMING, activity)
+      }
+      return delegated
+    }
 
     val appContext = context.applicationContext
-    stopLocal()
+    stopLocal(activity)
 
     val uri = IncomingCallNotificationChannels.resolveRingtoneUri(appContext)
     if (uri == null) {
@@ -45,7 +53,6 @@ object IncomingCallRingtonePlayer {
             AudioAttributes.Builder()
               .setUsage(AudioAttributes.USAGE_NOTIFICATION_RINGTONE)
               .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-              .setFlags(AudioAttributes.FLAG_AUDIBILITY_ENFORCED)
               .build()
           )
           setDataSource(appContext, uri)
@@ -55,23 +62,25 @@ object IncomingCallRingtonePlayer {
           start()
         }
       player = mp
+      boundActivity = activity
       acquireWakeLock(appContext)
+      CallRingtoneVolumeControl.bind(CallRingtoneVolumeControl.OWNER_INCOMING, activity)
       mainHandler.removeCallbacks(stopRunnable)
       mainHandler.postDelayed(stopRunnable, MAX_RING_MS)
       Log.i(TAG, "Native incoming ringtone started (module)")
       true
     } catch (e: Exception) {
       Log.e(TAG, "Failed to start native incoming ringtone", e)
-      stopLocal()
+      stopLocal(activity)
       false
     }
   }
 
   @JvmStatic
   @Synchronized
-  fun stop(context: Context?) {
+  fun stop(context: Context?, activity: Activity? = null) {
     invokeFcm("stop", context)
-    stopLocal()
+    stopLocal(activity)
   }
 
   @JvmStatic
@@ -106,10 +115,11 @@ object IncomingCallRingtonePlayer {
     }
   }
 
-  private fun stopLocal() {
+  private fun stopLocal(activity: Activity?) {
     mainHandler.removeCallbacks(stopRunnable)
     val mp = player
     player = null
+    boundActivity = null
     if (mp != null) {
       try {
         if (mp.isPlaying) mp.stop()
@@ -122,6 +132,7 @@ object IncomingCallRingtonePlayer {
         // ignore
       }
     }
+    CallRingtoneVolumeControl.release(CallRingtoneVolumeControl.OWNER_INCOMING)
     releaseWakeLock()
   }
 

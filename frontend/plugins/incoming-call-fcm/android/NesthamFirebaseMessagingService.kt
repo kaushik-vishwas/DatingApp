@@ -11,6 +11,10 @@ import expo.modules.notifications.service.delegates.FirebaseMessagingDelegate
  */
 class NesthamFirebaseMessagingService : ExpoFirebaseMessagingService() {
   override fun onMessageReceived(remoteMessage: RemoteMessage) {
+    // Unanswered invite ended on the server — stop this call's ring (app may be closed).
+    if (IncomingCallFcmPresenter.dismissIfCallCancelled(applicationContext, remoteMessage)) {
+      return
+    }
     if (IncomingCallFcmPresenter.presentIfIncomingCall(applicationContext, remoteMessage)) {
       FirebaseMessagingDelegate.runTaskManagerTasks(
         applicationContext,

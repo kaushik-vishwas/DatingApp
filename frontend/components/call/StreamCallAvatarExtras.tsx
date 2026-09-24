@@ -2,7 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import React, { useEffect, useRef, useState } from 'react';
 import { Platform, StyleSheet, Text, View } from 'react-native';
 import { useCallStateHooks, useCall } from '@stream-io/video-react-native-sdk';
-import { CallingState, type StreamVideoParticipant } from '@stream-io/video-client';
+import { CallingState, SfuModels, type StreamVideoParticipant } from '@stream-io/video-client';
 import { AvatarSoundWaveRings } from './AvatarVoiceWaves';
 import {
   ANDROID_TALK_GSM_SUSPECT_DEBOUNCE_MS,
@@ -148,6 +148,50 @@ export function StreamMicControlBridge({
   return null;
 }
 
+/** Show "Poor network" only after it persists; hide only after it recovers (no flicker). */
+const POOR_NETWORK_SHOW_AFTER_MS = 1_500;
+const POOR_NETWORK_HIDE_AFTER_MS = 3_000;
+
+/**
+ * Reports poor connection when either side (local or remote, as graded by Stream's SFU)
+ * has POOR quality — so both caller and receiver see it.
+ */
+export function StreamPoorNetworkBridge({
+  onPoorNetworkChange,
+}: {
+  onPoorNetworkChange: (poor: boolean) => void;
+}): null {
+  const { useParticipants } = useCallStateHooks();
+  const participants = useParticipants();
+  const anyPoor = participants.some(
+    (p) => p.connectionQuality === SfuModels.ConnectionQuality.POOR
+  );
+  const reportedRef = useRef(false);
+  const onChangeRef = useRef(onPoorNetworkChange);
+  onChangeRef.current = onPoorNetworkChange;
+
+  useEffect(() => {
+    if (anyPoor === reportedRef.current) return;
+    const timer = setTimeout(
+      () => {
+        reportedRef.current = anyPoor;
+        onChangeRef.current(anyPoor);
+      },
+      anyPoor ? POOR_NETWORK_SHOW_AFTER_MS : POOR_NETWORK_HIDE_AFTER_MS
+    );
+    return () => clearTimeout(timer);
+  }, [anyPoor]);
+
+  useEffect(
+    () => () => {
+      if (reportedRef.current) onChangeRef.current(false);
+    },
+    []
+  );
+
+  return null;
+}
+
 /**
  * @deprecated Cellular hold is handled by AndroidCellularHoldMonitor on VoiceCallScreen.
  */
@@ -214,10 +258,13 @@ const LOCAL_LEFT_CONFIRM_MS = isAndroidApi36OrNewer() ? 8_000 : 2_500;
  */
 export function StreamRemotePeerLeftBridge({
   onRemotePeerLeft,
+  onRemotePeerBack,
   onLocalGsmSuspect,
   onPeerGsmSuspect,
 }: {
   onRemotePeerLeft: (reason: 'local_left' | 'remote_empty') => void;
+  /** Remote participant reappeared after going missing (peer reopened the app / Stream reconnected). */
+  onRemotePeerBack?: () => void;
   /** Fired when this device leaves Stream during talk — likely answered a cellular call. */
   onLocalGsmSuspect?: () => void;
   /** Fired when the remote leaves Stream during talk — likely answered a cellular call. */
@@ -231,12 +278,15 @@ export function StreamRemotePeerLeftBridge({
   const localLeftSinceRef = useRef<number | null>(null);
   const liveSnapshotCountRef = useRef<number | null>(null);
   const onRemotePeerLeftRef = useRef(onRemotePeerLeft);
+  const onRemotePeerBackRef = useRef(onRemotePeerBack);
+  const remoteEmptyReportedRef = useRef(false);
   const onLocalGsmSuspectRef = useRef(onLocalGsmSuspect);
   const onPeerGsmSuspectRef = useRef(onPeerGsmSuspect);
   const gsmSuspectArmedRef = useRef(false);
   const callingStateRef = useRef(callingState);
   const remoteParticipantsRef = useRef(remoteParticipants);
   onRemotePeerLeftRef.current = onRemotePeerLeft;
+  onRemotePeerBackRef.current = onRemotePeerBack;
   onLocalGsmSuspectRef.current = onLocalGsmSuspect;
   onPeerGsmSuspectRef.current = onPeerGsmSuspect;
   callingStateRef.current = callingState;
@@ -381,6 +431,10 @@ export function StreamRemotePeerLeftBridge({
             remoteCount: remoteParticipantsRef.current.length,
           });
         }
+        if (emptySinceRef.current !== null || remoteEmptyReportedRef.current) {
+          remoteEmptyReportedRef.current = false;
+          onRemotePeerBackRef.current?.();
+        }
         hadRemoteRef.current = true;
         emptySinceRef.current = null;
         gsmSuspectArmedRef.current = false;
@@ -401,6 +455,7 @@ export function StreamRemotePeerLeftBridge({
       if (now - emptySinceRef.current >= debounceMs) {
         hadRemoteRef.current = false;
         emptySinceRef.current = null;
+        remoteEmptyReportedRef.current = true;
         tryEndCall('remote_empty', {
           debounceMs,
           holdGuard: isCallHoldGuardActive(),

@@ -10,15 +10,11 @@ import {
 } from 'react';
 import { io, type Socket } from 'socket.io-client';
 import { fetchWithdrawals } from '../api/client';
+import { getAdminApiOrigin } from '../api/apiOrigin';
 import { useAdminAuth } from './AdminAuthContext';
 
 const SEEN_KEY = 'adminWithdrawalNotifSeenIds';
-const API_ORIGIN = (() => {
-  if (import.meta.env.PROD) return 'https://backend.nesthamapp.com';
-  const fromEnv = import.meta.env.VITE_API_URL?.trim();
-  if (fromEnv) return fromEnv.replace(/\/+$/, '').replace(/\/auth$/, '');
-  return 'http://127.0.0.1:5000';
-})();
+const API_ORIGIN = getAdminApiOrigin();
 
 export type AdminWithdrawalNotification = {
   id: string;

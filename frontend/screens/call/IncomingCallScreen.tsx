@@ -13,7 +13,7 @@ import { canNavigateToIncomingCall } from '../../utils/incomingCallNotifications
 type Props = NativeStackScreenProps<ReceiverStackParamList, 'IncomingCall'>;
 
 /** Auto-answer once when the receiver is looking at the incoming UI. */
-const AUTO_ACCEPT_MS = 5_000;
+const AUTO_ACCEPT_MS = 10_000;
 
 export default function IncomingCallScreen({ navigation, route }: Props): React.JSX.Element {
   const insets = useSafeAreaInsets();

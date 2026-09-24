@@ -34,7 +34,11 @@ export type IncomingCallAndroidModule = {
   startIncomingRingtone(): boolean;
   stopIncomingRingtone(): boolean;
   isIncomingRingtonePlaying(): boolean;
+  startOutboundRingtone(): boolean;
+  stopOutboundRingtone(): boolean;
+  isOutboundRingtonePlaying(): boolean;
   setReceiverIncomingCallUiEnabled(enabled: boolean): boolean;
+  setInAppVoiceCallActive(active: boolean): boolean;
   requestIgnoreBatteryOptimizationsAsync(): Promise<{
     ok?: boolean;
     alreadyIgnoring?: boolean;
@@ -67,6 +71,7 @@ export type IncomingCallAndroidModule = {
   };
   releaseVoiceCallAudioRoute(): void;
   dismissIncomingCallTrayByCallId(callId: string): boolean;
+  isNativeIncomingCallTrayShowing(callId: string): boolean;
 };
 
 let cachedModule: IncomingCallAndroidModule | null | undefined;

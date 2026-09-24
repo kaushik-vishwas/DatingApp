@@ -15,6 +15,7 @@ export type IncomingCallNotifLogStep =
   | 'handler.decision'
   | 'show.start'
   | 'show.scheduled'
+  | 'show.native_present'
   | 'show.error'
   | 'show.fullscreen'
   | 'show.fullscreen_skip'

@@ -1,5 +1,5 @@
 import type { NavigationState, PartialState } from '@react-navigation/native';
-import { navigationRef } from './navigationRef';
+import { getRootNavigation } from './navigationRef';
 import type { VoiceCallScreenParams } from './voiceCallParams';
 
 export type ReceiverCallRoute =
@@ -42,9 +42,13 @@ function findReceiverCallRoute(
 }
 
 export function getReceiverActiveCallRoute(): ReceiverCallRoute | null {
-  const nav = navigationRef.current;
-  if (!nav?.isReady()) return null;
-  return findReceiverCallRoute(nav.getState());
+  const nav = getRootNavigation();
+  if (!nav) return null;
+  try {
+    return findReceiverCallRoute(nav.getState());
+  } catch {
+    return null;
+  }
 }
 
 /** True when IncomingCall must not be opened (already ringing this invite, or already on VoiceCall). */

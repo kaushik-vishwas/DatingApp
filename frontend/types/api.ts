@@ -117,6 +117,13 @@ export interface WalletCreditResponse {
   user: UserProfile;
 }
 
+/** POST /wallet/razorpay-reconcile */
+export interface WalletReconcileResponse extends WalletCreditResponse {
+  credited: boolean;
+  pending: boolean;
+  alreadyCredited?: boolean;
+}
+
 /** POST /wallet/razorpay-order */
 export interface RazorpayOrderResponse {
   orderId: string;
@@ -682,3 +689,13 @@ export interface CompleteCallerResponse {
   };
 }
 
+/** GET /app/update-policy — Play Store force-update gate (Android). */
+export interface AppUpdatePolicyResponse {
+  enabled: boolean;
+  force: boolean;
+  minAndroidVersionCode: number;
+  latestAndroidVersionCode: number;
+  title: string;
+  message: string;
+  playStoreUrl: string;
+}

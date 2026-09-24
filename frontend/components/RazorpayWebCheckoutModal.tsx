@@ -1,6 +1,7 @@
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo } from 'react';
 import {
   ActivityIndicator,
+  AppState,
   Modal,
   StyleSheet,
   Text,
@@ -8,7 +9,8 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { WebView, type ShouldStartLoadRequest, type WebViewMessageEvent } from 'react-native-webview';
+import { WebView, type WebViewMessageEvent } from 'react-native-webview';
+import type { ShouldStartLoadRequest } from 'react-native-webview/lib/WebViewTypes';
 
 import type { RazorpayOrderResponse } from '../types/api';
 import {
@@ -25,10 +27,19 @@ type Props = {
   visible: boolean;
   order: Order | null;
   prefill?: RazorpayCheckoutPrefill;
+  /** Fired when user returns from UPI / payment app while checkout is open. */
+  onAppForeground?: () => void;
   onResult: (result: RazorpayNativeCheckoutResult) => void;
 };
 
 const PURPLE = '#7b2cff';
+
+function friendlyPaymentFailure(raw: unknown): string {
+  const detail = String(raw ?? '').trim();
+  const base =
+    'Your payment did not go through and no money was added or deducted. Please try again — if UPI keeps failing, pay with Enter UPI ID, card or netbanking.';
+  return detail ? `${base}\n\nReason: ${detail}` : base;
+}
 
 /**
  * Standard Checkout via Checkout.js inside a WebView (not react-native-razorpay SDK).
@@ -38,12 +49,21 @@ export default function RazorpayWebCheckoutModal({
   visible,
   order,
   prefill,
+  onAppForeground,
   onResult,
 }: Props): React.JSX.Element | null {
   const html = useMemo(() => {
     if (!order) return '';
     return buildRazorpayCheckoutHtml(order, prefill);
   }, [order, prefill]);
+
+  useEffect(() => {
+    if (!visible || !onAppForeground) return;
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state === 'active') onAppForeground();
+    });
+    return () => sub.remove();
+  }, [visible, onAppForeground]);
 
   if (!visible || !order) return null;
 
@@ -71,8 +91,15 @@ export default function RazorpayWebCheckoutModal({
         onResult({ type: 'cancel' });
         return;
       }
+      if (type === 'attempt_failed') {
+        // Checkout stays open showing Razorpay's retry / other-methods screen — don't close it.
+        if (__DEV__) {
+          console.warn('[Razorpay] payment attempt failed:', raw.reason, raw.message);
+        }
+        return;
+      }
       if (type === 'error') {
-        onResult({ type: 'error', message: String(raw.message ?? 'Payment failed') });
+        onResult({ type: 'error', message: friendlyPaymentFailure(raw.message) });
       }
     } catch {
       onResult({ type: 'error', message: 'Invalid checkout response' });

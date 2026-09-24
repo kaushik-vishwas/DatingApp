@@ -16,4 +16,7 @@ Thumbs.db
 # Build artifacts
 *.apk
 *.aab
-*.log
+*.log.build-cache/
+
+.build-cache/
+frontend/*.log

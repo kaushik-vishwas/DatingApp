@@ -31,6 +31,7 @@ import type {
   UpdateCallerPayload,
   VerifyOtpResponse,
   WalletCreditResponse,
+  WalletReconcileResponse,
   WalletOffersResponse,
   RazorpayOrderResponse,
   CallerWalletTopupsResponse,
@@ -54,9 +55,34 @@ import type {
   ReceiverNotifyCandidatesResponse,
   ReceiverNotifyUserResponse,
   ReferralProfileResponse,
+  AppUpdatePolicyResponse,
 } from '../types/api';
 
 const JWT_KEY = 'jwt';
+
+let sessionSupersededHandler: (() => void) | null = null;
+let sessionSupersededHandling = false;
+
+/** Auth layer registers this so stale JWTs stop polling after login elsewhere. */
+export function registerSessionSupersededHandler(handler: (() => void) | null): void {
+  sessionSupersededHandler = handler;
+}
+
+async function handleSessionSuperseded401(error: AxiosError): Promise<void> {
+  if (error.response?.status !== 401) return;
+  const data = error.response.data as { error?: string } | undefined;
+  if (data?.error !== 'PROTECT_SESSION_SUPERSEDED') return;
+  if (sessionSupersededHandling) return;
+  sessionSupersededHandling = true;
+  try {
+    await clearJwt();
+    sessionSupersededHandler?.();
+  } finally {
+    setTimeout(() => {
+      sessionSupersededHandling = false;
+    }, 5000);
+  }
+}
 
 /** Production API (release builds and dev fallback when Metro tunnel cannot reach your PC). */
 const PROD_API = 'https://backend.nesthamapp.com';
@@ -396,6 +422,9 @@ api.interceptors.request.use(async (config) => {
 api.interceptors.response.use(
   (response) => response,
   async (error: AxiosError) => {
+    if (error.response) {
+      await handleSessionSuperseded401(error);
+    }
     const cfg = error.config as AxiosConfigWithFetchFlag | undefined;
     if (!cfg || cfg.__fetchRetried || error.response) {
       return Promise.reject(error);
@@ -431,6 +460,8 @@ export const getErrorMessage = (error: unknown): string => {
         '409': 'A verification request already exists. Wait and try again.',
         '506': 'Request already exists. Wait before requesting another OTP.',
         '505': 'Invalid or expired verification. Request a new OTP.',
+        '508': 'SMS service is temporarily unavailable. Please try again later.',
+        '805': 'SMS service is temporarily unavailable. Please try again later.',
       };
       const mapped = map[String(code)];
       if (mapped) return mapped;
@@ -452,10 +483,37 @@ export const getErrorMessage = (error: unknown): string => {
     if (isTransportFailureMessage(error.message)) {
       return 'Could not reach the server. Please check your internet connection and try again.';
     }
+    if (isTechnicalCodeError(error)) {
+      if (__DEV__) console.warn('[getErrorMessage] technical error hidden from user:', error);
+      return 'Something went wrong. Please try again.';
+    }
     return error.message;
   }
   return 'Something went wrong';
 };
+
+/** Diagnostics only: like getErrorMessage but keeps the raw text of technical/coding errors. */
+export const getErrorDetailForLog = (error: unknown): string => {
+  if (error instanceof Error && isTechnicalCodeError(error) && !isTransportFailureMessage(error.message)) {
+    return error.message || error.name;
+  }
+  return getErrorMessage(error);
+};
+
+/** JS runtime/coding errors (e.g. "Cannot read property 'x' of undefined") — never show raw to users. */
+function isTechnicalCodeError(error: Error): boolean {
+  if (
+    error instanceof TypeError ||
+    error instanceof ReferenceError ||
+    error instanceof SyntaxError ||
+    error instanceof RangeError
+  ) {
+    return true;
+  }
+  return /cannot read propert|undefined is not|null is not an object|is not a function|is not defined|of undefined|of null/i.test(
+    error.message || ''
+  );
+}
 
 /** JWT helpers */
 export const saveJwt = async (token: string) => {
@@ -626,6 +684,11 @@ export const discoverApi = {
   }) => api.get<DiscoverReceiversResponse>('/discover/receivers', { params }),
 };
 
+export const appApi = {
+  getUpdatePolicy: () =>
+    axios.get<AppUpdatePolicyResponse>(`${getResolvedApiBaseUrl()}/app/update-policy`, { timeout: 15000 }),
+};
+
 export const walletApi = {
   listTopups: () => api.get<CallerWalletTopupsResponse>('/wallet/topups'),
 
@@ -645,6 +708,10 @@ export const walletApi = {
     bonusPercent: number;
     walletAmount: number;
   }) => api.post<WalletCreditResponse>('/wallet/razorpay-verify', body),
+
+  /** Credit wallet from Razorpay when UPI Intent missed app verify (server checks Razorpay API). */
+  reconcileRazorpayPayment: (body: { razorpay_order_id: string; razorpay_payment_id?: string }) =>
+    api.post<WalletReconcileResponse>('/wallet/razorpay-reconcile', body),
 };
 
 export const CHAT_REPORT_REASONS = [

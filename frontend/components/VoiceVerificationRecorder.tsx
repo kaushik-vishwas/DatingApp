@@ -29,6 +29,43 @@ type Props = {
   onUploadError?: (message: string) => void;
 };
 
+async function releaseRecording(rec: Audio.Recording | null): Promise<void> {
+  if (!rec) return;
+  try {
+    await rec.stopAndUnloadAsync();
+  } catch {
+    // Already stopped / never started — nothing left to release.
+  }
+}
+
+/**
+ * expo-av allows one prepared Recording app-wide and only the Recording that set its internal
+ * "recorder exists" flag can clear it. Kept at module level so a Recording orphaned by a remount
+ * (screen left mid-prepare, Fast Refresh) is still released before the next attempt.
+ */
+let lastPreparedRecording: Audio.Recording | null = null;
+
+async function releaseLastPreparedRecording(): Promise<void> {
+  const rec = lastPreparedRecording;
+  lastPreparedRecording = null;
+  await releaseRecording(rec);
+}
+
+function isRecorderAlreadyPreparedError(e: unknown): boolean {
+  return e instanceof Error && e.message.includes('Only one Recording object can be prepared');
+}
+
+/**
+ * Last resort when the owning Recording is gone: clear expo-av's module-private flag through a
+ * throwaway instance. Safe because native prepare already discards any previous recorder.
+ */
+function forceResetExpoAvRecorderFlag(): void {
+  const dummy = new Audio.Recording() as unknown as {
+    _cleanupForUnloadedRecorder?: (finalStatus?: unknown) => Promise<unknown>;
+  };
+  void dummy._cleanupForUnloadedRecorder?.().catch(() => {});
+}
+
 function useRecordingPulse(active: boolean): {
   ring1: Animated.Value;
   ring2: Animated.Value;
@@ -131,23 +168,26 @@ export default function VoiceVerificationRecorder({
   const [isRecording, setIsRecording] = useState(false);
   const [busy, setBusy] = useState(false);
   const [statusLine, setStatusLine] = useState<string | null>(null);
+  /** Local file of the last recording whose upload failed — lets the user retry without re-recording. */
+  const [failedUploadUri, setFailedUploadUri] = useState<string | null>(null);
   const { ring1, ring2, hintOpacity, breathe } = useRecordingPulse(isRecording && !busy);
+  const mountedRef = useRef(true);
 
   useEffect(() => {
+    mountedRef.current = true;
     return () => {
-      void (async () => {
-        const r = recordingRef.current;
-        if (r) {
-          try {
-            await r.stopAndUnloadAsync();
-          } catch {
-            /* ignore */
-          }
-          recordingRef.current = null;
-        }
-      })();
+      mountedRef.current = false;
+      recordingRef.current = null;
+      void releaseLastPreparedRecording();
     };
   }, []);
+
+  const debug = useCallback(
+    (step: string, detail?: string) => {
+      onUploadDebug?.({ at: new Date().toISOString(), step, detail });
+    },
+    [onUploadDebug]
+  );
 
   const startRecording = useCallback(async () => {
     if (Platform.OS === 'web') {
@@ -155,14 +195,26 @@ export default function VoiceVerificationRecorder({
       return;
     }
     setStatusLine(null);
+    setFailedUploadUri(null);
     setBusy(true);
+    let rec: Audio.Recording | null = null;
+    let stage = 'release_previous';
+    debug('record_start', `${Platform.OS} ${String(Platform.Version)}`);
     try {
+      // A recording left prepared by an earlier failure blocks every new one — release it first.
+      await releaseRecording(recordingRef.current);
+      recordingRef.current = null;
+      await releaseLastPreparedRecording();
+
+      stage = 'mic_permission';
       const perm = await Audio.requestPermissionsAsync();
+      debug('mic_permission', `status=${perm.status} canAskAgain=${String(perm.canAskAgain)}`);
       if (perm.status !== 'granted') {
         Alert.alert('Permission', 'Microphone access is required to record your verification.');
         return;
       }
 
+      stage = 'audio_mode';
       await Audio.setAudioModeAsync({
         allowsRecordingIOS: true,
         playsInSilentModeIOS: true,
@@ -172,19 +224,71 @@ export default function VoiceVerificationRecorder({
         shouldDuckAndroid: true,
         playThroughEarpieceAndroid: false,
       });
+      debug('audio_mode_ok');
 
-      const rec = new Audio.Recording();
-      await rec.prepareToRecordAsync(Audio.RecordingOptionsPresets.HIGH_QUALITY);
+      stage = 'prepare';
+      rec = new Audio.Recording();
+      lastPreparedRecording = rec;
+      try {
+        await rec.prepareToRecordAsync(Audio.RecordingOptionsPresets.HIGH_QUALITY);
+      } catch (e) {
+        if (!isRecorderAlreadyPreparedError(e)) throw e;
+        // The Recording that owns expo-av's flag was lost — reset it and retry once.
+        debug('prepare_recorder_flag_reset');
+        forceResetExpoAvRecorderFlag();
+        await rec.prepareToRecordAsync(Audio.RecordingOptionsPresets.HIGH_QUALITY);
+      }
+      debug('prepare_ok');
+
+      stage = 'start';
       await rec.startAsync();
+      if (!mountedRef.current) {
+        // Screen closed while preparing — don't leave the mic recording in the background.
+        await releaseLastPreparedRecording();
+        return;
+      }
       recordingRef.current = rec;
       setIsRecording(true);
+      debug('recording_started');
     } catch (e) {
+      await releaseRecording(rec);
+      if (lastPreparedRecording === rec) lastPreparedRecording = null;
+      recordingRef.current = null;
+      setIsRecording(false);
       const msg = e instanceof Error ? e.message : 'Could not start recording';
-      Alert.alert('Recording', msg);
+      debug('record_start_failed', `at ${stage}: ${msg}`);
+      Alert.alert('Recording', `${msg}\n\nPlease tap the mic to try again.`);
     } finally {
       setBusy(false);
     }
-  }, []);
+  }, [debug]);
+
+  const upload = useCallback(
+    async (uri: string) => {
+      setBusy(true);
+      setStatusLine('Uploading…');
+      try {
+        const { secure_url } = await uploadToCloudinary(uri, {
+          mimeType: inferMimeFromLocalRecording(uri),
+          resourceType: 'auto',
+          fileName: 'voice-verification.m4a',
+          onDebug: onUploadDebug,
+        });
+        setFailedUploadUri(null);
+        onUploadComplete(secure_url);
+        setStatusLine('Voice sample ready. Continue below.');
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : 'Upload failed';
+        setFailedUploadUri(uri);
+        onUploadError?.(msg);
+        setStatusLine(`Upload failed: ${msg}`);
+        Alert.alert('Voice upload failed', `${msg}\n\nTap "Retry upload" or record again.`);
+      } finally {
+        setBusy(false);
+      }
+    },
+    [onUploadComplete, onUploadDebug, onUploadError]
+  );
 
   const stopAndUpload = useCallback(async () => {
     const rec = recordingRef.current;
@@ -192,33 +296,40 @@ export default function VoiceVerificationRecorder({
     setBusy(true);
     setStatusLine(null);
     try {
-      await rec.stopAndUnloadAsync();
-      recordingRef.current = null;
-      setIsRecording(false);
-      const uri = rec.getURI();
-      if (!uri) {
-        Alert.alert('Recording', 'No audio file was produced. Try again.');
-        return;
-      }
-      const mimeType = inferMimeFromLocalRecording(uri);
-      setStatusLine('Uploading…');
-      const { secure_url } = await uploadToCloudinary(uri, {
-        mimeType,
-        resourceType: 'auto',
-        fileName: 'voice-verification.m4a',
-        onDebug: onUploadDebug,
-      });
-      onUploadComplete(secure_url);
-      setStatusLine('Voice sample ready. Continue below.');
+      const status = await rec.getStatusAsync();
+      debug('record_status', `durationMs=${status.durationMillis ?? '?'} isRecording=${String(status.isRecording)}`);
     } catch (e) {
-      const msg = e instanceof Error ? e.message : 'Upload failed';
-      onUploadError?.(msg);
-      setStatusLine(`Failed: ${msg}`);
-      Alert.alert('Voice upload failed', msg);
-    } finally {
-      setBusy(false);
+      debug('record_status_failed', e instanceof Error ? e.message : String(e));
     }
-  }, [onUploadComplete, onUploadDebug, onUploadError]);
+    let stopError: unknown = null;
+    try {
+      await rec.stopAndUnloadAsync();
+      debug('stop_ok');
+    } catch (e) {
+      // Android throws here for very short recordings — still release the recorder below.
+      stopError = e;
+      debug('stop_failed', e instanceof Error ? e.message : String(e));
+    }
+    // Always leave "recording" state, otherwise the mic stays stuck on "Tap to stop".
+    recordingRef.current = null;
+    if (lastPreparedRecording === rec) lastPreparedRecording = null;
+    setIsRecording(false);
+    void Audio.setAudioModeAsync({ allowsRecordingIOS: false }).catch(() => {});
+
+    const uri = rec.getURI();
+    debug('file', uri ? `…${uri.slice(-60)}` : 'no uri');
+    if (stopError || !uri) {
+      setBusy(false);
+      const msg =
+        stopError instanceof Error && stopError.message
+          ? stopError.message
+          : 'No audio file was produced.';
+      setStatusLine('Recording failed. Tap the mic to record again.');
+      Alert.alert('Recording failed', `${msg}\n\nPlease record again and read the full paragraph.`);
+      return;
+    }
+    await upload(uri);
+  }, [debug, upload]);
 
   const onMicPress = () => {
     if (busy) return;
@@ -312,6 +423,17 @@ export default function VoiceVerificationRecorder({
         </Animated.Text>
 
         {statusLine ? <Text style={styles.status}>{statusLine}</Text> : null}
+
+        {failedUploadUri && !busy && !isRecording ? (
+          <TouchableOpacity
+            style={styles.retryBtn}
+            onPress={() => void upload(failedUploadUri)}
+            activeOpacity={0.85}
+            accessibilityRole="button"
+          >
+            <Text style={styles.retryText}>Retry upload</Text>
+          </TouchableOpacity>
+        ) : null}
       </View>
     </View>
   );
@@ -438,5 +560,18 @@ const styles = StyleSheet.create({
     color: '#6b7280',
     textAlign: 'center',
     paddingHorizontal: 12,
+  },
+  retryBtn: {
+    marginTop: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 22,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    borderColor: PURPLE,
+  },
+  retryText: {
+    color: PURPLE,
+    fontSize: 14,
+    fontWeight: '700',
   },
 });

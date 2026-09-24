@@ -2,6 +2,7 @@ import { Audio, InterruptionModeAndroid, InterruptionModeIOS, type AVPlaybackSta
 import { Platform } from 'react-native';
 
 import { getIncomingCallAndroidNativeModule } from '../modules/incoming-call-android';
+import { isVoiceCallAudioSessionActive } from './voiceCallAudioRoute';
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const CALLER_RINGTONE = require('../assets/sounds/caller_ringtone.mp3') as number;
@@ -63,6 +64,28 @@ function tryStopNativeIncomingRingtone(): void {
   incomingNativeRingtoneActive = false;
 }
 
+function tryStartNativeOutboundRingtone(): boolean {
+  if (Platform.OS !== 'android') return false;
+  const mod = getIncomingCallAndroidNativeModule();
+  if (!mod || typeof mod.startOutboundRingtone !== 'function') return false;
+  try {
+    return Boolean(mod.startOutboundRingtone());
+  } catch {
+    return false;
+  }
+}
+
+function tryStopNativeOutboundRingtone(): void {
+  const mod = getIncomingCallAndroidNativeModule();
+  if (mod && typeof mod.stopOutboundRingtone === 'function') {
+    try {
+      mod.stopOutboundRingtone();
+    } catch {
+      // ignore
+    }
+  }
+}
+
 function attachIncomingRingLoopGuard(sound: Audio.Sound): void {
   sound.setOnPlaybackStatusUpdate((status) => {
     const s = status as AVPlaybackStatusSuccess;
@@ -91,6 +114,7 @@ async function ensureAudioMode(): Promise<void> {
 
 /** Incoming ring must play when the app is minimized (socket still alive). */
 async function ensureIncomingRingtoneAudioMode(): Promise<void> {
+  if (isVoiceCallAudioSessionActive()) return;
   if (incomingRingBackgroundAudio) return;
   await Audio.setAudioModeAsync({
     allowsRecordingIOS: false,
@@ -107,6 +131,8 @@ async function ensureIncomingRingtoneAudioMode(): Promise<void> {
 async function releaseIncomingRingtoneAudioMode(): Promise<void> {
   if (!incomingRingBackgroundAudio) return;
   incomingRingBackgroundAudio = false;
+  // Never overwrite Stream's in-call audio session — that used to drop minimized calls.
+  if (isVoiceCallAudioSessionActive()) return;
   try {
     await Audio.setAudioModeAsync({
       allowsRecordingIOS: false,
@@ -312,6 +338,7 @@ let outboundRingEpoch = 0;
 /** Stop outbound ringtone immediately (e.g. caller cancelled while ringing). */
 export async function stopOutboundRingtonePlayback(): Promise<void> {
   outboundRingEpoch += 1;
+  tryStopNativeOutboundRingtone();
   const stop = activeOutboundRingtoneStop;
   activeOutboundRingtoneStop = null;
   if (stop) {
@@ -323,6 +350,21 @@ export async function stopOutboundRingtonePlayback(): Promise<void> {
 export async function startOutboundRingtoneLoop(): Promise<() => Promise<void>> {
   await stopOutboundRingtonePlayback();
   const startEpoch = outboundRingEpoch;
+  if (tryStartNativeOutboundRingtone()) {
+    const stop = async () => {
+      if (activeOutboundRingtoneStop === stop) {
+        activeOutboundRingtoneStop = null;
+      }
+      tryStopNativeOutboundRingtone();
+    };
+    if (startEpoch !== outboundRingEpoch) {
+      await stop();
+      return async () => {};
+    }
+    activeOutboundRingtoneStop = stop;
+    return stop;
+  }
+
   await ensureOutboundRingtoneAudioMode();
   const sound = new Audio.Sound();
   await sound.loadAsync(CALLER_RINGTONE, { shouldPlay: true, isLooping: true, volume: 0.92 });

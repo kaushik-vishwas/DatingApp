@@ -882,10 +882,42 @@ async function playIncomingRingtoneForBackgroundAlert(): Promise<boolean> {
  * then show a silent heads-up tray so OEMs do not play a short system notification ding.
  * If native ring fails, fall back to the ringing notification channel.
  */
+/** Native FCM / keep-alive call notification (stronger than the Expo row) is already posted. */
+function isNativeIncomingCallTrayShowing(callId: string): boolean {
+  if (Platform.OS !== 'android') return false;
+  try {
+    return Boolean(getIncomingCallAndroidNativeModule()?.isNativeIncomingCallTrayShowing?.(callId));
+  } catch {
+    return false;
+  }
+}
+
+/** Socket usually beats FCM by a moment; give the native notification a short head start. */
+const NATIVE_INCOMING_TRAY_WAIT_MS = 1_500;
+const NATIVE_INCOMING_TRAY_POLL_MS = 250;
+
+async function waitForNativeIncomingCallTray(callId: string): Promise<boolean> {
+  if (Platform.OS !== 'android') return false;
+  const deadline = Date.now() + NATIVE_INCOMING_TRAY_WAIT_MS;
+  while (true) {
+    if (isNativeIncomingCallTrayShowing(callId)) return true;
+    if (Date.now() >= deadline) return false;
+    await new Promise((resolve) => setTimeout(resolve, NATIVE_INCOMING_TRAY_POLL_MS));
+  }
+}
+
 export async function alertReceiverIncomingCallInBackground(
   incoming: IncomingCallNotificationPayload
 ): Promise<void> {
   if (!receiverIncomingCallUiEnabled) return;
+  if (await waitForNativeIncomingCallTray(incoming.callId.trim())) {
+    // Native notification already rings and shows full-screen; do not replace it.
+    logIncomingCallNotif('show.native_present', { callId: incoming.callId });
+    prefetchIncomingCallBootstrapFromNotification(incoming);
+    void persistShownIncomingCallNotification(incoming);
+    notifiedCallIds.add(incoming.callId.trim());
+    return;
+  }
   const ringing = await playIncomingRingtoneForBackgroundAlert();
   await showIncomingCallNotification(incoming, { visualOnly: ringing });
 }
@@ -918,6 +950,13 @@ export async function showIncomingCallNotification(
     }
     logIncomingCallNotif('show.start', { callId, showSessionId });
     prefetchIncomingCallBootstrapFromNotification(incoming);
+    if (isNativeIncomingCallTrayShowing(callId)) {
+      // Keep the native call notification (full-screen + CallStyle); an Expo row is weaker.
+      void persistShownIncomingCallNotification(incoming);
+      notifiedCallIds.add(callId);
+      logIncomingCallNotif('show.native_present', { callId });
+      return;
+    }
     if (Platform.OS === 'android') {
       try {
         getIncomingCallAndroidNativeModule()?.dismissIncomingCallTrayByCallId?.(callId);

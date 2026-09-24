@@ -10,7 +10,15 @@ import React, {
 } from 'react';
 import { Alert } from 'react-native';
 import { io, type Socket } from 'socket.io-client';
-import { authApi, clearJwt, getJwt, getResolvedApiBaseUrl, profileApi } from '../services/api';
+import {
+  authApi,
+  clearJwt,
+  getJwt,
+  getResolvedApiBaseUrl,
+  profileApi,
+  registerSessionSupersededHandler,
+} from '../services/api';
+import { reconcilePendingWalletCheckout } from '../utils/pendingWalletCheckout';
 import { teardownCallSession } from '../utils/callSessionTeardown';
 import { stopReceiverOnlineKeepAlive } from '../utils/receiverOnlineKeepAlive';
 import { markAuthWelcomeSeen } from '../services/authWelcomeStorage';
@@ -90,6 +98,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     void refreshUser();
   }, [token, refreshUser]);
 
+  useEffect(() => {
+    if (!user || user.role !== 'caller') return;
+    let cancelled = false;
+    void reconcilePendingWalletCheckout().then(async (result) => {
+      if (cancelled || result.status !== 'credited') return;
+      await refreshUser();
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [user?._id, user?.role, refreshUser]);
+
   const applyServerUser = useCallback((profile: UserProfile) => {
     setUser(profile);
   }, []);
@@ -128,6 +148,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     callerHomeOfferLoginShowRef.current = false;
     return true;
   }, []);
+
+  useEffect(() => {
+    registerSessionSupersededHandler(() => {
+      void (async () => {
+        await signOut();
+        Alert.alert('Signed out', 'This account was signed in on another device.');
+      })();
+    });
+    return () => registerSessionSupersededHandler(null);
+  }, [signOut]);
 
   /** Single-device login: server emits when this account signs in elsewhere; older JWT `sv` is lower. */
   useEffect(() => {

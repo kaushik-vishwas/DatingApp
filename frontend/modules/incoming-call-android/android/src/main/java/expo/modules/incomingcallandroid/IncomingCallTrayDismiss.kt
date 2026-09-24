@@ -27,4 +27,21 @@ object IncomingCallTrayDismiss {
     }
     return true
   }
+
+  /**
+   * True when the native FCM / keep-alive call notification is posted for this invite.
+   * Native rows use id = hash(tag); Expo local rows share the tag but use a different id.
+   */
+  fun isNativeShowing(context: Context, callId: String): Boolean {
+    val trimmed = callId.trim()
+    if (trimmed.isEmpty()) return false
+    val tag = TAG_PREFIX + trimmed
+    val nativeId = tag.hashCode() and 0x7fffffff
+    val nm = context.applicationContext.getSystemService(NotificationManager::class.java)
+    return try {
+      nm?.activeNotifications?.any { it.tag == tag && it.id == nativeId } == true
+    } catch (_: Exception) {
+      false
+    }
+  }
 }

@@ -39,6 +39,11 @@ import {
   isBluetoothVoiceOutputAvailable,
   releaseVoiceCallOutputRoute,
 } from '../../utils/voiceCallAudioRoute';
+import { getIncomingCallAndroidNativeModule } from '../../modules/incoming-call-android';
+import {
+  startReceiverOnlineKeepAlive,
+  stopReceiverOnlineKeepAlive,
+} from '../../utils/receiverOnlineKeepAlive';
 import { profileImageUrlForStreamOrNetwork, resolveProfileImageSource } from '../../utils/avatarSource';
 import { AvatarSoundWaveRings, CallingProfileTravelWaves, CallingWaitFooter } from '../../components/call/AvatarVoiceWaves';
 import { useCallScreenCaptureProtection } from '../../utils/callScreenCaptureProtection';
@@ -57,6 +62,7 @@ import {
   updateCallDiagnosticsLiveState,
   setCallDiagnosticsContext,
   registerTalkActiveReader,
+  registerAppInBackgroundReader,
 } from '../../utils/callDiagnostics';
 import {
   getSamsungCallCompatProfile,
@@ -133,8 +139,10 @@ type StreamCallAvatarExtrasModule = {
     talkActive?: boolean;
   }>;
   StreamTalkTimingBridge: React.ComponentType<{ onBothConnected: () => void }>;
+  StreamPoorNetworkBridge: React.ComponentType<{ onPoorNetworkChange: (poor: boolean) => void }>;
   StreamRemotePeerLeftBridge: React.ComponentType<{
     onRemotePeerLeft: (reason: 'local_left' | 'remote_empty') => void;
+    onRemotePeerBack?: () => void;
     onLocalGsmSuspect?: () => void;
     onPeerGsmSuspect?: () => void;
   }>;
@@ -181,6 +189,10 @@ type PostCallDetails = {
 };
 
 /** Must match backend `VOICE_CALL_ISSUE_TAGS`. */
+/** Peer missing from Stream this long with the server still saying "ongoing" ⇒ treat as dropped. */
+const REMOTE_PEER_GONE_MAX_MS = 45_000;
+const REMOTE_PEER_GONE_POLL_MS = 3_000;
+
 const POST_CALL_ISSUE_TAGS = [
   'Background noise',
   'Not Talking',
@@ -296,6 +308,8 @@ function getReceiverEarnRatePerMinute(
 
 export default function VoiceCallScreen({ navigation, route }: Props): React.JSX.Element {
   const MIN_RATING_SECONDS = 60;
+  /** Orange warning when remaining caller talk time is at or below this (seconds). */
+  const TALK_TIME_LOW_WARNING_SEC = 120;
   const insets = useSafeAreaInsets();
   const { user, refreshUser } = useAuth();
   const messageEligibility = useCallerMessageEligibilityOptional();
@@ -351,6 +365,8 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
   const [talkActive, setTalkActive] = useState(false);
   /** True when Stream reports JOINED + remote participant (media path actually up). */
   const [streamBothConnected, setStreamBothConnected] = useState(false);
+  /** Stream SFU grades local or remote connection as POOR (debounced in the bridge). */
+  const [poorNetwork, setPoorNetwork] = useState(false);
   const [systemCallHold, setSystemCallHold] = useState(false);
   const [peerCallHold, setPeerCallHold] = useState(false);
   const [peerCallMuted, setPeerCallMuted] = useState(false);
@@ -463,15 +479,29 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
   }, [systemCallHold, peerCallHold, talkActive, ready, appInBackground]);
 
   useEffect(() => {
+    if (!ready) {
+      registerTalkActiveReader(null);
+      registerAppInBackgroundReader(null);
+      return;
+    }
+    registerTalkActiveReader(() => talkActiveRef.current);
+    registerAppInBackgroundReader(
+      () => appInBackgroundRef.current && (readyRef.current || talkActiveRef.current)
+    );
+    return () => {
+      registerTalkActiveReader(null);
+      registerAppInBackgroundReader(null);
+    };
+  }, [ready]);
+
+  useEffect(() => {
     if (Platform.OS !== 'android' || !ready) {
       registerCallHoldKeepaliveReader(null);
-      registerTalkActiveReader(null);
       setCallKeepaliveActive('', false);
       stopGsmDisconnectProbe();
       return;
     }
     registerCallHoldKeepaliveReader(() => systemCallHoldRef.current);
-    registerTalkActiveReader(() => talkActiveRef.current);
     const callId = callIdRef.current.trim();
     if (callId) {
       startGsmDisconnectProbe(callId);
@@ -479,7 +509,6 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
     setCallKeepaliveActive(callId, callId.length > 0);
     return () => {
       registerCallHoldKeepaliveReader(null);
-      registerTalkActiveReader(null);
       setCallKeepaliveActive('', false);
       stopGsmDisconnectProbe();
     };
@@ -566,13 +595,10 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
       : elapsedSec;
   const remainingTalkBudgetSec = remainingTalkBudgetSecRef.current ?? initialRemainingTalkSec;
   const remainingTalkSec = Math.max(0, remainingTalkBudgetSec - liveTalkElapsedSec);
-  const hasRemainingTalkWallet =
-    sessionCallerWalletInr !== null || (user?.role === 'caller' && callerWalletInr > 0);
   const showRemainingTalkCountdown =
-    callChargeRatePerMinute > 0 &&
-    hasRemainingTalkWallet &&
-    talkActive &&
-    streamBothConnected;
+    callChargeRatePerMinute > 0 && talkActive && streamBothConnected;
+  const isTalkTimeLowWarning =
+    showRemainingTalkCountdown && remainingTalkSec > 0 && remainingTalkSec <= TALK_TIME_LOW_WARNING_SEC;
   const remainingTalkCountdownTitle =
     user?.role === 'receiver' ? "Caller's remaining talk time" : 'Remaining Talk Time';
 
@@ -833,6 +859,33 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
   }, [ready]);
 
   useEffect(() => {
+    if (Platform.OS !== 'android') return;
+    const native = getIncomingCallAndroidNativeModule();
+    try {
+      native?.setInAppVoiceCallActive?.(ready);
+    } catch {
+      // Native module missing until a rebuilt APK.
+    }
+    if (ready) {
+      stopReceiverOnlineKeepAlive();
+      return () => {
+        try {
+          native?.setInAppVoiceCallActive?.(false);
+        } catch {
+          // ignore
+        }
+        if (user?.role === 'receiver' && user?.isAvailable) {
+          startReceiverOnlineKeepAlive();
+        }
+      };
+    }
+    if (user?.role === 'receiver' && user?.isAvailable) {
+      startReceiverOnlineKeepAlive();
+    }
+    return undefined;
+  }, [ready, user?.role, user?.isAvailable]);
+
+  useEffect(() => {
     mutedRef.current = muted;
   }, [muted]);
 
@@ -958,13 +1011,19 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
 
   const remainingTalkCountdownEl = showRemainingTalkCountdown ? (
     user?.role === 'receiver' ? (
-      <Text style={styles.remainingTalkCompact}>
+      <Text
+        style={[styles.remainingTalkCompact, isTalkTimeLowWarning && styles.remainingTalkCompactWarning]}
+      >
         {remainingTalkCountdownTitle} · {formatHms(remainingTalkSec)}
       </Text>
     ) : (
-      <View style={styles.countdownCard}>
-        <Text style={styles.countdownTitle}>{remainingTalkCountdownTitle}</Text>
-        <Text style={styles.countdownValue}>{formatHms(remainingTalkSec)}</Text>
+      <View style={[styles.countdownCard, isTalkTimeLowWarning && styles.countdownCardWarning]}>
+        <Text style={[styles.countdownTitle, isTalkTimeLowWarning && styles.countdownTitleWarning]}>
+          {remainingTalkCountdownTitle}
+        </Text>
+        <Text style={[styles.countdownValue, isTalkTimeLowWarning && styles.countdownValueWarning]}>
+          {formatHms(remainingTalkSec)}
+        </Text>
       </View>
     )
   ) : null;
@@ -1261,6 +1320,51 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
   const checkPeerEndedViaServerRef = useRef(checkPeerEndedViaServer);
   checkPeerEndedViaServerRef.current = checkPeerEndedViaServer;
 
+  /**
+   * Stream "remote participant gone" is NOT a hangup by itself: when the peer minimizes or
+   * reopens the app, Stream drops and rejoins them for a few seconds. Only end once the server
+   * says the call is completed (real hangup), or the peer stays gone for REMOTE_PEER_GONE_MAX_MS.
+   */
+  const remotePeerGoneRef = useRef<{ callId: string; since: number; timer: ReturnType<typeof setTimeout> | null } | null>(null);
+  const cancelRemotePeerGoneCheck = useCallback((reason: string): void => {
+    const pending = remotePeerGoneRef.current;
+    if (!pending) return;
+    if (pending.timer) clearTimeout(pending.timer);
+    remotePeerGoneRef.current = null;
+    callDiag.info('remote_peer_gone_check_cancelled', { reason, goneMs: Date.now() - pending.since });
+  }, []);
+  const confirmRemotePeerGone = useCallback((callId: string): void => {
+    if (remotePeerGoneRef.current?.callId === callId) return;
+    cancelRemotePeerGoneCheck('new_call');
+    const pending = { callId, since: Date.now(), timer: null as ReturnType<typeof setTimeout> | null };
+    remotePeerGoneRef.current = pending;
+    callDiag.info('remote_peer_gone_check_started', { callId });
+
+    const tick = async (): Promise<void> => {
+      pending.timer = null;
+      if (remotePeerGoneRef.current !== pending) return;
+      if (endingRef.current || callIdRef.current.trim() !== callId) {
+        cancelRemotePeerGoneCheck('call_no_longer_active');
+        return;
+      }
+      const sync = await instrumentedSessionSync(callId, 'confirm_remote_peer_gone', { light: true });
+      if (remotePeerGoneRef.current !== pending) return;
+      if (sync.completed) {
+        remotePeerGoneRef.current = null;
+        handlePeerCallEndedRef.current(callId, 'stream_remote_empty');
+        return;
+      }
+      if (Date.now() - pending.since >= REMOTE_PEER_GONE_MAX_MS) {
+        remotePeerGoneRef.current = null;
+        handlePeerCallEndedRef.current(callId, 'stream_remote_empty_timeout');
+        return;
+      }
+      pending.timer = setTimeout(() => void tick(), REMOTE_PEER_GONE_POLL_MS);
+    };
+    void tick();
+  }, [cancelRemotePeerGoneCheck]);
+  useEffect(() => () => cancelRemotePeerGoneCheck('unmount'), [cancelRemotePeerGoneCheck]);
+
   const resetReceiverToWaiting = () => {
     setEnding(false, 'reset_receiver_to_waiting');
     endedSessionRef.current = false;
@@ -1556,14 +1660,31 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
   acceptIncomingOnSessionRef.current = onAcceptIncomingOnSession;
 
   // Stable one-shot auto-pick while on-screen incoming UI is visible (no failsafe reject race).
+  // Minimized: keep the native call notification and wait until the app is actually on screen.
   useEffect(() => {
     if (!receiverAvailabilitySession || receiverSessionPhase !== 'incoming' || !incomingReq) return;
     const callId = incomingReq.callId;
-    confirmIncomingCallSeenOnScreen(callId);
-    const autoAccept = setTimeout(() => {
-      acceptIncomingOnSessionRef.current();
-    }, 5_000);
-    return () => clearTimeout(autoAccept);
+    let autoAccept: ReturnType<typeof setTimeout> | null = null;
+    const armOnScreen = (): void => {
+      if (autoAccept) return;
+      confirmIncomingCallSeenOnScreen(callId);
+      autoAccept = setTimeout(() => {
+        acceptIncomingOnSessionRef.current();
+      }, 10_000);
+    };
+    if (AppState.currentState === 'active') {
+      armOnScreen();
+      return () => {
+        if (autoAccept) clearTimeout(autoAccept);
+      };
+    }
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state === 'active') armOnScreen();
+    });
+    return () => {
+      sub.remove();
+      if (autoAccept) clearTimeout(autoAccept);
+    };
   }, [
     receiverAvailabilitySession,
     receiverSessionPhase,
@@ -1774,10 +1895,17 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
             }
           });
       } catch (e: unknown) {
-        const msg = e instanceof Error ? e.message : 'Failed to join call';
+        const rawMsg = e instanceof Error ? e.message : 'Failed to join call';
         if (cancelled || attemptId !== streamJoinAttemptRef.current) {
           return;
         }
+        callDiag.error('voice_call_join_failed', { message: rawMsg });
+        // Stream already retried the join; show a plain message instead of SDK internals.
+        const msg = /\bSFU\b|\bWS\b|websocket|signal|ICE|peer connection|timed? ?out|failed to open|network/i.test(
+          rawMsg
+        )
+          ? 'Could not connect the call. Please check your internet connection and try again.'
+          : getErrorMessage(e);
         setError(msg);
         Alert.alert('Voice call error', msg, [{ text: 'OK', onPress: () => exitCallScreenRef.current() }]);
       }
@@ -2085,7 +2213,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
   useEffect(() => {
     if (!ready) return;
     const sub = AppState.addEventListener('change', (state) => {
-      if (state !== 'active' && state !== 'background' && state !== 'inactive') return;
+      if (state !== 'active') return;
       if (!callIdRef.current || endingRef.current) return;
       // Skip while GSM hold — false session "completed" mid-cellular was ending both sides.
       if (
@@ -2107,11 +2235,15 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
     if (remainingTalkSec > 0) return;
     if (endingRef.current || autoEndByBalanceRef.current) return;
     autoEndByBalanceRef.current = true;
+    const walletInr = sessionCallerWalletInr ?? callerWalletInr;
     void (async () => {
-      Alert.alert('Call ended', 'Your talk time is over.');
+      Alert.alert(
+        'Call ended',
+        walletInr <= 0 ? 'Your wallet balance is zero.' : 'Your talk time is over.'
+      );
       await hangup();
     })();
-  }, [remainingTalkSec, ready, showRemainingTalkCountdown, user?.role]);
+  }, [remainingTalkSec, ready, showRemainingTalkCountdown, user?.role, sessionCallerWalletInr, callerWalletInr]);
 
   const recoverAfterGsmHold = useCallback(async (): Promise<void> => {
     // Keep gsmInterruptPending / system hold until Stream is back so peer does not
@@ -2449,7 +2581,10 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
     try {
       await streamMicControlRef.current.toggle();
     } catch (e) {
-      Alert.alert('Mute failed', getErrorMessage(e));
+      // Mute UI already flipped locally; Stream SDK / network errors are technical noise to users.
+      callDiag.error('mute_toggle_failed', {
+        message: e instanceof Error ? e.message : String(e),
+      });
     }
   };
 
@@ -2982,8 +3117,13 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
               onRemotePeerLeft={(reason) => {
                 const callId = callIdRef.current.trim();
                 if (!callId || endingRef.current) return;
+                if (reason === 'remote_empty') {
+                  confirmRemotePeerGone(callId);
+                  return;
+                }
                 handlePeerCallEndedRef.current(callId, `stream_${reason}`);
               }}
+              onRemotePeerBack={() => cancelRemotePeerGoneCheck('peer_rejoined')}
             />
           ) : null}
           {streamAvatarExtras ? (
@@ -2993,23 +3133,34 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
             />
           ) : null}
           {streamAvatarExtras ? (
+            <streamAvatarExtras.StreamPoorNetworkBridge onPoorNetworkChange={setPoorNetwork} />
+          ) : null}
+          {streamAvatarExtras ? (
             <streamAvatarExtras.StreamHoldAudioBridge
               peerOnHold={peerCallHold}
               systemOnHold={systemCallHold}
             />
           ) : null}
           <View style={[styles.overlay, { paddingTop: Math.max(insets.top + 16, 36) }]}>
-            <View style={styles.statusPill}>
-              <Text style={styles.statusText}>
-                {systemCallHold
-                  ? 'Your call is on hold'
-                  : peerCallHold
-                    ? `${peerDisplayName} is on hold`
-                    : talkActive && streamBothConnected
-                      ? 'Call Active'
-                      : 'Connecting…'}
-              </Text>
-            </View>
+            {(() => {
+              const showPoorNetwork =
+                !systemCallHold && !peerCallHold && talkActive && streamBothConnected && poorNetwork;
+              return (
+                <View style={[styles.statusPill, showPoorNetwork && styles.statusPillPoorNetwork]}>
+                  <Text style={styles.statusText}>
+                    {systemCallHold
+                      ? 'Your call is on hold'
+                      : peerCallHold
+                        ? `${peerDisplayName} is on hold`
+                        : talkActive && streamBothConnected
+                          ? showPoorNetwork
+                            ? 'Poor network'
+                            : 'Call Active'
+                          : 'Connecting…'}
+                  </Text>
+                </View>
+              );
+            })()}
             <View style={styles.avatarRow}>
               <View style={styles.avatarCol}>
                 <View style={styles.avatarRingHost}>
@@ -3203,6 +3354,10 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(233, 213, 255, 0.45)',
   },
+  statusPillPoorNetwork: {
+    backgroundColor: 'rgba(234, 88, 12, 0.95)',
+    borderColor: 'rgba(254, 215, 170, 0.6)',
+  },
   statusText: { color: '#faf5ff', fontSize: 12, fontWeight: '800' },
   avatarRow: {
     flexDirection: 'row',
@@ -3377,6 +3532,12 @@ const styles = StyleSheet.create({
   },
   countdownTitle: { color: '#c4b5fd', fontSize: 11, fontWeight: '700' },
   countdownValue: { color: '#faf5ff', fontSize: 28, fontWeight: '900', marginTop: 2 },
+  countdownCardWarning: {
+    borderColor: 'rgba(249, 115, 22, 0.75)',
+    backgroundColor: 'rgba(67, 20, 7, 0.55)',
+  },
+  countdownTitleWarning: { color: '#fdba74' },
+  countdownValueWarning: { color: '#f97316' },
   addTalktimeBtn: {
     marginTop: 10,
     flexDirection: 'row',
@@ -3398,6 +3559,11 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     textAlign: 'center',
     opacity: 0.92,
+  },
+  remainingTalkCompactWarning: {
+    color: '#f97316',
+    fontWeight: '800',
+    opacity: 1,
   },
   modalOverlay: {
     flex: 1,

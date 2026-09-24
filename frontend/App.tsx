@@ -6,6 +6,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { AuthProvider } from './context/AuthContext';
 import { CallSignalProvider } from './context/CallSignalContext';
 import { ChatInboxProvider } from './context/ChatInboxContext';
+import AppUpdateGate from './components/AppUpdateGate';
 import AppNavigator from './navigation/AppNavigator';
 import { ensureIncomingCallNotificationInfrastructure, setReceiverIncomingCallUiEnabled } from './utils/incomingCallNotifications';
 import { ensureOnlinePresenceNotificationInfrastructure } from './utils/onlinePresenceNotifications';
@@ -52,7 +53,9 @@ export default function App() {
           <ChatInboxProvider>
             <CallSignalProvider>
               <StatusBar style="dark" backgroundColor="#fff" translucent={false} />
-              <AppNavigator />
+              <AppUpdateGate>
+                <AppNavigator />
+              </AppUpdateGate>
             </CallSignalProvider>
           </ChatInboxProvider>
         </AuthProvider>

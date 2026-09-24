@@ -92,7 +92,7 @@ export default function VoiceUploadDebugPanel({
       ) : null}
       {entries.length > 0 ? (
         <ScrollView style={styles.log} nestedScrollEnabled>
-          {[...entries].reverse().slice(0, 12).map((e, i) => (
+          {[...entries].reverse().slice(0, 30).map((e, i) => (
             <Text key={`${e.at}-${i}`} style={styles.logLine}>
               [{e.step}]
               {e.httpStatus ? ` ${e.httpStatus}` : ''}
@@ -133,7 +133,7 @@ const styles = StyleSheet.create({
     marginBottom: 4,
     lineHeight: 16,
   },
-  log: { maxHeight: 120, marginTop: 8 },
+  log: { maxHeight: 240, marginTop: 8 },
   logLine: {
     color: '#ddd6fe',
     fontSize: 10,

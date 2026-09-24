@@ -1,5 +1,6 @@
+import { CommonActions } from '@react-navigation/native';
 import { profileApi } from '../services/api';
-import { navigationRef } from '../navigation/navigationRef';
+import { getRootNavigation } from '../navigation/navigationRef';
 import type { UserProfile } from '../types/user';
 import {
   RECEIVER_ONBOARDING_DEFAULT_INTERESTS,
@@ -45,7 +46,22 @@ export async function submitReceiverOnboardingProfile(
 }
 
 export function goToReceiverAudioVerification(): void {
-  const nav = navigationRef.current;
-  if (!nav?.isReady()) return;
-  nav.navigate('Home', { screen: 'ReceiverAutoVerification' });
+  const nav = getRootNavigation();
+  if (!nav) return;
+  try {
+    nav.dispatch(
+      CommonActions.navigate({
+        name: 'Home',
+        params: {
+          screen: 'ReceiverAutoVerification',
+        },
+      })
+    );
+  } catch {
+    try {
+      nav.navigate('Home', { screen: 'ReceiverAutoVerification' });
+    } catch {
+      // ignore
+    }
+  }
 }

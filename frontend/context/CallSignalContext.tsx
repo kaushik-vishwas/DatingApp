@@ -15,12 +15,20 @@ import {
 import RandomCallMatchingOverlay from '../components/caller/RandomCallMatchingOverlay';
 import { getIncomingCallAndroidNativeModule } from '../modules/incoming-call-android';
 import { useAuth } from './AuthContext';
-import { callApi, getErrorMessage, getJwt, getResolvedApiBaseUrl, profileApi } from '../services/api';
+import {
+  callApi,
+  getErrorDetailForLog,
+  getErrorMessage,
+  getJwt,
+  getResolvedApiBaseUrl,
+  profileApi,
+} from '../services/api';
 import { MAX_RANDOM_CALL_RETRIES, isRetryableRandomInviteError } from '../utils/randomCallMatch';
 import { startRandomMatchingTone } from '../utils/callSounds';
 import type { VoiceBootstrapResponse } from '../types/api';
 import type { VoiceCallScreenParams } from '../navigation/voiceCallParams';
-import { navigationRef } from '../navigation/navigationRef';
+import { getRootNavigation } from '../navigation/navigationRef';
+import { isReceiverOnVoiceCallScreen } from '../navigation/receiverCallNavigation';
 import {
   ensureIncomingRingtoneLoaded,
   ensureIncomingRingtonePlaying,
@@ -263,7 +271,7 @@ function callerShouldResetStackForVoiceCall(params: VoiceCallScreenParams): bool
 }
 
 export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { isSignedIn, user } = useAuth();
+  const { isSignedIn, user, bootstrapping } = useAuth();
   const [randomCallMatchingVisible, setRandomCallMatchingVisible] = useState(false);
   const randomMatchAbortRef = useRef<AbortController | null>(null);
   const randomMatchStopSoundRef = useRef<(() => Promise<void>) | null>(null);
@@ -374,8 +382,8 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
   const dismissCallerVoiceCallScreen = useCallback((): void => {
     void stopOutboundRingtonePlayback();
-    const nav = navigationRef.current;
-    if (!nav?.isReady()) return;
+    const nav = getRootNavigation();
+    if (!nav) return;
     try {
       if (nav.canGoBack()) {
         nav.goBack();
@@ -384,33 +392,64 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     } catch {
       // ignore
     }
-    if (userRoleRef.current === 'caller') {
-      nav.navigate('CallerApp', {
-        screen: 'CallerMainTabs',
-        params: { screen: 'CallerHome' },
-      });
-    } else if (userRoleRef.current === 'receiver') {
-      nav.navigate('Home', { screen: 'ReceiverMainTabs', params: { screen: 'ReceiverHome' } });
+    try {
+      if (userRoleRef.current === 'caller') {
+        nav.navigate('CallerApp', {
+          screen: 'CallerMainTabs',
+          params: { screen: 'CallerHome' },
+        });
+      } else if (userRoleRef.current === 'receiver') {
+        nav.navigate('Home', { screen: 'ReceiverMainTabs', params: { screen: 'ReceiverHome' } });
+      }
+    } catch {
+      // ignore
     }
   }, []);
 
   const navigateToVoiceCallParams = useCallback((params: VoiceCallScreenParams): boolean => {
-    const nav = navigationRef.current;
-    if (!nav || !nav.isReady()) return false;
-    if (userRoleRef.current === 'caller') {
-      if (callerShouldResetStackForVoiceCall(params)) {
+    const nav = getRootNavigation();
+    if (!nav) return false;
+    try {
+      if (userRoleRef.current === 'caller') {
+        if (callerShouldResetStackForVoiceCall(params)) {
+          nav.dispatch(
+            CommonActions.reset({
+              index: 0,
+              routes: [
+                {
+                  name: 'CallerApp',
+                  state: {
+                    routes: [
+                      {
+                        name: 'CallerMainTabs',
+                        state: { routes: [{ name: 'CallerHome' }], index: 0 },
+                      },
+                      { name: 'VoiceCall', params },
+                    ],
+                    index: 1,
+                  },
+                },
+              ],
+            })
+          );
+          return true;
+        }
+        nav.navigate('CallerApp', {
+          screen: 'VoiceCall',
+          params,
+        });
+        return true;
+      }
+      if (userRoleRef.current === 'receiver') {
         nav.dispatch(
           CommonActions.reset({
             index: 0,
             routes: [
               {
-                name: 'CallerApp',
+                name: 'Home',
                 state: {
                   routes: [
-                    {
-                      name: 'CallerMainTabs',
-                      state: { routes: [{ name: 'CallerHome' }], index: 0 },
-                    },
+                    { name: 'ReceiverMainTabs', state: { routes: [{ name: 'ReceiverHome' }], index: 0 } },
                     { name: 'VoiceCall', params },
                   ],
                   index: 1,
@@ -421,31 +460,9 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         );
         return true;
       }
-      nav.navigate('CallerApp', {
-        screen: 'VoiceCall',
-        params,
-      });
-      return true;
-    }
-    if (userRoleRef.current === 'receiver') {
-      nav.dispatch(
-        CommonActions.reset({
-          index: 0,
-          routes: [
-            {
-              name: 'Home',
-              state: {
-                routes: [
-                  { name: 'ReceiverMainTabs', state: { routes: [{ name: 'ReceiverHome' }], index: 0 } },
-                  { name: 'VoiceCall', params },
-                ],
-                index: 1,
-              },
-            },
-          ],
-        })
-      );
-      return true;
+    } catch (e) {
+      console.warn('[call] navigateToVoiceCallParams failed', e);
+      return false;
     }
     return false;
   }, []);
@@ -458,35 +475,40 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     }
     void dismissIncomingCallNotification(incoming.callId);
     const navigate = () => {
-      const nav = navigationRef.current;
-      if (!nav || !nav.isReady()) return false;
-      nav.dispatch(
-        CommonActions.reset({
-          index: 0,
-          routes: [
-            {
-              name: 'Home',
-              state: {
-                routes: [
-                  { name: 'ReceiverMainTabs', state: { routes: [{ name: 'ReceiverHome' }], index: 0 } },
-                  {
-                    name: 'IncomingCall',
-                    params: {
-                      callId: incoming.callId,
-                      fromType: incoming.fromType,
-                      fromId: incoming.fromId,
-                      peerName: incoming.peerName,
-                      peerImage: incoming.peerImage ?? null,
+      const nav = getRootNavigation();
+      if (!nav) return false;
+      try {
+        nav.dispatch(
+          CommonActions.reset({
+            index: 0,
+            routes: [
+              {
+                name: 'Home',
+                state: {
+                  routes: [
+                    { name: 'ReceiverMainTabs', state: { routes: [{ name: 'ReceiverHome' }], index: 0 } },
+                    {
+                      name: 'IncomingCall',
+                      params: {
+                        callId: incoming.callId,
+                        fromType: incoming.fromType,
+                        fromId: incoming.fromId,
+                        peerName: incoming.peerName,
+                        peerImage: incoming.peerImage ?? null,
+                      },
                     },
-                  },
-                ],
-                index: 1,
+                  ],
+                  index: 1,
+                },
               },
-            },
-          ],
-        })
-      );
-      return true;
+            ],
+          })
+        );
+        return true;
+      } catch (e) {
+        console.warn('[call] openIncomingCall navigate failed', e);
+        return false;
+      }
     };
     if (navigate()) return;
     scheduleIncomingNavigateWhenReady(navigate);
@@ -556,11 +578,15 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         receiverEarningRatePerMinuteHint: p.receiverEarningRatePerMinuteHint,
       };
       const navigate = () => {
-        const nav = navigationRef.current;
-        if (!nav || !nav.isReady()) return false;
-        if (userRoleRef.current !== 'caller') return false;
-        nav.navigate('CallerApp', { screen: 'VoiceCall', params });
-        return true;
+        const nav = getRootNavigation();
+        if (!nav || userRoleRef.current !== 'caller') return false;
+        try {
+          nav.navigate('CallerApp', { screen: 'VoiceCall', params });
+          return true;
+        } catch (e) {
+          console.warn('[call] openVoiceCallRinging failed', e);
+          return false;
+        }
       };
       const navGen = outgoingNavigateGeneration;
       if (navigate()) return;
@@ -647,13 +673,17 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       outgoingInviteAbortRef.current = abort;
       const navGen = outgoingNavigateGeneration;
 
-      openVoiceCallRinging({
-        peerAccountId: id,
-        peerName: name,
-        peerImage: peerImage ?? null,
-        receiverRatePerMinuteHint: options?.receiverRatePerMinuteHint,
-        receiverEarningRatePerMinuteHint: options?.receiverEarningRatePerMinuteHint,
-      });
+      try {
+        openVoiceCallRinging({
+          peerAccountId: id,
+          peerName: name,
+          peerImage: peerImage ?? null,
+          receiverRatePerMinuteHint: options?.receiverRatePerMinuteHint,
+          receiverEarningRatePerMinuteHint: options?.receiverEarningRatePerMinuteHint,
+        });
+      } catch (navErr) {
+        console.warn('[call] ringing screen navigation failed', navErr);
+      }
 
       try {
         const [{ data }, socket] = await Promise.all([
@@ -717,10 +747,12 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
           throw new Error(ack.error || 'Could not ring this user.');
         }
         const outcome = await new Promise<InviteOutcome>((resolve) => {
+          // Safety net only: the server's no_answer (≤30s incl. on-screen extension) must win,
+          // so the caller never leaves while the receiver's incoming UI is still up.
           const timeout = setTimeout(() => {
             pendingInviteOutcomeRef.current.delete(data.callId);
             resolve({ accepted: false, reason: 'timeout' });
-          }, 22_000);
+          }, 40_000);
           pendingInviteOutcomeRef.current.set(data.callId, { resolve, timeout });
         });
         if (!outcome.accepted) {
@@ -763,7 +795,7 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
           e && typeof e === 'object' && 'response' in e
             ? (e as { response?: { data?: { debug?: unknown; message?: unknown } } }).response?.data
             : null;
-        logPresenceFailure('call_invite_failed', getErrorMessage(e), {
+        logPresenceFailure('call_invite_failed', getErrorDetailForLog(e), {
           peerId: id,
           httpDebug: axiosDebug ?? null,
         });
@@ -817,9 +849,13 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
               : null;
           if (rate != null && wallet < rate) {
             setRandomCallMatchingVisible(false);
-            const nav = navigationRef.current;
-            if (nav?.isReady()) {
-              nav.navigate('CallerApp', { screen: 'Wallet' });
+            const nav = getRootNavigation();
+            if (nav) {
+              try {
+                nav.navigate('CallerApp', { screen: 'Wallet' });
+              } catch {
+                // ignore
+              }
             }
             return;
           }
@@ -1229,6 +1265,7 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
     const pollPendingIncomingInvite = (): void => {
       if (!userAvailableRef.current) return;
+      if (isReceiverOnVoiceCallScreen()) return;
       void callApi
         .incomingPending()
         .then(({ data }) => {
@@ -1302,7 +1339,7 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
           }
         })
         .catch((e) => {
-          logPresenceFailure('http_background_request_failed', getErrorMessage(e), { trigger });
+          logPresenceFailure('http_background_request_failed', getErrorDetailForLog(e), { trigger });
         });
     };
 
@@ -1368,7 +1405,9 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         if (userRoleRef.current === 'receiver' && userAvailableRef.current) {
           if (state === 'background' || state === 'inactive') {
             touchReceiverBackgroundPresence(`appstate_${state}`);
-            void ensureIncomingRingtoneLoaded();
+            if (!isReceiverOnVoiceCallScreen()) {
+              void ensureIncomingRingtoneLoaded();
+            }
             if (!backgroundHeartbeat) {
               logPresenceDiagnostic('background_heartbeat_started', { intervalMs: 45_000 });
               backgroundHeartbeat = setInterval(() => {
@@ -1409,7 +1448,7 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
             .receiverForegroundPresence()
             .then(() => logPresenceDiagnostic('foreground_presence_synced'))
             .catch((e) =>
-              logPresenceFailure('foreground_presence_failed', getErrorMessage(e))
+              logPresenceFailure('foreground_presence_failed', getErrorDetailForLog(e))
             );
         }
         refreshPushToken();
@@ -1557,7 +1596,11 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
   useEffect(() => {
     if (!isSignedIn || !user) {
-      void teardownCallSession();
+      // Cold start (stored JWT or /auth/me still loading) must not wipe the incoming-call
+      // notification / ring that woke the app — only tear down when really signed out.
+      if (!bootstrapping && !isSignedIn) {
+        void teardownCallSession();
+      }
       if (socketRef.current) {
         registerCallKeepaliveSocket('main_call_signal', null);
         detachSocketIoProbe('main_call_signal');
@@ -1638,7 +1681,9 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
             }
           );
         }
-        if (userRoleRef.current === 'receiver') {
+        // Only receivers who can get calls need the ring preloaded. Preloading switches the
+        // audio session to playback-only, which breaks voice-verification recording in onboarding.
+        if (userRoleRef.current === 'receiver' && userAvailableRef.current) {
           void ensureIncomingRingtoneLoaded();
         }
       });
@@ -1784,6 +1829,15 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
       socket.on('call:response', (payload: CallResponsePayload) => {
         if (payload.fromType === (userRoleRef.current === 'caller' ? 'u' : 'r')) return;
+        if (
+          payload.accepted &&
+          userRoleRef.current === 'caller' &&
+          callerInviteAcceptedCallIdsRef.current.has(payload.callId) &&
+          !pendingInviteOutcomeRef.current.has(payload.callId)
+        ) {
+          // Already joining/in this call — a replayed "accepted" must not re-open the call screen.
+          return;
+        }
         if (payload.accepted && userRoleRef.current === 'caller') {
           seenIncomingCallIdsRef.current.delete(payload.callId);
           rejectedIncomingCallIdsRef.current.delete(payload.callId);
@@ -1917,10 +1971,14 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
           }
           if (legacyIncomingScreen) {
             const goHome = (): boolean => {
-              const n = navigationRef.current;
-              if (!n?.isReady()) return false;
-              n.navigate('Home', { screen: 'ReceiverMainTabs', params: { screen: 'ReceiverHome' } });
-              return true;
+              const n = getRootNavigation();
+              if (!n) return false;
+              try {
+                n.navigate('Home', { screen: 'ReceiverMainTabs', params: { screen: 'ReceiverHome' } });
+                return true;
+              } catch {
+                return false;
+              }
             };
             if (!goHome()) scheduleNavigateWhenReady(goHome, outgoingNavigateGeneration);
           }
@@ -1949,7 +2007,7 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       clearPendingInvites(false);
       socketRef.current = null;
     };
-  }, [clearPendingInvites, isSignedIn, signedInAccountId]);
+  }, [bootstrapping, clearPendingInvites, isSignedIn, signedInAccountId]);
 
   const value = useMemo<CallSignalContextValue>(
     () => ({

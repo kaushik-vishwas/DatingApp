@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -11,11 +11,21 @@ import {
 } from 'react-native';
 
 import RazorpayWebCheckoutModal from '../RazorpayWebCheckoutModal';
+import { useWalletPaymentRecovery } from '../../hooks/useWalletPaymentRecovery';
 import { getErrorMessage, walletApi } from '../../services/api';
 import type { RazorpayOrderResponse, WalletOfferRow } from '../../types/api';
 import { useAuth } from '../../context/AuthContext';
 import { logMetaWalletPurchase } from '../../utils/metaAppEvents';
 import type { RazorpayNativeCheckoutResult } from '../../utils/openRazorpayWalletCheckout';
+import {
+  clearPendingWalletCheckout,
+  confirmWalletPaymentWithRetry,
+  PAYMENT_CONFIRMING_MESSAGE,
+  PAYMENT_CONFIRMING_TITLE,
+  reconcilePendingWalletCheckout,
+  savePendingWalletCheckout,
+  type PendingWalletCheckout,
+} from '../../utils/pendingWalletCheckout';
 import {
   computeWalletRechargeBreakdown,
   walletCreditForRecharge,
@@ -49,6 +59,41 @@ export default function InCallTalktimeRechargeModal({
     walletAmount: number;
     bonusPercent: number;
   } | null>(null);
+  const [pendingCheckout, setPendingCheckout] = useState<PendingWalletCheckout | null>(null);
+
+  /** Checkout success + foreground reconcile can both credit — apply once per order. */
+  const creditAppliedRef = useRef(false);
+  const startingOrderRef = useRef(false);
+
+  const applyCreditedWallet = useCallback(
+    (creditAdded: number, newBalance: number) => {
+      if (creditAppliedRef.current) return;
+      creditAppliedRef.current = true;
+      void clearPendingWalletCheckout();
+      setPendingCheckout(null);
+      setCheckoutOrder(null);
+      setPendingBreakdown(null);
+      onRechargeSuccess(newBalance, creditAdded);
+      Alert.alert(
+        'Talktime added',
+        `₹${creditAdded.toLocaleString('en-IN')} added to your wallet. Your call continues.`,
+      );
+      onClose();
+    },
+    [onClose, onRechargeSuccess]
+  );
+
+  const { reconcileNow } = useWalletPaymentRecovery({
+    enabled: Boolean(checkoutOrder && pendingCheckout),
+    pending: pendingCheckout,
+    onCredited: (result) => {
+      const newBalance =
+        typeof result.data.user.walletBalance === 'number' && Number.isFinite(result.data.user.walletBalance)
+          ? result.data.user.walletBalance
+          : 0;
+      applyCreditedWallet(result.data.creditAdded, newBalance);
+    },
+  });
 
   const handleClose = useCallback(() => {
     if (busy || checkoutOrder) return;
@@ -86,7 +131,21 @@ export default function InCallTalktimeRechargeModal({
     setCheckoutOrder(null);
     setPendingBreakdown(null);
     if (checkout.type === 'cancel') {
-      setBusy(false);
+      // User may close checkout after paying in the UPI app, before Checkout.js saw the success.
+      setBusy(true);
+      try {
+        const recovered = await reconcilePendingWalletCheckout(pendingCheckout);
+        if (recovered.status === 'credited') {
+          const newBalance =
+            typeof recovered.data.user.walletBalance === 'number' &&
+            Number.isFinite(recovered.data.user.walletBalance)
+              ? recovered.data.user.walletBalance
+              : 0;
+          applyCreditedWallet(recovered.data.creditAdded, newBalance);
+        }
+      } finally {
+        setBusy(false);
+      }
       return;
     }
     if (checkout.type === 'error') {
@@ -119,14 +178,26 @@ export default function InCallTalktimeRechargeModal({
         typeof verified.user.walletBalance === 'number' && Number.isFinite(verified.user.walletBalance)
           ? verified.user.walletBalance
           : 0;
-      onRechargeSuccess(newBalance, verified.creditAdded);
-      Alert.alert(
-        'Talktime added',
-        `₹${verified.creditAdded.toLocaleString('en-IN')} added to your wallet. Your call continues.`,
-      );
-      onClose();
+      await clearPendingWalletCheckout();
+      setPendingCheckout(null);
+      applyCreditedWallet(verified.creditAdded, newBalance);
     } catch (e: unknown) {
-      Alert.alert('Payment failed', getErrorMessage(e));
+      if (__DEV__) console.warn('[wallet] verify failed, reconciling:', getErrorMessage(e));
+      // Razorpay already reported success — money is likely taken, so never say "failed" here.
+      const recovered = await confirmWalletPaymentWithRetry(
+        pendingCheckout,
+        checkout.razorpay_payment_id
+      );
+      if (recovered.status === 'credited') {
+        const newBalance =
+          typeof recovered.data.user.walletBalance === 'number' &&
+          Number.isFinite(recovered.data.user.walletBalance)
+            ? recovered.data.user.walletBalance
+            : 0;
+        applyCreditedWallet(recovered.data.creditAdded, newBalance);
+        return;
+      }
+      Alert.alert(PAYMENT_CONFIRMING_TITLE, PAYMENT_CONFIRMING_MESSAGE);
     } finally {
       setBusy(false);
     }
@@ -137,6 +208,10 @@ export default function InCallTalktimeRechargeModal({
       Alert.alert('Select a plan', 'Choose a recharge pack to continue.');
       return;
     }
+    // `busy` only disables the button after re-render — a fast double tap would create two orders.
+    if (startingOrderRef.current) return;
+    startingOrderRef.current = true;
+    creditAppliedRef.current = false;
     setBusy(true);
     try {
       const breakdown = computeWalletRechargeBreakdown(selected.amount);
@@ -150,10 +225,21 @@ export default function InCallTalktimeRechargeModal({
         walletAmount: breakdown.walletAmount,
         bonusPercent: selected.bonusPercent,
       });
+      const pending: PendingWalletCheckout = {
+        orderId: data.orderId,
+        payAmount: breakdown.totalPayable,
+        bonusPercent: selected.bonusPercent,
+        walletAmount: breakdown.walletAmount,
+        startedAt: Date.now(),
+      };
+      await savePendingWalletCheckout(pending);
+      setPendingCheckout(pending);
       setCheckoutOrder(data);
     } catch (e: unknown) {
       setBusy(false);
-      Alert.alert('Payment failed', getErrorMessage(e));
+      Alert.alert('Could not start payment', getErrorMessage(e));
+    } finally {
+      startingOrderRef.current = false;
     }
   };
 
@@ -221,6 +307,9 @@ export default function InCallTalktimeRechargeModal({
         visible={Boolean(checkoutOrder)}
         order={checkoutOrder}
         prefill={{ name: user?.name, contact: user?.phone }}
+        onAppForeground={() => {
+          void reconcileNow();
+        }}
         onResult={(result) => {
           void finishCheckout(result);
         }}

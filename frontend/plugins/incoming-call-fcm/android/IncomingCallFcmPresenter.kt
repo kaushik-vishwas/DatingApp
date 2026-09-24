@@ -25,9 +25,24 @@ import java.nio.charset.StandardCharsets
 object IncomingCallFcmPresenter {
   private const val TAG = "IncomingCallFcm"
   private const val TYPE_INCOMING = "call_incoming"
+  private const val TYPE_CANCELLED = "call_cancelled"
   private const val ID_PREFIX = "incoming-"
   private const val DEEP_LINK_PREFIX = "nestham://incoming-call/"
   private const val WAKE_MS = 15_000L
+  private const val MAX_REMEMBERED_CANCELLED = 20
+
+  /** Recently cancelled invites (this process), newest last. */
+  private val cancelledCallIds = ArrayDeque<String>()
+
+  @Synchronized
+  private fun rememberCancelled(callId: String) {
+    if (cancelledCallIds.contains(callId)) return
+    cancelledCallIds.addLast(callId)
+    while (cancelledCallIds.size > MAX_REMEMBERED_CANCELLED) cancelledCallIds.removeFirst()
+  }
+
+  @Synchronized
+  private fun isCancelled(callId: String): Boolean = cancelledCallIds.contains(callId)
 
   fun presentIfIncomingCall(context: Context, remoteMessage: RemoteMessage): Boolean {
     val data = remoteMessage.data
@@ -42,9 +57,18 @@ object IncomingCallFcmPresenter {
       Log.i(TAG, "Suppressed incoming call notification (receiver UI disabled)")
       return true
     }
+    if (IncomingCallUiGate.isInAppVoiceCallActive(appContext)) {
+      Log.i(TAG, "Suppressed incoming call notification (voice call already active)")
+      return true
+    }
 
     val callId = data["callId"]?.trim().orEmpty()
     if (callId.isEmpty()) return false
+    if (isCancelled(callId)) {
+      // FCM can reorder: the "cancelled" push arrived first — never ring a finished call.
+      Log.i(TAG, "Suppressed incoming call notification (already cancelled) callId=$callId")
+      return true
+    }
 
     val fromId = data["fromId"]?.trim().orEmpty()
     val fromType = data["fromType"]?.trim()?.ifEmpty { "u" } ?: "u"
@@ -241,6 +265,49 @@ object IncomingCallFcmPresenter {
       )
       return false
     }
+  }
+
+  /**
+   * Server says this invite ended unanswered (no-answer / caller hung up). Remove its ringing
+   * notification (native + Expo rows share the tag) and stop the ring if no other call rings.
+   */
+  fun dismissIfCallCancelled(context: Context, remoteMessage: RemoteMessage): Boolean {
+    val data = remoteMessage.data
+    if (data.isNullOrEmpty()) return false
+    if (data["type"]?.trim() != TYPE_CANCELLED) return false
+    val callId = data["callId"]?.trim().orEmpty()
+    if (callId.isEmpty()) return true
+    rememberCancelled(callId)
+
+    val appContext = context.applicationContext
+    val tag = ID_PREFIX + callId
+    val nm = appContext.getSystemService(NotificationManager::class.java)
+    var dismissed = false
+    var otherIncomingStillShown = false
+    try {
+      nm?.activeNotifications?.forEach { status ->
+        val statusTag = status.tag ?: return@forEach
+        if (statusTag == tag) {
+          NotificationManagerCompat.from(appContext).cancel(statusTag, status.id)
+          dismissed = true
+        } else if (statusTag.startsWith(ID_PREFIX)) {
+          otherIncomingStillShown = true
+        }
+      }
+    } catch (e: Exception) {
+      Log.w(TAG, "Cancel incoming call notification failed", e)
+    }
+    // Only silence the ring that belonged to this call — never a newer call that is ringing.
+    if (dismissed && !otherIncomingStillShown) {
+      IncomingCallRingtonePlayer.stop(appContext)
+    }
+    Log.i(TAG, "Call cancelled by server callId=$callId dismissed=$dismissed")
+    PresenceNativeWakeLog.append(
+      appContext,
+      "native_fcm_call_cancelled",
+      mapOf("callId" to callId, "dismissed" to dismissed)
+    )
+    return true
   }
 
   private fun acquireBriefWakeLock(context: Context) {

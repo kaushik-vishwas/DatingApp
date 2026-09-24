@@ -4,9 +4,25 @@ import { Linking, Platform } from 'react-native';
 const PENDING_KEY = '@selecto/pending_referral_code_v1';
 const CAPTURE_DONE_KEY = '@selecto/referral_capture_attempted_v1';
 
+/** Play/Meta install referrer labels — not user referral codes. */
+const IGNORED_INSTALL_REFERRER_CODES = new Set([
+  'ORGANIC',
+  'ORGANIC_INSTALL',
+  'GOOGLE_PLAY',
+  'PLAY_STORE',
+  'NONE',
+  'NULL',
+  'UNDEFINED',
+  'FACEBOOK',
+  'INSTAGRAM',
+  'GOOGLE',
+]);
+
 /** Matches invite landing + backend referral code format. */
 export function looksLikeReferralCode(value: string): boolean {
-  return /^[A-Za-z0-9]{6,12}$/.test(value.trim());
+  const raw = value.trim().toUpperCase();
+  if (IGNORED_INSTALL_REFERRER_CODES.has(raw)) return false;
+  return /^[A-Za-z0-9]{6,12}$/.test(raw);
 }
 
 export function normalizeReferralCode(value: unknown): string | null {

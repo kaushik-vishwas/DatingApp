@@ -110,6 +110,9 @@ export function buildRazorpayCheckoutHtml(
     (function () {
       var options = ${optionsJson};
       var closed = false;
+      // Last failed attempt. Checkout stays open after a failure (retry is enabled) so the user
+      // can retry or pick another method; we only report it if they then close the checkout.
+      var lastFailure = null;
 
       function post(payload) {
         try {
@@ -139,17 +142,23 @@ export function buildRazorpayCheckoutHtml(
           ondismiss: function () {
             if (closed) return;
             closed = true;
-            post({ type: 'cancel' });
+            if (lastFailure) {
+              post({ type: 'error', message: lastFailure.description, reason: lastFailure.reason });
+            } else {
+              post({ type: 'cancel' });
+            }
           }
         };
 
         try {
           var rzp = new Razorpay(options);
           rzp.on('payment.failed', function (response) {
-            var desc =
-              (response && response.error && (response.error.description || response.error.reason)) ||
-              'Payment failed';
-            post({ type: 'error', message: String(desc) });
+            var err = (response && response.error) || {};
+            lastFailure = {
+              description: String(err.description || err.reason || 'Payment failed'),
+              reason: String(err.reason || err.code || '')
+            };
+            post({ type: 'attempt_failed', message: lastFailure.description, reason: lastFailure.reason });
           });
           rzp.open();
         } catch (err) {
