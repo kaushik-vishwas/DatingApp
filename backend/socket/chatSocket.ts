@@ -32,6 +32,7 @@ import {
   tryReserveReceiver,
 } from '../services/callQueue';
 import { sendReceiverIncomingCallWake } from '../services/expoPush';
+import { sendFcmV1IncomingCallCancel } from '../services/fcmV1IncomingCall';
 import {
   armReceiverDiscoverGraceImmediate,
   clearReceiverDiscoverGrace,
@@ -70,6 +71,11 @@ const ACCEPTED_CALL_WATCHDOG_MS = 30_000;
 
 /** Open receiver app: allow 5s auto-accept + Stream join before no-answer skip. */
 const RING_NO_ANSWER_FOREGROUND_MS = 20_000;
+/**
+ * Once the receiver's incoming UI is actually on screen, leave at least this long to answer
+ * (10s auto-pick + join margin) — a late notification tap must not expire mid-auto-pick.
+ */
+const RING_ON_SCREEN_MIN_ANSWER_MS = 15_000;
 /** Minimized / frozen receiver: wait this long for a notification tap. */
 const RING_NO_ANSWER_BACKGROUND_MS = 15_000;
 
@@ -168,6 +174,33 @@ export function attachChatSocket(httpServer: HTTPServer): Server {
     }
   };
 
+  /**
+   * A still-ringing invite to a receiver ended unanswered. Socket `call:ended` cannot reach a
+   * closed app, so also push "stop ringing" — the caller never moves on while the receiver rings.
+   */
+  const notifyReceiverRingingCancelled = (invite: ActiveCallInvite): void => {
+    if (invite.targetType !== 'r' || invite.accepted) return;
+    void (async () => {
+      try {
+        const recv = await Receiver.findById(invite.targetId)
+          .select('fcmDeviceToken')
+          .lean<{ fcmDeviceToken?: string | null } | null>();
+        const token = recv?.fcmDeviceToken?.trim();
+        if (!token) return;
+        const result = await sendFcmV1IncomingCallCancel({ deviceToken: token, callId: invite.callId });
+        console.info('incoming call cancel fcm:', {
+          callId: invite.callId,
+          ok: result.ok,
+          status: result.status ?? null,
+          error: result.error ?? null,
+        });
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        console.error('incoming call cancel fcm error:', msg);
+      }
+    })();
+  };
+
   const expireInviteNoAnswer = (callId: string): void => {
     const invite = activeCallInvites.get(callId);
     if (!invite) return;
@@ -177,6 +210,7 @@ export function attachChatSocket(httpServer: HTTPServer): Server {
     }
     if (invite.accepted) return;
     activeCallInvites.delete(callId);
+    notifyReceiverRingingCancelled(invite);
     void settleAndReleaseCall(callId, invite.receiverId, inviteCallerId(invite), invite.invitedAt);
     io.to(accountRoom(invite.inviterType, invite.inviterId)).emit('call:response', {
       callId,
@@ -197,17 +231,6 @@ export function attachChatSocket(httpServer: HTTPServer): Server {
     });
   };
 
-  const isTargetInviteSentAfter = (
-    invite: ActiveCallInvite,
-    typ: AccountType,
-    accountId: string,
-    sinceMs: number | undefined
-  ): boolean =>
-    typeof sinceMs === 'number' &&
-    invite.targetType === typ &&
-    invite.targetId === accountId &&
-    invite.invitedAt.getTime() >= sinceMs;
-
   const armInviteNoAnswerTimeout = (invite: ActiveCallInvite, waitMs: number): void => {
     if (invite.timeoutHandle) {
       clearTimeout(invite.timeoutHandle);
@@ -216,13 +239,14 @@ export function attachChatSocket(httpServer: HTTPServer): Server {
     invite.timeoutHandle = setTimeout(() => expireInviteNoAnswer(invite.callId), Math.max(0, waitMs));
   };
   /**
-   * `keepTargetInvitesSinceMs`: on a socket drop, keep invites that were sent to this account
-   * after it disconnected — they ring the closed app via push and end via the no-answer timer.
+   * `keepUnansweredTargetInvites`: on a receiver socket drop, keep calls still ringing this
+   * receiver — the phone is rung via FCM (a dead socket can be detected late on poor network)
+   * and the no-answer timer ends the invite on both sides.
    */
   const cancelPendingInvitesFor = (
     typ: AccountType,
     accountId: string,
-    keepTargetInvitesSinceMs?: number
+    keepUnansweredTargetInvites = false
   ): void => {
     for (const [callId, invite] of activeCallInvites) {
       const isTarget = invite.targetType === typ && invite.targetId === accountId;
@@ -230,12 +254,13 @@ export function attachChatSocket(httpServer: HTTPServer): Server {
       if (!isTarget && !isInviter) continue;
       // Live calls end only via call:end / REST end / the watchdog — not queue-off or socket drops.
       if (invite.accepted) continue;
-      if (isTargetInviteSentAfter(invite, typ, accountId, keepTargetInvitesSinceMs)) continue;
+      if (keepUnansweredTargetInvites && isTarget) continue;
       if (invite.timeoutHandle) {
         clearTimeout(invite.timeoutHandle);
         invite.timeoutHandle = null;
       }
       activeCallInvites.delete(callId);
+      notifyReceiverRingingCancelled(invite);
       void settleAndReleaseCall(callId, invite.receiverId, inviteCallerId(invite), invite.invitedAt);
       io.to(accountRoom(invite.inviterType, invite.inviterId)).emit('call:ended', {
         callId,
@@ -470,8 +495,9 @@ export function attachChatSocket(httpServer: HTTPServer): Server {
     socket.on('disconnect', () => {
       const leavingId = String(socket.data.accountId);
       const leavingType = socket.data.typ as AccountType;
-      // Receivers only: closed receiver apps are rung via FCM, so post-drop invites must survive.
-      const disconnectedAtMs = leavingType === 'r' ? Date.now() : undefined;
+      // Receivers only: a closed/unreachable receiver app is rung via FCM, so its ringing
+      // invites must survive the socket drop (no-answer timer still ends them).
+      const keepUnansweredTargetInvites = leavingType === 'r';
       if (leavingType === 'r') {
         armReceiverDiscoverGraceImmediate(leavingId);
         void markReceiverDiscoverGraceIfAvailable(leavingId);
@@ -486,7 +512,7 @@ export function attachChatSocket(httpServer: HTTPServer): Server {
           if (leavingType === 'r') {
             setReceiverQueuePresence(leavingId, false);
           }
-          cancelPendingInvitesFor(leavingType, leavingId, disconnectedAtMs);
+          cancelPendingInvitesFor(leavingType, leavingId, keepUnansweredTargetInvites);
           for (const [callId, invite] of activeCallInvites) {
             if (
               (invite.inviterId === leavingId && invite.inviterType === leavingType) ||
@@ -497,8 +523,14 @@ export function attachChatSocket(httpServer: HTTPServer): Server {
                 watchAcceptedCall(callId);
                 continue;
               }
-              // Pushed to the closed app after this disconnect — let it ring (no-answer timer ends it).
-              if (isTargetInviteSentAfter(invite, leavingType, leavingId, disconnectedAtMs)) continue;
+              // Still ringing this receiver via FCM — let it ring (no-answer timer ends it).
+              if (
+                keepUnansweredTargetInvites &&
+                invite.targetId === leavingId &&
+                invite.targetType === leavingType
+              ) {
+                continue;
+              }
               if (invite.timeoutHandle) {
                 clearTimeout(invite.timeoutHandle);
                 invite.timeoutHandle = null;
@@ -1143,7 +1175,10 @@ export function attachChatSocket(httpServer: HTTPServer): Server {
           if (invite.ringSeen === 'background' && foreground) {
             invite.ringSeen = 'foreground';
             const elapsed = Date.now() - invite.invitedAt.getTime();
-            armInviteNoAnswerTimeout(invite, Math.max(1_000, RING_NO_ANSWER_FOREGROUND_MS - elapsed));
+            armInviteNoAnswerTimeout(
+              invite,
+              Math.max(RING_ON_SCREEN_MIN_ANSWER_MS, RING_NO_ANSWER_FOREGROUND_MS - elapsed)
+            );
           }
           ack?.({ ok: true });
           return;
@@ -1151,7 +1186,8 @@ export function attachChatSocket(httpServer: HTTPServer): Server {
         invite.ringSeen = foreground ? 'foreground' : 'background';
         const budgetMs = foreground ? RING_NO_ANSWER_FOREGROUND_MS : RING_NO_ANSWER_BACKGROUND_MS;
         const elapsed = Date.now() - invite.invitedAt.getTime();
-        armInviteNoAnswerTimeout(invite, Math.max(1_000, budgetMs - elapsed));
+        const minMs = foreground ? RING_ON_SCREEN_MIN_ANSWER_MS : 1_000;
+        armInviteNoAnswerTimeout(invite, Math.max(minMs, budgetMs - elapsed));
         ack?.({ ok: true });
       }
     );
@@ -1437,6 +1473,10 @@ export function attachChatSocket(httpServer: HTTPServer): Server {
           fromId: endedById,
         });
         activeCallInvites.delete(callId);
+        // Caller hung up before an answer — stop the receiver's ring even if her app is closed.
+        if (endedByType === invite.inviterType && endedById === invite.inviterId) {
+          notifyReceiverRingingCancelled(invite);
+        }
         void clearPendingIncomingCall(invite.receiverId, callId);
         void settleAndReleaseCall(
           callId,
