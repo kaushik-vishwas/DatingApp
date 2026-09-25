@@ -303,6 +303,9 @@ export function ReceiversPage() {
                   </th>
                   <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-neutral-500">Name</th>
                   <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-neutral-500">
+                    Mobile Number
+                  </th>
+                  <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-neutral-500">
                     KYC Status
                   </th>
                   <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-neutral-500">
@@ -339,6 +342,7 @@ export function ReceiversPage() {
                           {callsToday} calls today · {totalCalls} total
                         </p>
                       </td>
+                      <td className="px-4 py-3 text-neutral-700">{r.phone}</td>
                       <td className="px-4 py-3">
                         <span className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-semibold ${kyc.className}`}>
                           {kyc.label}
