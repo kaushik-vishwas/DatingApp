@@ -30,6 +30,7 @@ import {
   touchReceiverBackgroundPresence,
 } from '../services/receiverPresence';
 import { getLivePendingIncomingCall } from '../services/pendingIncomingCall';
+import { acknowledgeInviteRinging, declineInviteByReceiver } from '../services/callInviteActions';
 import {
   releaseReceiverReservation,
   syncReceiverQueueState,
@@ -948,7 +949,7 @@ export const getIncomingPending = async (req: Request, res: Response): Promise<v
       return;
     }
     const receiverId = String(req.receiver._id);
-    // Native keep-alive polls every 4s — renew discover grace so callers keep seeing her online.
+    // Native keep-alive polls every 10s — renew discover grace so callers keep seeing her online.
     try {
       await touchReceiverBackgroundPresence(receiverId);
     } catch {
@@ -970,6 +971,75 @@ export const getIncomingPending = async (req: Request, res: Response): Promise<v
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error('getIncomingPending error:', msg);
+    res.status(500).json({ message: msg || 'Server error' });
+  }
+};
+
+function receiverInviteActionStatus(error: string): number {
+  if (error === 'Forbidden') return 403;
+  if (error === 'Unknown call invite') return 404;
+  return 503;
+}
+
+/**
+ * POST /calls/:callId/decline — receiver tapped Decline on the native incoming-call notification
+ * (no JS running). Same effect as socket `call:response` with accepted=false.
+ */
+export const declineIncomingCall = async (req: Request, res: Response): Promise<void> => {
+  try {
+    if (req.accountKind !== 'receiver' || !req.receiver?._id) {
+      res.status(403).json({ message: 'Receiver account required' });
+      return;
+    }
+    const callId = String(req.params.callId ?? '').trim();
+    if (!callId) {
+      res.status(400).json({ message: 'callId is required' });
+      return;
+    }
+    const result = declineInviteByReceiver(callId, String(req.receiver._id));
+    if (!result.ok) {
+      res.status(receiverInviteActionStatus(result.error)).json({ ok: false, error: result.error });
+      return;
+    }
+    res.status(200).json(result);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error('declineIncomingCall error:', msg);
+    res.status(500).json({ message: msg || 'Server error' });
+  }
+};
+
+/**
+ * POST /calls/:callId/ringing — native Android posted the incoming-call notification.
+ * Lets the server tell "rang on the device" apart from "push never arrived".
+ */
+export const acknowledgeIncomingCallRinging = async (req: Request, res: Response): Promise<void> => {
+  try {
+    if (req.accountKind !== 'receiver' || !req.receiver?._id) {
+      res.status(403).json({ message: 'Receiver account required' });
+      return;
+    }
+    const callId = String(req.params.callId ?? '').trim();
+    if (!callId) {
+      res.status(400).json({ message: 'callId is required' });
+      return;
+    }
+    const receiverId = String(req.receiver._id);
+    const result = acknowledgeInviteRinging(callId, receiverId);
+    // The phone just proved it is reachable — renew its discover presence lease.
+    try {
+      await touchReceiverBackgroundPresence(receiverId);
+    } catch {
+      // Ack response must not fail if presence sync fails.
+    }
+    if (!result.ok) {
+      res.status(receiverInviteActionStatus(result.error)).json({ ok: false, error: result.error });
+      return;
+    }
+    res.status(200).json(result);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error('acknowledgeIncomingCallRinging error:', msg);
     res.status(500).json({ message: msg || 'Server error' });
   }
 };

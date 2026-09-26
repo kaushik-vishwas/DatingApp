@@ -17,6 +17,11 @@ import { scheduleReceiverAvailabilityNotifications } from '../services/receiverA
 import { registerPendingCallInvite, unregisterPendingCallInvite } from '../services/callInviteRegistry';
 import { clearPendingIncomingCall, setPendingIncomingCall } from '../services/pendingIncomingCall';
 import {
+  isReceiverRingAckCapable,
+  markReceiverRingAckCapable,
+  registerCallInviteActions,
+} from '../services/callInviteActions';
+import {
   ensureCallEndedAndSettled,
   getCallLastSyncAtMs,
   getStaleOngoingCallMs,
@@ -61,6 +66,8 @@ type ActiveCallInvite = {
   invitedAt: Date;
   timeoutHandle: NodeJS.Timeout | null;
   ringSeen: 'unknown' | 'foreground' | 'background';
+  /** Native Android confirmed the incoming-call notification is ringing (POST /calls/:id/ringing). */
+  ringAckAt: number | null;
   /** Set once the receiver accepts — the call is live and must survive socket drops (app minimized). */
   accepted: boolean;
   watchdogHandle: NodeJS.Timeout | null;
@@ -76,8 +83,13 @@ const RING_NO_ANSWER_FOREGROUND_MS = 20_000;
  * (10s auto-pick + join margin) — a late notification tap must not expire mid-auto-pick.
  */
 const RING_ON_SCREEN_MIN_ANSWER_MS = 15_000;
-/** Minimized / frozen receiver: wait this long for a notification tap. */
-const RING_NO_ANSWER_BACKGROUND_MS = 15_000;
+/**
+ * Receiver phone must confirm the native incoming-call notification rang (or its socket saw the
+ * invite) within this window after the wake push; otherwise it is treated as unreachable.
+ */
+const RING_ACK_TIMEOUT_MS = 8_000;
+/** Minimized / frozen receiver: wait this long for a notification tap (covers Doze push delay + app resume). */
+const RING_NO_ANSWER_BACKGROUND_MS = 30_000;
 
 function inviteCallerId(invite: ActiveCallInvite): string {
   return invite.inviterType === 'u' ? invite.inviterId : invite.targetId;
@@ -238,6 +250,98 @@ export function attachChatSocket(httpServer: HTTPServer): Server {
     }
     invite.timeoutHandle = setTimeout(() => expireInviteNoAnswer(invite.callId), Math.max(0, waitMs));
   };
+
+  /** Accept / decline an unanswered invite (socket `call:response` and native REST decline). */
+  const applyInviteResponse = (
+    invite: ActiveCallInvite,
+    accepted: boolean,
+    responderType: AccountType,
+    responderId: string
+  ): void => {
+    const callId = invite.callId;
+    if (invite.timeoutHandle) {
+      clearTimeout(invite.timeoutHandle);
+      invite.timeoutHandle = null;
+    }
+
+    io.to(accountRoom(invite.inviterType, invite.inviterId)).emit('call:response', {
+      callId,
+      accepted,
+      fromType: responderType,
+      fromId: responderId,
+    });
+    io.to(accountRoom(invite.targetType, invite.targetId)).emit('call:response', {
+      callId,
+      accepted,
+      fromType: responderType,
+      fromId: responderId,
+    });
+    if (accepted) {
+      invite.accepted = true;
+    } else {
+      activeCallInvites.delete(callId);
+      void clearPendingIncomingCall(invite.receiverId, callId);
+      void settleAndReleaseCall(
+        callId,
+        invite.receiverId,
+        inviteCallerId(invite),
+        invite.invitedAt
+      );
+    }
+  };
+
+  /**
+   * No ring ack (native notification) and no socket "seen" shortly after the wake push →
+   * the phone is not actually reachable. Hide the receiver from discover (the next keep-alive
+   * heartbeat re-arms presence if she is fine); the current invite keeps ringing to its timeout.
+   */
+  const armRingAckWatch = (invite: ActiveCallInvite): void => {
+    setTimeout(() => {
+      if (activeCallInvites.get(invite.callId) !== invite) return;
+      if (invite.accepted || invite.ringAckAt != null || invite.ringSeen !== 'unknown') return;
+      const receiverId = invite.targetId;
+      if (hasActiveSocketForAccount('r', receiverId)) return;
+      if (!isReceiverRingAckCapable(receiverId)) return;
+      console.warn('incoming call ring not acknowledged — marking receiver unreachable', {
+        callId: invite.callId,
+        receiverId,
+        ackTimeoutMs: RING_ACK_TIMEOUT_MS,
+      });
+      clearReceiverDiscoverGrace(receiverId);
+      void syncReceiverPresenceInDatabase(receiverId);
+    }, RING_ACK_TIMEOUT_MS);
+  };
+
+  registerCallInviteActions({
+    declineByReceiver: (callId, receiverId) => {
+      const invite = activeCallInvites.get(callId);
+      if (!invite) return { ok: false, error: 'Unknown call invite' };
+      if (invite.targetType !== 'r' || invite.targetId !== receiverId) {
+        return { ok: false, error: 'Forbidden' };
+      }
+      // A late decline must never end a live call (same rule as socket call:response).
+      if (invite.accepted) return { ok: true, alreadyAccepted: true };
+      applyInviteResponse(invite, false, 'r', receiverId);
+      return { ok: true };
+    },
+    acknowledgeRinging: (callId, receiverId) => {
+      markReceiverRingAckCapable(receiverId);
+      const invite = activeCallInvites.get(callId);
+      if (!invite) return { ok: false, error: 'Unknown call invite' };
+      if (invite.targetType !== 'r' || invite.targetId !== receiverId) {
+        return { ok: false, error: 'Forbidden' };
+      }
+      if (invite.ringAckAt == null) {
+        invite.ringAckAt = Date.now();
+        console.info('incoming call ring acknowledged', {
+          callId,
+          receiverId,
+          ackAfterMs: invite.ringAckAt - invite.invitedAt.getTime(),
+        });
+      }
+      return { ok: true, alreadyAccepted: invite.accepted || undefined };
+    },
+  });
   /**
    * `keepUnansweredTargetInvites`: on a receiver socket drop, keep calls still ringing this
    * receiver — the phone is rung via FCM (a dead socket can be detected late on poor network)
@@ -1075,11 +1179,13 @@ export function attachChatSocket(httpServer: HTTPServer): Server {
           invitedAt,
           timeoutHandle: null,
           ringSeen: 'unknown',
+          ringAckAt: null,
           accepted: false,
           watchdogHandle: null,
         };
         activeCallInvites.set(callId, invite);
         armInviteNoAnswerTimeout(invite, RING_NO_ANSWER_BACKGROUND_MS);
+        if (targetType === 'r') armRingAckWatch(invite);
 
         let fromName = '';
         let fromImage: string | null = null;
@@ -1218,35 +1324,7 @@ export function attachChatSocket(httpServer: HTTPServer): Server {
         ack?.({ ok: true, alreadyAccepted: true });
         return;
       }
-      if (invite.timeoutHandle) {
-        clearTimeout(invite.timeoutHandle);
-        invite.timeoutHandle = null;
-      }
-
-      io.to(accountRoom(invite.inviterType, invite.inviterId)).emit('call:response', {
-        callId,
-        accepted,
-        fromType: responderType,
-        fromId: responderId,
-      });
-      io.to(accountRoom(invite.targetType, invite.targetId)).emit('call:response', {
-        callId,
-        accepted,
-        fromType: responderType,
-        fromId: responderId,
-      });
-      if (accepted) {
-        invite.accepted = true;
-      } else {
-        activeCallInvites.delete(callId);
-        void clearPendingIncomingCall(invite.receiverId, callId);
-        void settleAndReleaseCall(
-          callId,
-          invite.receiverId,
-          inviteCallerId(invite),
-          invite.invitedAt
-        );
-      }
+      applyInviteResponse(invite, accepted, responderType, responderId);
       ack?.({ ok: true });
     });
 

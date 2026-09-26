@@ -1,6 +1,6 @@
 import Receiver from '../models/Receiver';
 
-const PENDING_TTL_MS = 16_000;
+const PENDING_TTL_MS = 31_000;
 
 export type PendingIncomingCall = {
   callId: string;
