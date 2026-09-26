@@ -5,6 +5,7 @@ import Receiver from '../models/Receiver';
 import ReceiverPriorityNotification from '../models/ReceiverPriorityNotification';
 import { hasPendingCallInviteForReceiver } from './callInviteRegistry';
 import { isReceiverSocketConnected } from '../socket/socketRegistry';
+import { isReceiverLoggedInAndAvailable } from './receiverPresence';
 
 const waitingReceiverIds = new Set<string>();
 const busyReceiverIds = new Set<string>();
@@ -156,17 +157,28 @@ export async function pickRandomQueuedReceiverForCaller(callerId: string): Promi
   };
 
   const candidates = await Receiver.find(baseFilter)
-    .select('_id name profileImage audioCallRate')
+    .select('_id name profileImage audioCallRate isAvailable discoverGraceUntil')
     .lean<{
       _id: mongoose.Types.ObjectId;
       name: string;
       profileImage?: string | null;
       audioCallRate?: number | null;
+      isAvailable?: boolean;
+      discoverGraceUntil?: Date | null;
     }[]>();
 
+  // Same presence rule as discover / bootstrap / call:invite: live socket OR discover grace,
+  // so closed-app receivers can be matched and woken by the existing FCM invite push.
   const eligibleRows = candidates.filter((r) => {
     const id = String(r._id);
-    return !busyReceiverIds.has(id) && isReceiverSocketConnected(id);
+    return (
+      !busyReceiverIds.has(id) &&
+      isReceiverLoggedInAndAvailable({
+        receiverId: id,
+        isAvailable: Boolean(r.isAvailable),
+        discoverGraceUntil: r.discoverGraceUntil ?? null,
+      })
+    );
   });
   if (eligibleRows.length === 0) return null;
 
