@@ -30,7 +30,12 @@ import {
   touchReceiverBackgroundPresence,
 } from '../services/receiverPresence';
 import { getLivePendingIncomingCall } from '../services/pendingIncomingCall';
-import { acknowledgeInviteRinging, declineInviteByReceiver } from '../services/callInviteActions';
+import {
+  acknowledgeInviteRinging,
+  declineInviteByReceiver,
+  hasLiveInviteForReceiver,
+  markInviteSeenByReceiver,
+} from '../services/callInviteActions';
 import {
   releaseReceiverReservation,
   syncReceiverQueueState,
@@ -489,8 +494,14 @@ export const getVoiceBootstrap = async (req: Request, res: Response): Promise<vo
     res.status(409).json({ message: 'Receiver is currently unavailable' });
     return;
   }
+  // The receiver answering an invite that is ringing her right now is reachable by definition —
+  // on a cold start from the notification her socket is not up yet and the grace may have lapsed.
+  const receiverAnsweringLiveInvite =
+    accountKind === 'receiver' &&
+    Boolean(requestedCallId) &&
+    hasLiveInviteForReceiver(requestedCallId, receiverId, callerUserId);
   // Align with discover: bootstrap only if Go Online is on and they are logged in (socket or grace).
-  if (!isReceiverSocketConnected(receiverId)) {
+  if (!receiverAnsweringLiveInvite && !isReceiverSocketConnected(receiverId)) {
     const recvPresence = await Receiver.findById(receiverId)
       .select('discoverGraceUntil isAvailable')
       .lean<{
@@ -1040,6 +1051,37 @@ export const acknowledgeIncomingCallRinging = async (req: Request, res: Response
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error('acknowledgeIncomingCallRinging error:', msg);
+    res.status(500).json({ message: msg || 'Server error' });
+  }
+};
+
+/**
+ * POST /calls/:callId/seen — native Android: the receiver tapped the incoming-call notification
+ * (app opening, JS / socket not up yet). Locks the on-screen answer budget like socket
+ * `call:incoming-seen` so a slow cold start cannot expire the invite mid-answer.
+ */
+export const markIncomingCallSeen = async (req: Request, res: Response): Promise<void> => {
+  try {
+    if (req.accountKind !== 'receiver' || !req.receiver?._id) {
+      res.status(403).json({ message: 'Receiver account required' });
+      return;
+    }
+    const callId = String(req.params.callId ?? '').trim();
+    if (!callId) {
+      res.status(400).json({ message: 'callId is required' });
+      return;
+    }
+    const appState = typeof req.body?.appState === 'string' ? req.body.appState : 'active';
+    const foreground = appState === 'active' || appState === 'foreground' || appState === 'inactive';
+    const result = markInviteSeenByReceiver(callId, String(req.receiver._id), foreground);
+    if (!result.ok) {
+      res.status(receiverInviteActionStatus(result.error)).json({ ok: false, error: result.error });
+      return;
+    }
+    res.status(200).json(result);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error('markIncomingCallSeen error:', msg);
     res.status(500).json({ message: msg || 'Server error' });
   }
 };

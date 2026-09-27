@@ -11,6 +11,8 @@ export type InviteActionResult =
 type InviteActionHandlers = {
   declineByReceiver: (callId: string, receiverId: string) => InviteActionResult;
   acknowledgeRinging: (callId: string, receiverId: string) => InviteActionResult;
+  markSeenByReceiver: (callId: string, receiverId: string, foreground: boolean) => InviteActionResult;
+  hasLiveInviteForReceiver: (callId: string, receiverId: string, callerId: string) => boolean;
 };
 
 let handlers: InviteActionHandlers | null = null;
@@ -25,6 +27,22 @@ export function declineInviteByReceiver(callId: string, receiverId: string): Inv
 
 export function acknowledgeInviteRinging(callId: string, receiverId: string): InviteActionResult {
   return handlers?.acknowledgeRinging(callId, receiverId) ?? { ok: false, error: 'Unavailable' };
+}
+
+/** Receiver opened the incoming call (native notification tap, before JS / socket are up). */
+export function markInviteSeenByReceiver(
+  callId: string,
+  receiverId: string,
+  foreground: boolean
+): InviteActionResult {
+  return (
+    handlers?.markSeenByReceiver(callId, receiverId, foreground) ?? { ok: false, error: 'Unavailable' }
+  );
+}
+
+/** An unanswered-or-live invite from [callerId] is ringing / connected to [receiverId] right now. */
+export function hasLiveInviteForReceiver(callId: string, receiverId: string, callerId: string): boolean {
+  return handlers?.hasLiveInviteForReceiver(callId, receiverId, callerId) ?? false;
 }
 
 /**

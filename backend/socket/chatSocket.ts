@@ -71,6 +71,8 @@ type ActiveCallInvite = {
   /** Set once the receiver accepts — the call is live and must survive socket drops (app minimized). */
   accepted: boolean;
   watchdogHandle: NodeJS.Timeout | null;
+  /** Epoch ms when the current no-answer timer fires (0 = not armed). */
+  noAnswerDeadlineAt: number;
 };
 
 /** How often to re-check a live call whose participant socket dropped. */
@@ -90,6 +92,17 @@ const RING_ON_SCREEN_MIN_ANSWER_MS = 15_000;
 const RING_ACK_TIMEOUT_MS = 8_000;
 /** Minimized / frozen receiver: wait this long for a notification tap (covers Doze push delay + app resume). */
 const RING_NO_ANSWER_BACKGROUND_MS = 30_000;
+/**
+ * The phone confirmed its native incoming-call notification is ringing (POST /calls/:id/ringing).
+ * After long idle the app is killed / frozen: tap → JS cold start → socket connect can take well
+ * over 30s, so keep the invite alive while the phone is still ringing (native ring lasts 55s).
+ */
+const RING_NO_ANSWER_NATIVE_RING_MS = 45_000;
+/**
+ * Hard ceiling for any unanswered invite, measured from the invite. Stays under the caller app's
+ * 50s outcome safety net (counted from its invite ack) so the server's no_answer always wins.
+ */
+const RING_MAX_TOTAL_MS = 48_000;
 
 function inviteCallerId(invite: ActiveCallInvite): string {
   return invite.inviterType === 'u' ? invite.inviterId : invite.targetId;
@@ -248,7 +261,44 @@ export function attachChatSocket(httpServer: HTTPServer): Server {
       clearTimeout(invite.timeoutHandle);
       invite.timeoutHandle = null;
     }
-    invite.timeoutHandle = setTimeout(() => expireInviteNoAnswer(invite.callId), Math.max(0, waitMs));
+    const elapsed = Date.now() - invite.invitedAt.getTime();
+    const cappedMs = Math.max(0, Math.min(waitMs, RING_MAX_TOTAL_MS - elapsed));
+    invite.noAnswerDeadlineAt = Date.now() + cappedMs;
+    invite.timeoutHandle = setTimeout(() => expireInviteNoAnswer(invite.callId), cappedMs);
+  };
+
+  /** On-screen budget; never shortens the native-ring budget (tap → cold start must still fit). */
+  const armOnScreenBudget = (invite: ActiveCallInvite, elapsed: number): void => {
+    let waitMs = Math.max(RING_ON_SCREEN_MIN_ANSWER_MS, RING_NO_ANSWER_FOREGROUND_MS - elapsed);
+    if (invite.ringAckAt != null && invite.noAnswerDeadlineAt > 0) {
+      waitMs = Math.max(waitMs, invite.noAnswerDeadlineAt - Date.now());
+    }
+    armInviteNoAnswerTimeout(invite, waitMs);
+  };
+
+  /**
+   * Receiver saw the invite (socket `call:incoming-seen` or native notification tap via REST).
+   * Foreground = incoming UI on screen → short on-screen budget; background = still minimized.
+   */
+  const applyInviteSeen = (invite: ActiveCallInvite, foreground: boolean): void => {
+    const elapsed = Date.now() - invite.invitedAt.getTime();
+    if (invite.ringSeen !== 'unknown') {
+      // Upgrade minimized → on-screen budget when the receiver opens the call UI.
+      if (invite.ringSeen === 'background' && foreground) {
+        invite.ringSeen = 'foreground';
+        armOnScreenBudget(invite, elapsed);
+      }
+      return;
+    }
+    invite.ringSeen = foreground ? 'foreground' : 'background';
+    if (foreground) {
+      armOnScreenBudget(invite, elapsed);
+      return;
+    }
+    // A native ring ack already extended the minimized budget — a background "seen" must not shrink it.
+    const backgroundBudgetMs =
+      invite.ringAckAt != null ? RING_NO_ANSWER_NATIVE_RING_MS : RING_NO_ANSWER_BACKGROUND_MS;
+    armInviteNoAnswerTimeout(invite, Math.max(1_000, backgroundBudgetMs - elapsed));
   };
 
   /** Accept / decline an unanswered invite (socket `call:response` and native REST decline). */
@@ -338,8 +388,29 @@ export function attachChatSocket(httpServer: HTTPServer): Server {
           receiverId,
           ackAfterMs: invite.ringAckAt - invite.invitedAt.getTime(),
         });
+        // Phone is ringing natively but JS may be dead — give tap + cold start time to reach us.
+        // An on-screen ("foreground") budget is already tighter by design; leave it alone.
+        if (!invite.accepted && invite.ringSeen !== 'foreground') {
+          const elapsed = invite.ringAckAt - invite.invitedAt.getTime();
+          armInviteNoAnswerTimeout(invite, Math.max(1_000, RING_NO_ANSWER_NATIVE_RING_MS - elapsed));
+        }
       }
       return { ok: true, alreadyAccepted: invite.accepted || undefined };
+    },
+    markSeenByReceiver: (callId, receiverId, foreground) => {
+      const invite = activeCallInvites.get(callId);
+      if (!invite) return { ok: false, error: 'Unknown call invite' };
+      if (invite.targetType !== 'r' || invite.targetId !== receiverId) {
+        return { ok: false, error: 'Forbidden' };
+      }
+      if (invite.accepted) return { ok: true, alreadyAccepted: true };
+      applyInviteSeen(invite, foreground);
+      return { ok: true };
+    },
+    hasLiveInviteForReceiver: (callId, receiverId, callerId) => {
+      const invite = activeCallInvites.get(callId);
+      if (!invite || invite.targetType !== 'r') return false;
+      return invite.targetId === receiverId && invite.inviterId === callerId;
     },
   });
   /**
@@ -1182,6 +1253,7 @@ export function attachChatSocket(httpServer: HTTPServer): Server {
           ringAckAt: null,
           accepted: false,
           watchdogHandle: null,
+          noAnswerDeadlineAt: 0,
         };
         activeCallInvites.set(callId, invite);
         armInviteNoAnswerTimeout(invite, RING_NO_ANSWER_BACKGROUND_MS);
@@ -1276,24 +1348,7 @@ export function attachChatSocket(httpServer: HTTPServer): Server {
           payload?.appState === 'active' ||
           payload?.appState === 'foreground' ||
           payload?.appState === 'inactive';
-        if (invite.ringSeen !== 'unknown') {
-          // Upgrade minimized → on-screen budget when the receiver opens the call UI.
-          if (invite.ringSeen === 'background' && foreground) {
-            invite.ringSeen = 'foreground';
-            const elapsed = Date.now() - invite.invitedAt.getTime();
-            armInviteNoAnswerTimeout(
-              invite,
-              Math.max(RING_ON_SCREEN_MIN_ANSWER_MS, RING_NO_ANSWER_FOREGROUND_MS - elapsed)
-            );
-          }
-          ack?.({ ok: true });
-          return;
-        }
-        invite.ringSeen = foreground ? 'foreground' : 'background';
-        const budgetMs = foreground ? RING_NO_ANSWER_FOREGROUND_MS : RING_NO_ANSWER_BACKGROUND_MS;
-        const elapsed = Date.now() - invite.invitedAt.getTime();
-        const minMs = foreground ? RING_ON_SCREEN_MIN_ANSWER_MS : 1_000;
-        armInviteNoAnswerTimeout(invite, Math.max(minMs, budgetMs - elapsed));
+        applyInviteSeen(invite, foreground);
         ack?.({ ok: true });
       }
     );

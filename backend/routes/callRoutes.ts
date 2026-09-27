@@ -7,6 +7,7 @@ import {
   getIncomingPending,
   getRandomQueuedReceiver,
   getVoiceBootstrap,
+  markIncomingCallSeen,
   rateVoiceSession,
   reportVoiceSessionIssue,
   startVoiceSession,
@@ -26,5 +27,6 @@ router.post('/session/report', protect, reportVoiceSessionIssue);
 // Native Android (no JS): decline from the notification / confirm the notification rang.
 router.post('/:callId/decline', protect, declineIncomingCall);
 router.post('/:callId/ringing', protect, acknowledgeIncomingCallRinging);
+router.post('/:callId/seen', protect, markIncomingCallSeen);
 
 export default router;
