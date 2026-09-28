@@ -46,10 +46,16 @@ export type IncomingCallAndroidModule = {
     sdkInt?: number;
   }>;
   isIgnoringBatteryOptimizations(): boolean;
+  setShowOverLockScreen(enabled: boolean): boolean;
+  hasOemAutostartSettings(): boolean;
+  openOemAutostartSettings(): { opened?: boolean; component?: string | null; reason?: string };
   canUseFullScreenIntent(): boolean;
   openFullScreenIntentSettingsAsync(): Promise<{ ok?: boolean; reason?: string }>;
   startOnlinePresenceKeepAlive(apiBase?: string, authToken?: string): boolean;
   stopOnlinePresenceKeepAlive(): boolean;
+  clearNativeCallCredentials(): boolean;
+  markIncomingCallHandledNative(callId: string): boolean;
+  isIncomingCallDeclined(callId: string): boolean;
   isOnlinePresenceKeepAliveRunning(): boolean;
   readNativePresenceWakeLog(): string;
   clearNativePresenceWakeLog(): boolean;
@@ -92,6 +98,8 @@ function unavailableMethod(name: string): (...args: unknown[]) => unknown {
   return (..._args: unknown[]) => {
     if (name === 'isBluetoothVoiceOutputAvailable') return false;
     if (name === 'isIgnoringBatteryOptimizations') return false;
+    if (name === 'hasOemAutostartSettings') return false;
+    if (name === 'openOemAutostartSettings') return { opened: false, reason: 'unavailable' };
     if (name === 'canUseFullScreenIntent') return true;
     if (name === 'isOnlinePresenceKeepAliveRunning') return false;
     if (name === 'readNativePresenceWakeLog') return '';

@@ -382,6 +382,9 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
   /** Caller wallet from server (both roles) — stays in sync as the call is billed. */
   const [sessionCallerWalletInr, setSessionCallerWalletInr] = useState<number | null>(null);
   const [talktimeRechargeOpen, setTalktimeRechargeOpen] = useState(false);
+  /** Caller: "2 min left — recharge?" prompt (shown once per low-balance stretch). */
+  const [lowTalkPromptOpen, setLowTalkPromptOpen] = useState(false);
+  const lowTalkPromptShownRef = useRef(false);
   const [sessionCallRatePerMinute, setSessionCallRatePerMinute] = useState<number | null>(null);
   const [ratingOpen, setRatingOpen] = useState(false);
   const [selectedRating, setSelectedRating] = useState(0);
@@ -856,7 +859,9 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
 
   useEffect(() => {
     readyRef.current = ready;
-  }, [ready]);
+    // Safety net: a late FCM / keep-alive re-present between Accept and ready can restart the ring.
+    if (ready) void stopIncomingRingtone();
+  }, [ready, stopIncomingRingtone]);
 
   useEffect(() => {
     if (Platform.OS !== 'android') return;
@@ -2245,6 +2250,19 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
     })();
   }, [remainingTalkSec, ready, showRemainingTalkCountdown, user?.role, sessionCallerWalletInr, callerWalletInr]);
 
+  useEffect(() => {
+    if (user?.role !== 'caller' || !ready) return;
+    if (!isTalkTimeLowWarning) {
+      // Re-arm after a recharge pushes remaining time back above the threshold.
+      if (remainingTalkSec > TALK_TIME_LOW_WARNING_SEC) lowTalkPromptShownRef.current = false;
+      setLowTalkPromptOpen(false);
+      return;
+    }
+    if (lowTalkPromptShownRef.current || talktimeRechargeOpen) return;
+    lowTalkPromptShownRef.current = true;
+    setLowTalkPromptOpen(true);
+  }, [isTalkTimeLowWarning, remainingTalkSec, ready, user?.role, talktimeRechargeOpen]);
+
   const recoverAfterGsmHold = useCallback(async (): Promise<void> => {
     // Keep gsmInterruptPending / system hold until Stream is back so peer does not
     // treat a transient LEFT/empty remote as hangup (stream_remote_empty).
@@ -3328,6 +3346,41 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
       {screenBody}
       {ratingModal}
       {postCallModal}
+      <Modal
+        visible={lowTalkPromptOpen && user?.role === 'caller' && !talktimeRechargeOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setLowTalkPromptOpen(false)}
+      >
+        <View style={styles.lowTalkBackdrop}>
+          <View style={styles.lowTalkCard}>
+            <TouchableOpacity
+              style={styles.lowTalkClose}
+              onPress={() => setLowTalkPromptOpen(false)}
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              accessibilityLabel="Close"
+            >
+              <Ionicons name="close" size={22} color="#e9d5ff" />
+            </TouchableOpacity>
+            <Ionicons name="time-outline" size={36} color="#f59e0b" />
+            <Text style={styles.lowTalkTitle}>Only 2 minutes left</Text>
+            <Text style={styles.lowTalkBody}>
+              Your talk time is about to run out. Recharge now to keep the call going.
+            </Text>
+            <TouchableOpacity
+              style={styles.lowTalkRechargeBtn}
+              activeOpacity={0.88}
+              onPress={() => {
+                setLowTalkPromptOpen(false);
+                setTalktimeRechargeOpen(true);
+              }}
+            >
+              <Ionicons name="wallet-outline" size={18} color="#fff" />
+              <Text style={styles.lowTalkRechargeText}>Recharge</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
       <InCallTalktimeRechargeModal
         visible={talktimeRechargeOpen}
         onClose={() => setTalktimeRechargeOpen(false)}
@@ -3551,6 +3604,41 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(124, 58, 237, 0.35)',
   },
   addTalktimeBtnText: { color: '#faf5ff', fontSize: 13, fontWeight: '800' },
+  lowTalkBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 28,
+  },
+  lowTalkCard: {
+    width: '100%',
+    maxWidth: 340,
+    backgroundColor: '#1a0b2e',
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: 'rgba(245,158,11,0.5)',
+    paddingTop: 28,
+    paddingBottom: 22,
+    paddingHorizontal: 22,
+    alignItems: 'center',
+  },
+  lowTalkClose: { position: 'absolute', top: 12, right: 12, padding: 2 },
+  lowTalkTitle: { color: '#fff', fontSize: 18, fontWeight: '800', marginTop: 10, textAlign: 'center' },
+  lowTalkBody: { color: '#d8c7f0', fontSize: 14, marginTop: 8, textAlign: 'center', lineHeight: 20 },
+  lowTalkRechargeBtn: {
+    marginTop: 18,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: '#7b2cff',
+    borderRadius: 999,
+    paddingVertical: 12,
+    paddingHorizontal: 28,
+    alignSelf: 'stretch',
+  },
+  lowTalkRechargeText: { color: '#fff', fontSize: 15, fontWeight: '800' },
   remainingTalkCompact: {
     marginTop: 4,
     marginBottom: 0,

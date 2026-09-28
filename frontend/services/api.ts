@@ -492,6 +492,20 @@ export const getErrorMessage = (error: unknown): string => {
   return 'Something went wrong';
 };
 
+/**
+ * True when the server refused login because the account was paused by admin
+ * (rejected/terminated). Backend returns 403 with `error: VERIFY_OTP_ACCOUNT_SUSPENDED`
+ * (PAUSED_MSG). Kept precise so it never intercepts any other error.
+ */
+export const isAccountPausedError = (error: unknown): boolean => {
+  if (!axios.isAxiosError(error)) return false;
+  if (error.response?.status !== 403) return false;
+  const data = error.response?.data as { message?: unknown; error?: unknown } | undefined;
+  const code = data?.error;
+  const msg = typeof data?.message === 'string' ? data.message : '';
+  return code === 'VERIFY_OTP_ACCOUNT_SUSPENDED' || /access is paused/i.test(msg);
+};
+
 /** Diagnostics only: like getErrorMessage but keeps the raw text of technical/coding errors. */
 export const getErrorDetailForLog = (error: unknown): string => {
   if (error instanceof Error && isTechnicalCodeError(error) && !isTransportFailureMessage(error.message)) {
@@ -755,6 +769,9 @@ export const chatApi = {
 };
 
 export const callApi = {
+  /** Receiver declines an unanswered invite over REST (socket not connected yet). 404 = already over. */
+  declineIncoming: (callId: string) =>
+    api.post<{ ok: boolean }>(`/calls/${encodeURIComponent(callId)}/decline`, {}),
   bootstrap: (peerId: string, callId?: string) =>
     api.get<VoiceBootstrapResponse>('/calls/bootstrap', {
       params: { peerId, ...(callId ? { callId } : {}) },

@@ -1,11 +1,24 @@
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useFocusEffect } from '@react-navigation/native';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Animated, Image, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import {
+  ActivityIndicator,
+  Alert,
+  Animated,
+  Image,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { useCallSignals, type IncomingCallRequest } from '../../context/CallSignalContext';
+import {
+  isIncomingCallGoneError,
+  useCallSignals,
+  type IncomingCallRequest,
+} from '../../context/CallSignalContext';
 import type { ReceiverStackParamList } from '../../navigation/ReceiverStackParamList';
 import { resolveProfileImageSource } from '../../utils/avatarSource';
 import { canNavigateToIncomingCall } from '../../utils/incomingCallNotifications';
@@ -34,6 +47,8 @@ export default function IncomingCallScreen({ navigation, route }: Props): React.
   const peerAvatarSource = useMemo(() => resolveProfileImageSource(peerImage), [peerImage]);
 
   const [responding, setResponding] = useState(false);
+  /** Which button was tapped — shows its spinner while the response is in flight. */
+  const [respondingAction, setRespondingAction] = useState<'accept' | 'reject' | null>(null);
   const respondedRef = useRef(false);
   const acceptRef = useRef<() => void>(() => {});
   const rejectRef = useRef<() => void>(() => {});
@@ -61,12 +76,14 @@ export default function IncomingCallScreen({ navigation, route }: Props): React.
     })();
   }, [startIncomingRingtone]);
 
-  // Pre-ask mic + Android phone/BT + warm audio while ringing so Accept → join is immediate.
+  // Warm the mic-permission cache + audio while ringing so Accept → join is immediate. Check only:
+  // a system permission dialog here covers Accept/Reject (taps lost). Accept / the call screen
+  // still request any missing permission before connecting.
   useEffect(() => {
     void (async () => {
       try {
-        const { ensureVoiceCallPermissions } = await import('../../utils/voiceCallPermissions');
-        await ensureVoiceCallPermissions();
+        const { hasVoiceCallMicrophonePermission } = await import('../../utils/voiceCallPermissions');
+        await hasVoiceCallMicrophonePermission();
       } catch {
         // Accept path still verifies microphone before connect.
       }
@@ -85,8 +102,9 @@ export default function IncomingCallScreen({ navigation, route }: Props): React.
   useEffect(() => {
     const pulseAnim = Animated.loop(
       Animated.sequence([
-        Animated.timing(pulse, { toValue: 1, duration: 900, useNativeDriver: false }),
-        Animated.timing(pulse, { toValue: 0, duration: 0, useNativeDriver: false }),
+        // Native driver: keeps the JS thread free for taps during a busy cold start.
+        Animated.timing(pulse, { toValue: 1, duration: 900, useNativeDriver: true }),
+        Animated.timing(pulse, { toValue: 0, duration: 0, useNativeDriver: true }),
       ])
     );
     pulseAnim.start();
@@ -104,11 +122,15 @@ export default function IncomingCallScreen({ navigation, route }: Props): React.
     if (respondedRef.current) return;
     respondedRef.current = true;
     setResponding(true);
+    setRespondingAction('reject');
     try {
-      await stopIncomingRingtone();
+      // Reject first (it also stops the ring) — never wait on audio before the caller is told.
       rejectIncomingCall(req);
+      void stopIncomingRingtone();
     } finally {
-      navigation.goBack();
+      // Cold start from a notification deep link: IncomingCall is the only route, goBack is a no-op.
+      if (navigation.canGoBack()) navigation.goBack();
+      else navigation.replace('ReceiverMainTabs', { screen: 'ReceiverHome' });
     }
   }, [navigation, rejectIncomingCall, req, stopIncomingRingtone]);
 
@@ -116,14 +138,31 @@ export default function IncomingCallScreen({ navigation, route }: Props): React.
     if (respondedRef.current) return;
     respondedRef.current = true;
     setResponding(true);
+    setRespondingAction('accept');
     try {
       void stopIncomingRingtone();
       await acceptIncomingCall(req);
-    } catch {
-      // Keep respondedRef true so auto-pick / taps do not double-fire and thrash the invite.
+    } catch (e) {
+      if (isIncomingCallGoneError(e)) {
+        // Invite ended on the server (caller gave up / no-answer before the tap landed): say so
+        // instead of silently dropping the receiver on Home.
+        Alert.alert('Call ended', 'The caller is no longer on the line.');
+        // A socket `call:ended` may already have taken us Home.
+        if (!navigation.isFocused()) return;
+        if (navigation.canGoBack()) navigation.goBack();
+        else navigation.navigate('ReceiverMainTabs', { screen: 'ReceiverHome' } as never);
+        return;
+      }
+      // Invite is still ringing (e.g. network / mic not ready): let the receiver tap Accept again.
+      respondedRef.current = false;
       setResponding(false);
+      setRespondingAction(null);
+      Alert.alert(
+        'Could not connect',
+        e instanceof Error && e.message ? `${e.message}\n\nTap accept to try again.` : 'Tap accept to try again.'
+      );
     }
-  }, [acceptIncomingCall, req, stopIncomingRingtone]);
+  }, [acceptIncomingCall, navigation, req, stopIncomingRingtone]);
 
   acceptRef.current = () => {
     void onAccept();
@@ -135,7 +174,9 @@ export default function IncomingCallScreen({ navigation, route }: Props): React.
   // Stable one-shot auto-pick: do not re-arm when callback identities change.
   useEffect(() => {
     const timeout = setTimeout(() => {
-      if (!respondedRef.current) {
+      // Skip when the invite was declined / answered / ended meanwhile (e.g. caller hung up while a
+      // cold-start screen stayed mounted under Home) — no stale "Call ended" alert.
+      if (!respondedRef.current && canNavigateToIncomingCall(callId)) {
         acceptRef.current();
       }
     }, AUTO_ACCEPT_MS);
@@ -170,25 +211,35 @@ export default function IncomingCallScreen({ navigation, route }: Props): React.
 
         <View style={styles.actions}>
           <TouchableOpacity
-            style={[styles.actionBtn, styles.rejectBtn]}
+            style={[styles.actionBtn, styles.rejectBtn, responding && styles.actionBtnBusy]}
             onPress={() => void onReject()}
             disabled={responding}
-            activeOpacity={0.9}
+            activeOpacity={0.6}
             accessibilityRole="button"
             accessibilityLabel="Reject incoming call"
+            accessibilityState={{ disabled: responding, busy: respondingAction === 'reject' }}
           >
-            <Ionicons name="close" size={28} color="#fff" />
+            {respondingAction === 'reject' ? (
+              <ActivityIndicator color="#fff" />
+            ) : (
+              <Ionicons name="close" size={28} color="#fff" />
+            )}
           </TouchableOpacity>
 
           <TouchableOpacity
-            style={[styles.actionBtn, styles.acceptBtn]}
+            style={[styles.actionBtn, styles.acceptBtn, responding && styles.actionBtnBusy]}
             onPress={() => void onAccept()}
             disabled={responding}
-            activeOpacity={0.9}
+            activeOpacity={0.6}
             accessibilityRole="button"
             accessibilityLabel="Accept incoming call"
+            accessibilityState={{ disabled: responding, busy: respondingAction === 'accept' }}
           >
-            <Ionicons name="checkmark" size={28} color="#fff" />
+            {respondingAction === 'accept' ? (
+              <ActivityIndicator color="#fff" />
+            ) : (
+              <Ionicons name="checkmark" size={28} color="#fff" />
+            )}
           </TouchableOpacity>
         </View>
       </View>
@@ -226,4 +277,5 @@ const styles = StyleSheet.create({
   actionBtn: { width: 74, height: 74, borderRadius: 37, alignItems: 'center', justifyContent: 'center' },
   rejectBtn: { backgroundColor: '#ff3048' },
   acceptBtn: { backgroundColor: '#2ad07f' },
+  actionBtnBusy: { opacity: 0.5 },
 });

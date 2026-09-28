@@ -21,7 +21,7 @@ import { getErrorMessage } from '../../services/api';
 import { resolveProfileImageSource } from '../../utils/avatarSource';
 import { CALLER_MESSAGE_REQUIRES_CALL } from '../../constants/callerMessaging';
 import { useCallerMessageEligibility } from '../../context/CallerMessageEligibilityContext';
-import { getReceiverPresenceInfo } from '../../utils/receiverStatus';
+import { getReceiverPresenceInfo, isReceiverBusyCallError } from '../../utils/receiverStatus';
 
 const PURPLE = '#7b2cff';
 const PINK = '#ff72d2';
@@ -96,7 +96,10 @@ export default function ReceiverProfileScreen({ navigation, route }: Props): Rea
           redirectToRandomOnMissed: true,
         });
       } catch (e: unknown) {
-        Alert.alert('Call failed', getErrorMessage(e));
+        const msg = getErrorMessage(e);
+        if (!isReceiverBusyCallError(msg)) {
+          Alert.alert('Call failed', msg);
+        }
       } finally {
         setCalling(false);
       }

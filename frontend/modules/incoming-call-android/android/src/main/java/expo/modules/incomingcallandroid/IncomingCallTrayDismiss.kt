@@ -11,6 +11,8 @@ object IncomingCallTrayDismiss {
   fun dismissByCallId(context: Context, callId: String): Boolean {
     val trimmed = callId.trim()
     if (trimmed.isEmpty()) return false
+    // App took over (incoming UI / accept / reject / ended) — close the ringing Telecom call.
+    SelectoTelecom.endCall(trimmed)
     val tag = TAG_PREFIX + trimmed
     val appContext = context.applicationContext
     val nm = appContext.getSystemService(NotificationManager::class.java)

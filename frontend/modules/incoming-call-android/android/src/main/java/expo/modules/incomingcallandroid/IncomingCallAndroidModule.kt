@@ -114,6 +114,24 @@ class IncomingCallAndroidModule : Module() {
       pm.isIgnoringBatteryOptimizations(context.packageName)
     }
 
+    /** JS: true only while the receiver's incoming / voice call screen is shown. */
+    Function("setShowOverLockScreen") { enabled: Boolean ->
+      CallLockScreen.setEnabled(appContext.currentActivity, enabled)
+      true
+    }
+
+    Function("hasOemAutostartSettings") {
+      val context = appContext.reactContext ?: return@Function false
+      OemAutostartSettings.isAvailable(context)
+    }
+
+    Function("openOemAutostartSettings") {
+      val context = appContext.reactContext
+        ?: return@Function mapOf("opened" to false, "reason" to "no_context")
+      val component = OemAutostartSettings.open(context)
+      mapOf("opened" to (component != null), "component" to component)
+    }
+
     Function("canUseFullScreenIntent") {
       val context = appContext.reactContext ?: return@Function true
       if (Build.VERSION.SDK_INT < 34) return@Function true
@@ -154,6 +172,24 @@ class IncomingCallAndroidModule : Module() {
       val context = appContext.reactContext ?: return@Function false
       OnlinePresenceForegroundService.stop(context)
       true
+    }
+
+    Function("clearNativeCallCredentials") {
+      val context = appContext.reactContext ?: return@Function false
+      NativeCallApi.clearCreds(context)
+      true
+    }
+
+    /** JS handled this invite (accepted / rejected / ended) — native poll + late FCM must not re-ring it. */
+    Function("markIncomingCallHandledNative") { callId: String ->
+      val context = appContext.reactContext ?: return@Function false
+      DeclinedCallRegistry.markDeclined(context, callId)
+      true
+    }
+
+    Function("isIncomingCallDeclined") { callId: String ->
+      val context = appContext.reactContext ?: return@Function false
+      DeclinedCallRegistry.isDeclined(context, callId)
     }
 
     Function("isOnlinePresenceKeepAliveRunning") {

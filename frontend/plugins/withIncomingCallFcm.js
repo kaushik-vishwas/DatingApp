@@ -193,12 +193,18 @@ function withIncomingCallFcm(config) {
         'NesthamFirebaseMessagingService.kt',
         'IncomingCallFcmPresenter.kt',
         'IncomingCallUiGate.kt',
-        'IncomingCallNotificationChannels.kt',
-        'IncomingCallRingtonePlayer.kt',
         'IncomingCallDeclineReceiver.kt',
-        'PresenceNativeWakeLog.kt',
       ]) {
         fs.copyFileSync(path.join(sourceDir, file), path.join(targetDir, file));
+      }
+      // Now shared from the incoming-call-android module — remove copies left by older prebuilds
+      // (duplicate singletons would split the ringtone player across two instances).
+      for (const stale of [
+        'IncomingCallNotificationChannels.kt',
+        'IncomingCallRingtonePlayer.kt',
+        'PresenceNativeWakeLog.kt',
+      ]) {
+        fs.rmSync(path.join(targetDir, stale), { force: true });
       }
 
       const rawDir = path.join(projectRoot, 'android', 'app', 'src', 'main', 'res', 'raw');

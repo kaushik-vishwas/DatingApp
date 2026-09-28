@@ -9,6 +9,7 @@ import type { PostBrandSplashRoute, RootStackParamList } from './RootStackParamL
 import { navigationRef } from './navigationRef';
 import { appLinking } from './appLinking';
 import { consumePendingNotificationTap } from '../utils/incomingCallNotifications';
+import { syncCallLockScreen } from '../utils/callLockScreen';
 
 import ReceiverEducationScreen from '../screens/onboarding/ReceiverEducationScreen';
 import BrandSplashScreen from '../screens/BrandSplashScreen';
@@ -179,7 +180,9 @@ export default function AppNavigator(): React.JSX.Element {
       linking={appLinking}
       onReady={() => {
         consumePendingNotificationTap();
+        syncCallLockScreen(user.role === 'receiver');
       }}
+      onStateChange={() => syncCallLockScreen(user.role === 'receiver')}
     >
       <Stack.Navigator screenOptions={{ headerShown: false }}>
         {user.role === 'caller' ? (

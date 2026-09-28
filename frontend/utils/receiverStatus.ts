@@ -51,6 +51,14 @@ export function getReceiverPresenceInfo(receiver: DiscoverReceiverSummary): Rece
   };
 }
 
+/**
+ * Backend "busy" refusal after tapping an enabled Call button — bootstrap 409
+ * ("Receiver is busy on another call") or call:invite ack ("Busy on another call.").
+ */
+export function isReceiverBusyCallError(message: string): boolean {
+  return /busy on another call/i.test(message);
+}
+
 /** Lower rank = shown earlier on discover (available → busy → offline). */
 export function getReceiverPresenceSortRank(receiver: DiscoverReceiverSummary): number {
   const { status } = getReceiverPresenceInfo(receiver);

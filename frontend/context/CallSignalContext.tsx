@@ -28,7 +28,10 @@ import { startRandomMatchingTone } from '../utils/callSounds';
 import type { VoiceBootstrapResponse } from '../types/api';
 import type { VoiceCallScreenParams } from '../navigation/voiceCallParams';
 import { getRootNavigation } from '../navigation/navigationRef';
-import { isReceiverOnVoiceCallScreen } from '../navigation/receiverCallNavigation';
+import {
+  getReceiverActiveCallRoute,
+  isReceiverOnVoiceCallScreen,
+} from '../navigation/receiverCallNavigation';
 import {
   ensureIncomingRingtoneLoaded,
   ensureIncomingRingtonePlaying,
@@ -85,6 +88,15 @@ function scheduleNavigateWhenReady(tryNavigate: () => boolean, navGeneration: nu
     else if (navGeneration === outgoingNavigateGeneration) void tryNavigate();
   };
   requestAnimationFrame(tick);
+}
+
+/**
+ * The IncomingCall screen for this invite is on screen. Covers a cold-start deep link that
+ * opened it directly (bypassing openIncomingCall, so activeIncomingCallUiCallIdRef was never set).
+ */
+function isIncomingCallScreenShowing(callId: string): boolean {
+  const active = getReceiverActiveCallRoute();
+  return active?.name === 'IncomingCall' && active.callId === callId;
 }
 
 /** Incoming-call navigation after notification tap — Samsung can need several seconds. */
@@ -225,9 +237,71 @@ function getFallbackPeerName(fromType: 'u' | 'r'): string {
   return fromType === 'r' ? 'Receiver' : 'Caller';
 }
 
+/**
+ * Reconnect the call socket now. `socket.connect()` is a no-op while socket.io waits out its
+ * reconnect backoff (up to ~90s on Android after a long Doze), which let the server's
+ * no-answer timer expire before a notification tap could reach it.
+ */
+function connectCallSocketNow(socket: Socket): void {
+  if (socket.connected) return;
+  const manager = socket.io as unknown as { _reconnecting?: boolean; _readyState?: string };
+  if (manager._reconnecting && manager._readyState !== 'opening') {
+    // Not connected, so this only clears the pending backoff timer (no 'disconnect' event).
+    socket.disconnect();
+  }
+  socket.connect();
+}
+
 const CALL_SIGNAL_CONNECT_WAIT_MS = 12_000;
 const CALL_SIGNAL_NOT_CONNECTED_MSG =
   'Call signaling is not connected. Check your network and try again.';
+
+/** Server answer to the receiver's accept; on timeout we proceed as before (old behaviour). */
+const CALL_ACCEPT_ACK_TIMEOUT_MS = 6_000;
+
+/**
+ * Accept failed and the invite no longer exists on the server (it expired before the answer
+ * landed, or this accept attempt ended it). Retrying cannot connect — leave the incoming UI.
+ */
+export type IncomingCallGoneError = Error & { incomingCallGone: true };
+
+function incomingCallGoneError(message: string): IncomingCallGoneError {
+  const err = new Error(message) as IncomingCallGoneError;
+  err.incomingCallGone = true;
+  return err;
+}
+
+export function isIncomingCallGoneError(e: unknown): e is IncomingCallGoneError {
+  return Boolean(e && typeof e === 'object' && (e as { incomingCallGone?: unknown }).incomingCallGone === true);
+}
+
+/** Emit accept and resolve with whether the server still had the invite (never rejects). */
+function emitAcceptWithAck(socket: Socket, callId: string): Promise<'ok' | 'invite_ended'> {
+  return new Promise((resolve) => {
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      resolve('ok');
+    }, CALL_ACCEPT_ACK_TIMEOUT_MS);
+    try {
+      socket.emit(
+        'call:response',
+        { callId, accepted: true },
+        (ack?: { ok?: boolean; error?: string }) => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
+          resolve(ack?.ok === false && ack.error === 'Unknown call invite' ? 'invite_ended' : 'ok');
+        }
+      );
+    } catch {
+      settled = true;
+      clearTimeout(timer);
+      resolve('ok');
+    }
+  });
+}
 
 /** Wait for the shared call socket (connect can lag behind REST after login / refresh). */
 async function ensureCallSocketReady(
@@ -237,7 +311,7 @@ async function ensureCallSocketReady(
     const socket = socketRef.current;
     if (socket && !socket.connected) {
       try {
-        socket.connect();
+        connectCallSocketNow(socket);
       } catch {
         // wait loop retries
       }
@@ -475,6 +549,9 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     }
     void dismissIncomingCallNotification(incoming.callId);
     const navigate = () => {
+      // Retries run up to 10s later (cold start): never re-open a call that was answered /
+      // declined / ended meanwhile, or is already on screen. `true` stops the retry loop.
+      if (!shouldPresentIncomingCallUi(incoming.callId)) return true;
       const nav = getRootNavigation();
       if (!nav) return false;
       try {
@@ -747,12 +824,12 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
           throw new Error(ack.error || 'Could not ring this user.');
         }
         const outcome = await new Promise<InviteOutcome>((resolve) => {
-          // Safety net only: the server's no_answer (≤30s incl. on-screen extension) must win,
+          // Safety net only: the server's no_answer (≤45s incl. on-screen extension) must win,
           // so the caller never leaves while the receiver's incoming UI is still up.
           const timeout = setTimeout(() => {
             pendingInviteOutcomeRef.current.delete(data.callId);
             resolve({ accepted: false, reason: 'timeout' });
-          }, 40_000);
+          }, 50_000);
           pendingInviteOutcomeRef.current.set(data.callId, { resolve, timeout });
         });
         if (!outcome.accepted) {
@@ -925,7 +1002,13 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     }
     incomingBootstrapByCallIdRef.current.delete(req.callId);
     incomingBootstrapPromiseByCallIdRef.current.delete(req.callId);
-    socketRef.current?.emit('call:response', { callId: req.callId, accepted: false });
+    const socket = socketRef.current;
+    socket?.emit('call:response', { callId: req.callId, accepted: false });
+    if (!socket?.connected) {
+      // Cold start: socket not up yet — the emit above may never leave, and the caller would keep
+      // ringing. REST decline is idempotent (a duplicate after the socket reject returns 404).
+      void callApi.declineIncoming(req.callId).catch(() => {});
+    }
   }, []);
 
   const acceptIncomingCallStayOnScreen = useCallback(
@@ -945,8 +1028,9 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       // while we finish mic/bootstrap locally (biggest accept→talk latency win).
       const existingSocket = socketRef.current;
       let acceptEmitted = false;
+      let acceptAck: Promise<'ok' | 'invite_ended'> | null = null;
       if (existingSocket?.connected) {
-        existingSocket.emit('call:response', { callId: req.callId, accepted: true });
+        acceptAck = emitAcceptWithAck(existingSocket, req.callId);
         acceptEmitted = true;
       }
 
@@ -967,14 +1051,20 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
           throw new Error('Microphone permission is required for voice calls');
         }
         socket = readySocket;
-        if (!acceptEmitted) {
-          socket.emit('call:response', { callId: req.callId, accepted: true });
+        if (!acceptAck) {
+          acceptAck = emitAcceptWithAck(socket, req.callId);
+        }
+        // Invite already gone (e.g. no-answer fired before this tap landed) — do not join an
+        // empty call; the incoming UI tells the receiver and leaves.
+        if ((await acceptAck) === 'invite_ended') {
+          throw incomingCallGoneError('This call has already ended.');
         }
 
         incomingBootstrapByCallIdRef.current.delete(req.callId);
         incomingBootstrapPromiseByCallIdRef.current.delete(req.callId);
         return bootstrapped;
       } catch (e) {
+        if (isIncomingCallGoneError(e)) throw e;
         if (acceptEmitted && (existingSocket?.connected || socketRef.current?.connected)) {
           const s = existingSocket?.connected ? existingSocket : socketRef.current;
           if (s) {
@@ -984,6 +1074,8 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
               'accept_stay_on_screen_failed',
               'main_call_socket'
             );
+            // This accept just ended the call on the server — a retry cannot connect.
+            throw incomingCallGoneError(e instanceof Error ? e.message : String(e));
           }
         }
         throw e;
@@ -1006,8 +1098,9 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
       const existingSocket = socketRef.current;
       let acceptEmitted = false;
+      let acceptAck: Promise<'ok' | 'invite_ended'> | null = null;
       if (existingSocket?.connected) {
-        existingSocket.emit('call:response', { callId: req.callId, accepted: true });
+        acceptAck = emitAcceptWithAck(existingSocket, req.callId);
         acceptEmitted = true;
       }
 
@@ -1028,14 +1121,20 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
           throw new Error('Microphone permission is required for voice calls');
         }
         socket = readySocket;
-        if (!acceptEmitted) {
-          socket.emit('call:response', { callId: req.callId, accepted: true });
+        if (!acceptAck) {
+          acceptAck = emitAcceptWithAck(socket, req.callId);
+        }
+        // Invite already gone (e.g. no-answer fired before this tap landed) — do not join an
+        // empty call; the incoming UI tells the receiver and leaves.
+        if ((await acceptAck) === 'invite_ended') {
+          throw incomingCallGoneError('This call has already ended.');
         }
 
         incomingBootstrapByCallIdRef.current.delete(req.callId);
         incomingBootstrapPromiseByCallIdRef.current.delete(req.callId);
         openVoiceCall(bootstrapped, req.peerName, req.peerImage ?? null);
       } catch (e) {
+        if (isIncomingCallGoneError(e)) throw e;
         if (acceptEmitted && (existingSocket?.connected || socketRef.current?.connected)) {
           const s = existingSocket?.connected ? existingSocket : socketRef.current;
           if (s) {
@@ -1045,6 +1144,8 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
               'accept_incoming_failed',
               'main_call_socket'
             );
+            // This accept just ended the call on the server — a retry cannot connect.
+            throw incomingCallGoneError(e instanceof Error ? e.message : String(e));
           }
         }
         throw e;
@@ -1062,16 +1163,57 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     const id = callId.trim();
     if (!id || userRoleRef.current !== 'receiver') return;
     void dismissIncomingCallNotification(id);
+    const emitSeen = (socket: Socket): void => {
+      try {
+        socket.emit(
+          'call:incoming-seen',
+          {
+            callId: id,
+            appState: isAppOnScreen() ? 'active' : 'background',
+          },
+          (ack?: { ok?: boolean; error?: string }) => {
+            // Invite already ended on the server (e.g. no-answer while the app was closed) —
+            // a replayed notification / deep link / stored tap must not keep ringing.
+            if (ack?.ok !== false || ack.error !== 'Unknown call invite') return;
+            if (acceptedIncomingCallIdsRef.current.has(id)) return;
+            callDiag.info('incoming_seen_unknown_invite', { callId: id });
+            void markIncomingCallHandled(id);
+            const legacyIncomingScreen =
+              !incomingCallDismissHandlerRef.current &&
+              !incomingCallHandlerRef.current &&
+              !remoteCallEndedHandlerRef.current &&
+              (activeIncomingCallUiCallIdRef.current === id || isIncomingCallScreenShowing(id));
+            clearReceiverIncomingCallUi(id);
+            if (legacyIncomingScreen) {
+              const goHome = (): boolean => {
+                const n = getRootNavigation();
+                if (!n) return false;
+                try {
+                  n.navigate('Home', { screen: 'ReceiverMainTabs', params: { screen: 'ReceiverHome' } });
+                  return true;
+                } catch {
+                  return false;
+                }
+              };
+              if (!goHome()) scheduleNavigateWhenReady(goHome, outgoingNavigateGeneration);
+            }
+          }
+        );
+      } catch {
+        // Server keeps prior budget if this fails.
+      }
+    };
     const socket = socketRef.current;
-    if (!socket?.connected) return;
-    try {
-      socket.emit('call:incoming-seen', {
-        callId: id,
-        appState: isAppOnScreen() ? 'active' : 'background',
-      });
-    } catch {
-      // Server keeps prior budget if this fails.
+    if (socket?.connected) {
+      emitSeen(socket);
+      return;
     }
+    // Cold start from a notification: socket may still be connecting when the screen mounts.
+    void ensureCallSocketReady(socketRef)
+      .then(emitSeen)
+      .catch(() => {
+        // Server keeps prior budget if this fails.
+      });
   }, []);
 
   const setIncomingCallHandler = useCallback((handler: ((req: IncomingCallRequest) => void) | null) => {
@@ -1251,7 +1393,11 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     };
     keepCallSocketAlive();
     const sub = AppState.addEventListener('change', (state: AppStateStatus) => {
-      if (state === 'active' || state === 'background' || state === 'inactive') {
+      if (state === 'active') {
+        // Back on screen (e.g. incoming-call notification tap): skip any pending backoff.
+        const socket = socketRef.current;
+        if (socket) connectCallSocketNow(socket);
+      } else if (state === 'background' || state === 'inactive') {
         keepCallSocketAlive();
       }
     });
@@ -1828,6 +1974,18 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       });
 
       socket.on('call:response', (payload: CallResponsePayload) => {
+        if (
+          userRoleRef.current === 'receiver' &&
+          payload.fromType === 'r' &&
+          !payload.accepted &&
+          typeof payload.callId === 'string' &&
+          payload.callId.trim()
+        ) {
+          // Own decline echo — e.g. Decline on the native notification while JS was backgrounded.
+          // Mark handled so the pending-invite poll / tray resume cannot re-open this call.
+          void markIncomingCallHandled(payload.callId);
+          return;
+        }
         if (payload.fromType === (userRoleRef.current === 'caller' ? 'u' : 'r')) return;
         if (
           payload.accepted &&
@@ -1965,7 +2123,8 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
           const legacyIncomingScreen =
             !onIntegratedVoiceCall &&
             !onVoiceCallScreen &&
-            activeIncomingCallUiCallIdRef.current === payload.callId;
+            (activeIncomingCallUiCallIdRef.current === payload.callId ||
+              isIncomingCallScreenShowing(payload.callId));
           if (onIntegratedVoiceCall || legacyIncomingScreen) {
             clearReceiverIncomingCallUi(payload.callId);
           }

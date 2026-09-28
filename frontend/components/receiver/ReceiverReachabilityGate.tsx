@@ -1,6 +1,11 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { Modal, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import type { ReachabilityCheckId, ReachabilityStatus } from '../../utils/receiverReachability';
+import {
+  hasOemAutostartSettings,
+  openOemAutostartSettings,
+  type ReachabilityCheckId,
+  type ReachabilityStatus,
+} from '../../utils/receiverReachability';
 
 type Props = {
   visible: boolean;
@@ -40,6 +45,7 @@ export default function ReceiverReachabilityGate({
   onRetry,
   onClose,
 }: Props): React.JSX.Element {
+  const canOpenAutostart = useMemo(() => (visible ? hasOemAutostartSettings() : false), [visible]);
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <View style={styles.backdrop}>
@@ -60,6 +66,15 @@ export default function ReceiverReachabilityGate({
             </View>
           ))}
           {status?.oemHint ? <Text style={styles.hint}>{status.oemHint}</Text> : null}
+          {status?.oemHint && canOpenAutostart ? (
+            <TouchableOpacity
+              style={styles.autostartBtn}
+              onPress={() => void openOemAutostartSettings()}
+              disabled={busy}
+            >
+              <Text style={styles.autostartText}>Open Autostart settings</Text>
+            </TouchableOpacity>
+          ) : null}
           <TouchableOpacity style={styles.primary} onPress={onRetry} disabled={busy}>
             <Text style={styles.primaryText}>{busy ? 'Checking…' : 'I fixed this — continue'}</Text>
           </TouchableOpacity>
@@ -110,6 +125,16 @@ const styles = StyleSheet.create({
     color: '#7c3aed',
     lineHeight: 17,
   },
+  autostartBtn: {
+    marginTop: 8,
+    alignSelf: 'flex-start',
+    borderWidth: 1,
+    borderColor: '#7c3aed',
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 8,
+  },
+  autostartText: { color: '#7c3aed', fontWeight: '800', fontSize: 12 },
   primary: {
     marginTop: 16,
     backgroundColor: '#111',

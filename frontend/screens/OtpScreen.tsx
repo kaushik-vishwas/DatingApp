@@ -17,7 +17,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import Icon from 'react-native-vector-icons/Ionicons';
 
-import { authApi, getErrorMessage, saveJwt } from '../services/api';
+import { authApi, getErrorMessage, isAccountPausedError, saveJwt } from '../services/api';
+import { AccountPausedModal } from '../components/auth/AccountPausedModal';
 import { useAuth } from '../context/AuthContext';
 import type { RootStackParamList } from '../navigation/RootStackParamList';
 
@@ -37,6 +38,7 @@ export default function OtpScreen({ navigation, route }: Props) {
   const [otp, setOtp] = useState<string>('');
   const [loading, setLoading] = useState<boolean>(false);
   const [resendLoading, setResendLoading] = useState<boolean>(false);
+  const [accountPaused, setAccountPaused] = useState<boolean>(false);
 
   const inputRef = useRef<TextInput>(null);
 
@@ -75,7 +77,11 @@ export default function OtpScreen({ navigation, route }: Props) {
       await saveJwt(data.token);
       signIn(data.token, data.user);
     } catch (e) {
-      Alert.alert('Error', getErrorMessage(e));
+      if (isAccountPausedError(e)) {
+        setAccountPaused(true);
+      } else {
+        Alert.alert('Error', getErrorMessage(e));
+      }
     } finally {
       setLoading(false);
     }
@@ -211,6 +217,8 @@ export default function OtpScreen({ navigation, route }: Props) {
           </View>
         </ScrollView>
       </TouchableWithoutFeedback>
+
+      <AccountPausedModal visible={accountPaused} onClose={() => setAccountPaused(false)} />
     </KeyboardAvoidingView>
   );
 }

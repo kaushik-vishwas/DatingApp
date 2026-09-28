@@ -42,6 +42,16 @@ export function startReceiverOnlineKeepAlive(): void {
   })();
 }
 
+/** Sign-out only: forget the JWT native notification Decline uses (kept across Go Online stops). */
+export function clearNativeCallCredentials(): void {
+  if (Platform.OS !== 'android') return;
+  try {
+    getIncomingCallAndroidNativeModule()?.clearNativeCallCredentials?.();
+  } catch {
+    // Native module missing until a rebuilt APK.
+  }
+}
+
 export function stopReceiverOnlineKeepAlive(): void {
   if (Platform.OS !== 'android') return;
   try {

@@ -93,7 +93,27 @@ export function canNavigateToIncomingCall(callId: string): boolean {
   if (!id) return false;
   if (handledIncomingCallIds.has(id)) return false;
   if (incomingCallNavigationGuard && !incomingCallNavigationGuard(id)) return false;
+  if (isIncomingCallDeclinedNative(id)) return false;
   return true;
+}
+
+/** Declined / handled on this phone (native notification Decline, or a previous JS session). */
+function isIncomingCallDeclinedNative(callId: string): boolean {
+  if (Platform.OS !== 'android') return false;
+  try {
+    return Boolean(getIncomingCallAndroidNativeModule()?.isIncomingCallDeclined?.(callId));
+  } catch {
+    return false;
+  }
+}
+
+function markIncomingCallHandledNative(callId: string): void {
+  if (Platform.OS !== 'android') return;
+  try {
+    getIncomingCallAndroidNativeModule()?.markIncomingCallHandledNative?.(callId);
+  } catch {
+    // Native module missing until a rebuilt APK.
+  }
 }
 
 /** True only while the invite is still unanswered and IncomingCall is not already covered by VoiceCall. */
@@ -109,6 +129,8 @@ export async function markIncomingCallHandled(callId: string): Promise<void> {
   const id = callId.trim();
   if (!id) return;
   handledIncomingCallIds.add(id);
+  // Native Go Online poll / late FCM must not re-ring (and restart the ringtone) after this.
+  markIncomingCallHandledNative(id);
   pendingOpens.delete(id);
   logIncomingCallNotif('nav.handled', { callId: id });
   await clearPendingIncomingCallTap();
@@ -918,6 +940,8 @@ export async function alertReceiverIncomingCallInBackground(
     notifiedCallIds.add(incoming.callId.trim());
     return;
   }
+  // Declined / answered / ended during the wait — never ring a handled call.
+  if (!canNavigateToIncomingCall(incoming.callId)) return;
   const ringing = await playIncomingRingtoneForBackgroundAlert();
   await showIncomingCallNotification(incoming, { visualOnly: ringing });
 }

@@ -34,7 +34,11 @@ import { useCallSignals } from '../context/CallSignalContext';
 import { discoverApi, getErrorMessage, profileApi, walletApi } from '../services/api';
 import type { CallerNotificationContent, DiscoverReceiverSummary, WalletHomeOfferPopup } from '../types/api';
 import { resolveProfileImageSource } from '../utils/avatarSource';
-import { getReceiverPresenceInfo, sortDiscoverReceivers } from '../utils/receiverStatus';
+import {
+  getReceiverPresenceInfo,
+  isReceiverBusyCallError,
+  sortDiscoverReceivers,
+} from '../utils/receiverStatus';
 import { withTimeout } from '../utils/withTimeout';
 import { computeWalletRechargeBreakdown, walletCreditForRecharge } from '../utils/walletRechargeFees';
 import {
@@ -529,7 +533,9 @@ export default function CallerDiscoverHome(): React.JSX.Element {
             redirectToRandomOnMissed: true,
           });
         } catch (e: unknown) {
-          Alert.alert('Call failed', getErrorMessage(e));
+          const msg = getErrorMessage(e);
+          if (isReceiverBusyCallError(msg)) return;
+          Alert.alert('Call failed', msg);
         }
       })();
     },

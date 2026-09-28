@@ -8,11 +8,18 @@ import android.graphics.Color
 import android.net.Uri
 import android.os.Build
 import android.os.PowerManager
+import android.telecom.DisconnectCause
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
-import androidx.core.app.Person
 import com.google.firebase.messaging.RemoteMessage
+import expo.modules.incomingcallandroid.DeclinedCallRegistry
+import expo.modules.incomingcallandroid.IncomingCallNotificationActions
+import expo.modules.incomingcallandroid.IncomingCallNotificationChannels
+import expo.modules.incomingcallandroid.IncomingCallRingtonePlayer
+import expo.modules.incomingcallandroid.NativeCallApi
+import expo.modules.incomingcallandroid.PresenceNativeWakeLog
+import expo.modules.incomingcallandroid.SelectoTelecom
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
 
@@ -67,6 +74,11 @@ object IncomingCallFcmPresenter {
     if (isCancelled(callId)) {
       // FCM can reorder: the "cancelled" push arrived first — never ring a finished call.
       Log.i(TAG, "Suppressed incoming call notification (already cancelled) callId=$callId")
+      return true
+    }
+    if (DeclinedCallRegistry.isDeclined(appContext, callId)) {
+      // Receiver already declined this call on this phone — never ring it again.
+      Log.i(TAG, "Suppressed incoming call notification (already declined) callId=$callId")
       return true
     }
 
@@ -182,31 +194,18 @@ object IncomingCallFcmPresenter {
       }
     }
 
-    // Android 12+ CallStyle improves heads-up / OEM call treatment when permitted.
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-      try {
-        val caller = Person.Builder().setName(peerName).setImportant(true).build()
-        val declineIntent =
-          Intent(appContext, IncomingCallDeclineReceiver::class.java).apply {
-            action = IncomingCallDeclineReceiver.ACTION_DECLINE
-            putExtra(IncomingCallDeclineReceiver.EXTRA_TAG, identifier)
-            putExtra(IncomingCallDeclineReceiver.EXTRA_ID, notificationId)
-            putExtra("callId", callId)
-          }
-        val declinePending =
-          PendingIntent.getBroadcast(
-            appContext,
-            notificationId + 31,
-            declineIntent,
-            piFlags
-          )
-        builder.setStyle(
-          NotificationCompat.CallStyle.forIncomingCall(caller, declinePending, contentPending)
-        )
-      } catch (e: Exception) {
-        Log.w(TAG, "CallStyle unavailable, using CATEGORY_CALL only", e)
-      }
-    }
+    // Decline / Answer: CallStyle where Android accepts it (12+ with full-screen), else plain buttons.
+    val usedCallStyle =
+      IncomingCallNotificationActions.apply(
+        builder,
+        appContext,
+        callId,
+        identifier,
+        notificationId,
+        peerName,
+        contentPending,
+        canFullScreen
+      )
 
     // Extras help JS / deep-link parsers if the activity inspects the Intent.
     builder.extras.putString("type", TYPE_INCOMING)
@@ -223,8 +222,26 @@ object IncomingCallFcmPresenter {
       if (!notificationsEnabled) {
         Log.w(TAG, "Notifications disabled — cannot present incoming call")
       }
-      NotificationManagerCompat.from(appContext).notify(identifier, notificationId, builder.build())
+      try {
+        NotificationManagerCompat.from(appContext).notify(identifier, notificationId, builder.build())
+      } catch (e: IllegalArgumentException) {
+        // Some OEM / Android builds reject CallStyle — never lose the call; retry with plain buttons.
+        if (!usedCallStyle) throw e
+        Log.w(TAG, "CallStyle rejected, re-posting with plain Decline/Answer", e)
+        IncomingCallNotificationActions.applyPlainActions(
+          builder,
+          appContext,
+          callId,
+          identifier,
+          notificationId,
+          body,
+          contentPending
+        )
+        NotificationManagerCompat.from(appContext).notify(identifier, notificationId, builder.build())
+      }
       Log.i(TAG, "Presented incoming call notification tag=$identifier nativeRing=$nativeRingOk")
+      SelectoTelecom.reportIncomingCall(appContext, callId, peerName, url)
+      NativeCallApi.acknowledgeRinging(appContext, callId)
       PresenceNativeWakeLog.append(
         appContext,
         "native_fcm_incoming",
@@ -278,6 +295,7 @@ object IncomingCallFcmPresenter {
     val callId = data["callId"]?.trim().orEmpty()
     if (callId.isEmpty()) return true
     rememberCancelled(callId)
+    SelectoTelecom.endCall(callId, DisconnectCause.MISSED)
 
     val appContext = context.applicationContext
     val tag = ID_PREFIX + callId

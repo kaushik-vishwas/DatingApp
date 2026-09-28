@@ -17,7 +17,8 @@ import { LinearGradient } from 'expo-linear-gradient';
 
 import { useAuth } from '../../context/AuthContext';
 import type { RootStackParamList } from '../../navigation/RootStackParamList';
-import { authApi, getErrorMessage, saveJwt } from '../../services/api';
+import { authApi, getErrorMessage, isAccountPausedError, saveJwt } from '../../services/api';
+import { AccountPausedModal } from './AccountPausedModal';
 import type { AuthAccountType } from '../../types/api';
 import { normalizeIndianMobileDigits, validateIndianMobileDigits } from '../../utils/validation';
 
@@ -65,6 +66,7 @@ export function AuthLoginCard({
   const [step, setStep] = useState<LoginStep>('mobile');
   const [otp, setOtp] = useState<string>('');
   const [loading, setLoading] = useState<boolean>(false);
+  const [accountPaused, setAccountPaused] = useState<boolean>(false);
   const scrollRef = useRef<ScrollView | null>(null);
 
   const scrollToFocusedInput = useCallback(() => {
@@ -110,7 +112,11 @@ export function AuthLoginCard({
       await saveJwt(data.token);
       signIn(data.token, data.user);
     } catch (e) {
-      Alert.alert('Error', getErrorMessage(e));
+      if (isAccountPausedError(e)) {
+        setAccountPaused(true);
+      } else {
+        Alert.alert('Error', getErrorMessage(e));
+      }
     } finally {
       setLoading(false);
     }
@@ -231,6 +237,8 @@ export function AuthLoginCard({
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
+
+      <AccountPausedModal visible={accountPaused} onClose={() => setAccountPaused(false)} />
     </View>
   );
 }

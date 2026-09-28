@@ -22,7 +22,8 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useAuth } from '../../context/AuthContext';
 import OnboardingLogoutButton from '../../components/auth/OnboardingLogoutButton';
 import type { RootStackParamList } from '../../navigation/RootStackParamList';
-import { authApi, getErrorMessage, saveJwt } from '../../services/api';
+import { authApi, getErrorMessage, isAccountPausedError, saveJwt } from '../../services/api';
+import { AccountPausedModal } from '../../components/auth/AccountPausedModal';
 import { normalizeIndianMobileDigits } from '../../utils/validation';
 import { PRIVACY_POLICY_CONTENT } from '../../constants/privacyPolicyContent';
 import SelectoLogo from '../../assets/SelectoLogo.png';
@@ -94,6 +95,7 @@ export default function MobileLoginScreen({ navigation }: Props): React.JSX.Elem
   const [resendTimer, setResendTimer] = useState(0);
   const [privacyAccepted, setPrivacyAccepted] = useState(false);
   const [showPrivacyModal, setShowPrivacyModal] = useState(false);
+  const [accountPaused, setAccountPaused] = useState(false);
   const scrollRef = useRef<ScrollView | null>(null);
   const flatListRef = useRef<FlatList>(null);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
@@ -200,7 +202,11 @@ export default function MobileLoginScreen({ navigation }: Props): React.JSX.Elem
       await saveJwt(data.token);
       signIn(data.token, data.user);
     } catch (e) {
-      Alert.alert('Error', getErrorMessage(e));
+      if (isAccountPausedError(e)) {
+        setAccountPaused(true);
+      } else {
+        Alert.alert('Error', getErrorMessage(e));
+      }
     } finally {
       setLoading(false);
     }
@@ -498,6 +504,8 @@ export default function MobileLoginScreen({ navigation }: Props): React.JSX.Elem
           </View>
         </View>
       </Modal>
+
+      <AccountPausedModal visible={accountPaused} onClose={() => setAccountPaused(false)} />
     </View>
   );
 }

@@ -45,6 +45,36 @@ export function oemBackgroundHint(): string | null {
   return 'Allow Selecto to run in the background and disable battery restrictions so calls can ring after the phone sits idle.';
 }
 
+/** True when this device has a known OEM Autostart screen we can deep-link to (Xiaomi/OPPO/Vivo…). */
+export function hasOemAutostartSettings(): boolean {
+  if (Platform.OS !== 'android') return false;
+  try {
+    return Boolean(getIncomingCallAndroidNativeModule()?.hasOemAutostartSettings?.());
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Opens the OEM Autostart manager; falls back to the app's system settings page.
+ * Returns true only when the Autostart screen itself opened (the text hint still applies otherwise).
+ */
+export async function openOemAutostartSettings(): Promise<boolean> {
+  if (Platform.OS !== 'android') return false;
+  try {
+    const result = getIncomingCallAndroidNativeModule()?.openOemAutostartSettings?.();
+    if (result?.opened) return true;
+  } catch {
+    // fall through to app settings
+  }
+  try {
+    await Linking.openSettings();
+  } catch {
+    // ignore — text hint remains visible
+  }
+  return false;
+}
+
 export async function getReceiverReachabilityStatus(): Promise<ReachabilityStatus> {
   if (Platform.OS !== 'android') {
     const push = await registerReceiverPushTokens(async (payload) => {

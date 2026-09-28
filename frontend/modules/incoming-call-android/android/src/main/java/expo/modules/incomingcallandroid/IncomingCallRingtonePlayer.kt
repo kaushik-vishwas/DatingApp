@@ -11,13 +11,11 @@ import android.util.Log
 
 /**
  * Loops the bundled Selecto receiver ringtone via [MediaPlayer].
- * Prefers the app FCM package singleton when present so killed-app FCM rings and
- * JS start/stop share one player instance.
+ * Single instance shared by native FCM (app plugin), keep-alive, Telecom and JS.
  */
 object IncomingCallRingtonePlayer {
   private const val TAG = "IncomingCallRingtone"
   private const val MAX_RING_MS = 55_000L
-  private const val FCM_PLAYER = "com.selecto.app.fcm.IncomingCallRingtonePlayer"
 
   private var player: MediaPlayer? = null
   private var wakeLock: PowerManager.WakeLock? = null
@@ -28,15 +26,6 @@ object IncomingCallRingtonePlayer {
   @JvmStatic
   @Synchronized
   fun start(context: Context, activity: Activity? = null): Boolean {
-    val delegated = invokeFcm("start", context)
-    if (delegated is Boolean) {
-      if (delegated) {
-        boundActivity = activity
-        CallRingtoneVolumeControl.bind(CallRingtoneVolumeControl.OWNER_INCOMING, activity)
-      }
-      return delegated
-    }
-
     val appContext = context.applicationContext
     stopLocal(activity)
 
@@ -67,7 +56,7 @@ object IncomingCallRingtonePlayer {
       CallRingtoneVolumeControl.bind(CallRingtoneVolumeControl.OWNER_INCOMING, activity)
       mainHandler.removeCallbacks(stopRunnable)
       mainHandler.postDelayed(stopRunnable, MAX_RING_MS)
-      Log.i(TAG, "Native incoming ringtone started (module)")
+      Log.i(TAG, "Native incoming ringtone started")
       true
     } catch (e: Exception) {
       Log.e(TAG, "Failed to start native incoming ringtone", e)
@@ -79,39 +68,16 @@ object IncomingCallRingtonePlayer {
   @JvmStatic
   @Synchronized
   fun stop(context: Context?, activity: Activity? = null) {
-    invokeFcm("stop", context)
     stopLocal(activity)
   }
 
   @JvmStatic
   @Synchronized
   fun isPlaying(): Boolean {
-    val delegated = invokeFcm("isPlaying", null)
-    if (delegated is Boolean) return delegated
     return try {
       player?.isPlaying == true
     } catch (_: Exception) {
       false
-    }
-  }
-
-  private fun invokeFcm(method: String, context: Context?): Any? {
-    return try {
-      val clazz = Class.forName(FCM_PLAYER)
-      when (method) {
-        "start" -> {
-          if (context == null) return null
-          clazz.getMethod("start", Context::class.java).invoke(null, context)
-        }
-        "stop" -> {
-          clazz.getMethod("stop", Context::class.java).invoke(null, context)
-          true
-        }
-        "isPlaying" -> clazz.getMethod("isPlaying").invoke(null)
-        else -> null
-      }
-    } catch (_: Exception) {
-      null
     }
   }
 

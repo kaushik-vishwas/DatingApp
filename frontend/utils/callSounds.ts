@@ -20,6 +20,20 @@ let incomingRingLoadPromise: Promise<void> | null = null;
 let incomingRingtonePlaying = false;
 /** True when Android native MediaPlayer owns the incoming ring. */
 let incomingNativeRingtoneActive = false;
+/** Bumped by every stop — an expo-av start that began earlier must not play afterwards. */
+let incomingRingGeneration = 0;
+
+/**
+ * A stop ran after this start began. If the start already reached playAsync, silence it
+ * (unless a newer start has since taken over and is playing).
+ */
+function abortStaleIncomingRingStart(generation: number, sound: Audio.Sound | null): boolean {
+  if (generation === incomingRingGeneration) return false;
+  if (sound && !incomingRingtonePlaying) {
+    void sound.stopAsync().catch(() => {});
+  }
+  return true;
+}
 
 /** True while the in-app incoming ring should be audible (looping). */
 export function isIncomingRingtonePlaying(): boolean {
@@ -169,6 +183,8 @@ export async function ensureIncomingRingtoneLoaded(): Promise<void> {
 
 /** Stop the shared incoming ring (safe to call repeatedly). */
 export async function stopIncomingRingtonePlayback(): Promise<void> {
+  // Cancels any expo-av start still awaiting load/audio-mode (Accept/Reject during that window).
+  incomingRingGeneration += 1;
   incomingRingtonePlaying = false;
   tryStopNativeIncomingRingtone();
   if (!incomingRingSound) {
@@ -266,29 +282,37 @@ export async function ensureIncomingRingtonePlaying(): Promise<() => Promise<voi
   if (tryStartNativeIncomingRingtone()) {
     return stopIncomingRingtonePlayback;
   }
+  const generation = incomingRingGeneration;
   incomingRingBackgroundAudio = false;
   await ensureIncomingRingtoneAudioMode();
+  if (abortStaleIncomingRingStart(generation, null)) return stopIncomingRingtonePlayback;
   try {
     await ensureIncomingRingtoneLoaded();
   } catch {
     return stopIncomingRingtonePlayback;
   }
+  if (abortStaleIncomingRingStart(generation, null)) return stopIncomingRingtonePlayback;
   const sound = incomingRingSound;
   if (!sound) return stopIncomingRingtonePlayback;
   try {
     const status = await sound.getStatusAsync();
+    if (abortStaleIncomingRingStart(generation, null)) return stopIncomingRingtonePlayback;
     if (status.isLoaded && status.isPlaying) {
       incomingRingtonePlaying = true;
       return stopIncomingRingtonePlayback;
     }
     if (status.isLoaded) {
       await sound.setPositionAsync(0);
+      if (abortStaleIncomingRingStart(generation, null)) return stopIncomingRingtonePlayback;
       await sound.playAsync();
+      if (abortStaleIncomingRingStart(generation, sound)) return stopIncomingRingtonePlayback;
       incomingRingtonePlaying = true;
     }
   } catch {
+    if (abortStaleIncomingRingStart(generation, null)) return stopIncomingRingtonePlayback;
     try {
       await sound.replayAsync();
+      if (abortStaleIncomingRingStart(generation, sound)) return stopIncomingRingtonePlayback;
       incomingRingtonePlaying = true;
     } catch {
       incomingRingtonePlaying = false;
@@ -302,27 +326,35 @@ export async function startIncomingRingtone(): Promise<() => Promise<void>> {
   if (tryStartNativeIncomingRingtone()) {
     return stopIncomingRingtonePlayback;
   }
+  const generation = incomingRingGeneration;
   incomingRingBackgroundAudio = false;
   await ensureIncomingRingtoneAudioMode();
+  if (abortStaleIncomingRingStart(generation, null)) return stopIncomingRingtonePlayback;
   try {
     await ensureIncomingRingtoneLoaded();
   } catch {
     return stopIncomingRingtonePlayback;
   }
+  if (abortStaleIncomingRingStart(generation, null)) return stopIncomingRingtonePlayback;
   const sound = incomingRingSound;
   if (!sound) return stopIncomingRingtonePlayback;
   try {
     const status = await sound.getStatusAsync();
+    if (abortStaleIncomingRingStart(generation, null)) return stopIncomingRingtonePlayback;
     if (status.isLoaded && status.isPlaying) {
       incomingRingtonePlaying = true;
       return stopIncomingRingtonePlayback;
     }
     await sound.setPositionAsync(0);
+    if (abortStaleIncomingRingStart(generation, null)) return stopIncomingRingtonePlayback;
     await sound.playAsync();
+    if (abortStaleIncomingRingStart(generation, sound)) return stopIncomingRingtonePlayback;
     incomingRingtonePlaying = true;
   } catch {
+    if (abortStaleIncomingRingStart(generation, null)) return stopIncomingRingtonePlayback;
     try {
       await sound.replayAsync();
+      if (abortStaleIncomingRingStart(generation, sound)) return stopIncomingRingtonePlayback;
       incomingRingtonePlaying = true;
     } catch {
       incomingRingtonePlaying = false;

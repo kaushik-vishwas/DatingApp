@@ -62,8 +62,15 @@ object IncomingCallNotificationTapEnhancer {
 
     val notificationManager =
       context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+    val active = notificationManager.activeNotifications
+    // Native FCM / keep-alive row (id = hash(tag)) shares the Expo tag. It already has full-screen
+    // + Decline/Answer — rebuilding it here would strip those buttons, so leave it alone.
+    val nativeId = tag.hashCode() and 0x7fffffff
+    if (active?.any { it.tag == tag && it.id == nativeId } == true) {
+      return failure(tag, nativeId, "native_present", debugEnabled, context)
+    }
     val status =
-      notificationManager.activeNotifications?.firstOrNull { it.tag == tag }
+      active?.firstOrNull { it.tag == tag }
         ?: return failure(tag, -1, "notification_not_active", debugEnabled, context)
 
     val existing = status.notification

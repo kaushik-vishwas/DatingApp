@@ -192,8 +192,14 @@ class OnlinePresenceForegroundService : Service() {
     const val EXTRA_AUTH = "authToken"
     private const val PREFS = "selecto_online_keepalive"
     private const val PREF_API = "api_base"
+    /** Legacy plaintext key — read once for migration, then removed. */
     private const val PREF_AUTH = "auth_token"
-    private const val POLL_MS = 4_000L
+    private const val PREF_AUTH_ENC = "auth_token_enc"
+    /**
+     * Fallback only (FCM high-priority push is the primary wake). 10s still catches a missed push
+     * well inside the server's 30s background ring window, at 40% of the old 4s poll cost.
+     */
+    private const val POLL_MS = 10_000L
     @Volatile
     var running: Boolean = false
       private set
@@ -210,19 +216,32 @@ class OnlinePresenceForegroundService : Service() {
 
     private fun persistCreds(context: Context) {
       if (apiBase.isEmpty() && authToken.isEmpty()) return
-      context.applicationContext
-        .getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-        .edit()
-        .putString(PREF_API, apiBase)
-        .putString(PREF_AUTH, authToken)
-        .apply()
+      val prefs = context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+      // Drop any legacy plaintext JWT; the token is only stored Keystore-encrypted.
+      prefs.edit().putString(PREF_API, apiBase).remove(PREF_AUTH).apply()
+      if (authToken.isNotEmpty()) SecureTokenStore.put(prefs, PREF_AUTH_ENC, authToken)
     }
 
     private fun restoreCreds(context: Context) {
       val prefs = context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
       if (apiBase.isEmpty()) apiBase = prefs.getString(PREF_API, "")?.trim().orEmpty()
-      if (authToken.isEmpty()) authToken = prefs.getString(PREF_AUTH, "")?.trim().orEmpty()
+      if (authToken.isEmpty()) authToken = SecureTokenStore.get(prefs, PREF_AUTH_ENC, PREF_AUTH)
     }
+
+    /**
+     * API base + JWT saved while Go Online is on (JWT decrypted from the Keystore store).
+     * Null when Go Online is off / signed out — native callers then skip server calls.
+     */
+    @Synchronized
+    fun readCreds(context: Context): Pair<String, String>? {
+      restoreCreds(context)
+      val base = apiBase
+      val token = authToken
+      return if (base.isEmpty() || token.isEmpty()) null else base to token
+    }
+
+    /** True when Go Online was on (credentials persisted) — used to resume after reboot/update. */
+    fun hasSavedCreds(context: Context): Boolean = readCreds(context) != null
 
     private fun clearCreds(context: Context) {
       context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().clear().apply()
@@ -236,6 +255,8 @@ class OnlinePresenceForegroundService : Service() {
       if (apiBaseUrl.isNotBlank()) apiBase = apiBaseUrl.trim().trimEnd('/')
       if (jwt.isNotBlank()) authToken = jwt.trim()
       persistCreds(app)
+      // Separate copy for notification Decline — survives stop() while a call is active.
+      NativeCallApi.saveCreds(app, apiBase, authToken)
       val intent = Intent(app, OnlinePresenceForegroundService::class.java).apply {
         putExtra(EXTRA_API_BASE, apiBase)
         putExtra(EXTRA_AUTH, authToken)

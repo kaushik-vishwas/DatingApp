@@ -34,6 +34,8 @@ object IncomingCallKeepAlivePresenter {
     val id = callId.trim()
     if (id.isEmpty()) return false
     val appContext = context.applicationContext
+    // Declined on this phone — the server may still list it for a moment; never re-ring.
+    if (DeclinedCallRegistry.isDeclined(appContext, id)) return false
     val prefs = appContext.getSharedPreferences("selecto_app_prefs", Context.MODE_PRIVATE)
     val inCall =
       prefs.getBoolean("in_app_voice_call_active", false) &&
@@ -107,9 +109,37 @@ object IncomingCallKeepAlivePresenter {
     if (!nativeRingOk) {
       IncomingCallNotificationChannels.resolveRingtoneUri(appContext)?.let { builder.setSound(it) }
     }
+    val usedCallStyle =
+      IncomingCallNotificationActions.apply(
+        builder,
+        appContext,
+        id,
+        identifier,
+        notificationId,
+        name,
+        contentPending,
+        canFullScreen
+      )
 
     return try {
-      NotificationManagerCompat.from(appContext).notify(identifier, notificationId, builder.build())
+      try {
+        NotificationManagerCompat.from(appContext).notify(identifier, notificationId, builder.build())
+      } catch (e: IllegalArgumentException) {
+        // CallStyle rejected by this Android build — never lose the call; plain buttons instead.
+        if (!usedCallStyle) throw e
+        IncomingCallNotificationActions.applyPlainActions(
+          builder,
+          appContext,
+          id,
+          identifier,
+          notificationId,
+          body,
+          contentPending
+        )
+        NotificationManagerCompat.from(appContext).notify(identifier, notificationId, builder.build())
+      }
+      SelectoTelecom.reportIncomingCall(appContext, id, name, url)
+      NativeCallApi.acknowledgeRinging(appContext, id)
       PresenceNativeWakeLog.append(
         appContext,
         "native_keepalive_incoming",
