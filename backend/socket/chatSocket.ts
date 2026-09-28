@@ -328,6 +328,9 @@ export function attachChatSocket(httpServer: HTTPServer): Server {
     });
     if (accepted) {
       invite.accepted = true;
+      // Answered — `/calls/incoming-pending` must stop listing it, or the receiver's native
+      // Go Online poll re-shows the call (and restarts the ringtone) between accept and connect.
+      void clearPendingIncomingCall(invite.receiverId, callId);
     } else {
       activeCallInvites.delete(callId);
       void clearPendingIncomingCall(invite.receiverId, callId);
