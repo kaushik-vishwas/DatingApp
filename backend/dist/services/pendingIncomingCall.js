@@ -8,7 +8,7 @@ exports.setPendingIncomingCall = setPendingIncomingCall;
 exports.clearPendingIncomingCall = clearPendingIncomingCall;
 exports.getLivePendingIncomingCall = getLivePendingIncomingCall;
 const Receiver_1 = __importDefault(require("../models/Receiver"));
-const PENDING_TTL_MS = 16_000;
+const PENDING_TTL_MS = 31_000;
 function pendingIncomingExpiresAt(from = Date.now()) {
     return new Date(from + PENDING_TTL_MS);
 }

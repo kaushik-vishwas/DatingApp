@@ -19,7 +19,7 @@ import {
   publicEarningSchedulePayload,
   resolveFixedRatePerMinuteAt,
 } from '../services/receiverEarningModel';
-import { pickRandomQueuedReceiverForCaller } from '../services/callQueue';
+
 import {
   emitCallEndedToParticipants,
   emitCallTalkStarted,
@@ -416,38 +416,6 @@ async function receiverHasBlockingOngoingSession(receiverId: string, callerUserI
   return doc != null;
 }
 
-export const getRandomQueuedReceiver = async (req: Request, res: Response): Promise<void> => {
-  try {
-    if (req.accountKind !== 'user' || !req.user?._id) {
-      res.status(403).json({ message: 'Only callers can use random call match' });
-      return;
-    }
-    const callerId = String(req.user._id);
-    const caller = await User.findById(callerId).select('accountStatus suspended');
-    if (!caller || caller.accountStatus !== 'approved' || caller.suspended) {
-      res.status(403).json({ message: 'Caller account is not allowed for calling' });
-      return;
-    }
-
-    const timeoutMs = 10_000;
-    const pollEveryMs = 1_000;
-    const started = Date.now();
-    while (Date.now() - started < timeoutMs) {
-      const matched = await pickRandomQueuedReceiverForCaller(callerId);
-      if (matched) {
-        res.status(200).json(matched);
-        return;
-      }
-      await sleep(pollEveryMs);
-    }
-
-    res.status(404).json({ message: 'No available receiver found right now. Please try again shortly.' });
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    console.error('getRandomQueuedReceiver error:', msg);
-    res.status(500).json({ message: msg || 'Server error' });
-  }
-};
 
 export const getVoiceBootstrap = async (req: Request, res: Response): Promise<void> => {
   const accountKind = req.accountKind;

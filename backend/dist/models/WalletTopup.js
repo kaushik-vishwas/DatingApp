@@ -36,7 +36,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const mongoose_1 = __importStar(require("mongoose"));
 const walletTopupSchema = new mongoose_1.Schema({
     userId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
-    razorpayOrderId: { type: String, required: true },
+    razorpayOrderId: { type: String, required: true, index: true },
     razorpayPaymentId: { type: String, required: true, unique: true },
     payAmount: { type: Number, required: true },
     bonusPercent: { type: Number, required: true },

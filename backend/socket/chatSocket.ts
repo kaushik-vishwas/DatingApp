@@ -82,9 +82,9 @@ const ACCEPTED_CALL_WATCHDOG_MS = 30_000;
 const RING_NO_ANSWER_FOREGROUND_MS = 20_000;
 /**
  * Once the receiver's incoming UI is actually on screen, leave at least this long to answer
- * (10s auto-pick + join margin) — a late notification tap must not expire mid-auto-pick.
+ * (15s auto-pick + join margin) — a late notification tap must not expire mid-auto-pick.
  */
-const RING_ON_SCREEN_MIN_ANSWER_MS = 15_000;
+const RING_ON_SCREEN_MIN_ANSWER_MS = 20_000;
 /**
  * Receiver phone must confirm the native incoming-call notification rang (or its socket saw the
  * invite) within this window after the wake push; otherwise it is treated as unreachable.

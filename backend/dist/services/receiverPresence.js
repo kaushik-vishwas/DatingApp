@@ -20,11 +20,12 @@ const socketRegistry_1 = require("../socket/socketRegistry");
 const receiverScore_1 = require("./receiverScore");
 const callQueue_1 = require("./callQueue");
 /**
- * Rolling grace window renewed by JS / native keep-alive heartbeats while Go Online is on.
- * Long enough that brief OEM doze or network gaps do not drop discover presence.
+ * Rolling presence lease renewed by native keep-alive (10s poll), JS background heartbeat (45s)
+ * and native ring acks while Go Online is on. Short so an offline / rebooted / force-stopped phone
+ * stops looking callable within minutes (was 24h → "phantom" missed calls).
  */
-exports.RECEIVER_DISCOVER_GRACE_MS = 24 * 60 * 60 * 1000;
-/** Min interval between DB grace renewals (keep-alive polls every 4s). */
+exports.RECEIVER_DISCOVER_GRACE_MS = 5 * 60 * 1000;
+/** Min interval between DB grace renewals (keep-alive polls every 10s). */
 const BACKGROUND_PRESENCE_TOUCH_MIN_MS = 30_000;
 const discoverGraceUntilByReceiverId = new Map();
 const discoverGraceExpireTimers = new Map();

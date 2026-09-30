@@ -45,6 +45,7 @@ var __importStar = (this && this.__importStar) || (function () {
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.buildFcmV1IncomingCallMessage = buildFcmV1IncomingCallMessage;
+exports.sendFcmV1IncomingCallCancel = sendFcmV1IncomingCallCancel;
 exports.sendFcmV1IncomingCallPush = sendFcmV1IncomingCallPush;
 function buildIncomingCallData(payload) {
     const peerImage = payload.fromImage?.trim() ?? '';
@@ -119,6 +120,46 @@ async function getGoogleAccessToken() {
     }
     const json = (await tokenRes.json());
     return json.access_token?.trim() ?? null;
+}
+/**
+ * Data-only "stop ringing" push for an invite that ended unanswered (no-answer, caller hung up,
+ * cancelled). Lets a closed/minimized receiver app drop its ringing notification + ringtone.
+ */
+async function sendFcmV1IncomingCallCancel(payload) {
+    const projectId = process.env.FCM_PROJECT_ID?.trim();
+    const token = payload.deviceToken.trim();
+    const callId = payload.callId.trim();
+    if (!projectId || !token || !callId) {
+        return { ok: false, error: 'missing_project_token_or_call' };
+    }
+    const accessToken = await getGoogleAccessToken();
+    if (!accessToken) {
+        return { ok: false, error: 'oauth_failed' };
+    }
+    try {
+        const res = await fetch(`https://fcm.googleapis.com/v1/projects/${projectId}/messages:send`, {
+            method: 'POST',
+            headers: {
+                Authorization: `Bearer ${accessToken}`,
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                message: {
+                    token,
+                    data: { type: 'call_cancelled', callId },
+                    android: { priority: 'HIGH', ttl: '60s' },
+                },
+            }),
+        });
+        if (!res.ok) {
+            const text = await res.text();
+            return { ok: false, status: res.status, error: text.slice(0, 400) };
+        }
+        return { ok: true, status: res.status };
+    }
+    catch (e) {
+        return { ok: false, error: e instanceof Error ? e.message : String(e) };
+    }
 }
 /** Send data-only incoming call via FCM HTTP v1. Requires FCM_PROJECT_ID + service account. */
 async function sendFcmV1IncomingCallPush(payload) {

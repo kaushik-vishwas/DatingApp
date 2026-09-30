@@ -1,11 +1,8 @@
 import mongoose from 'mongoose';
-import ChatBlock from '../models/ChatBlock';
 import CallSession from '../models/CallSession';
 import Receiver from '../models/Receiver';
-import ReceiverPriorityNotification from '../models/ReceiverPriorityNotification';
 import { hasPendingCallInviteForReceiver } from './callInviteRegistry';
 import { isReceiverSocketConnected } from '../socket/socketRegistry';
-import { isReceiverLoggedInAndAvailable } from './receiverPresence';
 
 const waitingReceiverIds = new Set<string>();
 const busyReceiverIds = new Set<string>();
@@ -133,98 +130,3 @@ export async function syncReceiverQueueState(receiverId: string): Promise<void> 
   waitingReceiverIds.delete(rid);
 }
 
-/**
- * Pick a random receiver who can take a call right now: approved, online, available,
- * not busy, not blocked by this caller. Does not require "queue" or Go Online screen.
- */
-export async function pickRandomQueuedReceiverForCaller(callerId: string): Promise<{
-  receiverId: string;
-  name: string;
-  profileImage: string | null;
-  audioCallRate: number | null;
-} | null> {
-  const cid = normalizeId(callerId);
-  if (!mongoose.Types.ObjectId.isValid(cid)) return null;
-
-  await releaseStaleReceiverBusyFlags();
-
-  const baseFilter = {
-    accountStatus: 'approved' as const,
-    suspended: { $ne: true },
-    isOnline: true,
-    isAvailable: true,
-    isBusyOnCall: { $ne: true },
-  };
-
-  const candidates = await Receiver.find(baseFilter)
-    .select('_id name profileImage audioCallRate isAvailable discoverGraceUntil')
-    .lean<{
-      _id: mongoose.Types.ObjectId;
-      name: string;
-      profileImage?: string | null;
-      audioCallRate?: number | null;
-      isAvailable?: boolean;
-      discoverGraceUntil?: Date | null;
-    }[]>();
-
-  // Same presence rule as discover / bootstrap / call:invite: live socket OR discover grace,
-  // so closed-app receivers can be matched and woken by the existing FCM invite push.
-  const eligibleRows = candidates.filter((r) => {
-    const id = String(r._id);
-    return (
-      !busyReceiverIds.has(id) &&
-      isReceiverLoggedInAndAvailable({
-        receiverId: id,
-        isAvailable: Boolean(r.isAvailable),
-        discoverGraceUntil: r.discoverGraceUntil ?? null,
-      })
-    );
-  });
-  if (eligibleRows.length === 0) return null;
-
-  const eligibleIds = eligibleRows.map((r) => r._id);
-  const blockedIds = await ChatBlock.distinct('receiverId', {
-    userId: new mongoose.Types.ObjectId(cid),
-    receiverId: { $in: eligibleIds },
-  });
-  const blockedSet = new Set((blockedIds as mongoose.Types.ObjectId[]).map((id) => String(id)));
-
-  const eligible = eligibleRows.filter((r) => !blockedSet.has(String(r._id)));
-  if (eligible.length === 0) return null;
-  const eligibleById = new Map(eligible.map((r) => [String(r._id), r]));
-  const priorityRows = await ReceiverPriorityNotification.find({
-    userId: new mongoose.Types.ObjectId(cid),
-    priorityUntil: { $gt: new Date() },
-    receiverId: {
-      $in: [...eligibleById.keys()].map((id) => new mongoose.Types.ObjectId(id)),
-    },
-  })
-    .sort({ lastNotifiedAt: -1 })
-    .limit(5)
-    .select('receiverId')
-    .lean<{ receiverId: mongoose.Types.ObjectId }[]>();
-  for (const row of priorityRows) {
-    const prioritized = eligibleById.get(String(row.receiverId));
-    if (!prioritized) continue;
-    return {
-      receiverId: String(prioritized._id),
-      name: prioritized.name,
-      profileImage: prioritized.profileImage ?? null,
-      audioCallRate:
-        typeof prioritized.audioCallRate === 'number' && Number.isFinite(prioritized.audioCallRate)
-          ? prioritized.audioCallRate
-          : null,
-    };
-  }
-  const chosen = eligible[Math.floor(Math.random() * eligible.length)];
-  if (!chosen) return null;
-  return {
-    receiverId: String(chosen._id),
-    name: chosen.name,
-    profileImage: chosen.profileImage ?? null,
-    audioCallRate:
-      typeof chosen.audioCallRate === 'number' && Number.isFinite(chosen.audioCallRate)
-        ? chosen.audioCallRate
-        : null,
-  };
-}

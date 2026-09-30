@@ -1060,21 +1060,31 @@ const updateReceiver = async (req, res) => {
                 return;
             }
         }
-        if (typeof body.aadhaarNumber === 'string' && body.aadhaarNumber.trim()) {
-            const aadhaarDigits = body.aadhaarNumber.replace(/\D/g, '').trim();
-            if (!/^\d{12}$/.test(aadhaarDigits)) {
-                res.status(400).json({ message: 'aadhaarNumber must be a valid 12-digit number' });
-                return;
+        if (body.aadhaarNumber !== undefined) {
+            if (body.aadhaarNumber === null || (typeof body.aadhaarNumber === 'string' && !body.aadhaarNumber.trim())) {
+                receiver.aadhaarNumber = null;
             }
-            receiver.aadhaarNumber = aadhaarDigits;
+            else if (typeof body.aadhaarNumber === 'string') {
+                const aadhaarDigits = body.aadhaarNumber.replace(/\D/g, '').trim();
+                if (!/^\d{12}$/.test(aadhaarDigits)) {
+                    res.status(400).json({ message: 'aadhaarNumber must be a valid 12-digit number' });
+                    return;
+                }
+                receiver.aadhaarNumber = aadhaarDigits;
+            }
         }
-        if (typeof body.panNumber === 'string' && body.panNumber.trim()) {
-            const pan = body.panNumber.trim().toUpperCase();
-            if (!/^[A-Z]{5}[0-9]{4}[A-Z]$/.test(pan)) {
-                res.status(400).json({ message: 'panNumber must be valid (e.g. ABCDE1234F)' });
-                return;
+        if (body.panNumber !== undefined) {
+            if (body.panNumber === null || (typeof body.panNumber === 'string' && !body.panNumber.trim())) {
+                receiver.panNumber = null;
             }
-            receiver.panNumber = pan;
+            else if (typeof body.panNumber === 'string') {
+                const pan = body.panNumber.trim().toUpperCase();
+                if (!/^[A-Z]{5}[0-9]{4}[A-Z]$/.test(pan)) {
+                    res.status(400).json({ message: 'panNumber must be valid (e.g. ABCDE1234F)' });
+                    return;
+                }
+                receiver.panNumber = pan;
+            }
         }
         for (const [key, field] of [
             ['aadhaarFront', 'aadhaarFront'],
@@ -1095,29 +1105,139 @@ const updateReceiver = async (req, res) => {
                 }
             }
         }
-        if (receiver.aadhaarFront && receiver.aadhaarBack && receiver.panFront) {
-            receiver.documents = [receiver.aadhaarFront, receiver.aadhaarBack, receiver.panFront];
+        receiver.documents = [receiver.aadhaarFront, receiver.aadhaarBack, receiver.panFront].filter(Boolean);
+        if (body.nameAsPerAadhaar !== undefined) {
+            receiver.nameAsPerAadhaar =
+                typeof body.nameAsPerAadhaar === 'string' && body.nameAsPerAadhaar.trim()
+                    ? body.nameAsPerAadhaar.trim()
+                    : null;
         }
-        if (typeof body.gender === 'string') {
-            const g = body.gender.trim();
-            if (g === 'male' || g === 'female' || g === 'other') {
-                receiver.gender = g;
+        if (body.upiId !== undefined) {
+            receiver.upiId =
+                typeof body.upiId === 'string' && body.upiId.trim() ? body.upiId.trim() : null;
+        }
+        if (body.bankAccountHolderName !== undefined) {
+            receiver.bankAccountHolderName =
+                typeof body.bankAccountHolderName === 'string' && body.bankAccountHolderName.trim()
+                    ? body.bankAccountHolderName.trim()
+                    : null;
+        }
+        if (body.bankAccountType !== undefined) {
+            const bat = body.bankAccountType;
+            if (bat === 'savings' || bat === 'current' || bat === null) {
+                receiver.bankAccountType = bat;
+            }
+            else if (typeof bat === 'string' && !bat.trim()) {
+                receiver.bankAccountType = null;
             }
             else {
-                res.status(400).json({ message: 'gender must be male, female, or other' });
+                res.status(400).json({ message: 'bankAccountType must be savings, current, or null' });
                 return;
             }
         }
-        if (typeof body.age === 'number' && Number.isFinite(body.age)) {
-            const age = Math.round(body.age);
-            if (age < 18 || age > 120) {
-                res.status(400).json({ message: 'age must be between 18 and 120' });
-                return;
+        if (body.bankAccountNumber !== undefined) {
+            receiver.bankAccountNumber =
+                typeof body.bankAccountNumber === 'string' && body.bankAccountNumber.trim()
+                    ? body.bankAccountNumber.trim()
+                    : null;
+        }
+        if (body.bankIfsc !== undefined) {
+            receiver.bankIfsc =
+                typeof body.bankIfsc === 'string' && body.bankIfsc.trim()
+                    ? body.bankIfsc.trim().toUpperCase()
+                    : null;
+        }
+        if (body.bankName !== undefined) {
+            receiver.bankName =
+                typeof body.bankName === 'string' && body.bankName.trim()
+                    ? body.bankName.trim()
+                    : null;
+        }
+        if (body.languages !== undefined) {
+            if (Array.isArray(body.languages)) {
+                receiver.languages = body.languages.map((s) => String(s).trim()).filter(Boolean);
             }
-            receiver.age = age;
+            else if (typeof body.languages === 'string') {
+                receiver.languages = body.languages.split(',').map((s) => s.trim()).filter(Boolean);
+            }
+        }
+        if (body.interests !== undefined) {
+            if (Array.isArray(body.interests)) {
+                receiver.interests = body.interests.map((s) => String(s).trim()).filter(Boolean);
+            }
+            else if (typeof body.interests === 'string') {
+                receiver.interests = body.interests.split(',').map((s) => s.trim()).filter(Boolean);
+            }
+        }
+        if (body.gender !== undefined) {
+            if (body.gender === null || (typeof body.gender === 'string' && !body.gender.trim())) {
+                receiver.gender = null;
+            }
+            else if (typeof body.gender === 'string') {
+                const g = body.gender.trim();
+                if (g === 'male' || g === 'female' || g === 'other') {
+                    receiver.gender = g;
+                }
+                else {
+                    res.status(400).json({ message: 'gender must be male, female, or other' });
+                    return;
+                }
+            }
+        }
+        if (body.age !== undefined) {
+            if (body.age === null) {
+                receiver.age = null;
+            }
+            else if (typeof body.age === 'number' && Number.isFinite(body.age)) {
+                const age = Math.round(body.age);
+                if (age < 18 || age > 120) {
+                    res.status(400).json({ message: 'age must be between 18 and 120' });
+                    return;
+                }
+                receiver.age = age;
+            }
         }
         if (body.state !== undefined) {
             receiver.state = typeof body.state === 'string' && body.state.trim() ? body.state.trim() : null;
+        }
+        if (body.audioCallRate !== undefined) {
+            if (body.audioCallRate === null) {
+                receiver.audioCallRate = null;
+            }
+            else if (typeof body.audioCallRate === 'number' && Number.isFinite(body.audioCallRate)) {
+                receiver.audioCallRate = Math.max(0, body.audioCallRate);
+            }
+        }
+        if (typeof body.voiceVerificationApproved === 'boolean') {
+            receiver.voiceVerificationApproved = body.voiceVerificationApproved;
+        }
+        if (typeof body.isVerified === 'boolean') {
+            receiver.isVerified = body.isVerified;
+        }
+        if (typeof body.accountStatus === 'string') {
+            const status = body.accountStatus.trim();
+            if (['pending_profile', 'pending_review', 'approved', 'rejected'].includes(status)) {
+                const wasApproved = receiver.accountStatus === 'approved';
+                receiver.accountStatus = status;
+                if (status === 'approved' && !wasApproved) {
+                    receiver.isVerified = true;
+                    receiver.voiceVerificationApproved = true;
+                    receiver.rejectionReason = null;
+                    (0, socketRegistry_1.emitReceiverApproved)(String(receiver._id));
+                }
+            }
+            else {
+                res.status(400).json({
+                    message: 'accountStatus must be pending_profile, pending_review, approved, or rejected',
+                });
+                return;
+            }
+        }
+        if (body.rejectionReason !== undefined) {
+            receiver.rejectionReason =
+                typeof body.rejectionReason === 'string' && body.rejectionReason.trim()
+                    ? body.rejectionReason.trim()
+                    : null;
         }
         if (typeof body.isAvailable === 'boolean') {
             receiver.isAvailable = body.isAvailable;

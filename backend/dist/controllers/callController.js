@@ -36,11 +36,15 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getIncomingPending = exports.reportVoiceSessionIssue = exports.rateVoiceSession = exports.syncVoiceSession = exports.endVoiceSession = exports.startVoiceSession = exports.getVoiceBootstrap = exports.getRandomQueuedReceiver = exports.MISSED_OR_INCOMPLETE_MAX_SEC = void 0;
+exports.markIncomingCallSeen = exports.acknowledgeIncomingCallRinging = exports.declineIncomingCall = exports.getIncomingPending = exports.reportVoiceSessionIssue = exports.rateVoiceSession = exports.syncVoiceSession = exports.endVoiceSession = exports.startVoiceSession = exports.getVoiceBootstrap = exports.MISSED_OR_INCOMPLETE_MAX_SEC = void 0;
 exports.callTalkStartedAt = callTalkStartedAt;
 exports.callTalkDurationSec = callTalkDurationSec;
 exports.ensureCallEndedAndSettled = ensureCallEndedAndSettled;
 exports.settleCallSession = settleCallSession;
+exports.noteCallSyncActivity = noteCallSyncActivity;
+exports.getCallLastSyncAtMs = getCallLastSyncAtMs;
+exports.clearCallSyncActivity = clearCallSyncActivity;
+exports.getStaleOngoingCallMs = getStaleOngoingCallMs;
 const mongoose_1 = __importDefault(require("mongoose"));
 const ChatBlock_1 = __importDefault(require("../models/ChatBlock"));
 const User_1 = __importDefault(require("../models/User"));
@@ -51,11 +55,11 @@ const UserReport_1 = __importDefault(require("../models/UserReport"));
 const streamVoice_1 = require("../utils/streamVoice");
 const receiverScore_1 = require("../services/receiverScore");
 const receiverEarningModel_1 = require("../services/receiverEarningModel");
-const callQueue_1 = require("../services/callQueue");
 const socketRegistry_1 = require("../socket/socketRegistry");
 const receiverPresence_1 = require("../services/receiverPresence");
 const pendingIncomingCall_1 = require("../services/pendingIncomingCall");
-const callQueue_2 = require("../services/callQueue");
+const callInviteActions_1 = require("../services/callInviteActions");
+const callQueue_1 = require("../services/callQueue");
 function roundInr(n) {
     return Math.round(n * 100) / 100;
 }
@@ -261,10 +265,32 @@ async function settleCallSession(callId, complete) {
     if (!snapshot) {
         throw new Error('Call settlement failed');
     }
-    return snapshot;
+    const result = snapshot;
+    if (result.status === 'completed') {
+        clearCallSyncActivity(callId);
+    }
+    return result;
 }
 /** Live calls hit sessionSync every ~5s, which bumps updatedAt. No updates for this long ⇒ abandoned. */
 const DEFAULT_STALE_ONGOING_MS = 90 * 1000;
+/**
+ * Last time a participant synced each live call (light syncs included — they don't write to Mongo,
+ * so CallSession.updatedAt alone goes stale mid-talk). In-memory: single-process server.
+ */
+const callLastSyncAtMs = new Map();
+function noteCallSyncActivity(callId) {
+    callLastSyncAtMs.set(callId, Date.now());
+}
+function getCallLastSyncAtMs(callId) {
+    return callLastSyncAtMs.get(callId) ?? null;
+}
+function clearCallSyncActivity(callId) {
+    callLastSyncAtMs.delete(callId);
+}
+function getStaleOngoingCallMs() {
+    const ms = Number(process.env.STALE_ONGOING_CALL_MS ?? DEFAULT_STALE_ONGOING_MS);
+    return Number.isFinite(ms) && ms > 0 ? ms : DEFAULT_STALE_ONGOING_MS;
+}
 /**
  * Ongoing CallSession rows persist in MongoDB; orphan "ongoing" blocks bootstrap forever.
  * - Same caller+receiver as the DB row → allow (reconnect / second bootstrap for same call).
@@ -285,9 +311,9 @@ async function receiverHasBlockingOngoingSession(receiverId, callerUserId) {
     if (String(session.callerId) === callerUserId) {
         return false;
     }
-    const touch = (session.updatedAt && session.updatedAt.getTime()) ||
-        (session.startedAt && session.startedAt.getTime()) ||
-        0;
+    // Light syncs (used for the whole talk phase) don't write to Mongo — include in-memory sync time,
+    // otherwise any call >90s into talk looked "stale" and got force-ended when someone else dialed.
+    const touch = Math.max(getCallLastSyncAtMs(session.callId) ?? 0, (session.updatedAt && session.updatedAt.getTime()) || 0, (session.startedAt && session.startedAt.getTime()) || 0);
     if (Date.now() - touch <= staleMs) {
         return true;
     }
@@ -305,8 +331,8 @@ async function receiverHasBlockingOngoingSession(receiverId, callerUserId) {
                 console.error('receiver call score record (stale settle):', msg);
             });
         }
-        (0, callQueue_2.releaseReceiverReservation)(settled.receiverId);
-        await (0, callQueue_2.syncReceiverQueueState)(settled.receiverId);
+        (0, callQueue_1.releaseReceiverReservation)(settled.receiverId);
+        await (0, callQueue_1.syncReceiverQueueState)(settled.receiverId);
     }
     catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
@@ -315,38 +341,6 @@ async function receiverHasBlockingOngoingSession(receiverId, callerUserId) {
     const doc = await CallSession_1.default.exists({ receiverId: oid, status: 'ongoing' });
     return doc != null;
 }
-const getRandomQueuedReceiver = async (req, res) => {
-    try {
-        if (req.accountKind !== 'user' || !req.user?._id) {
-            res.status(403).json({ message: 'Only callers can use random call match' });
-            return;
-        }
-        const callerId = String(req.user._id);
-        const caller = await User_1.default.findById(callerId).select('accountStatus suspended');
-        if (!caller || caller.accountStatus !== 'approved' || caller.suspended) {
-            res.status(403).json({ message: 'Caller account is not allowed for calling' });
-            return;
-        }
-        const timeoutMs = 10_000;
-        const pollEveryMs = 1_000;
-        const started = Date.now();
-        while (Date.now() - started < timeoutMs) {
-            const matched = await (0, callQueue_1.pickRandomQueuedReceiverForCaller)(callerId);
-            if (matched) {
-                res.status(200).json(matched);
-                return;
-            }
-            await sleep(pollEveryMs);
-        }
-        res.status(404).json({ message: 'No available receiver found right now. Please try again shortly.' });
-    }
-    catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        console.error('getRandomQueuedReceiver error:', msg);
-        res.status(500).json({ message: msg || 'Server error' });
-    }
-};
-exports.getRandomQueuedReceiver = getRandomQueuedReceiver;
 const getVoiceBootstrap = async (req, res) => {
     const accountKind = req.accountKind;
     const meId = accountKind === 'user' ? String(req.user?._id ?? '') : String(req.receiver?._id ?? '');
@@ -387,8 +381,13 @@ const getVoiceBootstrap = async (req, res) => {
         res.status(409).json({ message: 'Receiver is currently unavailable' });
         return;
     }
+    // The receiver answering an invite that is ringing her right now is reachable by definition —
+    // on a cold start from the notification her socket is not up yet and the grace may have lapsed.
+    const receiverAnsweringLiveInvite = accountKind === 'receiver' &&
+        Boolean(requestedCallId) &&
+        (0, callInviteActions_1.hasLiveInviteForReceiver)(requestedCallId, receiverId, callerUserId);
     // Align with discover: bootstrap only if Go Online is on and they are logged in (socket or grace).
-    if (!(0, socketRegistry_1.isReceiverSocketConnected)(receiverId)) {
+    if (!receiverAnsweringLiveInvite && !(0, socketRegistry_1.isReceiverSocketConnected)(receiverId)) {
         const recvPresence = await Receiver_1.default.findById(receiverId)
             .select('discoverGraceUntil isAvailable')
             .lean();
@@ -493,7 +492,7 @@ const startVoiceSession = async (req, res) => {
             recordVoiceParticipantJoined(callId, accountKind),
             readCallerWalletBalanceInr(callerId),
         ]);
-        (0, callQueue_2.tryReserveReceiver)(receiverId);
+        (0, callQueue_1.tryReserveReceiver)(receiverId);
         res.status(200).json({
             ok: true,
             ...callTalkApiFields(session),
@@ -569,8 +568,8 @@ const endVoiceSession = async (req, res) => {
             ...talkFields,
             ...(callerWalletBalanceInr !== undefined ? { callerWalletBalanceInr } : {}),
         });
-        (0, callQueue_2.releaseReceiverReservation)(settled.receiverId);
-        await (0, callQueue_2.syncReceiverQueueState)(settled.receiverId);
+        (0, callQueue_1.releaseReceiverReservation)(settled.receiverId);
+        await (0, callQueue_1.syncReceiverQueueState)(settled.receiverId);
     }
     catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
@@ -602,6 +601,12 @@ const syncVoiceSession = async (req, res) => {
         if (!isParticipant) {
             res.status(403).json({ message: 'Not allowed for this call' });
             return;
+        }
+        if (current.status === 'ongoing') {
+            noteCallSyncActivity(callId);
+        }
+        else {
+            clearCallSyncActivity(callId);
         }
         if (light) {
             const talkFields = callTalkApiFields(current);
@@ -778,7 +783,7 @@ const getIncomingPending = async (req, res) => {
             return;
         }
         const receiverId = String(req.receiver._id);
-        // Native keep-alive polls every 4s — renew discover grace so callers keep seeing her online.
+        // Native keep-alive polls every 10s — renew discover grace so callers keep seeing her online.
         try {
             await (0, receiverPresence_1.touchReceiverBackgroundPresence)(receiverId);
         }
@@ -806,3 +811,108 @@ const getIncomingPending = async (req, res) => {
     }
 };
 exports.getIncomingPending = getIncomingPending;
+function receiverInviteActionStatus(error) {
+    if (error === 'Forbidden')
+        return 403;
+    if (error === 'Unknown call invite')
+        return 404;
+    return 503;
+}
+/**
+ * POST /calls/:callId/decline — receiver tapped Decline on the native incoming-call notification
+ * (no JS running). Same effect as socket `call:response` with accepted=false.
+ */
+const declineIncomingCall = async (req, res) => {
+    try {
+        if (req.accountKind !== 'receiver' || !req.receiver?._id) {
+            res.status(403).json({ message: 'Receiver account required' });
+            return;
+        }
+        const callId = String(req.params.callId ?? '').trim();
+        if (!callId) {
+            res.status(400).json({ message: 'callId is required' });
+            return;
+        }
+        const result = (0, callInviteActions_1.declineInviteByReceiver)(callId, String(req.receiver._id));
+        if (!result.ok) {
+            res.status(receiverInviteActionStatus(result.error)).json({ ok: false, error: result.error });
+            return;
+        }
+        res.status(200).json(result);
+    }
+    catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error('declineIncomingCall error:', msg);
+        res.status(500).json({ message: msg || 'Server error' });
+    }
+};
+exports.declineIncomingCall = declineIncomingCall;
+/**
+ * POST /calls/:callId/ringing — native Android posted the incoming-call notification.
+ * Lets the server tell "rang on the device" apart from "push never arrived".
+ */
+const acknowledgeIncomingCallRinging = async (req, res) => {
+    try {
+        if (req.accountKind !== 'receiver' || !req.receiver?._id) {
+            res.status(403).json({ message: 'Receiver account required' });
+            return;
+        }
+        const callId = String(req.params.callId ?? '').trim();
+        if (!callId) {
+            res.status(400).json({ message: 'callId is required' });
+            return;
+        }
+        const receiverId = String(req.receiver._id);
+        const result = (0, callInviteActions_1.acknowledgeInviteRinging)(callId, receiverId);
+        // The phone just proved it is reachable — renew its discover presence lease.
+        try {
+            await (0, receiverPresence_1.touchReceiverBackgroundPresence)(receiverId);
+        }
+        catch {
+            // Ack response must not fail if presence sync fails.
+        }
+        if (!result.ok) {
+            res.status(receiverInviteActionStatus(result.error)).json({ ok: false, error: result.error });
+            return;
+        }
+        res.status(200).json(result);
+    }
+    catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error('acknowledgeIncomingCallRinging error:', msg);
+        res.status(500).json({ message: msg || 'Server error' });
+    }
+};
+exports.acknowledgeIncomingCallRinging = acknowledgeIncomingCallRinging;
+/**
+ * POST /calls/:callId/seen — native Android: the receiver tapped the incoming-call notification
+ * (app opening, JS / socket not up yet). Locks the on-screen answer budget like socket
+ * `call:incoming-seen` so a slow cold start cannot expire the invite mid-answer.
+ */
+const markIncomingCallSeen = async (req, res) => {
+    try {
+        if (req.accountKind !== 'receiver' || !req.receiver?._id) {
+            res.status(403).json({ message: 'Receiver account required' });
+            return;
+        }
+        const callId = String(req.params.callId ?? '').trim();
+        if (!callId) {
+            res.status(400).json({ message: 'callId is required' });
+            return;
+        }
+        const appState = typeof req.body?.appState === 'string' ? req.body.appState : 'active';
+        const foreground = appState === 'active' || appState === 'foreground' || appState === 'inactive';
+        const result = (0, callInviteActions_1.markInviteSeenByReceiver)(callId, String(req.receiver._id), foreground);
+        if (!result.ok) {
+            res.status(receiverInviteActionStatus(result.error)).json({ ok: false, error: result.error });
+            return;
+        }
+        res.status(200).json(result);
+    }
+    catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error('markIncomingCallSeen error:', msg);
+        res.status(500).json({ message: msg || 'Server error' });
+    }
+};
+exports.markIncomingCallSeen = markIncomingCallSeen;
