@@ -15,6 +15,7 @@ function iso(d: Date | string): string {
   return d instanceof Date ? d.toISOString() : new Date(d).toISOString();
 }
 
+
 export async function getMessages(req: Request, res: Response): Promise<void> {
   try {
     const kind = req.accountKind;
