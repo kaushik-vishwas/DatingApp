@@ -17,7 +17,6 @@ type WalletOfferRow = {
   homePopupKind: HomePopupKind;
 };
 
-
 function toHomePopupKind(v: unknown): HomePopupKind {
   return v === 'spotlight' ? 'spotlight' : 'social';
 }
