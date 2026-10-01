@@ -1,13 +1,23 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { BrowserRouter } from 'react-router-dom';
+import './sentry';
+import { Sentry } from './sentry';
 import './index.css';
 import App from './App.tsx';
 
 createRoot(document.getElementById('root')!).render(
-  <StrictMode>
-    <BrowserRouter>
-      <App />
-    </BrowserRouter>
-  </StrictMode>
+  <Sentry.ErrorBoundary
+    fallback={
+      <div style={{ padding: 24, fontFamily: 'sans-serif' }}>
+        Something went wrong. Reload the page.
+      </div>
+    }
+  >
+    <StrictMode>
+      <BrowserRouter>
+        <App />
+      </BrowserRouter>
+    </StrictMode>
+  </Sentry.ErrorBoundary>
 );

@@ -8,6 +8,7 @@ import {
   type ReactNode,
 } from 'react';
 import { api } from '../api/client';
+import { setSentryAdmin } from '../sentry';
 
 export type AdminInfo = {
   _id: string;
@@ -38,6 +39,14 @@ export function AdminAuthProvider({ children }: { children: ReactNode }) {
     }
   });
   const [bootstrapping, setBootstrapping] = useState<boolean>(!!token);
+
+  useEffect(() => {
+    if (admin?._id && admin.role) {
+      setSentryAdmin({ id: admin._id, role: admin.role });
+      return;
+    }
+    setSentryAdmin(null);
+  }, [admin?._id, admin?.role]);
 
   useEffect(() => {
     if (!token) {

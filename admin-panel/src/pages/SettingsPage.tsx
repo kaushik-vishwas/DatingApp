@@ -4,8 +4,11 @@ import {
   fetchAdminSettings,
   updateAdminRole,
   updateAdminSettingsNotifications,
+  updateAdminReceiverEarningModel,
   type AdminRole,
   type AdminSettingsResponse,
+  type ReceiverEarningModel,
+  type FixedPerMinuteWindow,
 } from '../api/client';
 
 export function SettingsPage() {
@@ -16,6 +19,9 @@ export function SettingsPage() {
   const [ok, setOk] = useState<string | null>(null);
   const [data, setData] = useState<AdminSettingsResponse | null>(null);
   const [notifications, setNotifications] = useState<AdminSettingsResponse['notificationControls'] | null>(null);
+  const [earningModel, setEarningModel] = useState<ReceiverEarningModel>('score_based');
+  const [fixedWindows, setFixedWindows] = useState<FixedPerMinuteWindow[]>([]);
+  const [savingEarning, setSavingEarning] = useState(false);
   const canManageRoles = admin?.role === 'super_admin';
 
   const roleLabelById = useMemo(() => {
@@ -31,6 +37,8 @@ export function SettingsPage() {
       const res = await fetchAdminSettings();
       setData(res);
       setNotifications(res.notificationControls);
+      setEarningModel(res.receiverEarningModel ?? 'score_based');
+      setFixedWindows(res.fixedPerMinuteWindows ?? []);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Failed to load settings');
     } finally {
@@ -41,6 +49,29 @@ export function SettingsPage() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  const updateWindowRate = (id: string, rate: number) => {
+    setFixedWindows((prev) => prev.map((w) => (w.id === id ? { ...w, ratePerMinute: rate } : w)));
+  };
+
+  const onSaveEarningModel = async () => {
+    setSavingEarning(true);
+    setError(null);
+    setOk(null);
+    try {
+      const res = await updateAdminReceiverEarningModel({
+        receiverEarningModel: earningModel,
+        fixedPerMinuteWindows: fixedWindows,
+      });
+      setEarningModel(res.receiverEarningModel);
+      setFixedWindows(res.fixedPerMinuteWindows);
+      setOk('Earning model updated.');
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Failed to save earning model');
+    } finally {
+      setSavingEarning(false);
+    }
+  };
 
   const onSaveNotifications = async () => {
     if (!notifications) return;
@@ -98,7 +129,7 @@ export function SettingsPage() {
       ) : null}
 
       <div className="mt-6 space-y-5">
-        {/* <section className="rounded-xl border border-neutral-200 bg-white p-5">
+        <section className="rounded-xl border border-neutral-200 bg-white p-5">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <h2 className="text-sm font-bold text-neutral-800">Receiver earning model</h2>
@@ -174,7 +205,7 @@ export function SettingsPage() {
               Platinum / Diamond / Supreme badges and score multipliers remain unchanged.
             </p>
           )}
-        </section> */}
+        </section>
 
         <section className="rounded-xl border border-neutral-200 bg-white p-5">
           <h2 className="text-sm font-bold text-neutral-800">Notification Control</h2>

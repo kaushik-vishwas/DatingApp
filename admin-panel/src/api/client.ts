@@ -1,5 +1,6 @@
 import axios, { AxiosHeaders } from 'axios';
 import { getAdminApiOrigin, logAdminApiOriginOnce } from './apiOrigin';
+import { captureAdminError } from '../sentry';
 
 logAdminApiOriginOnce();
 
@@ -25,6 +26,17 @@ api.interceptors.request.use((config) => {
 
   return config;
 });
+
+api.interceptors.response.use(
+  (response) => response,
+  (error: unknown) => {
+    if (axios.isAxiosError(error) && error.response && error.response.status >= 500) {
+      const path = typeof error.config?.url === 'string' ? error.config.url : '';
+      captureAdminError(error, { area: 'api', status: String(error.response.status), path });
+    }
+    return Promise.reject(error);
+  }
+);
 
 /** Prefer backend `{ message }` over generic Axios "Request failed with status code …". */
 export function getApiErrorMessage(e: unknown, fallback = 'Request failed'): string {
@@ -58,6 +70,13 @@ export type ReceiverRecord = {
   panFront?: string | null;
   nameAsPerAadhaar?: string | null;
   upiId?: string | null;
+  bankAccountHolderName?: string | null;
+  bankAccountType?: 'savings' | 'current' | null;
+  bankAccountNumber?: string | null;
+  bankIfsc?: string | null;
+  bankName?: string | null;
+  languages?: string[];
+  interests?: string[];
   documents?: string[];
   createdAt: string;
   updatedAt: string;
@@ -82,6 +101,7 @@ export type ReceiverRecord = {
   gender?: string | null;
   age?: number | null;
   state?: string | null;
+  rejectionReason?: string | null;
 };
 
 export type AdminReceiverUpdatePayload = {
@@ -90,14 +110,28 @@ export type AdminReceiverUpdatePayload = {
   walletBalance?: number;
   profileImage?: string | null;
   userAudio?: string | null;
-  aadhaarNumber?: string;
-  panNumber?: string;
+  aadhaarNumber?: string | null;
+  panNumber?: string | null;
   aadhaarFront?: string | null;
   aadhaarBack?: string | null;
   panFront?: string | null;
-  gender?: string;
-  age?: number;
+  nameAsPerAadhaar?: string | null;
+  upiId?: string | null;
+  bankAccountHolderName?: string | null;
+  bankAccountType?: 'savings' | 'current' | null;
+  bankAccountNumber?: string | null;
+  bankIfsc?: string | null;
+  bankName?: string | null;
+  languages?: string[];
+  interests?: string[];
+  gender?: string | null;
+  age?: number | null;
   state?: string | null;
+  audioCallRate?: number | null;
+  voiceVerificationApproved?: boolean;
+  isVerified?: boolean;
+  accountStatus?: string;
+  rejectionReason?: string | null;
   isAvailable?: boolean;
   suspended?: boolean;
 };

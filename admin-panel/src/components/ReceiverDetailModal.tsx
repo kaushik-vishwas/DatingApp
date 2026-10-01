@@ -63,6 +63,54 @@ export function ReceiverDetailModal({ receiver, onClose, onEdit }: Props) {
             <dt className="text-neutral-500">Account status</dt>
             <dd className="font-medium text-neutral-900">{receiver.accountStatus}</dd>
           </div>
+          {receiver.gender ? (
+            <div className="flex justify-between gap-4">
+              <dt className="text-neutral-500">Gender</dt>
+              <dd className="font-medium capitalize text-neutral-900">{receiver.gender}</dd>
+            </div>
+          ) : null}
+          {receiver.age != null ? (
+            <div className="flex justify-between gap-4">
+              <dt className="text-neutral-500">Age</dt>
+              <dd className="font-medium text-neutral-900">{receiver.age} years</dd>
+            </div>
+          ) : null}
+          {receiver.state ? (
+            <div className="flex justify-between gap-4">
+              <dt className="text-neutral-500">State / Region</dt>
+              <dd className="font-medium text-neutral-900">{receiver.state}</dd>
+            </div>
+          ) : null}
+          {receiver.languages && receiver.languages.length > 0 ? (
+            <div className="flex flex-col gap-1 py-1">
+              <dt className="text-neutral-500">Languages</dt>
+              <dd className="flex flex-wrap gap-1.5 pt-0.5">
+                {receiver.languages.map((lang) => (
+                  <span
+                    key={lang}
+                    className="inline-flex items-center rounded-lg border border-violet-200 bg-violet-50 px-2 py-0.5 text-xs font-semibold text-violet-800"
+                  >
+                    {lang}
+                  </span>
+                ))}
+              </dd>
+            </div>
+          ) : null}
+          {receiver.interests && receiver.interests.length > 0 ? (
+            <div className="flex flex-col gap-1 py-1">
+              <dt className="text-neutral-500">Interests</dt>
+              <dd className="flex flex-wrap gap-1.5 pt-0.5">
+                {receiver.interests.map((int) => (
+                  <span
+                    key={int}
+                    className="inline-flex items-center rounded-lg border border-pink-200 bg-pink-50 px-2 py-0.5 text-xs font-semibold text-pink-800"
+                  >
+                    {int}
+                  </span>
+                ))}
+              </dd>
+            </div>
+          ) : null}
           {receiver.aadhaarNumber ? (
             <div className="flex justify-between gap-4">
               <dt className="text-neutral-500">Aadhaar number</dt>
@@ -87,10 +135,52 @@ export function ReceiverDetailModal({ receiver, onClose, onEdit }: Props) {
               <dd className="font-medium text-neutral-900">{receiver.upiId}</dd>
             </div>
           ) : null}
-          {typeof receiver.audioCallRate === 'number' && Number.isFinite(receiver.audioCallRate) ? (
+          {receiver.bankAccountHolderName || receiver.bankAccountNumber ? (
+            <div className="border-t border-neutral-100 pt-2 space-y-1">
+              <p className="text-xs font-semibold text-neutral-400 uppercase tracking-wider">Bank Details</p>
+              {receiver.bankAccountHolderName ? (
+                <div className="flex justify-between gap-4">
+                  <dt className="text-neutral-500">Holder name</dt>
+                  <dd className="font-medium text-neutral-900">{receiver.bankAccountHolderName}</dd>
+                </div>
+              ) : null}
+              {receiver.bankName ? (
+                <div className="flex justify-between gap-4">
+                  <dt className="text-neutral-500">Bank</dt>
+                  <dd className="font-medium text-neutral-900">{receiver.bankName}</dd>
+                </div>
+              ) : null}
+              {receiver.bankAccountNumber ? (
+                <div className="flex justify-between gap-4">
+                  <dt className="text-neutral-500">Account number</dt>
+                  <dd className="font-medium text-neutral-900">{receiver.bankAccountNumber}</dd>
+                </div>
+              ) : null}
+              {receiver.bankIfsc ? (
+                <div className="flex justify-between gap-4">
+                  <dt className="text-neutral-500">IFSC code</dt>
+                  <dd className="font-medium text-neutral-900">{receiver.bankIfsc}</dd>
+                </div>
+              ) : null}
+              {receiver.bankAccountType ? (
+                <div className="flex justify-between gap-4">
+                  <dt className="text-neutral-500">Account type</dt>
+                  <dd className="font-medium capitalize text-neutral-900">{receiver.bankAccountType}</dd>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+
+          <div className="flex justify-between gap-4">
+            <dt className="text-neutral-500">Voice verified</dt>
+            <dd className="font-medium text-neutral-900">
+              {receiver.voiceVerificationApproved ? '✅ Verified' : '❌ Not verified'}
+            </dd>
+          </div>
+          {receiver.rejectionReason ? (
             <div className="flex justify-between gap-4">
-              <dt className="text-neutral-500">Audio call rate</dt>
-              <dd className="font-medium text-neutral-900">₹{receiver.audioCallRate}/min</dd>
+              <dt className="text-neutral-500">Rejection reason</dt>
+              <dd className="font-medium text-red-600">{receiver.rejectionReason}</dd>
             </div>
           ) : null}
         </dl>
