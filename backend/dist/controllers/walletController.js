@@ -45,6 +45,7 @@ const User_1 = __importDefault(require("../models/User"));
 const WalletTopup_1 = __importDefault(require("../models/WalletTopup"));
 const WalletCredit_1 = __importDefault(require("../models/WalletCredit"));
 const WalletOffer_1 = __importDefault(require("../models/WalletOffer"));
+const instrument_1 = require("../instrument");
 const authController_1 = require("./authController");
 const accountAccess_1 = require("../utils/accountAccess");
 const walletRechargeFees_1 = require("../constants/walletRechargeFees");
@@ -194,6 +195,7 @@ async function ensurePaymentCaptured(rz, payment) {
             // fall through
         }
         console.error('ensurePaymentCaptured failed:', paymentId, razorpayErrorMessage(err));
+        (0, instrument_1.captureServerError)(err, { area: 'wallet', handler: 'ensurePaymentCaptured' });
         return 'not_captured';
     }
 }
@@ -273,6 +275,11 @@ async function creditCapturedWalletPayment(input) {
                 creditedPaymentId: existingOrder.razorpayPaymentId,
                 duplicatePaymentId: paymentId,
                 userId,
+            });
+            (0, instrument_1.captureServerMessage)('Duplicate Razorpay payment on an already credited order', {
+                area: 'wallet',
+                handler: 'creditCapturedWalletPayment',
+                extra: { orderId, duplicatePaymentId: paymentId },
             });
         }
         return {
@@ -401,6 +408,7 @@ const listWalletCredits = async (req, res) => {
     catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         console.error('listWalletCredits error:', msg);
+        (0, instrument_1.captureServerError)(err, { area: 'wallet', handler: 'listWalletCredits' });
         res.status(500).json({ message: msg || 'Server error' });
     }
 };
@@ -441,6 +449,7 @@ const listWalletTopups = async (req, res) => {
     catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         console.error('listWalletTopups error:', msg);
+        (0, instrument_1.captureServerError)(err, { area: 'wallet', handler: 'listWalletTopups' });
         res.status(500).json({ message: msg || 'Server error' });
     }
 };
@@ -519,6 +528,7 @@ const createRazorpayWalletOrder = async (req, res) => {
     catch (err) {
         const msg = razorpayErrorMessage(err);
         console.error('createRazorpayWalletOrder error:', msg);
+        (0, instrument_1.captureServerError)(err, { area: 'wallet', handler: 'createRazorpayWalletOrder' });
         res.status(500).json({ message: msg || 'Server error' });
     }
 };
@@ -595,6 +605,7 @@ const verifyRazorpayWalletPayment = async (req, res) => {
         }
         const fresh = await User_1.default.findById(authUser._id);
         if (!fresh) {
+            (0, instrument_1.captureServerMessage)('User missing after wallet credit', { area: 'wallet', handler: 'credit' });
             res.status(500).json({ message: 'User missing after credit' });
             return;
         }
@@ -611,6 +622,7 @@ const verifyRazorpayWalletPayment = async (req, res) => {
             res.status(400).json({ message: msg || 'Invalid Razorpay request' });
             return;
         }
+        (0, instrument_1.captureServerError)(err, { area: 'wallet', handler: 'verifyRazorpayWalletPayment' });
         res.status(500).json({ message: msg || 'Server error' });
     }
 };
@@ -625,6 +637,10 @@ const razorpayWalletWebhook = async (req, res) => {
         const webhookSecret = process.env.RAZORPAY_WEBHOOK_SECRET?.trim();
         if (!webhookSecret) {
             console.error('razorpayWalletWebhook: RAZORPAY_WEBHOOK_SECRET is not set');
+            (0, instrument_1.captureServerMessage)('Razorpay webhook secret is not set', {
+                area: 'wallet',
+                handler: 'razorpayWalletWebhook',
+            });
             res.status(503).json({ message: 'Webhook not configured' });
             return;
         }
@@ -668,6 +684,11 @@ const razorpayWalletWebhook = async (req, res) => {
         const meta = await resolveOrderWalletMeta(order, orderId);
         if ('error' in meta) {
             console.error('razorpayWalletWebhook:', meta.error, orderId);
+            (0, instrument_1.captureServerMessage)('Razorpay webhook order could not be credited', {
+                area: 'wallet',
+                handler: 'razorpayWalletWebhook',
+                extra: { orderId, reason: meta.error },
+            });
             res.status(200).json({ ok: false, reason: meta.error });
             return;
         }
@@ -693,6 +714,11 @@ const razorpayWalletWebhook = async (req, res) => {
         });
         if (!credited.ok) {
             console.error('razorpayWalletWebhook credit failed:', credited.reason, paymentId);
+            (0, instrument_1.captureServerMessage)('Razorpay webhook credit failed', {
+                area: 'wallet',
+                handler: 'razorpayWalletWebhook',
+                extra: { reason: credited.reason },
+            });
             const permanent = credited.reason === 'User not found' || credited.reason === 'Invalid wallet offer';
             res.status(permanent ? 200 : 500).json({ ok: false, reason: credited.reason });
             return;
@@ -708,6 +734,7 @@ const razorpayWalletWebhook = async (req, res) => {
     catch (err) {
         const msg = razorpayErrorMessage(err);
         console.error('razorpayWalletWebhook error:', msg);
+        (0, instrument_1.captureServerError)(err, { area: 'wallet', handler: 'razorpayWalletWebhook' });
         // Return 200 sparingly only for business skips; infrastructure errors should retry.
         res.status(500).json({ message: msg || 'Server error' });
     }
@@ -807,6 +834,7 @@ const reconcileRazorpayWalletPayment = async (req, res) => {
         }
         const fresh = await User_1.default.findById(authUser._id);
         if (!fresh) {
+            (0, instrument_1.captureServerMessage)('User missing after wallet credit', { area: 'wallet', handler: 'credit' });
             res.status(500).json({ message: 'User missing after credit' });
             return;
         }
@@ -828,6 +856,7 @@ const reconcileRazorpayWalletPayment = async (req, res) => {
             res.status(400).json({ message: msg || 'Invalid Razorpay request' });
             return;
         }
+        (0, instrument_1.captureServerError)(err, { area: 'wallet', handler: 'reconcileRazorpayWalletPayment' });
         res.status(500).json({ message: msg || 'Server error' });
     }
 };
@@ -915,6 +944,7 @@ const adminReconcileRazorpayWalletPayment = async (req, res) => {
     catch (err) {
         const msg = razorpayErrorMessage(err);
         console.error('adminReconcileRazorpayWalletPayment error:', msg);
+        (0, instrument_1.captureServerError)(err, { area: 'wallet', handler: 'adminReconcileRazorpayWalletPayment' });
         res.status(500).json({ message: msg || 'Server error' });
     }
 };
@@ -978,6 +1008,7 @@ const creditWallet = async (req, res) => {
     catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         console.error('creditWallet error:', msg);
+        (0, instrument_1.captureServerError)(err, { area: 'wallet', handler: 'creditWallet' });
         res.status(500).json({ message: msg || 'Server error' });
     }
 };

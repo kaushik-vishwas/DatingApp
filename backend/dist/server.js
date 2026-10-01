@@ -3,7 +3,8 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-require("./config/bootstrapEnv");
+require("./instrument");
+const instrument_1 = require("./instrument");
 const http_1 = __importDefault(require("http"));
 const express_1 = __importDefault(require("express"));
 const cors_1 = __importDefault(require("cors"));
@@ -78,6 +79,11 @@ app.use((err, req, res, _next) => {
         errMessage: msg,
         stack: err instanceof Error ? err.stack : undefined,
     }));
+    (0, instrument_1.captureServerError)(err, {
+        area: 'api',
+        handler: 'unhandled_route',
+        extra: { traceId, method: req.method, path: req.originalUrl ?? req.url },
+    });
     res.status(500).json({
         traceId,
         message: msg || 'Internal server error',

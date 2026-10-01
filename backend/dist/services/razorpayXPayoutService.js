@@ -6,6 +6,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.trackAndFinalizeRazorpayXPayout = trackAndFinalizeRazorpayXPayout;
 exports.trackAndFinalizeAdminRazorpayXPayout = trackAndFinalizeAdminRazorpayXPayout;
 const mongoose_1 = __importDefault(require("mongoose"));
+const instrument_1 = require("../instrument");
 const WithdrawalRequest_1 = __importDefault(require("../models/WithdrawalRequest"));
 const AdminWithdrawalRequest_1 = __importDefault(require("../models/AdminWithdrawalRequest"));
 const Receiver_1 = __importDefault(require("../models/Receiver"));
@@ -228,6 +229,7 @@ async function trackAndFinalizeRazorpayXPayout(withdrawalId) {
                 ? 'UPI ID missing for this withdrawal'
                 : 'Receiver payment/contact details missing';
         console.error('razorpayX receiver payout skipped:', withdrawalId, payoutError);
+        (0, instrument_1.captureServerMessage)(payoutError, { area: 'payout', handler: 'missingDestination', level: 'warning' });
         await WithdrawalRequest_1.default.findByIdAndUpdate(withdrawalId, {
             status: 'rejected',
             payoutStatus: 'failed',
@@ -248,6 +250,10 @@ async function trackAndFinalizeRazorpayXPayout(withdrawalId) {
     if (!payoutAccountNumber || isRazorpayXMerchantId(payoutAccountNumber)) {
         const payoutError = 'RAZORPAYX_ACCOUNT_NUMBER must be the numeric Current Account / Lite customer identifier from RazorpayX Settings → Banking. The Merchant ID from the profile menu is not valid here.';
         console.error('razorpayX receiver payout skipped:', withdrawalId, payoutError);
+        (0, instrument_1.captureServerMessage)('RazorpayX payout account is not configured', {
+            area: 'payout',
+            handler: 'missingAccountNumber',
+        });
         await WithdrawalRequest_1.default.findByIdAndUpdate(withdrawalId, {
             status: 'rejected',
             payoutStatus: 'failed',
@@ -294,6 +300,10 @@ async function trackAndFinalizeRazorpayXPayout(withdrawalId) {
             payoutId = createdPayoutId;
             if (payoutStatus === 'failed') {
                 console.error('razorpayX receiver payout declined:', withdrawalId, payoutError);
+                (0, instrument_1.captureServerMessage)('RazorpayX payout was declined', {
+                    area: 'payout',
+                    handler: 'payoutDeclined',
+                });
                 (0, socketRegistry_1.emitReceiverWithdrawalUpdate)(String(withdrawal.receiverId), {
                     withdrawalId,
                     amount: payoutInr,
@@ -343,6 +353,10 @@ async function trackAndFinalizeRazorpayXPayout(withdrawalId) {
             }
             if (payoutStatus === 'failed') {
                 const err = extractRazorpayErrorMessage(payout);
+                (0, instrument_1.captureServerMessage)('RazorpayX payout failed while polling', {
+                    area: 'payout',
+                    handler: 'payoutPoll',
+                });
                 await WithdrawalRequest_1.default.findByIdAndUpdate(withdrawalId, {
                     payoutStatus: 'failed',
                     payoutError: err,
@@ -364,6 +378,7 @@ async function trackAndFinalizeRazorpayXPayout(withdrawalId) {
         const msg = err instanceof Error ? err.message : String(err);
         const payoutError = humanizePayoutCreateError(msg);
         console.error('razorpayX receiver payout failed:', withdrawalId, payoutError);
+        (0, instrument_1.captureServerError)(err, { area: 'payout', handler: 'createPayout' });
         if (payoutError !== msg) {
             console.error('razorpayX receiver payout raw:', withdrawalId, msg.slice(0, 800));
         }

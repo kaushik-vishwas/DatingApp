@@ -1950,7 +1950,14 @@ const updateReceiverProfile = async (req, res) => {
         const wasAvailable = Boolean(receiver.isAvailable);
         const wasOnline = Boolean(receiver.isOnline);
         if (typeof req.body.name === 'string' && req.body.name.trim()) {
-            receiver.name = req.body.name.trim();
+            const displayName = req.body.name.trim().replace(/ {2,}/g, ' ');
+            if (!/^[A-Za-z]+(?: [A-Za-z]+)*$/.test(displayName) || displayName.length < 2 || displayName.length > 40) {
+                res.status(400).json({
+                    message: 'Display name can use English letters only. Numbers and special characters are not allowed.',
+                });
+                return;
+            }
+            receiver.name = displayName;
         }
         if (typeof req.body.profileImage === 'string' && req.body.profileImage.trim()) {
             receiver.profileImage = req.body.profileImage.trim();

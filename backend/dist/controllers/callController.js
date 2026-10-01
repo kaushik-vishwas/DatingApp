@@ -45,6 +45,7 @@ exports.noteCallSyncActivity = noteCallSyncActivity;
 exports.getCallLastSyncAtMs = getCallLastSyncAtMs;
 exports.clearCallSyncActivity = clearCallSyncActivity;
 exports.getStaleOngoingCallMs = getStaleOngoingCallMs;
+const instrument_1 = require("../instrument");
 const mongoose_1 = __importDefault(require("mongoose"));
 const ChatBlock_1 = __importDefault(require("../models/ChatBlock"));
 const User_1 = __importDefault(require("../models/User"));
@@ -329,6 +330,7 @@ async function receiverHasBlockingOngoingSession(receiverId, callerUserId) {
             }).catch((e) => {
                 const msg = e instanceof Error ? e.message : String(e);
                 console.error('receiver call score record (stale settle):', msg);
+                (0, instrument_1.captureServerError)(e, { area: 'call', handler: 'recordReceiverCallScore' });
             });
         }
         (0, callQueue_1.releaseReceiverReservation)(settled.receiverId);
@@ -337,6 +339,7 @@ async function receiverHasBlockingOngoingSession(receiverId, callerUserId) {
     catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
         console.error('receiverHasBlockingOngoingSession stale settle:', msg);
+        (0, instrument_1.captureServerError)(e, { area: 'call', handler: 'staleSettle' });
     }
     const doc = await CallSession_1.default.exists({ receiverId: oid, status: 'ongoing' });
     return doc != null;
@@ -503,6 +506,7 @@ const startVoiceSession = async (req, res) => {
     catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         console.error('startVoiceSession error:', msg);
+        (0, instrument_1.captureServerError)(err, { area: 'call', handler: 'startVoiceSession' });
         res.status(500).json({ message: msg || 'Server error' });
     }
 };
@@ -543,6 +547,7 @@ const endVoiceSession = async (req, res) => {
             }).catch((e) => {
                 const msg = e instanceof Error ? e.message : String(e);
                 console.error('receiver call score record error:', msg);
+                (0, instrument_1.captureServerError)(e, { area: 'call', handler: 'recordReceiverCallScore' });
             });
         }
         let callerWalletBalanceInr;
@@ -574,6 +579,7 @@ const endVoiceSession = async (req, res) => {
     catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         console.error('endVoiceSession error:', msg);
+        (0, instrument_1.captureServerError)(err, { area: 'call', handler: 'endVoiceSession' });
         res.status(500).json({ message: msg || 'Server error' });
     }
 };
@@ -647,6 +653,7 @@ const syncVoiceSession = async (req, res) => {
     catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         console.error('syncVoiceSession error:', msg);
+        (0, instrument_1.captureServerError)(err, { area: 'call', handler: 'syncVoiceSession' });
         res.status(500).json({ message: msg || 'Server error' });
     }
 };
@@ -701,6 +708,7 @@ const rateVoiceSession = async (req, res) => {
     catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         console.error('rateVoiceSession error:', msg);
+        (0, instrument_1.captureServerError)(err, { area: 'call', handler: 'rateVoiceSession' });
         res.status(500).json({ message: msg || 'Server error' });
     }
 };
@@ -769,6 +777,7 @@ const reportVoiceSessionIssue = async (req, res) => {
     catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         console.error('reportVoiceSessionIssue error:', msg);
+        (0, instrument_1.captureServerError)(err, { area: 'call', handler: 'reportVoiceSessionIssue' });
         res.status(500).json({ message: msg || 'Server error' });
     }
 };
@@ -807,6 +816,7 @@ const getIncomingPending = async (req, res) => {
     catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         console.error('getIncomingPending error:', msg);
+        (0, instrument_1.captureServerError)(err, { area: 'call', handler: 'getIncomingPending' });
         res.status(500).json({ message: msg || 'Server error' });
     }
 };
@@ -843,6 +853,7 @@ const declineIncomingCall = async (req, res) => {
     catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         console.error('declineIncomingCall error:', msg);
+        (0, instrument_1.captureServerError)(err, { area: 'call', handler: 'declineIncomingCall' });
         res.status(500).json({ message: msg || 'Server error' });
     }
 };
@@ -880,6 +891,7 @@ const acknowledgeIncomingCallRinging = async (req, res) => {
     catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         console.error('acknowledgeIncomingCallRinging error:', msg);
+        (0, instrument_1.captureServerError)(err, { area: 'call', handler: 'acknowledgeIncomingCallRinging' });
         res.status(500).json({ message: msg || 'Server error' });
     }
 };
@@ -912,6 +924,7 @@ const markIncomingCallSeen = async (req, res) => {
     catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         console.error('markIncomingCallSeen error:', msg);
+        (0, instrument_1.captureServerError)(err, { area: 'call', handler: 'markIncomingCallSeen' });
         res.status(500).json({ message: msg || 'Server error' });
     }
 };
