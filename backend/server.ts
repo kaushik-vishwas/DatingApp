@@ -1,4 +1,5 @@
-import './config/bootstrapEnv';
+import './instrument';
+import { captureServerError } from './instrument';
 import http from 'http';
 import express from 'express';
 import cors from 'cors';
@@ -87,6 +88,11 @@ app.use((err: unknown, req: express.Request, res: express.Response, _next: expre
       stack: err instanceof Error ? err.stack : undefined,
     })
   );
+  captureServerError(err, {
+    area: 'api',
+    handler: 'unhandled_route',
+    extra: { traceId, method: req.method, path: req.originalUrl ?? req.url },
+  });
   res.status(500).json({
     traceId,
     message: msg || 'Internal server error',

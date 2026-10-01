@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import { captureServerError, captureServerMessage } from '../instrument';
 import WithdrawalRequest, { type PayoutStatus } from '../models/WithdrawalRequest';
 import AdminWithdrawalRequest from '../models/AdminWithdrawalRequest';
 import Receiver from '../models/Receiver';
@@ -324,6 +325,7 @@ export async function trackAndFinalizeRazorpayXPayout(withdrawalId: string): Pro
           ? 'UPI ID missing for this withdrawal'
           : 'Receiver payment/contact details missing';
     console.error('razorpayX receiver payout skipped:', withdrawalId, payoutError);
+    captureServerMessage(payoutError, { area: 'payout', handler: 'missingDestination', level: 'warning' });
     await WithdrawalRequest.findByIdAndUpdate(withdrawalId, {
       status: 'rejected',
       payoutStatus: 'failed',
@@ -347,6 +349,10 @@ export async function trackAndFinalizeRazorpayXPayout(withdrawalId: string): Pro
     const payoutError =
       'RAZORPAYX_ACCOUNT_NUMBER must be the numeric Current Account / Lite customer identifier from RazorpayX Settings → Banking. The Merchant ID from the profile menu is not valid here.';
     console.error('razorpayX receiver payout skipped:', withdrawalId, payoutError);
+    captureServerMessage('RazorpayX payout account is not configured', {
+      area: 'payout',
+      handler: 'missingAccountNumber',
+    });
     await WithdrawalRequest.findByIdAndUpdate(withdrawalId, {
       status: 'rejected',
       payoutStatus: 'failed',
@@ -400,6 +406,10 @@ export async function trackAndFinalizeRazorpayXPayout(withdrawalId: string): Pro
 
       if (payoutStatus === 'failed') {
         console.error('razorpayX receiver payout declined:', withdrawalId, payoutError);
+        captureServerMessage('RazorpayX payout was declined', {
+          area: 'payout',
+          handler: 'payoutDeclined',
+        });
         emitReceiverWithdrawalUpdate(String(withdrawal.receiverId), {
           withdrawalId,
           amount: payoutInr,
@@ -454,6 +464,10 @@ export async function trackAndFinalizeRazorpayXPayout(withdrawalId: string): Pro
 
       if (payoutStatus === 'failed') {
         const err = extractRazorpayErrorMessage(payout);
+        captureServerMessage('RazorpayX payout failed while polling', {
+          area: 'payout',
+          handler: 'payoutPoll',
+        });
         await WithdrawalRequest.findByIdAndUpdate(withdrawalId, {
           payoutStatus: 'failed',
           payoutError: err,
@@ -475,6 +489,7 @@ export async function trackAndFinalizeRazorpayXPayout(withdrawalId: string): Pro
     const msg = err instanceof Error ? err.message : String(err);
     const payoutError = humanizePayoutCreateError(msg);
     console.error('razorpayX receiver payout failed:', withdrawalId, payoutError);
+    captureServerError(err, { area: 'payout', handler: 'createPayout' });
     if (payoutError !== msg) {
       console.error('razorpayX receiver payout raw:', withdrawalId, msg.slice(0, 800));
     }
