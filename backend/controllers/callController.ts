@@ -471,26 +471,36 @@ export const getVoiceBootstrap = async (req: Request, res: Response): Promise<vo
     accountKind === 'receiver' &&
     Boolean(requestedCallId) &&
     hasLiveInviteForReceiver(requestedCallId, receiverId, callerUserId);
-  // Align with discover: bootstrap only if Go Online is on and they are logged in (socket or grace).
+  // Go Online is already required above. Socket or the 5-minute lease still passes.
+  // If both are gone, a stored FCM device token is enough to continue into the existing wake.
   if (!receiverAnsweringLiveInvite && !isReceiverSocketConnected(receiverId)) {
     const recvPresence = await Receiver.findById(receiverId)
-      .select('discoverGraceUntil isAvailable')
+      .select('discoverGraceUntil isAvailable fcmDeviceToken')
       .lean<{
         discoverGraceUntil?: Date | null;
         isAvailable?: boolean;
+        fcmDeviceToken?: string | null;
       } | null>();
     const presenceLive = isReceiverLoggedInAndAvailable({
       receiverId,
       isAvailable: Boolean(recvPresence?.isAvailable ?? receiverDoc.isAvailable),
       discoverGraceUntil: recvPresence?.discoverGraceUntil ?? null,
     });
-    if (!presenceLive) {
+    const fcmToken = recvPresence?.fcmDeviceToken?.trim() ?? '';
+    const canFcmWake =
+      Boolean(recvPresence?.isAvailable ?? receiverDoc.isAvailable) &&
+      fcmToken.length >= 20 &&
+      !fcmToken.startsWith('ExponentPushToken');
+    // Socket or 5-minute lease: callable as before. After both expire, still attempt the
+    // existing FCM wake when Go Online is on and a device token is stored.
+    if (!presenceLive && !canFcmWake) {
       res.status(409).json({
         message: 'Receiver is offline right now',
         debug: {
           receiverSocket: false,
           presenceLive: false,
           graceUntil: recvPresence?.discoverGraceUntil ?? null,
+          fcmWake: false,
         },
       });
       return;
