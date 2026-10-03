@@ -28,6 +28,7 @@ import {
   updateAdminReceiverWelcome,
   updateAdminCallerNotification,
   updateAdminRole,
+  getWithdrawalPendingCount,
   listWithdrawals,
   listAdminTransactions,
   resolveModerationReport,
@@ -42,6 +43,7 @@ import {
 } from '../controllers/walletOffersController';
 import { listCallerAppStoreReviews } from '../controllers/adminCallerAppReviewController';
 import { adminReconcileRazorpayWalletPayment } from '../controllers/walletController';
+import { listReferralAlerts } from '../controllers/adminReferralController';
 import adminEarningsRoutes from './adminEarningsRoutes';
 
 const router = Router();
@@ -75,11 +77,13 @@ router.patch('/receivers/:id', adminProtect, updateReceiver);
 router.delete('/receivers/:id', adminProtect, deleteReceiverPermanently);
 
 router.get('/reports', adminProtect, listModerationReports);
+router.get('/referral-alerts', adminProtect, listReferralAlerts);
 router.patch('/reports/:id', adminProtect, resolveModerationReport);
 router.get('/caller-app-reviews', adminProtect, listCallerAppStoreReviews);
 router.get('/overview', adminProtect, getOverviewDashboard);
 router.get('/revenue', adminProtect, getRevenueDashboard);
 router.use('/earnings', adminEarningsRoutes);
+router.get('/withdrawals/pending-count', adminProtect, getWithdrawalPendingCount);
 router.get('/withdrawals', adminProtect, listWithdrawals);
 router.patch('/withdrawals/:id', adminProtect, resolveWithdrawal);
 router.get('/transactions', adminProtect, listAdminTransactions);

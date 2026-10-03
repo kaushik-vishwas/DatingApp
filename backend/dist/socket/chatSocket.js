@@ -1055,7 +1055,13 @@ function attachChatSocket(httpServer) {
                         graceUntil: recvPresence?.discoverGraceUntil ?? null,
                         isAvailable: Boolean(recvPresence?.isAvailable),
                     };
-                    if (!presenceLive) {
+                    const canFcmWake = Boolean(recvPresence?.isAvailable) &&
+                        !!fcmToken &&
+                        fcmToken.length >= 20 &&
+                        !fcmToken.startsWith('ExponentPushToken');
+                    // Socket or 5-minute lease: callable as before. After both expire, still attempt the
+                    // existing FCM wake when Go Online is on and a device token is stored.
+                    if (!presenceLive && !canFcmWake) {
                         ack?.({ ok: false, error: 'Receiver is offline right now.', debug: inviteDebug });
                         return;
                     }

@@ -15,11 +15,14 @@ const mongoose_1 = __importDefault(require("mongoose"));
 const User_1 = __importDefault(require("../models/User"));
 const Receiver_1 = __importDefault(require("../models/Receiver"));
 const Referral_1 = __importDefault(require("../models/Referral"));
+const ReferralAlert_1 = __importDefault(require("../models/ReferralAlert"));
 const WalletCredit_1 = __importDefault(require("../models/WalletCredit"));
 const ReceiverWalletCredit_1 = __importDefault(require("../models/ReceiverWalletCredit"));
 const referralRewards_1 = require("../constants/referralRewards");
 const phoneNormalize_1 = require("../utils/phoneNormalize");
 const referralLanding_1 = require("../constants/referralLanding");
+const REFERRAL_BURST_WINDOW_MS = 60 * 60 * 1000;
+const REFERRAL_BURST_COUNT = 5;
 const REFERRAL_CODE_LENGTH = 8;
 const REFERRAL_CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 /** Play/Meta install referrer strings that match code format but are not referrals. */
@@ -135,6 +138,52 @@ function phonesMatch(a, b) {
 function referredRoleFromKind(kind) {
     return kind === 'user' ? 'caller' : 'receiver';
 }
+async function rewardedPhoneAlreadyUsed(phoneKey, variants) {
+    const or = [{ referredPhoneKey: phoneKey }];
+    if (variants.length > 0)
+        or.push({ referredPhone: { $in: variants } });
+    const hit = await Referral_1.default.exists({ status: 'rewarded', $or: or });
+    return Boolean(hit);
+}
+async function recordReferralAlert(params) {
+    try {
+        if (params.type === 'burst') {
+            const since = new Date(Date.now() - REFERRAL_BURST_WINDOW_MS);
+            const recent = await ReferralAlert_1.default.exists({
+                type: 'burst',
+                referrerId: params.referrerId,
+                createdAt: { $gte: since },
+            });
+            if (recent)
+                return;
+        }
+        await ReferralAlert_1.default.create(params);
+    }
+    catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error('[referral] alert write failed:', msg);
+    }
+}
+async function noteReferralBurst(params) {
+    const since = new Date(Date.now() - REFERRAL_BURST_WINDOW_MS);
+    const count = await Referral_1.default.countDocuments({
+        referrerKind: params.referrerKind,
+        referrerId: params.referrerId,
+        status: 'rewarded',
+        rewardedAt: { $gte: since },
+    });
+    if (count < REFERRAL_BURST_COUNT)
+        return;
+    await recordReferralAlert({
+        type: 'burst',
+        referrerKind: params.referrerKind,
+        referrerId: params.referrerId,
+        referrerPhone: params.referrerPhone,
+        referredPhoneKey: '',
+        referralCode: params.referralCode,
+        message: `${count} referral rewards in the last hour`,
+    });
+}
 async function applyReferralRewardOnSignup(params) {
     const code = normalizeReferralCode(params.referralCode);
     if (!code) {
@@ -163,6 +212,24 @@ async function applyReferralRewardOnSignup(params) {
         console.warn('[referral] same phone referral blocked', { referredPhone: params.referredPhone });
         return { applied: false, reason: 'same_phone' };
     }
+    const phoneKey = (0, phoneNormalize_1.normalizeIndianMobilePhone)(params.referredPhone);
+    const phoneVariants = (0, phoneNormalize_1.phoneLookupVariants)(params.referredPhone);
+    if (!phoneKey) {
+        return { applied: false, reason: 'invalid_phone' };
+    }
+    if (await rewardedPhoneAlreadyUsed(phoneKey, phoneVariants)) {
+        console.warn('[referral] phone already rewarded', { referredPhone: phoneKey });
+        await recordReferralAlert({
+            type: 'duplicate_phone',
+            referrerKind: referrer.kind,
+            referrerId: referrer.id,
+            referrerPhone: referrer.phone,
+            referredPhoneKey: phoneKey,
+            referralCode: code,
+            message: 'Signup reused a mobile number that already received a referral reward',
+        });
+        return { applied: false, reason: 'phone_already_rewarded' };
+    }
     const referredRole = referredRoleFromKind(params.referredKind);
     const rewardInr = roundInr((0, referralRewards_1.resolveReferralRewardInr)(referrer.role, referredRole));
     if (rewardInr <= 0) {
@@ -183,6 +250,7 @@ async function applyReferralRewardOnSignup(params) {
                     referredKind: params.referredKind,
                     referredId: new mongoose_1.default.Types.ObjectId(params.referredId),
                     referredPhone: params.referredPhone,
+                    referredPhoneKey: phoneKey,
                     rewardInr,
                     status: 'rewarded',
                     rejectReason: null,
@@ -239,11 +307,31 @@ async function applyReferralRewardOnSignup(params) {
             rewardInr,
             code,
         });
+        void noteReferralBurst({
+            referrerKind: referrer.kind,
+            referrerId: referrer.id,
+            referrerPhone: referrer.phone,
+            referralCode: code,
+        });
         return { applied: true, rewardInr, referralId };
     }
     catch (err) {
         const codeNum = err?.code;
         if (codeNum === 11000) {
+            const phoneCollision = Boolean(err.keyPattern?.referredPhoneKey);
+            if (phoneCollision) {
+                console.warn('[referral] phone already rewarded', { referredPhone: phoneKey });
+                await recordReferralAlert({
+                    type: 'duplicate_phone',
+                    referrerKind: referrer.kind,
+                    referrerId: referrer.id,
+                    referrerPhone: referrer.phone,
+                    referredPhoneKey: phoneKey,
+                    referralCode: code,
+                    message: 'Signup reused a mobile number that already received a referral reward',
+                });
+                return { applied: false, reason: 'phone_already_rewarded' };
+            }
             console.warn('[referral] duplicate referred account — reward already granted', {
                 referredKind: params.referredKind,
                 referredId: params.referredId,

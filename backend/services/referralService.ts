@@ -3,14 +3,18 @@ import mongoose from 'mongoose';
 import User from '../models/User';
 import Receiver from '../models/Receiver';
 import Referral, { type ReferralAccountKind } from '../models/Referral';
+import ReferralAlert from '../models/ReferralAlert';
 import WalletCredit from '../models/WalletCredit';
 import ReceiverWalletCredit from '../models/ReceiverWalletCredit';
 import {
   resolveReferralRewardInr,
   type ReferralPartyRole,
 } from '../constants/referralRewards';
-import { phoneLookupVariants } from '../utils/phoneNormalize';
+import { normalizeIndianMobilePhone, phoneLookupVariants } from '../utils/phoneNormalize';
 import { getReferralLandingBaseUrl } from '../constants/referralLanding';
+
+const REFERRAL_BURST_WINDOW_MS = 60 * 60 * 1000;
+const REFERRAL_BURST_COUNT = 5;
 
 const REFERRAL_CODE_LENGTH = 8;
 const REFERRAL_CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -157,6 +161,64 @@ function referredRoleFromKind(kind: ReferralAccountKind): ReferralPartyRole {
   return kind === 'user' ? 'caller' : 'receiver';
 }
 
+async function rewardedPhoneAlreadyUsed(phoneKey: string, variants: string[]): Promise<boolean> {
+  const or: Record<string, unknown>[] = [{ referredPhoneKey: phoneKey }];
+  if (variants.length > 0) or.push({ referredPhone: { $in: variants } });
+  const hit = await Referral.exists({ status: 'rewarded', $or: or });
+  return Boolean(hit);
+}
+
+async function recordReferralAlert(params: {
+  type: 'duplicate_phone' | 'burst';
+  referrerKind: ReferralAccountKind;
+  referrerId: mongoose.Types.ObjectId;
+  referrerPhone: string;
+  referredPhoneKey: string;
+  referralCode: string;
+  message: string;
+}): Promise<void> {
+  try {
+    if (params.type === 'burst') {
+      const since = new Date(Date.now() - REFERRAL_BURST_WINDOW_MS);
+      const recent = await ReferralAlert.exists({
+        type: 'burst',
+        referrerId: params.referrerId,
+        createdAt: { $gte: since },
+      });
+      if (recent) return;
+    }
+    await ReferralAlert.create(params);
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error('[referral] alert write failed:', msg);
+  }
+}
+
+async function noteReferralBurst(params: {
+  referrerKind: ReferralAccountKind;
+  referrerId: mongoose.Types.ObjectId;
+  referrerPhone: string;
+  referralCode: string;
+}): Promise<void> {
+  const since = new Date(Date.now() - REFERRAL_BURST_WINDOW_MS);
+  const count = await Referral.countDocuments({
+    referrerKind: params.referrerKind,
+    referrerId: params.referrerId,
+    status: 'rewarded',
+    rewardedAt: { $gte: since },
+  });
+  if (count < REFERRAL_BURST_COUNT) return;
+  await recordReferralAlert({
+    type: 'burst',
+    referrerKind: params.referrerKind,
+    referrerId: params.referrerId,
+    referrerPhone: params.referrerPhone,
+    referredPhoneKey: '',
+    referralCode: params.referralCode,
+    message: `${count} referral rewards in the last hour`,
+  });
+}
+
 export async function applyReferralRewardOnSignup(params: {
   referralCode?: unknown;
   referredKind: ReferralAccountKind;
@@ -194,6 +256,25 @@ export async function applyReferralRewardOnSignup(params: {
     return { applied: false, reason: 'same_phone' };
   }
 
+  const phoneKey = normalizeIndianMobilePhone(params.referredPhone);
+  const phoneVariants = phoneLookupVariants(params.referredPhone);
+  if (!phoneKey) {
+    return { applied: false, reason: 'invalid_phone' };
+  }
+  if (await rewardedPhoneAlreadyUsed(phoneKey, phoneVariants)) {
+    console.warn('[referral] phone already rewarded', { referredPhone: phoneKey });
+    await recordReferralAlert({
+      type: 'duplicate_phone',
+      referrerKind: referrer.kind,
+      referrerId: referrer.id,
+      referrerPhone: referrer.phone,
+      referredPhoneKey: phoneKey,
+      referralCode: code,
+      message: 'Signup reused a mobile number that already received a referral reward',
+    });
+    return { applied: false, reason: 'phone_already_rewarded' };
+  }
+
   const referredRole = referredRoleFromKind(params.referredKind);
   const rewardInr = roundInr(resolveReferralRewardInr(referrer.role, referredRole));
   if (rewardInr <= 0) {
@@ -218,6 +299,7 @@ export async function applyReferralRewardOnSignup(params: {
             referredKind: params.referredKind,
             referredId: new mongoose.Types.ObjectId(params.referredId),
             referredPhone: params.referredPhone,
+            referredPhoneKey: phoneKey,
             rewardInr,
             status: 'rewarded',
             rejectReason: null,
@@ -281,10 +363,30 @@ export async function applyReferralRewardOnSignup(params: {
       code,
     });
 
+    void noteReferralBurst({
+      referrerKind: referrer.kind,
+      referrerId: referrer.id,
+      referrerPhone: referrer.phone,
+      referralCode: code,
+    });
     return { applied: true, rewardInr, referralId };
   } catch (err: unknown) {
-    const codeNum = (err as { code?: number })?.code;
+    const codeNum = (err as { code?: number; keyPattern?: Record<string, number> })?.code;
     if (codeNum === 11000) {
+      const phoneCollision = Boolean((err as { keyPattern?: Record<string, number> }).keyPattern?.referredPhoneKey);
+      if (phoneCollision) {
+        console.warn('[referral] phone already rewarded', { referredPhone: phoneKey });
+        await recordReferralAlert({
+          type: 'duplicate_phone',
+          referrerKind: referrer.kind,
+          referrerId: referrer.id,
+          referrerPhone: referrer.phone,
+          referredPhoneKey: phoneKey,
+          referralCode: code,
+          message: 'Signup reused a mobile number that already received a referral reward',
+        });
+        return { applied: false, reason: 'phone_already_rewarded' };
+      }
       console.warn('[referral] duplicate referred account — reward already granted', {
         referredKind: params.referredKind,
         referredId: params.referredId,

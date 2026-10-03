@@ -11,7 +11,6 @@ import ReceiverDailyScore from '../models/ReceiverDailyScore';
 import ReceiverPriorityNotification from '../models/ReceiverPriorityNotification';
 import ReceiverRating from '../models/ReceiverRating';
 import ReceiverWalletCredit from '../models/ReceiverWalletCredit';
-import Referral from '../models/Referral';
 import User from '../models/User';
 import UserReport from '../models/UserReport';
 import WalletCredit from '../models/WalletCredit';
@@ -47,7 +46,7 @@ export async function cascadeDeleteReceiverAccount(receiverId: string): Promise<
     ChatReadState.deleteMany({ receiverId: rid }),
     CallSession.deleteMany({ receiverId: rid }),
     WithdrawalRequest.deleteMany({ receiverId: rid }),
-    ReceiverWalletCredit.deleteMany({ receiverId: rid }),
+    ReceiverWalletCredit.deleteMany({ receiverId: rid, source: { $ne: 'referral_reward' } }),
     ReceiverDailyScore.deleteMany({ receiverId: rid }),
     ReceiverRating.deleteMany({ receiverId: rid }),
     CallerOnlineNotification.deleteMany({ receiverId: rid }),
@@ -56,12 +55,6 @@ export async function cascadeDeleteReceiverAccount(receiverId: string): Promise<
       $or: [
         { reporterKind: 'receiver', reporterId: rid },
         { reportedKind: 'receiver', reportedId: rid },
-      ],
-    }),
-    Referral.deleteMany({
-      $or: [
-        { referrerKind: 'receiver', referrerId: rid },
-        { referredKind: 'receiver', referredId: rid },
       ],
     }),
     ReceiverAvailabilityNotification.updateMany(
@@ -89,7 +82,7 @@ export async function cascadeDeleteUserAccount(userId: string): Promise<void> {
     ChatReadState.deleteMany({ userId: uid }),
     CallSession.deleteMany({ callerId: uid }),
     WalletTopup.deleteMany({ userId: uid }),
-    WalletCredit.deleteMany({ userId: uid }),
+    WalletCredit.deleteMany({ userId: uid, source: { $ne: 'referral_reward' } }),
     CallerAppStoreReview.deleteMany({ userId: uid }),
     ReceiverRating.deleteMany({ raterId: uid }),
     ReceiverPriorityNotification.deleteMany({ userId: uid }),
@@ -98,12 +91,6 @@ export async function cascadeDeleteUserAccount(userId: string): Promise<void> {
       $or: [
         { reporterKind: 'user', reporterId: uid },
         { reportedKind: 'user', reportedId: uid },
-      ],
-    }),
-    Referral.deleteMany({
-      $or: [
-        { referrerKind: 'user', referrerId: uid },
-        { referredKind: 'user', referredId: uid },
       ],
     }),
     CallerOnlineNotification.updateMany({ callerIds: uid }, { $pull: { callerIds: uid } }),

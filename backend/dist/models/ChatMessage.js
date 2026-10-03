@@ -42,5 +42,6 @@ const chatMessageSchema = new mongoose_1.Schema({
     feeInr: { type: Number, default: 0, min: 0 },
 }, { timestamps: true });
 chatMessageSchema.index({ userId: 1, receiverId: 1, createdAt: 1 });
+chatMessageSchema.index({ senderType: 1, createdAt: -1 });
 const ChatMessage = mongoose_1.default.model('ChatMessage', chatMessageSchema);
 exports.default = ChatMessage;

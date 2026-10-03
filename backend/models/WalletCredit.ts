@@ -24,7 +24,7 @@ const walletCreditSchema = new Schema<IWalletCredit>(
       index: true,
     },
     amountInr: { type: Number, required: true, min: 0.01 },
-    referralId: { type: Schema.Types.ObjectId, ref: 'Referral', default: null },
+    referralId: { type: Schema.Types.ObjectId, ref: 'Referral' },
     description: { type: String, required: true, trim: true, maxlength: 300 },
   },
   { timestamps: true }

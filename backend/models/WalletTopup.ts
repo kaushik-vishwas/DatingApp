@@ -25,6 +25,8 @@ const walletTopupSchema = new Schema<IWalletTopup>(
   { timestamps: true }
 );
 
+walletTopupSchema.index({ createdAt: -1 });
+
 const WalletTopup: Model<IWalletTopup> =
   mongoose.models.WalletTopup ?? mongoose.model<IWalletTopup>('WalletTopup', walletTopupSchema);
 

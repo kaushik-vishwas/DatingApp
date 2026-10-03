@@ -110,6 +110,8 @@ const receiverSchema = new mongoose_1.Schema({
         default: null,
     },
     referralCode: { type: String, default: null, trim: true, uppercase: true, sparse: true, unique: true },
+    accountDeletionRequestedAt: { type: Date, default: null },
+    accountDeletionReason: { type: String, default: null, trim: true, maxlength: 300 },
 }, { timestamps: true });
 const Receiver = mongoose_1.default.model('Receiver', receiverSchema);
 exports.default = Receiver;

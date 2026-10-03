@@ -43,14 +43,24 @@ function startOfLocalWeek(d = new Date()) {
 }
 /** Net amount actually paid to receivers — only payoutStatus success (not pending / failed / processing). */
 async function aggregateReceiverWithdrawalPayouts(since, extraMatch = {}) {
-    const rows = await WithdrawalRequest_1.default.find({ ...(0, receiverWithdrawalFees_1.paidWithdrawalMatch)(since), ...extraMatch })
-        .select('amount payoutAmount')
-        .lean();
-    let total = 0;
-    for (const row of rows) {
-        total += (0, receiverWithdrawalFees_1.resolveWithdrawalPayoutAmount)(row);
-    }
-    return roundInr(total);
+    const [agg] = await WithdrawalRequest_1.default.aggregate([
+        { $match: { ...(0, receiverWithdrawalFees_1.paidWithdrawalMatch)(since), ...extraMatch } },
+        {
+            $group: {
+                _id: null,
+                total: {
+                    $sum: {
+                        $cond: [
+                            { $gt: [{ $ifNull: ['$payoutAmount', 0] }, 0] },
+                            '$payoutAmount',
+                            { $ifNull: ['$amount', 0] },
+                        ],
+                    },
+                },
+            },
+        },
+    ]);
+    return roundInr(agg?.total ?? 0);
 }
 /** Count of withdrawals actually paid out. */
 async function countPaidReceiverWithdrawals(since, extraMatch = {}) {

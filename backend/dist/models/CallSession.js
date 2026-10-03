@@ -55,5 +55,7 @@ const callSessionSchema = new mongoose_1.Schema({
 }, { timestamps: true });
 callSessionSchema.index({ receiverId: 1, startedAt: -1 });
 callSessionSchema.index({ callerId: 1, startedAt: -1 });
+callSessionSchema.index({ status: 1, startedAt: -1 });
+callSessionSchema.index({ receiverId: 1, status: 1, startedAt: -1 });
 const CallSession = mongoose_1.default.model('CallSession', callSessionSchema);
 exports.default = CallSession;

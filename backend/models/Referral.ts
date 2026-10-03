@@ -11,6 +11,8 @@ export interface IReferral {
   referredKind: ReferralAccountKind;
   referredId: mongoose.Types.ObjectId;
   referredPhone: string;
+  /** Canonical 10-digit mobile. Stays unique after the account is deleted. */
+  referredPhoneKey?: string;
   rewardInr: number;
   status: ReferralStatus;
   rejectReason: string | null;
@@ -31,6 +33,7 @@ const referralSchema = new Schema<IReferral>(
     referredKind: { type: String, enum: ['user', 'receiver'], required: true },
     referredId: { type: Schema.Types.ObjectId, required: true },
     referredPhone: { type: String, required: true, trim: true },
+    referredPhoneKey: { type: String, trim: true },
     rewardInr: { type: Number, required: true, min: 0 },
     status: { type: String, enum: ['rewarded', 'rejected'], required: true, index: true },
     rejectReason: { type: String, default: null, trim: true, maxlength: 300 },
@@ -43,6 +46,7 @@ const referralSchema = new Schema<IReferral>(
 
 referralSchema.index({ referredKind: 1, referredId: 1 }, { unique: true });
 referralSchema.index({ referrerKind: 1, referrerId: 1, createdAt: -1 });
+referralSchema.index({ referredPhoneKey: 1 }, { unique: true, sparse: true });
 
 const Referral: Model<IReferral> = mongoose.model<IReferral>('Referral', referralSchema);
 

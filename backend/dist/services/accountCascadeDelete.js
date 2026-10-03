@@ -18,7 +18,6 @@ const ReceiverDailyScore_1 = __importDefault(require("../models/ReceiverDailySco
 const ReceiverPriorityNotification_1 = __importDefault(require("../models/ReceiverPriorityNotification"));
 const ReceiverRating_1 = __importDefault(require("../models/ReceiverRating"));
 const ReceiverWalletCredit_1 = __importDefault(require("../models/ReceiverWalletCredit"));
-const Referral_1 = __importDefault(require("../models/Referral"));
 const User_1 = __importDefault(require("../models/User"));
 const UserReport_1 = __importDefault(require("../models/UserReport"));
 const WalletCredit_1 = __importDefault(require("../models/WalletCredit"));
@@ -51,7 +50,7 @@ async function cascadeDeleteReceiverAccount(receiverId) {
         ChatReadState_1.default.deleteMany({ receiverId: rid }),
         CallSession_1.default.deleteMany({ receiverId: rid }),
         WithdrawalRequest_1.default.deleteMany({ receiverId: rid }),
-        ReceiverWalletCredit_1.default.deleteMany({ receiverId: rid }),
+        ReceiverWalletCredit_1.default.deleteMany({ receiverId: rid, source: { $ne: 'referral_reward' } }),
         ReceiverDailyScore_1.default.deleteMany({ receiverId: rid }),
         ReceiverRating_1.default.deleteMany({ receiverId: rid }),
         CallerOnlineNotification_1.default.deleteMany({ receiverId: rid }),
@@ -60,12 +59,6 @@ async function cascadeDeleteReceiverAccount(receiverId) {
             $or: [
                 { reporterKind: 'receiver', reporterId: rid },
                 { reportedKind: 'receiver', reportedId: rid },
-            ],
-        }),
-        Referral_1.default.deleteMany({
-            $or: [
-                { referrerKind: 'receiver', referrerId: rid },
-                { referredKind: 'receiver', referredId: rid },
             ],
         }),
         ReceiverAvailabilityNotification_1.default.updateMany({ receiverIds: rid }, { $pull: { receiverIds: rid } }),
@@ -86,7 +79,7 @@ async function cascadeDeleteUserAccount(userId) {
         ChatReadState_1.default.deleteMany({ userId: uid }),
         CallSession_1.default.deleteMany({ callerId: uid }),
         WalletTopup_1.default.deleteMany({ userId: uid }),
-        WalletCredit_1.default.deleteMany({ userId: uid }),
+        WalletCredit_1.default.deleteMany({ userId: uid, source: { $ne: 'referral_reward' } }),
         CallerAppStoreReview_1.default.deleteMany({ userId: uid }),
         ReceiverRating_1.default.deleteMany({ raterId: uid }),
         ReceiverPriorityNotification_1.default.deleteMany({ userId: uid }),
@@ -95,12 +88,6 @@ async function cascadeDeleteUserAccount(userId) {
             $or: [
                 { reporterKind: 'user', reporterId: uid },
                 { reportedKind: 'user', reportedId: uid },
-            ],
-        }),
-        Referral_1.default.deleteMany({
-            $or: [
-                { referrerKind: 'user', referrerId: uid },
-                { referredKind: 'user', referredId: uid },
             ],
         }),
         CallerOnlineNotification_1.default.updateMany({ callerIds: uid }, { $pull: { callerIds: uid } }),

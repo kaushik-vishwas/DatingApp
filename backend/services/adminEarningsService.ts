@@ -51,14 +51,24 @@ export async function aggregateReceiverWithdrawalPayouts(
   since?: Date | null,
   extraMatch: Record<string, unknown> = {}
 ): Promise<number> {
-  const rows = await WithdrawalRequest.find({ ...paidWithdrawalMatch(since), ...extraMatch })
-    .select('amount payoutAmount')
-    .lean<{ amount: number; payoutAmount?: number | null }[]>();
-  let total = 0;
-  for (const row of rows) {
-    total += resolveWithdrawalPayoutAmount(row);
-  }
-  return roundInr(total);
+  const [agg] = await WithdrawalRequest.aggregate<{ total: number }>([
+    { $match: { ...paidWithdrawalMatch(since), ...extraMatch } },
+    {
+      $group: {
+        _id: null,
+        total: {
+          $sum: {
+            $cond: [
+              { $gt: [{ $ifNull: ['$payoutAmount', 0] }, 0] },
+              '$payoutAmount',
+              { $ifNull: ['$amount', 0] },
+            ],
+          },
+        },
+      },
+    },
+  ]);
+  return roundInr(agg?.total ?? 0);
 }
 
 /** Count of withdrawals actually paid out. */

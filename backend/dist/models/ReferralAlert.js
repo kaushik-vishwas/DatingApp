@@ -34,14 +34,16 @@ var __importStar = (this && this.__importStar) || (function () {
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
 const mongoose_1 = __importStar(require("mongoose"));
-const walletTopupSchema = new mongoose_1.Schema({
-    userId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
-    razorpayOrderId: { type: String, required: true, index: true },
-    razorpayPaymentId: { type: String, required: true, unique: true },
-    payAmount: { type: Number, required: true },
-    bonusPercent: { type: Number, required: true },
-    creditAdded: { type: Number, required: true },
+const referralAlertSchema = new mongoose_1.Schema({
+    type: { type: String, enum: ['duplicate_phone', 'burst'], required: true, index: true },
+    referrerKind: { type: String, enum: ['user', 'receiver'], required: true },
+    referrerId: { type: mongoose_1.Schema.Types.ObjectId, required: true, index: true },
+    referrerPhone: { type: String, required: true, trim: true },
+    referredPhoneKey: { type: String, default: '', trim: true },
+    referralCode: { type: String, default: '', trim: true, uppercase: true },
+    message: { type: String, required: true, trim: true, maxlength: 400 },
 }, { timestamps: true });
-walletTopupSchema.index({ createdAt: -1 });
-const WalletTopup = mongoose_1.default.models.WalletTopup ?? mongoose_1.default.model('WalletTopup', walletTopupSchema);
-exports.default = WalletTopup;
+referralAlertSchema.index({ createdAt: -1 });
+referralAlertSchema.index({ referrerId: 1, type: 1, createdAt: -1 });
+const ReferralAlert = mongoose_1.default.models.ReferralAlert ?? mongoose_1.default.model('ReferralAlert', referralAlertSchema);
+exports.default = ReferralAlert;

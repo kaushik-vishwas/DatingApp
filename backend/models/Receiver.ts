@@ -99,6 +99,9 @@ export interface IReceiver {
   } | null;
   /** Unique share code for referral invites. */
   referralCode: string | null;
+  /** Set when the receiver asks admin to delete the account. The account stays until admin deletes it. */
+  accountDeletionRequestedAt: Date | null;
+  accountDeletionReason: string | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -180,6 +183,8 @@ const receiverSchema = new Schema<IReceiver>(
       default: null,
     },
     referralCode: { type: String, default: null, trim: true, uppercase: true, sparse: true, unique: true },
+    accountDeletionRequestedAt: { type: Date, default: null },
+    accountDeletionReason: { type: String, default: null, trim: true, maxlength: 300 },
   },
   { timestamps: true }
 );

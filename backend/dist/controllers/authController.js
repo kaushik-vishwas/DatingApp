@@ -214,6 +214,8 @@ function toApiReceiver(receiver) {
             ? r.badgeLevel
             : 'platinum',
         earningRatePerMinute: roundScoreField(r.earningRatePerMinute),
+        accountDeletionRequestedAt: r.accountDeletionRequestedAt ? iso(r.accountDeletionRequestedAt) : null,
+        accountDeletionReason: r.accountDeletionReason ?? null,
     };
 }
 /** Prefer toApiUser / toApiReceiver — resolves by Mongoose modelName */

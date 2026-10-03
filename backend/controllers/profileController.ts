@@ -2728,7 +2728,7 @@ export const reopenRejectedReceiverKyc = async (req: Request, res: Response): Pr
 };
 
 /**
- * DELETE /profile/receiver — deletes receiver account and all related receiver-side data.
+ * DELETE /profile/receiver — asks admin to delete the account. The account stays until an admin deletes it.
  */
 export const deleteReceiverAccount = async (
   req: Request<{}, {}, { reason?: string }>,
@@ -2745,15 +2745,33 @@ export const deleteReceiverAccount = async (
       return;
     }
 
-    const reason = String(req.body.reason ?? '').trim();
-    if (reason) {
-      console.log(`[receiver-delete] receiver=${receiverId} reason="${reason}"`);
+    const reason = String(req.body.reason ?? '').trim().slice(0, 300);
+    if (!reason) {
+      res.status(400).json({ message: 'Please select a reason' });
+      return;
     }
 
-    const { cascadeDeleteReceiverAccount } = await import('../services/accountCascadeDelete');
-    await cascadeDeleteReceiverAccount(receiverId);
+    const receiver = await Receiver.findById(receiverId).select('accountDeletionRequestedAt');
+    if (!receiver) {
+      res.status(404).json({ message: 'Receiver not found' });
+      return;
+    }
 
-    res.status(200).json({ message: 'Account deleted' });
+    await Receiver.updateOne(
+      { _id: receiverId },
+      {
+        $set: {
+          accountDeletionRequestedAt: receiver.accountDeletionRequestedAt ?? new Date(),
+          accountDeletionReason: reason,
+        },
+      }
+    );
+    console.log(`[receiver-delete-request] receiver=${receiverId} reason="${reason}"`);
+
+    res.status(200).json({
+      message: 'Delete request sent to admin. Your account stays active until admin deletes it.',
+      requested: true,
+    });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error('deleteReceiverAccount error:', msg);

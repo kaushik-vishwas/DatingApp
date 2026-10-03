@@ -36,7 +36,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.listAdminTransactions = exports.resolveWithdrawal = exports.listWithdrawals = exports.resolveModerationReport = exports.listModerationReports = exports.rejectAppUser = exports.approveAppUser = exports.listPendingAppUsers = exports.rejectReceiver = exports.approveReceiver = exports.listPendingReceivers = exports.getKycStats = exports.listAllReceivers = exports.deleteReceiverPermanently = exports.updateReceiver = exports.deleteAppUser = exports.updateAppUser = exports.listAppUsers = exports.getOverviewDashboard = exports.getRevenueDashboard = exports.updateAdminRole = exports.updateAdminCallerNotification = exports.updateAdminReceiverWelcome = exports.updateAdminReceiverEarningModel = exports.updateAdminNotificationControls = exports.getAdminSettings = exports.adminConfirmEmailChange = exports.adminRequestEmailChange = exports.adminResetPassword = exports.adminForgotPassword = exports.adminMe = exports.adminLogin = void 0;
+exports.listAdminTransactions = exports.resolveWithdrawal = exports.listWithdrawals = exports.getWithdrawalPendingCount = exports.resolveModerationReport = exports.listModerationReports = exports.rejectAppUser = exports.approveAppUser = exports.listPendingAppUsers = exports.rejectReceiver = exports.approveReceiver = exports.listPendingReceivers = exports.getKycStats = exports.listAllReceivers = exports.deleteReceiverPermanently = exports.updateReceiver = exports.deleteAppUser = exports.updateAppUser = exports.listAppUsers = exports.getOverviewDashboard = exports.getRevenueDashboard = exports.updateAdminRole = exports.updateAdminCallerNotification = exports.updateAdminReceiverWelcome = exports.updateAdminReceiverEarningModel = exports.updateAdminNotificationControls = exports.getAdminSettings = exports.adminConfirmEmailChange = exports.adminRequestEmailChange = exports.adminResetPassword = exports.adminForgotPassword = exports.adminMe = exports.adminLogin = void 0;
 const bcryptjs_1 = __importDefault(require("bcryptjs"));
 const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
 const mongoose_1 = __importDefault(require("mongoose"));
@@ -703,18 +703,21 @@ const getOverviewDashboard = async (req, res) => {
         const trendSince = new Date();
         trendSince.setDate(trendSince.getDate() - 6);
         trendSince.setHours(0, 0, 0, 0);
-        const [platformRevenue, receiverWithdrawalPayout, calls, topupsForTrend, activeReceivers, activeUsers, pendingKycApprovals, pendingWithdrawals, flaggedReports] = await Promise.all([
-            (0, adminEarningsService_1.getPlatformRevenueForRange)(start),
-            (0, adminEarningsService_1.aggregateReceiverWithdrawalPayouts)(start),
-            CallSession_1.default.find({
+        const [walletCollections, calls, trendRows, activeReceivers, activeUsers, pendingKycApprovals, pendingWithdrawals, flaggedReports] = await Promise.all([
+            (0, adminEarningsService_1.aggregateWalletTopupCollections)(start),
+            CallSession_1.default.countDocuments({
                 status: 'completed',
                 ...(start ? { startedAt: { $gte: start } } : {}),
-            })
-                .select('startedAt settledAmountInr')
-                .lean(),
-            WalletTopup_1.default.find({ createdAt: { $gte: trendSince } })
-                .select('payAmount createdAt')
-                .lean(),
+            }),
+            WalletTopup_1.default.aggregate([
+                { $match: { createdAt: { $gte: trendSince } } },
+                {
+                    $group: {
+                        _id: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } },
+                        amount: { $sum: { $ifNull: ['$payAmount', 0] } },
+                    },
+                },
+            ]),
             Receiver_1.default.countDocuments({ accountStatus: 'approved', suspended: { $ne: true } }),
             User_1.default.countDocuments({ accountStatus: 'approved', suspended: { $ne: true } }),
             Receiver_1.default.countDocuments({
@@ -723,16 +726,9 @@ const getOverviewDashboard = async (req, res) => {
             WithdrawalRequest_1.default.countDocuments({ status: 'pending' }),
             UserReport_1.default.countDocuments({ status: 'pending' }),
         ]);
-        const totalRevenue = platformRevenue.totalRevenue;
-        const adminEarnings = platformRevenue.adminEarnings;
-        const receiverRevenue = platformRevenue.receiverRevenue;
-        const totalCalls = calls.length;
-        const trendByDay = new Map();
-        for (const topup of topupsForTrend) {
-            const gross = roundInr(Number(topup.payAmount || 0));
-            const day = new Date(topup.createdAt).toISOString().slice(0, 10);
-            trendByDay.set(day, roundInr((trendByDay.get(day) || 0) + gross));
-        }
+        const totalRevenue = walletCollections;
+        const totalCalls = calls;
+        const trendByDay = new Map(trendRows.map((row) => [row._id, roundInr(row.amount)]));
         // For chart, return last 7 buckets ending today.
         const trend = [];
         const now = new Date();
@@ -746,12 +742,12 @@ const getOverviewDashboard = async (req, res) => {
         res.status(200).json({
             cards: {
                 totalRevenue,
-                walletCollections: platformRevenue.walletCollections,
-                callerUsageSpend: platformRevenue.callerUsageSpend,
-                adminEarnings,
-                receiverRevenue,
-                receiverEarningsSum: receiverRevenue,
-                receiverWithdrawalPayout,
+                walletCollections,
+                callerUsageSpend: 0,
+                adminEarnings: 0,
+                receiverRevenue: 0,
+                receiverEarningsSum: 0,
+                receiverWithdrawalPayout: 0,
                 totalCalls,
                 activeReceivers,
                 activeUsers,
@@ -1281,14 +1277,89 @@ const deleteReceiverPermanently = async (req, res) => {
     }
 };
 exports.deleteReceiverPermanently = deleteReceiverPermanently;
+function receiverStatusClause(status) {
+    if (status === 'approved' || status === 'kyc_approved') {
+        return status === 'kyc_approved'
+            ? { accountStatus: 'approved', isVerified: true }
+            : { accountStatus: 'approved' };
+    }
+    if (status === 'pending')
+        return { accountStatus: { $in: ['pending_review', 'pending_profile'] } };
+    if (status === 'kyc_pending') {
+        return {
+            $or: [
+                { accountStatus: { $in: ['pending_review', 'pending_profile'] } },
+                { accountStatus: 'approved', isVerified: { $ne: true } },
+            ],
+        };
+    }
+    if (status === 'rejected')
+        return { accountStatus: 'rejected' };
+    return {};
+}
+function withReceiverStatus(search, status) {
+    const clause = receiverStatusClause(status);
+    if (search.$or && clause.$or)
+        return { $and: [search, clause] };
+    return { ...search, ...clause };
+}
 /**
- * GET /admin/receivers — all rows in `receivers` collection.
+ * GET /admin/receivers — all rows, or one page when `page` is set.
+ * Page query: status=all|approved|pending|rejected, q, range=7d|30d|all, page, limit.
  */
-const listAllReceivers = async (_req, res) => {
+const listAllReceivers = async (req, res) => {
     try {
-        const receivers = await Receiver_1.default.find({})
-            .select('-otp -otpExpiry')
-            .sort({ createdAt: 1 });
+        const paginated = String(req.query.page ?? '').trim() !== '';
+        let page = 1;
+        let limit = 20;
+        let total = 0;
+        let tabCounts;
+        let receivers;
+        if (paginated) {
+            page = Math.max(1, Number(req.query.page) || 1);
+            limit = Math.min(100, Math.max(1, Number(req.query.limit) || 20));
+            const status = String(req.query.status ?? 'all').toLowerCase();
+            const range = String(req.query.range ?? 'all').toLowerCase();
+            const q = String(req.query.q ?? '').trim();
+            const search = {};
+            const rangeStart = range === '7d' || range === '30d' ? toRangeStart(range) : null;
+            if (rangeStart)
+                search.createdAt = { $gte: rangeStart };
+            if (q) {
+                const rx = new RegExp(escapeRegex(q), 'i');
+                search.$or = [{ name: rx }, { email: rx }, { phone: rx }];
+            }
+            const [all, approved, pending, rejected, kycPending, kycApproved, pageRows] = await Promise.all([
+                Receiver_1.default.countDocuments(search),
+                Receiver_1.default.countDocuments(withReceiverStatus(search, 'approved')),
+                Receiver_1.default.countDocuments(withReceiverStatus(search, 'pending')),
+                Receiver_1.default.countDocuments(withReceiverStatus(search, 'rejected')),
+                Receiver_1.default.countDocuments(withReceiverStatus(search, 'kyc_pending')),
+                Receiver_1.default.countDocuments(withReceiverStatus(search, 'kyc_approved')),
+                Receiver_1.default.find(withReceiverStatus(search, status))
+                    .select('-otp -otpExpiry')
+                    .sort({ createdAt: 1 })
+                    .skip((page - 1) * limit)
+                    .limit(limit),
+            ]);
+            total =
+                status === 'approved'
+                    ? approved
+                    : status === 'kyc_approved'
+                        ? kycApproved
+                        : status === 'pending'
+                            ? pending
+                            : status === 'kyc_pending'
+                                ? kycPending
+                                : status === 'rejected'
+                                    ? rejected
+                                    : all;
+            tabCounts = { all, approved, pending, rejected, kycPending, kycApproved };
+            receivers = pageRows;
+        }
+        else {
+            receivers = await Receiver_1.default.find({}).select('-otp -otpExpiry').sort({ createdAt: 1 });
+        }
         const receiverIds = receivers.map((r) => r._id);
         const todayStart = new Date();
         todayStart.setHours(0, 0, 0, 0);
@@ -1341,7 +1412,7 @@ const listAllReceivers = async (_req, res) => {
                 isLiveAvailable: isOnline,
             };
         });
-        res.status(200).json({ receivers: list });
+        res.status(200).json(paginated ? { receivers: list, total, page, limit, tabCounts } : { receivers: list });
     }
     catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
@@ -1764,6 +1835,21 @@ const resolveModerationReport = async (req, res) => {
 };
 exports.resolveModerationReport = resolveModerationReport;
 /**
+ * GET /admin/withdrawals/pending-count — badge only. Does not load payout totals.
+ */
+const getWithdrawalPendingCount = async (_req, res) => {
+    try {
+        const pendingCount = await WithdrawalRequest_1.default.countDocuments({ status: 'pending' });
+        res.status(200).json({ pendingCount });
+    }
+    catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error('getWithdrawalPendingCount error:', msg);
+        res.status(500).json({ message: msg || 'Server error' });
+    }
+};
+exports.getWithdrawalPendingCount = getWithdrawalPendingCount;
+/**
  * GET /admin/withdrawals — list + cards for withdrawal dashboard.
  */
 const listWithdrawals = async (req, res) => {
@@ -1794,13 +1880,14 @@ const listWithdrawals = async (req, res) => {
         const baseFilter = { ...statusFilter, ...periodFilter };
         const todayStart = new Date(new Date().setHours(0, 0, 0, 0));
         const [pendingRows, rejectedTodayRows, totalBase, totalSuccessfulPayoutAmount, paidTodayCount, paidTodayAmount, paidInRangeCount, tabAllCount, tabPendingCount, tabPaidCount, tabRejectedCount,] = await Promise.all([
-            WithdrawalRequest_1.default.find({ status: 'pending' }).select('amount').lean(),
-            WithdrawalRequest_1.default.find({
-                status: 'rejected',
-                reviewedAt: { $gte: todayStart },
-            })
-                .select('amount')
-                .lean(),
+            WithdrawalRequest_1.default.aggregate([
+                { $match: { status: 'pending' } },
+                { $group: { _id: null, count: { $sum: 1 }, amount: { $sum: { $ifNull: ['$amount', 0] } } } },
+            ]),
+            WithdrawalRequest_1.default.aggregate([
+                { $match: { status: 'rejected', reviewedAt: { $gte: todayStart } } },
+                { $group: { _id: null, count: { $sum: 1 }, amount: { $sum: { $ifNull: ['$amount', 0] } } } },
+            ]),
             WithdrawalRequest_1.default.countDocuments(baseFilter),
             (0, adminEarningsService_1.aggregateReceiverWithdrawalPayouts)(null, periodFilter),
             (0, adminEarningsService_1.countPaidReceiverWithdrawals)(todayStart),
@@ -1811,12 +1898,12 @@ const listWithdrawals = async (req, res) => {
             (0, adminEarningsService_1.countPaidReceiverWithdrawals)(null, periodFilter),
             WithdrawalRequest_1.default.countDocuments({ status: 'rejected', ...periodFilter }),
         ]);
-        const pendingCount = pendingRows.length;
-        const pendingAmount = pendingRows.reduce((sum, row) => sum + Number(row.amount || 0), 0);
+        const pendingCount = pendingRows[0]?.count ?? 0;
+        const pendingAmount = pendingRows[0]?.amount ?? 0;
         const approvedTodayCount = paidTodayCount;
         const approvedTodayAmount = paidTodayAmount;
-        const rejectedTodayCount = rejectedTodayRows.length;
-        const rejectedTodayAmount = rejectedTodayRows.reduce((sum, row) => sum + Number(row.amount || 0), 0);
+        const rejectedTodayCount = rejectedTodayRows[0]?.count ?? 0;
+        const rejectedTodayAmount = rejectedTodayRows[0]?.amount ?? 0;
         const processedCount = paidInRangeCount;
         const processedTodayAmount = paidTodayAmount;
         const receiverCandidates = q.length === 0
@@ -1867,7 +1954,7 @@ const listWithdrawals = async (req, res) => {
             .lean();
         const receiverIds = [...new Set(rows.map((row) => String(row.receiverId)))];
         const receivers = await Receiver_1.default.find({ _id: { $in: receiverIds } })
-            .select('_id name nameAsPerAadhaar upiId bankAccountHolderName bankAccountNumber bankIfsc bankName bankAccountType')
+            .select('_id name phone nameAsPerAadhaar upiId bankAccountHolderName bankAccountNumber bankIfsc bankName bankAccountType')
             .lean();
         const receiverById = new Map(receivers.map((r) => [String(r._id), r]));
         res.status(200).json({
@@ -1912,6 +1999,7 @@ const listWithdrawals = async (req, res) => {
                     _id: String(row._id),
                     withdrawalId: `W-${String(row._id).slice(-6).toUpperCase()}`,
                     receiverName: receiver?.name ?? 'Receiver',
+                    receiverPhone: String(receiver?.phone ?? '').trim(),
                     amount: row.amount,
                     platformFee,
                     payoutAmount,

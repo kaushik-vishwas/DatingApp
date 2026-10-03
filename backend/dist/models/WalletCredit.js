@@ -43,7 +43,7 @@ const walletCreditSchema = new mongoose_1.Schema({
         index: true,
     },
     amountInr: { type: Number, required: true, min: 0.01 },
-    referralId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Referral', default: null },
+    referralId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Referral' },
     description: { type: String, required: true, trim: true, maxlength: 300 },
 }, { timestamps: true });
 walletCreditSchema.index({ userId: 1, createdAt: -1 });

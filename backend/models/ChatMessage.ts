@@ -27,6 +27,7 @@ const chatMessageSchema = new Schema<IChatMessage>(
 );
 
 chatMessageSchema.index({ userId: 1, receiverId: 1, createdAt: 1 });
+chatMessageSchema.index({ senderType: 1, createdAt: -1 });
 
 const ChatMessage: Model<IChatMessage> = mongoose.model<IChatMessage>('ChatMessage', chatMessageSchema);
 

@@ -41,6 +41,7 @@ const referralSchema = new mongoose_1.Schema({
     referredKind: { type: String, enum: ['user', 'receiver'], required: true },
     referredId: { type: mongoose_1.Schema.Types.ObjectId, required: true },
     referredPhone: { type: String, required: true, trim: true },
+    referredPhoneKey: { type: String, trim: true },
     rewardInr: { type: Number, required: true, min: 0 },
     status: { type: String, enum: ['rewarded', 'rejected'], required: true, index: true },
     rejectReason: { type: String, default: null, trim: true, maxlength: 300 },
@@ -50,5 +51,6 @@ const referralSchema = new mongoose_1.Schema({
 }, { timestamps: true });
 referralSchema.index({ referredKind: 1, referredId: 1 }, { unique: true });
 referralSchema.index({ referrerKind: 1, referrerId: 1, createdAt: -1 });
+referralSchema.index({ referredPhoneKey: 1 }, { unique: true, sparse: true });
 const Referral = mongoose_1.default.model('Referral', referralSchema);
 exports.default = Referral;

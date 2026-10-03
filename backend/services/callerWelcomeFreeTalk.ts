@@ -53,7 +53,6 @@ export async function grantCallerWelcomeFreeTalk(userId: string): Promise<{
             userId: new mongoose.Types.ObjectId(uid),
             source: 'welcome_free_talk',
             amountInr,
-            referralId: null,
             description: `Welcome free talk — ${CALLER_WELCOME_FREE_TALK_MINUTES} min`,
           },
         ],

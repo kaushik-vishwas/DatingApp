@@ -82,6 +82,9 @@ export interface SafeUser {
   badgeLevel?: 'platinum' | 'diamond' | 'supreme';
   /** Receivers only: INR per valid call minute from tier. */
   earningRatePerMinute?: number;
+  /** Receivers only: set when they ask admin to delete the account. */
+  accountDeletionRequestedAt?: string | null;
+  accountDeletionReason?: string | null;
 }
 
 type LegacyRegisterRole = 'caller' | 'receiver' | 'both';
@@ -307,6 +310,8 @@ export function toApiReceiver(receiver: ReceiverDocument): SafeUser {
         ? r.badgeLevel
         : 'platinum',
     earningRatePerMinute: roundScoreField(r.earningRatePerMinute),
+    accountDeletionRequestedAt: r.accountDeletionRequestedAt ? iso(r.accountDeletionRequestedAt) : null,
+    accountDeletionReason: r.accountDeletionReason ?? null,
   };
 }
 

@@ -46,7 +46,6 @@ async function grantCallerWelcomeFreeTalk(userId) {
                     userId: new mongoose_1.default.Types.ObjectId(uid),
                     source: 'welcome_free_talk',
                     amountInr,
-                    referralId: null,
                     description: `Welcome free talk — ${callerWelcomeFreeTalk_1.CALLER_WELCOME_FREE_TALK_MINUTES} min`,
                 },
             ], { session });

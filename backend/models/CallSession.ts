@@ -59,6 +59,8 @@ const callSessionSchema = new Schema<ICallSession>(
 
 callSessionSchema.index({ receiverId: 1, startedAt: -1 });
 callSessionSchema.index({ callerId: 1, startedAt: -1 });
+callSessionSchema.index({ status: 1, startedAt: -1 });
+callSessionSchema.index({ receiverId: 1, status: 1, startedAt: -1 });
 
 const CallSession: Model<ICallSession> = mongoose.model<ICallSession>('CallSession', callSessionSchema);
 
