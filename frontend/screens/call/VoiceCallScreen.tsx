@@ -1300,6 +1300,15 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
       talkActiveRef.current = false;
       setTalkActive(false);
       setStreamBothConnected(false);
+      // Still on Calling / Connecting — close that screen now. A connected call keeps the
+      // existing teardown (rating, summary) and is not changed.
+      if (!readyRef.current) {
+        void stopOutboundRingtonePlayback();
+        void leaveMediaRef.current();
+        void ensureSessionEndedRef.current();
+        exitCallScreenRef.current();
+        return;
+      }
       void finishCallerCallEndRef.current();
       return;
     }
@@ -1403,6 +1412,8 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
 
     const navSub = navigation.addListener('beforeRemove', (e) => {
       if (allowLeaveCallScreenRef.current) return;
+      // Calling screen opened before bootstrap has a call id. A busy/failed attempt must be able to close it.
+      if (userRoleRef.current === 'caller' && !callIdRef.current.trim()) return;
       const action = e.data.action;
       if (action.type === 'REPLACE') {
         const target =

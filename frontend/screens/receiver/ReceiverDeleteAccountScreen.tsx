@@ -3,6 +3,7 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import React, { useState } from 'react';
 import { Alert, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import Icon from 'react-native-vector-icons/Feather';
 import { useAuth } from '../../context/AuthContext';
 import type { ReceiverStackParamList } from '../../navigation/ReceiverStackParamList';
 import { getErrorMessage, profileApi } from '../../services/api';
@@ -11,9 +12,11 @@ type Nav = NativeStackNavigationProp<ReceiverStackParamList, 'ReceiverDeleteAcco
 
 export default function ReceiverDeleteAccountScreen(): React.JSX.Element {
   const navigation = useNavigation<Nav>();
-  const { signOut } = useAuth();
+  const { user, applyServerUser } = useAuth();
+  const alreadyRequested = Boolean(user?.accountDeletionRequestedAt);
   const [reason, setReason] = useState('');
   const [busy, setBusy] = useState(false);
+  const [sent, setSent] = useState(alreadyRequested);
   const reasons = [
     "I'm not using this app anymore",
     'Technical issues or poor experience',
@@ -27,18 +30,39 @@ export default function ReceiverDeleteAccountScreen(): React.JSX.Element {
       Alert.alert('Select a reason', 'Please select an appropriate reason.');
       return;
     }
-    Alert.alert('Delete account', 'This action cannot be undone.', [
+    Alert.alert('Request account deletion', 'Admin will review this. Your account stays active until then.', [
       { text: 'Cancel', style: 'cancel' },
       {
-        text: 'Delete',
+        text: 'Send request',
         style: 'destructive',
         onPress: async () => {
+          if (sent || alreadyRequested) {
+            Alert.alert('Request already sent', 'Your delete request is already with admin.');
+            return;
+          }
           setBusy(true);
           try {
-            await profileApi.deleteReceiverAccount({ reason });
-            await signOut();
+            const { data } = await profileApi.deleteReceiverAccount({ reason });
+            setSent(true);
+            if (user) {
+              applyServerUser({
+                ...user,
+                accountDeletionRequestedAt: user.accountDeletionRequestedAt ?? new Date().toISOString(),
+              });
+            }
+            if (data.alreadySent) {
+              Alert.alert('Request already sent', 'Your delete request is already with admin.');
+              return;
+            }
+            Alert.alert('Request sent', 'Admin has your delete request. Your account is still active.');
           } catch (e) {
-            Alert.alert('Delete failed', getErrorMessage(e));
+            const message = getErrorMessage(e);
+            if (/user not found/i.test(message)) {
+              setSent(true);
+              Alert.alert('Request already sent', 'Your delete request is already with admin.');
+              return;
+            }
+            Alert.alert('Request failed', message);
           } finally {
             setBusy(false);
           }
@@ -52,15 +76,17 @@ export default function ReceiverDeleteAccountScreen(): React.JSX.Element {
       <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
       <View style={styles.header}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
-          <Text style={styles.backText}>←</Text>
+          <Icon name="chevron-left" size={24} color="#1a1a1a" />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Delete Account</Text>
-        <View style={styles.backBtn} />
+        <Text style={styles.headerTitle}>Request deletion</Text>
+        <View style={styles.placeholder} />
       </View>
 
       {/* <Text style={styles.title}>Delete Account</Text> */}
       <Text style={styles.note}>
-        We're really sorry to see you go. Are you sure you want to delete your account? Once you confirm, your data will be gone.
+        {sent
+          ? 'Delete request is already sent. Your account stays active until admin deletes it.'
+          : 'This sends a delete request to admin. Your account stays active until admin deletes it.'}
       </Text>
       <Text style={[styles.note, { marginTop: 18 }]}>Please select an appropriate reason</Text>
 
@@ -76,8 +102,8 @@ export default function ReceiverDeleteAccountScreen(): React.JSX.Element {
         })}
       </View>
 
-      <TouchableOpacity style={[styles.deleteBtn, busy && styles.disabled]} disabled={busy} onPress={onDelete}>
-        <Text style={styles.deleteText}>{busy ? 'Deleting...' : 'Delete Account'}</Text>
+      <TouchableOpacity style={[styles.deleteBtn, (busy || sent) && styles.disabled]} disabled={busy || sent} onPress={onDelete}>
+        <Text style={styles.deleteText}>{sent ? 'Request sent' : busy ? 'Sending...' : 'Request deletion'}</Text>
       </TouchableOpacity>
       </ScrollView>
     </SafeAreaView>
@@ -89,9 +115,16 @@ const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: '#f7f7f8' },
   content: { padding: 16, paddingBottom: 32 },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 },
-  backBtn: { width: 28, height: 28, alignItems: 'center', justifyContent: 'center' },
-  backText: { fontSize: 20, color: '#111', fontWeight: '700' },
-  headerTitle: { fontSize: 16, color: '#111', fontWeight: '900' },
+  backBtn: {
+    width: 36,
+    height: 36,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 18,
+    backgroundColor: '#fff',
+  },
+  placeholder: { width: 36, height: 36 },
+  headerTitle: { fontSize: 18, color: '#111', fontWeight: '900' },
   title: { fontSize: 22, color: '#b91c1c', fontWeight: '900', marginBottom: 12 },
   note: { fontSize: 12, color: '#555', fontWeight: '700', marginBottom: 6, marginTop: 16 },
   reasonRow: {

@@ -9,15 +9,11 @@ const POPUP_CARD_GRADIENT = ['#3b0764', '#1e3a5f', '#064e3b'] as const;
 type Props = {
   visible: boolean;
   onDismiss: () => void;
-  onRandomCall: () => void;
-  randomCallBusy?: boolean;
 };
 
 export default function CallerFreeTalkPopup({
   visible,
   onDismiss,
-  onRandomCall,
-  randomCallBusy = false,
 }: Props): React.JSX.Element {
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onDismiss}>
@@ -46,26 +42,24 @@ export default function CallerFreeTalkPopup({
             You got {CALLER_FREE_TALK_MINUTES} min free talk time!
           </Text>
           <Text style={styles.body}>
-            Start a Random Call now and enjoy your free minutes. This offer reminder appears about
-            once every hour.
+            Enjoy your free minutes when you connect with verified receivers.
           </Text>
 
           <TouchableOpacity
             activeOpacity={0.9}
-            onPress={onRandomCall}
-            disabled={randomCallBusy}
+            onPress={onDismiss}
             style={styles.ctaHit}
           >
             <LinearGradient
               colors={['#f472b6', '#a855f7', '#db2777']}
               start={{ x: 0, y: 0 }}
               end={{ x: 1, y: 1 }}
-              style={[styles.cta, randomCallBusy && styles.ctaDisabled]}
+              style={styles.cta}
             >
               <Text style={styles.ctaText}>
-                {randomCallBusy ? 'Please wait…' : 'Random Call'}
+                Explore Profiles
               </Text>
-              {!randomCallBusy ? <Ionicons name="call-outline" size={18} color="#fff" /> : null}
+              <Ionicons name="sparkles" size={18} color="#fff" />
             </LinearGradient>
           </TouchableOpacity>
 

@@ -9,8 +9,14 @@ import CallerAlertsTabScreen from '../screens/caller/CallerAlertsTabScreen';
 import CallerCallsTabScreen from '../screens/caller/CallerCallsTabScreen';
 import CallerChatTabScreen from '../screens/caller/tabs/CallerChatTabScreen';
 import type { CallerTabParamList } from './CallerTabParamList';
+import { withBottomTabSwipe } from './MainTabSwipeLayout';
 
 const Tab = createBottomTabNavigator<CallerTabParamList>();
+
+const SwipeCallerHome = withBottomTabSwipe(CallerDiscoverHome);
+const SwipeCallerRecents = withBottomTabSwipe(CallerCallsTabScreen);
+const SwipeCallerAlerts = withBottomTabSwipe(CallerAlertsTabScreen);
+const SwipeCallerChats = withBottomTabSwipe(CallerChatTabScreen);
 
 const TAB_PURPLE = '#7b2cff';
 const TAB_INACTIVE = '#9ca3af';
@@ -32,7 +38,7 @@ export default function CallerMainTabsNavigator(): React.JSX.Element {
     >
       <Tab.Screen
         name="CallerHome"
-        component={CallerDiscoverHome}
+        component={SwipeCallerHome}
         options={{
           tabBarLabel: 'Home',
           tabBarIcon: ({ color, size }) => <Ionicons name="home" size={size} color={color} />,
@@ -40,7 +46,7 @@ export default function CallerMainTabsNavigator(): React.JSX.Element {
       />
       <Tab.Screen
         name="CallerRecents"
-        component={CallerCallsTabScreen}
+        component={SwipeCallerRecents}
         options={{
           tabBarLabel: 'Recents',
           tabBarIcon: ({ color, size }) => <Ionicons name="time-outline" size={size} color={color} />,
@@ -48,7 +54,7 @@ export default function CallerMainTabsNavigator(): React.JSX.Element {
       />
       <Tab.Screen
         name="CallerAlerts"
-        component={CallerAlertsTabScreen}
+        component={SwipeCallerAlerts}
         listeners={{
           focus: () => clearAlertsBadge(),
         }}
@@ -60,7 +66,7 @@ export default function CallerMainTabsNavigator(): React.JSX.Element {
       />
       <Tab.Screen
         name="CallerChatsTab"
-        component={CallerChatTabScreen}
+        component={SwipeCallerChats}
         options={{
           tabBarLabel: 'Chat',
           tabBarIcon: ({ color, size }) => <Ionicons name="chatbubbles-outline" size={size} color={color} />,

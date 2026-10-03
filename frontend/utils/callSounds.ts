@@ -258,24 +258,6 @@ export async function startOutgoingCallTone(): Promise<() => Promise<void>> {
   };
 }
 
-export async function startRandomMatchingTone(): Promise<() => Promise<void>> {
-  await ensureAudioMode();
-  const sound = new Audio.Sound();
-  await sound.loadAsync(CALLER_RINGTONE, { shouldPlay: true, isLooping: true, volume: 0.85 });
-
-  return async () => {
-    try {
-      await sound.stopAsync();
-    } catch {
-      // ignore
-    }
-    try {
-      await sound.unloadAsync();
-    } catch {
-      // ignore
-    }
-  };
-}
 
 /** Start looping incoming ring without restarting if already playing (tap handoff). */
 export async function ensureIncomingRingtonePlaying(): Promise<() => Promise<void>> {

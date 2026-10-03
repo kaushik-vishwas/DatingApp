@@ -40,6 +40,12 @@
   import type { ReceiverStackParamList } from '../../navigation/ReceiverStackParamList';
   import { authApi, getErrorMessage, profileApi } from '../../services/api';
   import { resolveProfileImageSource } from '../../utils/avatarSource';
+  import {
+    englishDisplayNameError,
+    isEnglishDisplayName,
+    normalizeEnglishDisplayName,
+    sanitizeEnglishDisplayNameInput,
+  } from '../../utils/validation';
   import { shouldUploadProfileImageToCloudinary } from '../../utils/profileImageUrl';
   import type { RouteProp } from '@react-navigation/native';
   import { useRoute } from '@react-navigation/native';
@@ -125,7 +131,7 @@
     const isProfileComplete = () => {
       if (isWithdrawKycMode) return true;
       
-      const hasName = name && name.trim().length > 0;
+      const hasName = isEnglishDisplayName(name);
       const hasState = stateValue && stateValue.trim().length > 0;
       const hasLanguages = languages.length > 0;
       const hasInterests = interests.length > 0;
@@ -153,8 +159,9 @@
         }
       } else {
         // Validate all fields are filled
-        if (!name.trim()) {
-          Alert.alert('Validation', 'Please enter your display name.');
+        const nameError = englishDisplayNameError(name);
+        if (nameError) {
+          Alert.alert('Validation', nameError);
           return;
         }
         if (!stateValue.trim()) {
@@ -198,7 +205,7 @@
         const panFrontUrl =
           isWithdrawKycMode && panFront ? await ensureUploadedUrl(panFront, 'pan-front') : undefined;
         await profileApi.updateReceiverProfile({
-          name: isWithdrawKycMode ? undefined : name.trim(),
+          name: isWithdrawKycMode ? undefined : normalizeEnglishDisplayName(name),
           profileImage: isWithdrawKycMode ? undefined : profileImageUri?.trim(),
           state: isWithdrawKycMode ? undefined : stateValue.trim(),
           languages: isWithdrawKycMode ? undefined : languages,
@@ -337,7 +344,7 @@
                 <Field 
                   label="Display Name" 
                   value={name} 
-                  onChangeText={setName} 
+                  onChangeText={(t) => setName(sanitizeEnglishDisplayNameInput(t))} 
                   placeholder="Enter your display name"
                   required
                 />

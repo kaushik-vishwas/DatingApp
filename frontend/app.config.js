@@ -121,6 +121,7 @@ module.exports = {
           androidKeepCallAlive: true,
         },
       ],
+      '@sentry/react-native/expo',
       [
         'expo-notifications',
         {
@@ -140,6 +141,7 @@ module.exports = {
       callScreenCaptureProtection,
       cloudinaryCloudName,
       cloudinaryUploadPreset,
+      sentryDsn: process.env.EXPO_PUBLIC_SENTRY_DSN?.trim() || '',
       appKind: appKind || undefined,
       appShare: {
         ...(appJson.expo.extra?.appShare || {}),

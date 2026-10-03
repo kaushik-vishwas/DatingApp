@@ -8,8 +8,8 @@
     "android": "expo run:android",
     "prebuild:android": "npx expo prebuild --platform android --clean && node scripts/ensureAndroidLocalProperties.js",
     "android:apk:prebuild": "npm run prebuild:android",
-    "android:apk": "cd android && gradlew.bat assembleRelease -PreactNativeArchitectures=arm64-v8a",
-    "android:apk:fast": "cd android && gradlew.bat assembleRelease -PreactNativeArchitectures=arm64-v8a --build-cache",
+    "android:apk": "node scripts/copyAndroidCallSounds.js && cd android && gradlew.bat assembleRelease -PreactNativeArchitectures=arm64-v8a",
+    "android:apk:fast": "node scripts/copyAndroidCallSounds.js && cd android && gradlew.bat assembleRelease -PreactNativeArchitectures=arm64-v8a --build-cache",
     "ios": "expo run:ios",
     "web": "expo start --web",
     "typecheck": "tsc -p tsconfig.json --noEmit"
@@ -22,6 +22,7 @@
     "@react-navigation/bottom-tabs": "^7.16.1",
     "@react-navigation/native": "^7.2.2",
     "@react-navigation/native-stack": "^7.14.10",
+    "@sentry/react-native": "~7.2.0",
     "@stream-io/video-react-native-sdk": "^1.32.3",
     "axios": "^1.14.0",
     "expo": "~54.0.33",

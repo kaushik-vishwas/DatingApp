@@ -93,7 +93,6 @@ export default function ReceiverProfileScreen({ navigation, route }: Props): Rea
             receiver.audioCallRate != null && Number.isFinite(receiver.audioCallRate)
               ? receiver.audioCallRate
               : undefined,
-          redirectToRandomOnMissed: true,
         });
       } catch (e: unknown) {
         const msg = getErrorMessage(e);

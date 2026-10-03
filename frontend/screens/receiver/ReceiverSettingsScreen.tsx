@@ -129,9 +129,9 @@ export default function ReceiverSettingsScreen(): React.JSX.Element {
             <View style={[styles.iconCircle, styles.dangerIconCircle]}>
               <Icon name="trash-2" size={18} color="#dc2626" />
             </View>
-            <Text style={[styles.label, styles.danger]}>Delete Account</Text>
+            <Text style={[styles.label, styles.danger, styles.labelFlex]}>Request account deletion</Text>
           </View>
-          <Icon name="chevron-right" size={18} color="#dc2626" />
+          <Icon name="chevron-right" size={18} color="#9ca3af" />
         </TouchableOpacity>
 
         <TouchableOpacity
@@ -197,9 +197,11 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   rowLeft: {
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
+    marginRight: 8,
   },
   iconCircle: {
     width: 36,
@@ -216,6 +218,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#fee2e2',
   },
   label: { fontSize: 14, color: '#222', fontWeight: '600' },
+  labelFlex: { flex: 1 },
   chev: { fontSize: 14, color: '#777', fontWeight: '700' },
   danger: { color: '#dc2626' },
   logout: {

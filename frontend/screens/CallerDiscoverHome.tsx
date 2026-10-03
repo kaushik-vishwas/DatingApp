@@ -22,6 +22,7 @@ import { Ionicons } from '@expo/vector-icons';
 
 import { useReceiverTabBarBottomInset } from '../utils/receiverTabBarInset';
 import { useCallerAppNavigation } from '../utils/callerAppNavigation';
+import { useSuppressMainTabSwipeHandlers } from '../navigation/MainTabSwipeLayout';
 import DiscoverFiltersModal, {
   DEFAULT_DISCOVER_FILTERS,
   DiscoverFilterIcon,
@@ -359,8 +360,9 @@ const DiscoverReceiverRow = React.memo(function DiscoverReceiverRow({
 export default function CallerDiscoverHome(): React.JSX.Element {
   const contentBottomPadding = useReceiverTabBarBottomInset();
   const navigation = useCallerAppNavigation();
+  const suppressMainTabSwipe = useSuppressMainTabSwipeHandlers();
   const { user, refreshUser, token, bootstrapping, consumeCallerHomeOfferLoginShow } = useAuth();
-  const { startCallInvite, startRandomCallEngagement, randomCallMatchingVisible } = useCallSignals();
+  const { startCallInvite } = useCallSignals();
   const [language, setLanguage] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [debounced, setDebounced] = useState('');
@@ -380,6 +382,7 @@ export default function CallerDiscoverHome(): React.JSX.Element {
   const [homeOfferPopup, setHomeOfferPopup] = useState<WalletHomeOfferPopup | null>(null);
   const [homeOfferPopupVisible, setHomeOfferPopupVisible] = useState(false);
   const [freeTalkPopupVisible, setFreeTalkPopupVisible] = useState(false);
+  const showOfferAfterFreeTalkRef = useRef(false);
 
   useEffect(() => {
     const t = setTimeout(() => setDebounced(search.trim()), 350);
@@ -530,7 +533,6 @@ export default function CallerDiscoverHome(): React.JSX.Element {
           await startCallInvite(item._id, item.name, item.profileImage ?? null, {
             receiverRatePerMinuteHint:
               item.audioCallRate != null && Number.isFinite(item.audioCallRate) ? item.audioCallRate : undefined,
-            redirectToRandomOnMissed: true,
           });
         } catch (e: unknown) {
           const msg = getErrorMessage(e);
@@ -541,11 +543,6 @@ export default function CallerDiscoverHome(): React.JSX.Element {
     },
     [navigation, startCallInvite, wallet]
   );
-
-  const onCallRandom = useCallback(() => {
-    if (randomCallMatchingVisible) return;
-    void startRandomCallEngagement();
-  }, [randomCallMatchingVisible, startRandomCallEngagement]);
 
 
   const onOpenProfile = useCallback(
@@ -583,11 +580,26 @@ export default function CallerDiscoverHome(): React.JSX.Element {
           setFreeTalkPopupVisible(true);
           setHomeOfferPopupVisible(false);
           await markCallerFreeTalkPopupShown(user._id);
-          // Still load recharge offer data in background for later sessions.
-          void walletApi.offers().then(({ data }) => {
-            if (cancelled) return;
-            setHomeOfferPopup(data.popup ?? null);
+          const { data } = await walletApi.offers();
+          if (cancelled) return;
+          const queued = data.popup ?? null;
+          if (!queued?.offerId) {
+            showOfferAfterFreeTalkRef.current = false;
+            setHomeOfferPopup(null);
+            return;
+          }
+          const forceFromLogin = consumeCallerHomeOfferLoginShow();
+          const showOffer = await shouldShowCallerHomeOfferPopup({
+            userId: user._id,
+            offerId: queued.offerId,
+            forceFromLogin,
           });
+          if (cancelled) return;
+          setHomeOfferPopup(queued);
+          showOfferAfterFreeTalkRef.current = showOffer;
+          if (showOffer) {
+            await markCallerHomeOfferPopupSeen(user._id, queued.offerId);
+          }
           return;
         }
 
@@ -630,13 +642,11 @@ export default function CallerDiscoverHome(): React.JSX.Element {
 
   const dismissFreeTalkPopup = useCallback(() => {
     setFreeTalkPopupVisible(false);
+    if (showOfferAfterFreeTalkRef.current) {
+      showOfferAfterFreeTalkRef.current = false;
+      setHomeOfferPopupVisible(true);
+    }
   }, []);
-
-  const onFreeTalkRandomCall = useCallback(() => {
-    setFreeTalkPopupVisible(false);
-    if (randomCallMatchingVisible) return;
-    void startRandomCallEngagement();
-  }, [randomCallMatchingVisible, startRandomCallEngagement]);
 
   const rechargeHomeOfferPopup = useCallback(() => {
     if (!homeOfferPopup) return;
@@ -704,29 +714,22 @@ export default function CallerDiscoverHome(): React.JSX.Element {
           <View style={styles.adminNoticeCard}>
             <View style={styles.adminNoticeLeft}>
               <TouchableOpacity
-                onPress={onShareAppPress}
-                activeOpacity={0.82}
-                style={styles.adminNoticeBtnWrap}
-                accessibilityRole="button"
-                accessibilityLabel="Share app, get free talk"
-              >
-                <LinearGradient
-                  colors={[SHARE_BTN_GRADIENT_START, SHARE_BTN_GRADIENT_END]}
-                  start={{ x: 0, y: 0.5 }}
-                  end={{ x: 1, y: 0.5 }}
-                  style={styles.adminNoticeBtn}
-                >
-                  <View style={styles.adminNoticeBtnContent}>
-                    <View style={styles.adminNoticeBtnIconWrap}>
-                      <Ionicons name="share-social" size={15} color={SHARE_BTN_ICON} />
-                    </View>
-                    <Text style={styles.adminNoticeBtnText} numberOfLines={2}>
-                      {'Tab for free\ntalk time'}
-                    </Text>
-                    <Ionicons name="chevron-forward" size={15} color="rgba(255,255,255,0.9)" />
-                  </View>
-                </LinearGradient>
-              </TouchableOpacity>
+  onPress={onShareAppPress}
+  activeOpacity={0.82}
+  style={styles.adminNoticeBtnWrap}
+  accessibilityRole="button"
+  accessibilityLabel="Share app, get free talk"
+>
+  <View style={styles.adminNoticeBtnContent}>
+    <View style={styles.adminNoticeBtnIconWrap}>
+      <Ionicons name="share-social" size={15} color={SHARE_BTN_ICON} />
+    </View>
+    <Text style={styles.adminNoticeBtnText} numberOfLines={2}>
+      {'Tab for free\ntalk time'}
+    </Text>
+    <Ionicons name="chevron-forward" size={15} color="rgba(255,255,255,0.9)" />
+  </View>
+</TouchableOpacity>
             </View>
             {callerNotification.body?.trim() ? (
               <>
@@ -765,6 +768,7 @@ export default function CallerDiscoverHome(): React.JSX.Element {
             showsHorizontalScrollIndicator={false}
             style={styles.langScrollArea}
             contentContainerStyle={styles.langScroll}
+            {...suppressMainTabSwipe}
           >
             {langChip('All', null)}
             {CALLER_LANGUAGE_OPTIONS.map((l) => langChip(l, l))}
@@ -833,9 +837,7 @@ export default function CallerDiscoverHome(): React.JSX.Element {
     [err, loading, receivers.length]
   );
 
-  // Screen layout already sits above the tab bar — keep button flush to that edge.
-  const stickyRandomBottom = 4;
-  const listBottomPad = contentBottomPadding + 44;
+  const listBottomPad = contentBottomPadding + 16;
 
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'left', 'right']}>
@@ -870,33 +872,6 @@ export default function CallerDiscoverHome(): React.JSX.Element {
             maxToRenderPerBatch={8}
             updateCellsBatchingPeriod={50}
           />
-
-          <View pointerEvents="box-none" style={[styles.stickyRandomWrap, { bottom: stickyRandomBottom }]}>
-            <TouchableOpacity
-              activeOpacity={0.9}
-              onPress={onCallRandom}
-              disabled={randomCallMatchingVisible}
-              accessibilityLabel="Random Call"
-              style={styles.stickyRandomHit}
-            >
-              <LinearGradient
-                colors={[SHARE_BTN_GRADIENT_START, '#a855f7', SHARE_BTN_GRADIENT_END]}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 1 }}
-                style={[
-                  styles.stickyRandomBtn,
-                  randomCallMatchingVisible && styles.stickyRandomBtnDisabled,
-                ]}
-              >
-                <View style={styles.randomBtnContent}>
-                  <Ionicons name="call-outline" size={17} color="#fff" />
-                  <Text style={styles.stickyRandomBtnText} numberOfLines={2}>
-                    {randomCallMatchingVisible ? 'Please\nwait…' : 'Random\nCall'}
-                  </Text>
-                </View>
-              </LinearGradient>
-            </TouchableOpacity>
-          </View>
         </View>
       </KeyboardAvoidingView>
       <DiscoverSearchModal
@@ -928,8 +903,6 @@ export default function CallerDiscoverHome(): React.JSX.Element {
       <CallerFreeTalkPopup
         visible={freeTalkPopupVisible}
         onDismiss={dismissFreeTalkPopup}
-        onRandomCall={onFreeTalkRandomCall}
-        randomCallBusy={randomCallMatchingVisible}
       />
     </SafeAreaView>
   );
@@ -956,7 +929,7 @@ const styles = StyleSheet.create({
   listContent: {
     paddingHorizontal: 16,
     paddingBottom: 24,
-    paddingTop: 8,
+    paddingTop: 5,
   },
 
   // Enhanced Top Section Styles
@@ -1252,14 +1225,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: '#faf7f2',
     borderRadius: 18,
-    paddingTop: 12,
-    paddingBottom: 12,
+    paddingTop: 0,
+    paddingBottom: 0,
     paddingLeft: 14,
     paddingRight: 138,
     overflow: 'hidden',
     borderWidth: 1,
     borderColor: '#f0ebe3',
-    minHeight: 84,
+    minHeight: 70,
   },
   promoTextCol: {
     flex: 1,
@@ -1309,57 +1282,13 @@ const styles = StyleSheet.create({
   promoRoseLeft: {
     left: 3,
   },
-  stickyRandomWrap: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    zIndex: 20,
-    alignItems: 'center',
-  },
-  stickyRandomHit: {
-    alignSelf: 'center',
-    borderRadius: 32,
-    overflow: 'hidden',
-    shadowColor: '#e879f9',
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.35,
-    shadowRadius: 6,
-    elevation: 7,
-  },
-  stickyRandomBtn: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1.5,
-    borderColor: 'rgba(255, 255, 255, 0.88)',
-    paddingHorizontal: 6,
-    paddingVertical: 7,
-  },
-  stickyRandomBtnDisabled: {
-    opacity: 0.75,
-  },
-  stickyRandomBtnText: {
-    color: '#fff',
-    fontWeight: '800',
-    fontSize: 9.5,
-    letterSpacing: 0.1,
-    textAlign: 'center',
-    lineHeight: 11,
-  },
-  randomBtnContent: {
-    flexDirection: 'column',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 2,
-  },
+
   adminNoticeCard: {
     flexDirection: 'row',
-    marginBottom: 10,
+    marginBottom: 5,
     borderRadius: 16,
     overflow: 'hidden',
-    minHeight: 76,
+    minHeight: 74,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
@@ -1375,8 +1304,8 @@ const styles = StyleSheet.create({
     opacity: 0.55,
   },
   adminNoticeLeft: {
-    width: '46%',
-    minWidth: 158,
+    width: '38%',
+    minWidth: 0,
     backgroundColor: NOTICE_LEFT_BG,
     alignItems: 'center',
     justifyContent: 'center',
@@ -1388,18 +1317,11 @@ const styles = StyleSheet.create({
     alignSelf: 'stretch',
     backgroundColor: '#ffffff',
   },
-  adminNoticeBtnWrap: {
-    width: '100%',
-    maxWidth: 168,
-    borderRadius: 999,
-    overflow: 'hidden',
-    backgroundColor: SHARE_BTN_GRADIENT_END,
-    shadowColor: '#831843',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.4,
-    shadowRadius: 6,
-    elevation: 6,
-  },
+ adminNoticeBtnWrap: {
+  width: '100%',
+  maxWidth: 168,
+  // removed: borderRadius, overflow, backgroundColor, shadow, elevation
+},
   adminNoticeBtn: {
     width: '100%',
     minHeight: 48,
@@ -1418,10 +1340,12 @@ const styles = StyleSheet.create({
     width: '100%',
   },
   adminNoticeBtnIconWrap: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    backgroundColor: 'rgba(255, 255, 255, 0.22)',
+    width: 25,
+    height: 25,
+    borderRadius: 15,
+    borderWidth: 1.6,             // ← circle outline
+    borderColor: '#ffffff',       // ← white ring
+    backgroundColor: 'transparent', // ← no fill inside
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -1430,7 +1354,7 @@ const styles = StyleSheet.create({
     flexShrink: 1,
     color: SHARE_BTN_TEXT,
     fontWeight: '800',
-    fontSize: 13,
+    fontSize: 12.5,
     lineHeight: 16,
     letterSpacing: 0.15,
     textAlign: 'left',

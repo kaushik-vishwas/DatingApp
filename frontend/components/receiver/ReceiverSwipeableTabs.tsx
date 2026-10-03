@@ -9,6 +9,7 @@ import {
   type ViewStyle,
 } from 'react-native';
 import PagerView from 'react-native-pager-view';
+import { useMainTabSwipePagerGuard } from '../../navigation/MainTabSwipeLayout';
 
 export type SwipeableTabItem<T extends string> = {
   key: T;
@@ -51,6 +52,10 @@ export default function ReceiverSwipeableTabs<T extends string>({
     0,
     tabs.findIndex((item) => item.key === activeTab)
   );
+  const pagerGuard = useMainTabSwipePagerGuard(
+    !swipeEnabled || activeIndex <= 0,
+    !swipeEnabled || activeIndex >= tabs.length - 1
+  );
 
   const onPageSelected = useCallback(
     (event: { nativeEvent: { position: number } }) => {
@@ -72,7 +77,7 @@ export default function ReceiverSwipeableTabs<T extends string>({
   );
 
   return (
-    <View style={styles.root}>
+    <View style={styles.root} {...pagerGuard}>
       <View style={[styles.tabBar, tabBarStyle]}>
         <View style={styles.tabButtons}>
           {tabs.map((item, index) => {

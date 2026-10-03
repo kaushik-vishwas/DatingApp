@@ -12,7 +12,6 @@ import {
   logPresenceDiagnostic,
   logPresenceFailure,
 } from '../utils/receiverPresenceDiagnostics';
-import RandomCallMatchingOverlay from '../components/caller/RandomCallMatchingOverlay';
 import { getIncomingCallAndroidNativeModule } from '../modules/incoming-call-android';
 import { useAuth } from './AuthContext';
 import {
@@ -23,11 +22,10 @@ import {
   getResolvedApiBaseUrl,
   profileApi,
 } from '../services/api';
-import { MAX_RANDOM_CALL_RETRIES, isRetryableRandomInviteError } from '../utils/randomCallMatch';
-import { startRandomMatchingTone } from '../utils/callSounds';
 import type { VoiceBootstrapResponse } from '../types/api';
 import type { VoiceCallScreenParams } from '../navigation/voiceCallParams';
 import { getRootNavigation } from '../navigation/navigationRef';
+import { isReceiverBusyCallError } from '../utils/receiverStatus';
 import {
   getReceiverActiveCallRoute,
   isReceiverOnVoiceCallScreen,
@@ -40,6 +38,7 @@ import {
   stopOutboundRingtonePlayback,
 } from '../utils/callSounds';
 import { teardownCallSession } from '../utils/callSessionTeardown';
+import CallResultNotice, { type CallResultKind } from '../components/call/CallResultNotice';
 import {
   bindIncomingCallNotificationHandlers,
   canNavigateToIncomingCall,
@@ -88,6 +87,35 @@ function scheduleNavigateWhenReady(tryNavigate: () => boolean, navGeneration: nu
     else if (navGeneration === outgoingNavigateGeneration) void tryNavigate();
   };
   requestAnimationFrame(tick);
+}
+
+/**
+ * Minimal AbortController-compatible handle for cancelling an outgoing call invite.
+ * The RN `AbortController` global is only defined when the runtime booted RN's XHR/fetch
+ * globals (`setUpXHR`). Older builds / some OEM Android runtimes can lack it, and an
+ * unguarded `new AbortController()` there crashes every dial attempt with a ReferenceError
+ * that surfaces as a generic "Call failed — Something went wrong" alert. Mirror the guard
+ * already used in services/api.ts and fall back to a tiny handle that supports the only two
+ * members the call flow touches (`abort()` and `signal.aborted`).
+ */
+type CallAbortHandle = {
+  abort: () => void;
+  signal: { aborted: boolean };
+};
+
+function createCallAbortHandle(): CallAbortHandle {
+  if (typeof AbortController !== 'undefined') {
+    return new AbortController() as unknown as CallAbortHandle;
+  }
+  let aborted = false;
+  return {
+    abort: () => {
+      aborted = true;
+    },
+    get signal() {
+      return { aborted };
+    },
+  };
 }
 
 /**
@@ -183,8 +211,6 @@ export type IncomingCallRequest = {
 export type StartCallInviteOptions = {
   receiverRatePerMinuteHint?: number;
   receiverEarningRatePerMinuteHint?: number;
-  /** After no-answer / decline / hang-up before connect, open random matching (manual calls only). */
-  redirectToRandomOnMissed?: boolean;
 };
 
 type CallSignalContextValue = {
@@ -195,9 +221,6 @@ type CallSignalContextValue = {
     peerImage?: string | null,
     options?: StartCallInviteOptions
   ) => Promise<void>;
-  startRandomCallEngagement: () => Promise<void>;
-  cancelRandomCallEngagement: () => void;
-  randomCallMatchingVisible: boolean;
   cancelOutgoingCallInvite: () => void;
   setIncomingCallHandler: (handler: ((req: IncomingCallRequest) => void) | null) => void;
   /** Receiver availability VoiceCall: clear incoming UI when caller cancels or call ends. */
@@ -346,11 +369,6 @@ function callerShouldResetStackForVoiceCall(params: VoiceCallScreenParams): bool
 
 export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { isSignedIn, user, bootstrapping } = useAuth();
-  const [randomCallMatchingVisible, setRandomCallMatchingVisible] = useState(false);
-  const randomMatchAbortRef = useRef<AbortController | null>(null);
-  const randomMatchStopSoundRef = useRef<(() => Promise<void>) | null>(null);
-  const randomMatchRunningRef = useRef(false);
-  const scheduleRandomAfterMissedManualCallRef = useRef<() => void>(() => {});
   const socketRef = useRef<Socket | null>(null);
   const peerProfileRef = useRef<Map<string, { name: string; image?: string | null }>>(new Map());
   const pendingOutgoingByCallIdRef = useRef<Map<string, PendingOutgoingCall>>(new Map());
@@ -364,10 +382,20 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   const incomingBootstrapByCallIdRef = useRef<Map<string, VoiceBootstrapResponse>>(new Map());
   const incomingBootstrapPromiseByCallIdRef = useRef<Map<string, Promise<VoiceBootstrapResponse>>>(new Map());
   const userRoleRef = useRef(user?.role ?? null);
-  const outgoingInviteAbortRef = useRef<AbortController | null>(null);
+  const outgoingInviteAbortRef = useRef<CallAbortHandle | null>(null);
   const incomingCallHandlerRef = useRef<((req: IncomingCallRequest) => void) | null>(null);
   const incomingCallDismissHandlerRef = useRef<((callId: string) => void) | null>(null);
   const remoteCallEndedHandlerRef = useRef<((callId: string) => void) | null>(null);
+  const [callResult, setCallResult] = useState<{ kind: CallResultKind; peerName: string } | null>(null);
+  const shownCallResultKeysRef = useRef<Set<string>>(new Set());
+  const showCallResult = useCallback((callId: string, kind: CallResultKind, peerName: string) => {
+    const key = `${callId}:${kind}`;
+    if (shownCallResultKeysRef.current.has(key)) return;
+    shownCallResultKeysRef.current.add(key);
+    setCallResult({ kind, peerName: peerName.trim() || (kind === 'no_answer' ? 'Receiver' : 'Caller') });
+  }, []);
+  const showCallResultRef = useRef(showCallResult);
+  showCallResultRef.current = showCallResult;
   const activeCallRecoveryHandlerRef = useRef<(() => void) | null>(null);
   const talkStartedHandlerRef = useRef<((callId: string, talkStartedAt: string) => void) | null>(
     null
@@ -746,10 +774,11 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         throw new Error('Microphone permission is required for voice calls');
       }
 
-      const abort = new AbortController();
+      const abort = createCallAbortHandle();
       outgoingInviteAbortRef.current = abort;
       const navGen = outgoingNavigateGeneration;
 
+      let outgoingCallId = '';
       try {
         openVoiceCallRinging({
           peerAccountId: id,
@@ -770,6 +799,7 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         if (abort.signal.aborted) {
           return;
         }
+        outgoingCallId = data.callId;
         const session: PendingOutgoingCall = {
           callId: data.callId,
           peerId: id,
@@ -847,18 +877,20 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
               'main_call_socket'
             );
           }
-          if (options?.redirectToRandomOnMissed && !abort.signal.aborted) {
-            dismissCallerVoiceCallScreen();
-            scheduleRandomAfterMissedManualCallRef.current();
-            return;
-          }
           if (abort.signal.aborted) {
             return;
           }
-          if (outcome.reason === 'rejected') {
-            throw new Error('Call was declined by receiver.');
+          if (remoteCallEndedHandlerRef.current) {
+            remoteCallEndedHandlerRef.current(data.callId);
+          } else {
+            dismissCallerVoiceCallScreen();
           }
-          throw new Error('Receiver is not available right now.');
+          if (outcome.reason === 'rejected') {
+            showCallResultRef.current(data.callId, 'declined', name);
+            return;
+          }
+          showCallResultRef.current(data.callId, 'no_answer', name);
+          return;
         }
         const joinedSession = outgoingSessionByCallIdRef.current.get(data.callId);
         if (joinedSession) {
@@ -876,6 +908,16 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
           peerId: id,
           httpDebug: axiosDebug ?? null,
         });
+        const msg = getErrorMessage(e);
+        if (isReceiverBusyCallError(msg)) {
+          if (outgoingCallId && remoteCallEndedHandlerRef.current) {
+            remoteCallEndedHandlerRef.current(outgoingCallId);
+          } else {
+            dismissCallerVoiceCallScreen();
+          }
+          Alert.alert('Busy on another call', `${name} is busy on another call.`);
+          return;
+        }
         dismissCallerVoiceCallScreen();
         throw e;
       } finally {
@@ -896,100 +938,7 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     ]
   );
 
-  const startRandomCallEngagement = useCallback(async (): Promise<void> => {
-    if (userRoleRef.current !== 'caller') return;
-    if (randomMatchRunningRef.current) return;
 
-    const wallet =
-      typeof user?.walletBalance === 'number' && Number.isFinite(user.walletBalance)
-        ? Math.max(0, user.walletBalance)
-        : 0;
-
-    const abort = new AbortController();
-    randomMatchAbortRef.current = abort;
-    randomMatchRunningRef.current = true;
-    setRandomCallMatchingVisible(true);
-
-    let stopMatchSound: (() => Promise<void>) | undefined;
-    try {
-      stopMatchSound = await startRandomMatchingTone();
-      randomMatchStopSoundRef.current = stopMatchSound;
-      let lastErr: unknown = null;
-      for (let attempt = 0; attempt < MAX_RANDOM_CALL_RETRIES; attempt += 1) {
-        if (abort.signal.aborted) return;
-        try {
-          const { data } = await callApi.randomReceiver();
-          if (abort.signal.aborted) return;
-          const rate =
-            typeof data.audioCallRate === 'number' && Number.isFinite(data.audioCallRate)
-              ? data.audioCallRate
-              : null;
-          if (rate != null && wallet < rate) {
-            setRandomCallMatchingVisible(false);
-            const nav = getRootNavigation();
-            if (nav) {
-              try {
-                nav.navigate('CallerApp', { screen: 'Wallet' });
-              } catch {
-                // ignore
-              }
-            }
-            return;
-          }
-          await stopMatchSound?.();
-          stopMatchSound = undefined;
-          setRandomCallMatchingVisible(false);
-          await startCallInvite(data.receiverId, data.name, data.profileImage ?? null, {
-            receiverRatePerMinuteHint:
-              rate != null && Number.isFinite(rate) ? rate : undefined,
-            redirectToRandomOnMissed: true,
-          });
-          return;
-        } catch (e: unknown) {
-          lastErr = e;
-          const msg = getErrorMessage(e);
-          if (!isRetryableRandomInviteError(msg) || attempt === MAX_RANDOM_CALL_RETRIES - 1) {
-            throw e;
-          }
-        }
-      }
-      throw lastErr ?? new Error('No available receiver found right now. Please try again shortly.');
-    } catch (e: unknown) {
-      if (!abort.signal.aborted) {
-        Alert.alert('Random call', getErrorMessage(e));
-      }
-    } finally {
-      await stopMatchSound?.();
-      randomMatchStopSoundRef.current = null;
-      if (randomMatchAbortRef.current === abort) {
-        randomMatchAbortRef.current = null;
-      }
-      // Aborted for handoff to the next random match — leave overlay/state to the new engagement.
-      if (!abort.signal.aborted) {
-        randomMatchRunningRef.current = false;
-        setRandomCallMatchingVisible(false);
-      }
-    }
-  }, [startCallInvite, user?.walletBalance]);
-
-  const cancelRandomCallEngagement = useCallback(() => {
-    randomMatchAbortRef.current?.abort();
-    randomMatchAbortRef.current = null;
-    randomMatchRunningRef.current = false;
-    void randomMatchStopSoundRef.current?.();
-    randomMatchStopSoundRef.current = null;
-    setRandomCallMatchingVisible(false);
-    void stopOutboundRingtonePlayback();
-  }, []);
-
-  useEffect(() => {
-    scheduleRandomAfterMissedManualCallRef.current = () => {
-      randomMatchAbortRef.current?.abort();
-      randomMatchAbortRef.current = null;
-      randomMatchRunningRef.current = false;
-      void startRandomCallEngagement();
-    };
-  }, [startRandomCallEngagement]);
 
   const rejectIncomingCall = useCallback((req: IncomingCallRequest) => {
     void markIncomingCallHandled(req.callId);
@@ -1984,6 +1933,12 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
           // Own decline echo — e.g. Decline on the native notification while JS was backgrounded.
           // Mark handled so the pending-invite poll / tray resume cannot re-open this call.
           void markIncomingCallHandled(payload.callId);
+          const incoming = pendingIncomingCallRequestRef.current;
+          const peerName =
+            incoming?.callId === payload.callId ? incoming.peerName : 'Caller';
+          if (payload.reason !== 'no_answer') {
+            showCallResultRef.current(payload.callId, 'declined', peerName);
+          }
           return;
         }
         if (payload.fromType === (userRoleRef.current === 'caller' ? 'u' : 'r')) return;
@@ -2022,8 +1977,13 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
           if (userRoleRef.current === 'caller') {
             void stopOutboundRingtonePlayback();
           }
-          if (!waiter) {
-            Alert.alert('Call unavailable', 'Receiver is not available right now.');
+          if (!waiter && userRoleRef.current === 'caller') {
+            const peerName = pending?.peerName ?? 'Receiver';
+            showCallResultRef.current(
+              payload.callId,
+              payload.reason === 'no_answer' ? 'no_answer' : 'declined',
+              peerName
+            );
           }
           return;
         }
@@ -2116,6 +2076,9 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         }
 
         if (userRoleRef.current === 'receiver') {
+          const ringingCall = pendingIncomingCallRequestRef.current;
+          const wasRingingThisCall = ringingCall?.callId === payload.callId;
+          const ringingPeerName = wasRingingThisCall ? ringingCall.peerName : '';
           const onVoiceCallScreen = Boolean(remoteCallEndedHandlerRef.current);
           const onIntegratedVoiceCall =
             Boolean(incomingCallDismissHandlerRef.current) ||
@@ -2140,6 +2103,15 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
               }
             };
             if (!goHome()) scheduleNavigateWhenReady(goHome, outgoingNavigateGeneration);
+          }
+          const incomingVisible =
+            wasRingingThisCall || activeIncomingCallUiCallIdRef.current === payload.callId;
+          if (incomingVisible) {
+            showCallResultRef.current(
+              payload.callId,
+              payload.fromType === 'u' ? 'declined' : 'no_answer',
+              ringingPeerName || 'Caller'
+            );
           }
         }
 
@@ -2172,9 +2144,6 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     () => ({
       registerPeer,
       startCallInvite,
-      startRandomCallEngagement,
-      cancelRandomCallEngagement,
-      randomCallMatchingVisible,
       cancelOutgoingCallInvite,
       setIncomingCallHandler,
       setIncomingCallDismissHandler,
@@ -2197,9 +2166,6 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     [
       registerPeer,
       startCallInvite,
-      startRandomCallEngagement,
-      cancelRandomCallEngagement,
-      randomCallMatchingVisible,
       cancelOutgoingCallInvite,
       setIncomingCallHandler,
       setIncomingCallDismissHandler,
@@ -2225,11 +2191,11 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   return (
     <CallSignalContext.Provider value={value}>
       {children}
-      <RandomCallMatchingOverlay
-        visible={randomCallMatchingVisible}
-        onCancel={cancelRandomCallEngagement}
-        userName={user?.name}
-        userProfileImage={user?.profileImage}
+      <CallResultNotice
+        visible={callResult != null}
+        kind={callResult?.kind ?? null}
+        peerName={callResult?.peerName ?? ''}
+        onClose={() => setCallResult(null)}
       />
     </CallSignalContext.Provider>
   );

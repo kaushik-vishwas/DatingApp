@@ -8,8 +8,14 @@ import ReceiverPaymentTabScreen from '../screens/receiver/tabs/ReceiverPaymentTa
 import ReceiverHistoryTabScreen from '../screens/receiver/tabs/ReceiverHistoryTabScreen';
 import ReceiverChatTabScreen from '../screens/receiver/tabs/ReceiverChatTabScreen';
 import type { ReceiverTabParamList } from './ReceiverTabParamList';
+import { withBottomTabSwipe } from './MainTabSwipeLayout';
 
 const Tab = createBottomTabNavigator<ReceiverTabParamList>();
+
+const SwipeReceiverHome = withBottomTabSwipe(ReceiverHomeDashboard);
+const SwipeReceiverPayment = withBottomTabSwipe(ReceiverPaymentTabScreen);
+const SwipeReceiverHistory = withBottomTabSwipe(ReceiverHistoryTabScreen);
+const SwipeReceiverChat = withBottomTabSwipe(ReceiverChatTabScreen);
 
 const TAB_PURPLE = '#7b2cff';
 const TAB_INACTIVE = '#9ca3af';
@@ -29,7 +35,7 @@ export default function ReceiverMainTabsNavigator(): React.JSX.Element {
     >
       <Tab.Screen
         name="ReceiverHome"
-        component={ReceiverHomeDashboard}
+        component={SwipeReceiverHome}
         options={{
           tabBarLabel: 'Home',
           tabBarIcon: ({ color, size }) => <Ionicons name="home" size={size} color={color} />,
@@ -37,7 +43,7 @@ export default function ReceiverMainTabsNavigator(): React.JSX.Element {
       />
       <Tab.Screen
         name="ReceiverPayment"
-        component={ReceiverPaymentTabScreen}
+        component={SwipeReceiverPayment}
         options={{
           tabBarLabel: 'Payment',
           tabBarIcon: ({ color, size }) => <Ionicons name="wallet-outline" size={size} color={color} />,
@@ -45,7 +51,7 @@ export default function ReceiverMainTabsNavigator(): React.JSX.Element {
       />
       <Tab.Screen
         name="ReceiverHistory"
-        component={ReceiverHistoryTabScreen}
+        component={SwipeReceiverHistory}
         options={{
           tabBarLabel: 'History',
           tabBarIcon: ({ color, size }) => <Ionicons name="time-outline" size={size} color={color} />,
@@ -53,7 +59,7 @@ export default function ReceiverMainTabsNavigator(): React.JSX.Element {
       />
       <Tab.Screen
         name="ReceiverChat"
-        component={ReceiverChatTabScreen}
+        component={SwipeReceiverChat}
         options={{
           tabBarLabel: 'Chat',
           tabBarIcon: ({ color, size }) => <Ionicons name="chatbubbles-outline" size={size} color={color} />,

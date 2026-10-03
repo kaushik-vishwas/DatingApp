@@ -43,7 +43,6 @@ import type {
   ReceiverWelcomeResponse,
   CallerNotificationResponse,
   VoiceBootstrapResponse,
-  RandomReceiverMatchResponse,
   SendWithdrawalOtpResponse,
   VerifyWithdrawalOtpResponse,
   CallerCallHistoryResponse,
@@ -424,6 +423,15 @@ api.interceptors.response.use(
   async (error: AxiosError) => {
     if (error.response) {
       await handleSessionSuperseded401(error);
+      if (error.response.status >= 500) {
+        const { captureClientError } = await import('../utils/sentry');
+        const path = typeof error.config?.url === 'string' ? error.config.url : '';
+        captureClientError(error, {
+          area: 'api',
+          status: String(error.response.status),
+          path,
+        });
+      }
     }
     const cfg = error.config as AxiosConfigWithFetchFlag | undefined;
     if (!cfg || cfg.__fetchRetried || error.response) {
@@ -631,7 +639,9 @@ export const profileApi = {
     api.post<CompleteProfileResponse>('/profile/receiver/complete-audio-onboarding', payload ?? {}),
 
   deleteReceiverAccount: (payload?: DeleteReceiverAccountPayload) =>
-    api.delete<{ message: string }>('/profile/receiver', { data: payload ?? {} }),
+    api.delete<{ message: string; requested?: boolean; alreadySent?: boolean }>('/profile/receiver', {
+      data: payload ?? {},
+    }),
 
   callerCallHistory: (range: 'all' | 'week' | 'month' = 'all') =>
     api.get<CallerCallHistoryResponse>('/profile/caller-call-history', {
@@ -776,7 +786,6 @@ export const callApi = {
     api.get<VoiceBootstrapResponse>('/calls/bootstrap', {
       params: { peerId, ...(callId ? { callId } : {}) },
     }),
-  randomReceiver: () => api.get<RandomReceiverMatchResponse>('/calls/random-receiver'),
   sessionStart: (callId: string, peerId: string) =>
     api.post<{
       ok: boolean;

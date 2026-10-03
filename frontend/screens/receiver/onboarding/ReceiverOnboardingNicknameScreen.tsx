@@ -5,6 +5,12 @@ import { Alert, StyleSheet, TextInput } from 'react-native';
 import ReceiverOnboardingStepLayout from '../../../components/receiver/onboarding/ReceiverOnboardingStepLayout';
 import { useReceiverOnboarding } from '../../../context/ReceiverOnboardingContext';
 import type { ReceiverOnboardingStackParamList } from '../../../navigation/ReceiverOnboardingStackParamList';
+import {
+  englishDisplayNameError,
+  isEnglishDisplayName,
+  normalizeEnglishDisplayName,
+  sanitizeEnglishDisplayNameInput,
+} from '../../../utils/validation';
 
 type Props = NativeStackScreenProps<ReceiverOnboardingStackParamList, 'ReceiverOnboardingNickname'>;
 
@@ -12,13 +18,16 @@ export default function ReceiverOnboardingNicknameScreen({ navigation }: Props):
   const { nickname, setNickname } = useReceiverOnboarding();
   const [value, setValue] = useState('');
 
+  const displayName = normalizeEnglishDisplayName(value);
+  const canContinue = isEnglishDisplayName(displayName);
+
   const onContinue = () => {
-    const trimmed = value.trim();
-    if (trimmed.length < 2) {
-      Alert.alert('Nickname', 'Please enter a nickname (at least 2 characters).');
+    const nameError = englishDisplayNameError(value);
+    if (nameError) {
+      Alert.alert('Display name', nameError);
       return;
     }
-    setNickname(trimmed);
+    setNickname(displayName);
     navigation.navigate('ReceiverOnboardingBirthYear');
   };
 
@@ -27,14 +36,14 @@ export default function ReceiverOnboardingNicknameScreen({ navigation }: Props):
       title="Enter Your Display Name"
       subtitle="This is how callers will see you on the app."
       onContinue={onContinue}
-      continueDisabled={value.trim().length < 2}
+      continueDisabled={!canContinue}
     >
       <TextInput
         style={styles.input}
         placeholder="Enter nickname"
         placeholderTextColor="#999"
         value={value}
-        onChangeText={setValue}
+        onChangeText={(t) => setValue(sanitizeEnglishDisplayNameInput(t))}
         autoCapitalize="words"
         autoCorrect={false}
         maxLength={40}

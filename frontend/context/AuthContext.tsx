@@ -23,6 +23,7 @@ import { teardownCallSession } from '../utils/callSessionTeardown';
 import { stopReceiverOnlineKeepAlive } from '../utils/receiverOnlineKeepAlive';
 import { markAuthWelcomeSeen } from '../services/authWelcomeStorage';
 import type { UserProfile } from '../types/user';
+import { setSentryUser } from '../utils/sentry';
 
 type AuthContextValue = {
   token: string | null;
@@ -97,6 +98,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
     void refreshUser();
   }, [token, refreshUser]);
+
+  useEffect(() => {
+    if (user?._id && user.role) {
+      setSentryUser({ id: user._id, role: user.role });
+      return;
+    }
+    setSentryUser(null);
+  }, [user?._id, user?.role]);
 
   useEffect(() => {
     if (!user || user.role !== 'caller') return;

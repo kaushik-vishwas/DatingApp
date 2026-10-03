@@ -236,13 +236,6 @@ export interface VoiceBootstrapResponse {
   callId: string;
 }
 
-export interface RandomReceiverMatchResponse {
-  receiverId: string;
-  name: string;
-  profileImage: string | null;
-  /** Per-minute rate when matched; used for wallet checks before placing call */
-  audioCallRate?: number | null;
-}
 
 export type ReceiverCallInsightRow = {
   id: string;

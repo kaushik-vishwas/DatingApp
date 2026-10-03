@@ -52,4 +52,6 @@ export interface UserProfile {
   cumulativeScore?: number;
   badgeLevel?: 'platinum' | 'diamond' | 'supreme';
   earningRatePerMinute?: number;
+  /** Set when this receiver has asked admin to delete the account. */
+  accountDeletionRequestedAt?: string | null;
 }

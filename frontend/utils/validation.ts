@@ -52,3 +52,28 @@ export function validateAccountNumberDigits(s: string): string | null {
   if (d.length < 9 || d.length > 18) return 'Account number must be 9–18 digits';
   return null;
 }
+
+/** English letters and single spaces between words. No digits or special characters. */
+const ENGLISH_DISPLAY_NAME_RE = /^[A-Za-z]+(?: [A-Za-z]+)*$/;
+
+export function sanitizeEnglishDisplayNameInput(raw: string): string {
+  return raw.replace(/[^A-Za-z ]/g, '').replace(/ {2,}/g, ' ');
+}
+
+export function normalizeEnglishDisplayName(raw: string): string {
+  return sanitizeEnglishDisplayNameInput(raw).trim();
+}
+
+export function isEnglishDisplayName(raw: string): boolean {
+  const name = normalizeEnglishDisplayName(raw);
+  return name.length >= 2 && name.length <= 40 && ENGLISH_DISPLAY_NAME_RE.test(name);
+}
+
+export function englishDisplayNameError(raw: string): string | null {
+  const name = normalizeEnglishDisplayName(raw);
+  if (name.length < 2) return 'Please enter a display name with at least 2 English letters.';
+  if (!ENGLISH_DISPLAY_NAME_RE.test(name) || name.length > 40) {
+    return 'Display name can use English letters only. Numbers and special characters are not allowed.';
+  }
+  return null;
+}
