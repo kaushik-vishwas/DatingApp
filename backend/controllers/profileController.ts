@@ -2753,7 +2753,20 @@ export const deleteReceiverAccount = async (
 
     const receiver = await Receiver.findById(receiverId).select('accountDeletionRequestedAt');
     if (!receiver) {
-      res.status(404).json({ message: 'Receiver not found' });
+      res.status(200).json({
+        message: 'Delete request is already sent.',
+        requested: true,
+        alreadySent: true,
+      });
+      return;
+    }
+
+    if (receiver.accountDeletionRequestedAt) {
+      res.status(200).json({
+        message: 'Delete request is already sent.',
+        requested: true,
+        alreadySent: true,
+      });
       return;
     }
 
