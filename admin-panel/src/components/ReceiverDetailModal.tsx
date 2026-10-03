@@ -37,6 +37,12 @@ export function ReceiverDetailModal({ receiver, onClose, onEdit }: Props) {
             <h2 className="text-lg font-bold text-neutral-900">{receiver.name}</h2>
             {receiver.email ? <p className="mt-1 text-sm text-neutral-500">{receiver.email}</p> : null}
             <p className="text-sm text-neutral-500">{receiver.phone}</p>
+            {receiver.accountDeletionRequestedAt ? (
+              <p className="mt-1 text-xs font-semibold text-red-600">
+                Delete requested
+                {receiver.accountDeletionReason ? `: ${receiver.accountDeletionReason}` : ''}
+              </p>
+            ) : null}
           </div>
           <button
             type="button"

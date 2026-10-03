@@ -29,7 +29,7 @@ function downloadCsv(filename: string, rows: string[][]) {
 
 export function AppUsersPage() {
   const [tab, setTab] = useState<AppUserStatusTab>('all');
-  const [range, setRange] = useState<AppUserRange>('all');
+  const [range, setRange] = useState<AppUserRange>('7d');
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [page, setPage] = useState(1);

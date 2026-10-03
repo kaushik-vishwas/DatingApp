@@ -7,7 +7,7 @@ const formatInr = (n: number) =>
   `₹${Number(n || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 })}`;
 
 export function AdminNotificationBell() {
-  const { items, unreadCount, markAllSeen, markSeen } = useAdminNotifications();
+  const { items, pendingCount, unreadCount, markAllSeen, markSeen } = useAdminNotifications();
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement | null>(null);
   const navigate = useNavigate();
@@ -58,8 +58,12 @@ export function AdminNotificationBell() {
             </button>
           </div>
           <div className="max-h-80 overflow-auto">
-            {items.length === 0 ? (
+            {pendingCount === 0 && items.length === 0 ? (
               <p className="px-3 py-8 text-center text-sm text-neutral-500">No pending withdrawal requests</p>
+            ) : items.length === 0 ? (
+              <p className="px-3 py-8 text-center text-sm text-neutral-600">
+                {pendingCount} pending withdrawal {pendingCount === 1 ? 'request' : 'requests'}. Open withdrawals for the list.
+              </p>
             ) : (
               items.map((item) => (
                 <button

@@ -8,7 +8,7 @@ function inr(v: number): string {
 }
 
 export function OverviewPage() {
-  const [range, setRange] = useState<'7d' | '30d' | 'all'>('all');
+  const [range, setRange] = useState<'7d' | '30d' | 'all'>('7d');
   const [data, setData] = useState<OverviewDashboardResponse | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);

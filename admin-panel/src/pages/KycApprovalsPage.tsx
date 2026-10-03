@@ -2,8 +2,8 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Check, Eye, FileText, Image as ImageIcon, RefreshCw, X } from 'lucide-react';
 import {
   approveReceiver,
-  fetchAllReceivers,
   fetchKycStats,
+  fetchReceiversPage,
   rejectReceiver,
   type ReceiverRecord,
 } from '../api/client';
@@ -14,6 +14,14 @@ import { resolveAdminProfileImageUrl } from '../utils/resolveProfileImageUrl';
 type Tab = 'all' | 'approved' | 'pending';
 type Range = '7d' | '30d' | 'all';
 
+const PAGE_SIZE = 20;
+
+function kycStatus(tab: Tab): 'all' | 'kyc_approved' | 'kyc_pending' {
+  if (tab === 'approved') return 'kyc_approved';
+  if (tab === 'pending') return 'kyc_pending';
+  return 'all';
+}
+
 function formatSubmitted(iso?: string) {
   if (!iso) return '—';
   try {
@@ -21,15 +29,6 @@ function formatSubmitted(iso?: string) {
   } catch {
     return iso;
   }
-}
-
-function inDateRange(iso: string | undefined, range: Range): boolean {
-  if (range === 'all') return true;
-  if (!iso) return false;
-  const t = new Date(iso).getTime();
-  const now = Date.now();
-  const days = range === '7d' ? 7 : 30;
-  return t >= now - days * 24 * 60 * 60 * 1000;
 }
 
 function statusBadge(status: string) {
@@ -40,18 +39,6 @@ function statusBadge(status: string) {
     return { label: 'Profile incomplete', className: 'bg-sky-100 text-sky-800' };
   if (status === 'rejected') return { label: 'Rejected', className: 'bg-red-100 text-red-800' };
   return { label: status.replace(/_/g, ' '), className: 'bg-neutral-100 text-neutral-700' };
-}
-
-function isApprovedAndVerified(r: ReceiverRecord): boolean {
-  return r.accountStatus === 'approved' && Boolean(r.isVerified);
-}
-
-function isPendingVerification(r: ReceiverRecord): boolean {
-  return (
-    r.accountStatus === 'pending_review' ||
-    r.accountStatus === 'pending_profile' ||
-    (r.accountStatus === 'approved' && !r.isVerified)
-  );
 }
 
 function canApproveReceiver(r: ReceiverRecord): boolean {
@@ -72,6 +59,9 @@ export function KycApprovalsPage() {
   const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>('pending');
   const [range, setRange] = useState<Range>('7d');
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState(0);
+  const [tabCounts, setTabCounts] = useState({ all: 0, approved: 0, pending: 0 });
   const [busyId, setBusyId] = useState<string | null>(null);
   const [detail, setDetail] = useState<ReceiverRecord | null>(null);
   const [stats, setStats] = useState<{
@@ -85,8 +75,17 @@ export function KycApprovalsPage() {
     setLoading(true);
     setError(null);
     try {
-      const [list, st] = await Promise.all([fetchAllReceivers(), fetchKycStats()]);
-      setRows(list);
+      const [data, st] = await Promise.all([
+        fetchReceiversPage({ status: kycStatus(tab), range, page, limit: PAGE_SIZE }),
+        fetchKycStats(),
+      ]);
+      setRows(data.receivers);
+      setTotal(data.total);
+      setTabCounts({
+        all: data.tabCounts.all,
+        approved: data.tabCounts.kycApproved ?? data.tabCounts.approved,
+        pending: data.tabCounts.kycPending ?? data.tabCounts.pending,
+      });
       setStats(st);
     } catch (err: unknown) {
       const msg =
@@ -97,43 +96,21 @@ export function KycApprovalsPage() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [tab, range, page]);
 
   useEffect(() => {
     void load();
   }, [load]);
 
-  /** All receivers from API; date filter uses updatedAt with createdAt fallback. */
-  const kycPool = useMemo(() => rows, [rows]);
-
-  const byTab = useMemo(() => {
-    return kycPool.filter((r) => {
-      if (tab === 'approved') return isApprovedAndVerified(r);
-      if (tab === 'pending') return isPendingVerification(r);
-      return true;
-    });
-  }, [kycPool, tab]);
-
-  const filtered = useMemo(() => {
-    return byTab.filter((r) => inDateRange(activityIso(r), range));
-  }, [byTab, range]);
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   const sorted = useMemo(() => {
-    return [...filtered].sort((a, b) => {
+    return [...rows].sort((a, b) => {
       const ta = new Date(activityIso(a)).getTime();
       const tb = new Date(activityIso(b)).getTime();
       return tb - ta;
     });
-  }, [filtered]);
-
-  const tabCounts = useMemo(
-    () => ({
-      all: kycPool.filter((r) => inDateRange(activityIso(r), range)).length,
-      approved: kycPool.filter((r) => isApprovedAndVerified(r) && inDateRange(activityIso(r), range)).length,
-      pending: kycPool.filter((r) => isPendingVerification(r) && inDateRange(activityIso(r), range)).length,
-    }),
-    [kycPool, range]
-  );
+  }, [rows]);
 
   const onApprove = async (id: string) => {
     setBusyId(id);
@@ -189,7 +166,10 @@ export function KycApprovalsPage() {
         <div className="flex flex-wrap items-center gap-3">
           <select
             value={range}
-            onChange={(e) => setRange(e.target.value as Range)}
+            onChange={(e) => {
+              setRange(e.target.value as Range);
+              setPage(1);
+            }}
             className="rounded-xl border border-neutral-200 bg-white px-3 py-2 text-sm font-semibold text-neutral-800 shadow-sm"
           >
             <option value="7d">Last 7 days</option>
@@ -243,7 +223,10 @@ export function KycApprovalsPage() {
           <button
             key={key}
             type="button"
-            onClick={() => setTab(key)}
+            onClick={() => {
+              setTab(key);
+              setPage(1);
+            }}
             className={`rounded-full px-4 py-2 text-sm font-semibold transition-colors ${
               tab === key
                 ? 'bg-[var(--color-brand-muted)] text-[#7b2cff]'
@@ -408,6 +391,32 @@ export function KycApprovalsPage() {
           </div>
         )}
       </div>
+
+      {totalPages > 1 ? (
+        <div className="mt-4 flex items-center justify-between text-sm text-neutral-600">
+          <p>
+            Page {page} of {totalPages} · {total} in this view
+          </p>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              disabled={page <= 1 || loading}
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              className="rounded-lg border border-neutral-200 bg-white px-3 py-1.5 font-semibold disabled:opacity-40"
+            >
+              Previous
+            </button>
+            <button
+              type="button"
+              disabled={page >= totalPages || loading}
+              onClick={() => setPage((p) => p + 1)}
+              className="rounded-lg border border-neutral-200 bg-white px-3 py-1.5 font-semibold disabled:opacity-40"
+            >
+              Next
+            </button>
+          </div>
+        </div>
+      ) : null}
 
       <ReceiverDetailModal receiver={detail} onClose={() => setDetail(null)} />
     </div>

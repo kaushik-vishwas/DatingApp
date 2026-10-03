@@ -8,6 +8,7 @@ import {
   Landmark,
   Wallet,
   Flag,
+  ShieldAlert,
   Settings,
   LogOut,
   Tag,
@@ -38,6 +39,7 @@ const items = [
   { to: '/receiver-welcome', label: 'Receiver Welcome', icon: MessageSquareHeart },
   { to: '/caller-notification', label: 'Caller Notification', icon: Megaphone },
   { to: '/reports', label: 'Reports', icon: Flag },
+  { to: '/referral-alerts', label: 'Referral alerts', icon: ShieldAlert },
   { to: '/ratings', label: 'Ratings', icon: Star },
   { to: '/settings', label: 'Settings', icon: Settings },
 ] as const;

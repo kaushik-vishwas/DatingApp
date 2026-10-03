@@ -9,7 +9,7 @@ import {
   type ReactNode,
 } from 'react';
 import { io, type Socket } from 'socket.io-client';
-import { fetchWithdrawals } from '../api/client';
+import { fetchWithdrawalPendingCount } from '../api/client';
 import { getAdminApiOrigin } from '../api/apiOrigin';
 import { useAdminAuth } from './AdminAuthContext';
 
@@ -28,6 +28,7 @@ export type AdminWithdrawalNotification = {
 
 type AdminNotificationsContextValue = {
   items: AdminWithdrawalNotification[];
+  pendingCount: number;
   unreadCount: number;
   markAllSeen: () => void;
   markSeen: (id: string) => void;
@@ -54,7 +55,8 @@ function writeSeenIds(ids: Set<string>): void {
 export function AdminNotificationsProvider({ children }: { children: ReactNode }) {
   const { token } = useAdminAuth();
   const [items, setItems] = useState<AdminWithdrawalNotification[]>([]);
-  const [seenIds, setSeenIds] = useState<Set<string>>(() => readSeenIds());
+  const [pendingCount, setPendingCount] = useState(0);
+  const [, setSeenIds] = useState<Set<string>>(() => readSeenIds());
   const socketRef = useRef<Socket | null>(null);
 
   const upsert = useCallback((next: AdminWithdrawalNotification) => {
@@ -68,30 +70,16 @@ export function AdminNotificationsProvider({ children }: { children: ReactNode }
 
   const loadPending = useCallback(async () => {
     try {
-      const data = await fetchWithdrawals({ range: 'all', status: 'pending', page: 1 });
-      const mapped: AdminWithdrawalNotification[] = data.rows.map((row) => ({
-        id: row._id,
-        receiverName: row.receiverName,
-        amount: row.amount,
-        payoutAmount:
-          typeof row.payoutAmount === 'number' && row.payoutAmount > 0
-            ? row.payoutAmount
-            : Math.max(0, row.amount - Number(row.platformFee || 0)),
-        payoutMethod: row.payoutMethod ?? null,
-        message: 'Withdrawal request awaiting review.',
-        at: row.createdAt,
-      }));
-      setItems(
-        mapped.sort((a, b) => +new Date(b.at) - +new Date(a.at))
-      );
+      setPendingCount(await fetchWithdrawalPendingCount());
     } catch {
-      // keep existing list
+      // keep the last count
     }
   }, []);
 
   useEffect(() => {
     if (!token) {
       setItems([]);
+      setPendingCount(0);
       if (socketRef.current) {
         socketRef.current.removeAllListeners();
         socketRef.current.disconnect();
@@ -122,6 +110,7 @@ export function AdminNotificationsProvider({ children }: { children: ReactNode }
         at?: string;
       }) => {
         if (!payload?.withdrawalId) return;
+        void loadPending();
         upsert({
           id: String(payload.withdrawalId),
           receiverName: String(payload.receiverName ?? 'Receiver'),
@@ -142,10 +131,7 @@ export function AdminNotificationsProvider({ children }: { children: ReactNode }
     };
   }, [token, loadPending, upsert]);
 
-  const unreadCount = useMemo(
-    () => items.filter((item) => !seenIds.has(item.id)).length,
-    [items, seenIds]
-  );
+  const unreadCount = pendingCount;
 
   const markAllSeen = useCallback(() => {
     setSeenIds((prev) => {
@@ -167,8 +153,8 @@ export function AdminNotificationsProvider({ children }: { children: ReactNode }
   }, []);
 
   const value = useMemo(
-    () => ({ items, unreadCount, markAllSeen, markSeen }),
-    [items, unreadCount, markAllSeen, markSeen]
+    () => ({ items, pendingCount, unreadCount, markAllSeen, markSeen }),
+    [items, pendingCount, unreadCount, markAllSeen, markSeen]
   );
 
   return (

@@ -102,6 +102,8 @@ export type ReceiverRecord = {
   age?: number | null;
   state?: string | null;
   rejectionReason?: string | null;
+  accountDeletionRequestedAt?: string | null;
+  accountDeletionReason?: string | null;
 };
 
 export type AdminReceiverUpdatePayload = {
@@ -389,6 +391,38 @@ export async function fetchAllReceivers() {
   return data.receivers;
 }
 
+export async function fetchReceiversPage(params: {
+  status?: 'all' | 'approved' | 'pending' | 'rejected' | 'kyc_pending' | 'kyc_approved';
+  q?: string;
+  range?: '7d' | '30d' | 'all';
+  page?: number;
+  limit?: number;
+}) {
+  const { data } = await api.get<{
+    receivers: ReceiverRecord[];
+    total: number;
+    page: number;
+    limit: number;
+    tabCounts: {
+      all: number;
+      approved: number;
+      pending: number;
+      rejected: number;
+      kycPending?: number;
+      kycApproved?: number;
+    };
+  }>('/admin/receivers', {
+    params: {
+      status: params.status ?? 'all',
+      q: params.q?.trim() || undefined,
+      range: params.range ?? '7d',
+      page: params.page ?? 1,
+      limit: params.limit ?? 20,
+    },
+  });
+  return data;
+}
+
 export async function fetchKycStats() {
   const { data } = await api.get<{
     pendingApprovals: number;
@@ -512,6 +546,34 @@ export type ModerationReportStats = {
   usersSuspended: number;
 };
 
+export type ReferralAlertRow = {
+  _id: string;
+  type: 'duplicate_phone' | 'burst';
+  referrerKind: string;
+  referrerPhone: string;
+  referredPhone: string;
+  referralCode: string;
+  message: string;
+  createdAt: string;
+};
+
+export type ReceiverDeletionRequestRow = {
+  _id: string;
+  name: string;
+  phone: string;
+  accountStatus: string;
+  reason: string;
+  requestedAt: string;
+};
+
+export async function fetchReferralAlerts() {
+  const { data } = await api.get<{
+    alerts: ReferralAlertRow[];
+    deletionRequests: ReceiverDeletionRequestRow[];
+  }>('/admin/referral-alerts');
+  return data;
+}
+
 export async function fetchModerationReports(params?: { q?: string; status?: string; page?: number }) {
   const { data } = await api.get<{
     stats: ModerationReportStats;
@@ -598,7 +660,7 @@ export type RevenueDashboardResponse = {
 
 export async function fetchRevenueDashboard(params?: { range?: '7d' | '30d' | 'all' }) {
   const { data } = await api.get<RevenueDashboardResponse>('/admin/revenue', {
-    params: { range: params?.range ?? 'all' },
+    params: { range: params?.range ?? '7d' },
   });
   return data;
 }
@@ -660,6 +722,7 @@ export type AdminWithdrawalRow = {
   _id: string;
   withdrawalId: string;
   receiverName: string;
+  receiverPhone?: string;
   amount: number;
   platformFee?: number;
   /** Net amount admin should transfer to the receiver */
@@ -702,6 +765,11 @@ export type AdminWithdrawalStats = {
   };
 };
 
+export async function fetchWithdrawalPendingCount() {
+  const { data } = await api.get<{ pendingCount: number }>('/admin/withdrawals/pending-count');
+  return data.pendingCount;
+}
+
 export async function fetchWithdrawals(params?: {
   q?: string;
   range?: '7d' | '30d' | 'all';
@@ -718,7 +786,7 @@ export async function fetchWithdrawals(params?: {
   }>('/admin/withdrawals', {
     params: {
       q: params?.q?.trim() || undefined,
-      range: params?.range ?? 'all',
+      range: params?.range ?? '7d',
       status: params?.status ?? 'all',
       page: params?.page ?? 1,
       limit: params?.limit ?? 20,

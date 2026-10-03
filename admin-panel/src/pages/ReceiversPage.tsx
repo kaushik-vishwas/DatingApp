@@ -2,16 +2,13 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Edit2, Eye, Mic, RefreshCw, Search, Star, Trash2 } from 'lucide-react';
 import {
   deleteReceiverPermanently,
-  fetchAllReceivers,
+  fetchReceiversPage,
   type ReceiverRecord,
 } from '../api/client';
 import { ReceiverDetailModal } from '../components/ReceiverDetailModal';
 import { ReceiverEditModal } from '../components/ReceiverEditModal';
 import {
   formatINR,
-  isReceiverApproved,
-  isReceiverPendingKyc,
-  isReceiverRejected,
   receiverAvailabilityState,
   receiverCode,
   receiverIsLiveAvailable,
@@ -22,24 +19,7 @@ import {
 type Tab = 'all' | 'approved' | 'pending' | 'rejected';
 type ReceiverRange = '7d' | '30d' | 'all';
 
-function matchesReceiverSearch(r: ReceiverRecord, q: string): boolean {
-  if (!q) return true;
-  const needle = q.toLowerCase();
-  const name = r.name?.toLowerCase() ?? '';
-  const email = r.email?.toLowerCase() ?? '';
-  const phone = r.phone?.replace(/\s+/g, '') ?? '';
-  const phoneQ = q.replace(/\s+/g, '');
-  return name.includes(needle) || email.includes(needle) || phone.includes(phoneQ);
-}
-
-function matchesReceiverRange(r: ReceiverRecord, range: ReceiverRange): boolean {
-  if (range === 'all') return true;
-  const created = r.createdAt ? new Date(r.createdAt).getTime() : 0;
-  if (!created) return false;
-  const days = range === '7d' ? 7 : 30;
-  const since = Date.now() - days * 24 * 60 * 60 * 1000;
-  return created >= since;
-}
+const PAGE_SIZE = 20;
 
 function kycLabel(status: string): { label: string; className: string } {
   if (status === 'approved') return { label: 'Approved', className: 'bg-emerald-100 text-emerald-800' };
@@ -56,9 +36,12 @@ export function ReceiversPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>('all');
-  const [range, setRange] = useState<ReceiverRange>('all');
+  const [range, setRange] = useState<ReceiverRange>('7d');
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState(0);
+  const [tabCounts, setTabCounts] = useState({ all: 0, approved: 0, pending: 0, rejected: 0 });
   const [detail, setDetail] = useState<ReceiverRecord | null>(null);
   const [editReceiver, setEditReceiver] = useState<ReceiverRecord | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -67,8 +50,16 @@ export function ReceiversPage() {
     setLoading(true);
     setError(null);
     try {
-      const list = await fetchAllReceivers();
-      setRows(list);
+      const data = await fetchReceiversPage({
+        status: tab,
+        q: debouncedSearch || undefined,
+        range,
+        page,
+        limit: PAGE_SIZE,
+      });
+      setRows(data.receivers);
+      setTotal(data.total);
+      setTabCounts(data.tabCounts);
     } catch (err: unknown) {
       const msg =
         err && typeof err === 'object' && 'response' in err
@@ -78,21 +69,24 @@ export function ReceiversPage() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [tab, debouncedSearch, range, page]);
 
   useEffect(() => {
     void load();
   }, [load]);
 
   useEffect(() => {
-    const t = window.setTimeout(() => setDebouncedSearch(search.trim()), 350);
+    const t = window.setTimeout(() => {
+      setDebouncedSearch(search.trim());
+      setPage(1);
+    }, 350);
     return () => window.clearTimeout(t);
   }, [search]);
 
   const onDeletePermanently = async (r: ReceiverRecord) => {
     if (
       !window.confirm(
-        `Permanently delete ${r.name}? This removes chats, call sessions, daily scores, ratings, notifications, withdrawals, and reports for this receiver. This cannot be undone.`
+        `Permanently delete ${r.name}? This removes chats, call sessions, daily scores, ratings, notifications, withdrawals, and reports. Referral reward history is kept. This cannot be undone.`
       )
     ) {
       return;
@@ -115,42 +109,14 @@ export function ReceiversPage() {
     }
   };
 
-  const sorted = useMemo(() => {
-    return [...rows].sort((a, b) => {
-      const ca = a.createdAt ? new Date(a.createdAt).getTime() : 0;
-      const cb = b.createdAt ? new Date(b.createdAt).getTime() : 0;
-      return ca - cb;
-    });
-  }, [rows]);
-
-  const idIndex = useMemo(() => {
-    const m = new Map<string, number>();
-    sorted.forEach((r, i) => m.set(r._id, i));
-    return m;
-  }, [sorted]);
-
-  const rangeSearchFiltered = useMemo(() => {
-    return sorted.filter(
-      (r) => matchesReceiverRange(r, range) && matchesReceiverSearch(r, debouncedSearch)
-    );
-  }, [sorted, range, debouncedSearch]);
-
-  const filtered = useMemo(() => {
-    if (tab === 'approved') return rangeSearchFiltered.filter((r) => isReceiverApproved(r));
-    if (tab === 'pending') return rangeSearchFiltered.filter((r) => isReceiverPendingKyc(r));
-    if (tab === 'rejected') return rangeSearchFiltered.filter((r) => isReceiverRejected(r));
-    return rangeSearchFiltered;
-  }, [rangeSearchFiltered, tab]);
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   const stats = useMemo(() => {
-    const total = rangeSearchFiltered.length;
-    const pendingKyc = rangeSearchFiltered.filter((r) => isReceiverPendingKyc(r)).length;
-    const rejected = rangeSearchFiltered.filter((r) => isReceiverRejected(r)).length;
     let online = 0;
     let voiceVerified = 0;
     let ratingWeightedSum = 0;
     let ratingWeightedN = 0;
-    for (const r of rangeSearchFiltered) {
+    for (const r of rows) {
       if (receiverIsLiveAvailable(r)) online += 1;
       if (receiverVoiceVerificationSucceeded(r)) voiceVerified += 1;
       if (r.accountStatus === 'approved' && typeof r.ratingAvg === 'number' && (r.ratingCount ?? 0) > 0) {
@@ -161,18 +127,15 @@ export function ReceiversPage() {
     }
     const avgRating =
       ratingWeightedN > 0 ? Math.round((ratingWeightedSum / ratingWeightedN) * 10) / 10 : null;
-    return { total, online, pendingKyc, rejected, voiceVerified, avgRating };
-  }, [rangeSearchFiltered]);
-
-  const tabCounts = useMemo(
-    () => ({
-      all: rangeSearchFiltered.length,
-      approved: rangeSearchFiltered.filter((r) => isReceiverApproved(r)).length,
-      pending: rangeSearchFiltered.filter((r) => isReceiverPendingKyc(r)).length,
-      rejected: rangeSearchFiltered.filter((r) => isReceiverRejected(r)).length,
-    }),
-    [rangeSearchFiltered]
-  );
+    return {
+      total: tabCounts.all,
+      online,
+      pendingKyc: tabCounts.pending,
+      rejected: tabCounts.rejected,
+      voiceVerified,
+      avgRating,
+    };
+  }, [rows, tabCounts]);
 
   const rangeLabel = range === 'all' ? 'All time' : range === '30d' ? 'Last 30 days' : 'Last 7 days';
 
@@ -188,7 +151,10 @@ export function ReceiversPage() {
         <div className="flex flex-wrap items-center gap-3">
           <select
             value={range}
-            onChange={(e) => setRange(e.target.value as ReceiverRange)}
+            onChange={(e) => {
+              setRange(e.target.value as ReceiverRange);
+              setPage(1);
+            }}
             className="rounded-xl border border-neutral-200 bg-white px-3 py-2 text-sm font-semibold text-neutral-800 shadow-sm"
           >
             <option value="7d">Last 7 days</option>
@@ -231,7 +197,7 @@ export function ReceiversPage() {
         <div className="rounded-2xl border border-neutral-200 bg-white p-5 shadow-sm">
           <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">Online Now</p>
           <p className="mt-2 text-3xl font-bold text-emerald-600">{stats.online}</p>
-          <p className="mt-1 text-xs text-neutral-400">Availability on &amp; logged in</p>
+          <p className="mt-1 text-xs text-neutral-400">On this page</p>
         </div>
         <div className="rounded-2xl border border-neutral-200 bg-white p-5 shadow-sm">
           <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">Pending KYC</p>
@@ -248,7 +214,7 @@ export function ReceiversPage() {
             <p className="text-3xl font-bold text-violet-600">{stats.voiceVerified}</p>
             <Mic className="h-7 w-7 text-violet-500" />
           </div>
-          <p className="mt-1 text-xs text-neutral-400">Passed voice verification</p>
+          <p className="mt-1 text-xs text-neutral-400">On this page</p>
         </div>
         <div className="rounded-2xl border border-neutral-200 bg-white p-5 shadow-sm">
           <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">Avg Rating</p>
@@ -256,7 +222,7 @@ export function ReceiversPage() {
             <p className="text-3xl font-bold text-neutral-900">{stats.avgRating ?? '—'}</p>
             {stats.avgRating != null ? <Star className="h-7 w-7 fill-amber-400 text-amber-400" /> : null}
           </div>
-          <p className="mt-1 text-xs text-neutral-400">From caller ratings</p>
+          <p className="mt-1 text-xs text-neutral-400">On this page</p>
         </div>
       </div>
 
@@ -272,7 +238,10 @@ export function ReceiversPage() {
           <button
             key={key}
             type="button"
-            onClick={() => setTab(key)}
+            onClick={() => {
+              setTab(key);
+              setPage(1);
+            }}
             className={`rounded-full px-4 py-2 text-sm font-semibold transition-colors ${
               tab === key
                 ? 'bg-[var(--color-brand-muted)] text-[#7b2cff]'
@@ -287,7 +256,7 @@ export function ReceiversPage() {
       <div className="mt-6 overflow-hidden rounded-2xl border border-neutral-200 bg-white shadow-sm">
         {loading ? (
           <p className="p-8 text-center text-sm text-neutral-500">Loading…</p>
-        ) : filtered.length === 0 ? (
+        ) : rows.length === 0 ? (
           <p className="p-12 text-center text-sm text-neutral-500">
             {debouncedSearch || range !== 'all'
               ? 'No receivers match your search or date filter.'
@@ -322,8 +291,8 @@ export function ReceiversPage() {
                 </tr>
               </thead>
               <tbody>
-                {filtered.map((r) => {
-                  const idx = idIndex.get(r._id) ?? 0;
+                {rows.map((r, i) => {
+                  const idx = (page - 1) * PAGE_SIZE + i;
                   const kyc = kycLabel(r.accountStatus);
                   const availability = receiverAvailabilityState(r);
                   const ratingLabel = receiverRatingDisplay(r);
@@ -338,6 +307,9 @@ export function ReceiversPage() {
                       </td>
                       <td className="px-4 py-3">
                         <p className="font-medium text-neutral-900">{r.name}</p>
+                        {r.accountDeletionRequestedAt ? (
+                          <p className="text-xs font-semibold text-red-600">Delete requested</p>
+                        ) : null}
                         <p className="text-xs text-neutral-500">
                           {callsToday} calls today · {totalCalls} total
                         </p>
@@ -418,6 +390,32 @@ export function ReceiversPage() {
           </div>
         )}
       </div>
+
+      {totalPages > 1 ? (
+        <div className="mt-4 flex items-center justify-between text-sm text-neutral-600">
+          <p>
+            Page {page} of {totalPages} · {total} in this view
+          </p>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              disabled={page <= 1 || loading}
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              className="rounded-lg border border-neutral-200 bg-white px-3 py-1.5 font-semibold disabled:opacity-40"
+            >
+              Previous
+            </button>
+            <button
+              type="button"
+              disabled={page >= totalPages || loading}
+              onClick={() => setPage((p) => p + 1)}
+              className="rounded-lg border border-neutral-200 bg-white px-3 py-1.5 font-semibold disabled:opacity-40"
+            >
+              Next
+            </button>
+          </div>
+        </div>
+      ) : null}
 
       <ReceiverDetailModal
         receiver={detail}

@@ -184,7 +184,7 @@ export function WithdrawalsPage() {
   const [tabCounts, setTabCounts] = useState({ all: 0, pending: 0, paid: 0, rejected: 0 });
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
-  const [range, setRange] = useState<'7d' | '30d' | 'all'>('all');
+  const [range, setRange] = useState<'7d' | '30d' | 'all'>('7d');
   const [busyId, setBusyId] = useState<string | null>(null);
   const [confirm, setConfirm] = useState<ConfirmState | null>(null);
 
@@ -351,6 +351,7 @@ export function WithdrawalsPage() {
               <tr>
                 <th className="px-3 py-2">ID</th>
                 <th className="px-3 py-2">Receiver</th>
+                <th className="px-3 py-2">Mobile</th>
                 <th className="px-3 py-2">Amount</th>
                 <th className="px-3 py-2">Payout destination</th>
                 <th className="px-3 py-2">Request date</th>
@@ -366,6 +367,9 @@ export function WithdrawalsPage() {
                   <tr key={row._id} className="border-t border-neutral-100">
                     <td className="px-3 py-2.5 font-medium text-neutral-700">{row.withdrawalId}</td>
                     <td className="px-3 py-2.5 font-medium text-neutral-800">{row.receiverName}</td>
+                    <td className="px-3 py-2.5 font-medium text-neutral-800">
+                      {row.receiverPhone?.trim() || '—'}
+                    </td>
                     <td className="px-3 py-2.5 font-semibold text-neutral-800">
                       {formatInr(row.amount)}
                       {typeof row.payoutAmount === 'number' && row.payoutAmount !== row.amount ? (

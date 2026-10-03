@@ -25,7 +25,7 @@ export function TransactionsPage() {
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [range, setRange] = useState<'7d' | '30d' | 'all'>('all');
+  const [range, setRange] = useState<'7d' | '30d' | 'all'>('7d');
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
 
