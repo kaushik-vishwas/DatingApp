@@ -7,6 +7,7 @@ import Receiver, {
 } from '../models/Receiver';
 import ChatBlock from '../models/ChatBlock';
 import ReceiverRating from '../models/ReceiverRating';
+import ReceiverDailyScore from '../models/ReceiverDailyScore';
 import { blockCallerUntilApproved } from '../utils/accountAccess';
 import { getBusyReceiverIdSet } from '../services/callQueue';
 import { isReceiverLoggedInAndAvailable } from '../services/receiverPresence';
@@ -27,6 +28,18 @@ function parseIntQuery(val: unknown): number {
   if (!s) return NaN;
   const n = parseInt(s, 10);
   return Number.isFinite(n) ? n : NaN;
+}
+
+function parseBoolQuery(val: unknown): boolean {
+  const s = firstQueryString(val).toLowerCase();
+  return s === 'true' || s === '1' || s === 'yes';
+}
+
+/** Receivers who were online in this window stay on caller discover. */
+const DISCOVER_ACTIVE_WINDOW_MS = 10 * 24 * 60 * 60 * 1000;
+
+function utcDateKey(d: Date): string {
+  return d.toISOString().slice(0, 10);
 }
 
 export type DiscoverReceiverCard = {
@@ -97,7 +110,12 @@ export const listReceiversForCaller = async (req: Request, res: Response): Promi
     const maxAgeRaw = parseIntQuery(req.query.maxAge);
 
     const limitRaw = parseIntQuery(req.query.limit);
-    const limit = Math.min(100, Math.max(1, Number.isFinite(limitRaw) ? limitRaw : 50));
+    const limit = Math.min(100, Math.max(1, Number.isFinite(limitRaw) ? limitRaw : 40));
+    const skipRaw = parseIntQuery(req.query.skip);
+    const skip = Math.min(5000, Math.max(0, Number.isFinite(skipRaw) ? skipRaw : 0));
+    const onlineOnly = parseBoolQuery(req.query.onlineOnly);
+    const minRatingRaw = parseIntQuery(req.query.minRating);
+    const minRating = Number.isFinite(minRatingRaw) ? minRatingRaw : 0;
 
     const filter = buildDiscoverReceiverFilter({
       language: firstQueryString(req.query.language),
@@ -108,20 +126,47 @@ export const listReceiversForCaller = async (req: Request, res: Response): Promi
       maxAge: maxAgeRaw,
     });
 
+    const activeSince = new Date(Date.now() - DISCOVER_ACTIVE_WINDOW_MS);
+    const activeIds = await ReceiverDailyScore.distinct('receiverId', {
+      dateKey: { $gte: utcDateKey(activeSince) },
+    });
+    const activityClause: Record<string, unknown> = {
+      $or: [
+        { isOnline: true },
+        { onlineSince: { $type: 'date' } },
+        { lastActiveAt: { $gte: activeSince } },
+        ...(activeIds.length > 0 ? [{ _id: { $in: activeIds } }] : []),
+      ],
+    };
+
     const uid = new mongoose.Types.ObjectId(String(req.user!._id));
     const blockedReceiverIds = await ChatBlock.distinct('receiverId', { userId: uid });
-    const blockClause =
-      blockedReceiverIds.length > 0
-        ? { _id: { $nin: blockedReceiverIds as mongoose.Types.ObjectId[] } }
-        : {};
+    const clauses: Record<string, unknown>[] = [filter, activityClause];
+    if (blockedReceiverIds.length > 0) {
+      clauses.push({ _id: { $nin: blockedReceiverIds as mongoose.Types.ObjectId[] } });
+    }
+    if (onlineOnly) {
+      clauses.push({ isAvailable: true, isOnline: true, isBusyOnCall: { $ne: true } });
+    }
+    if (minRating >= 1) {
+      const ratedIds = await ReceiverRating.aggregate<{ _id: mongoose.Types.ObjectId }>([
+        { $group: { _id: '$receiverId', avg: { $avg: '$rating' } } },
+        { $match: { avg: { $gte: minRating } } },
+        { $project: { _id: 1 } },
+      ]);
+      clauses.push({ _id: { $in: ratedIds.map((row) => row._id) } });
+    }
 
-    const receivers = await Receiver.find({ ...filter, ...blockClause })
+    const receivers = await Receiver.find({ $and: clauses })
       .select(
         'name age state interests languages profileImage audioCallRate updatedAt gender isAvailable isOnline isBusyOnCall discoverGraceUntil expoPushToken fcmDeviceToken'
       )
-      .sort({ updatedAt: -1 })
-      .limit(limit)
+      .sort({ isOnline: -1, isAvailable: -1, isBusyOnCall: 1, updatedAt: -1 })
+      .skip(skip)
+      .limit(limit + 1)
       .exec();
+    const hasMore = receivers.length > limit;
+    if (hasMore) receivers.pop();
 
     const receiverIds = receivers.map((r) => new mongoose.Types.ObjectId(String(r._id)));
     const ratingRows =
@@ -157,6 +202,7 @@ export const listReceiversForCaller = async (req: Request, res: Response): Promi
       receivers: receivers.map((r) =>
         toCard(r as ReceiverDocument, ratingByReceiverId, busyByReceiverId)
       ),
+      hasMore,
     });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);

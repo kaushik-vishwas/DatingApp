@@ -82,6 +82,8 @@ export interface IReceiver {
   earningRatePerMinute: number;
   /** Timestamp when the active online session started. */
   onlineSince: Date | null;
+  /** Last time this receiver was online. Used only to keep discover to the last 10 days. */
+  lastActiveAt: Date | null;
   /** Incremented on each new login; JWT must match for single-device sessions. */
   authSessionVersion: number;
   /** Expo push token for incoming-call alerts when the app is backgrounded. */
@@ -168,6 +170,7 @@ const receiverSchema = new Schema<IReceiver>(
     badgeLevel: { type: String, enum: ['platinum', 'diamond', 'supreme'], default: 'platinum' },
     earningRatePerMinute: { type: Number, default: 2.0, min: 0 },
     onlineSince: { type: Date, default: null },
+    lastActiveAt: { type: Date, default: null },
     authSessionVersion: { type: Number, default: 0, min: 0 },
     expoPushToken: { type: String, default: null },
     fcmDeviceToken: { type: String, default: null, trim: true },

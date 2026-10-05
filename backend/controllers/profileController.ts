@@ -2443,6 +2443,7 @@ export const updateReceiverProfile = async (
         receiver.isOnline = false;
         receiver.onlineSince = null;
         if (onlineSince instanceof Date) {
+          receiver.lastActiveAt = endedAt;
           await finalizeReceiverOnlineSession({
             receiverId,
             onlineSince,

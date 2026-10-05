@@ -161,7 +161,7 @@ export async function syncReceiverPresenceInDatabase(receiverId: string): Promis
   if (!rid) return;
 
   const receiver = await Receiver.findById(rid).select(
-    'isAvailable onlineSince isOnline discoverGraceUntil'
+    'isAvailable onlineSince isOnline discoverGraceUntil lastActiveAt'
   );
   if (!receiver) return;
 
@@ -173,6 +173,7 @@ export async function syncReceiverPresenceInDatabase(receiverId: string): Promis
 
   if (shouldBeOnline && !wasOnline) {
     receiver.isOnline = true;
+    receiver.lastActiveAt = new Date();
     if (!(onlineSince instanceof Date)) {
       receiver.onlineSince = new Date();
     }
@@ -184,6 +185,7 @@ export async function syncReceiverPresenceInDatabase(receiverId: string): Promis
   if (!shouldBeOnline && wasOnline) {
     receiver.isOnline = false;
     receiver.onlineSince = null;
+    receiver.lastActiveAt = new Date();
     await receiver.save();
     if (onlineSince instanceof Date) {
       await finalizeReceiverOnlineSession({
