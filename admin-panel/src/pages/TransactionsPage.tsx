@@ -18,6 +18,8 @@ const emptyStats: AdminTransactionStats = {
 const formatInr = (n: number) =>
   `₹${Number(n || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 })}`;
 
+const PAGE_SIZE = 50;
+
 export function TransactionsPage() {
   const [stats, setStats] = useState<AdminTransactionStats>(emptyStats);
   const [rows, setRows] = useState<AdminTransactionRow[]>([]);
@@ -25,7 +27,7 @@ export function TransactionsPage() {
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [range, setRange] = useState<'7d' | '30d' | 'all'>('7d');
+  const [range, setRange] = useState<'today' | '7d' | '30d' | 'all'>('today');
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
 
@@ -33,7 +35,7 @@ export function TransactionsPage() {
     setLoading(true);
     setError(null);
     try {
-      const data = await fetchTransactions({ range, q: debouncedSearch || undefined, page });
+      const data = await fetchTransactions({ range, q: debouncedSearch || undefined, page, limit: PAGE_SIZE });
       setStats(data.stats);
       setRows(data.rows);
       setTotal(data.total);
@@ -88,7 +90,7 @@ export function TransactionsPage() {
     [stats]
   );
 
-  const totalPages = Math.max(1, Math.ceil(total / 20));
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   return (
     <div className="p-8">
@@ -107,9 +109,10 @@ export function TransactionsPage() {
           </div>
           <select
             value={range}
-            onChange={(e) => setRange(e.target.value as '7d' | '30d' | 'all')}
+            onChange={(e) => setRange(e.target.value as 'today' | '7d' | '30d' | 'all')}
             className="rounded-lg border border-neutral-200 bg-white px-3 py-2 text-xs font-semibold text-neutral-600"
           >
+            <option value="today">Today</option>
             <option value="7d">Last 7 days</option>
             <option value="30d">Last 30 days</option>
             <option value="all">All time</option>

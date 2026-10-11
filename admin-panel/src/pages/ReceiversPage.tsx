@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Edit2, Eye, Mic, RefreshCw, Search, Star, Trash2 } from 'lucide-react';
+import { Download, Edit2, Eye, Mic, RefreshCw, Search, Star, Trash2 } from 'lucide-react';
 import {
   deleteReceiverPermanently,
   fetchReceiversPage,
@@ -11,15 +11,54 @@ import {
   formatINR,
   receiverAvailabilityState,
   receiverCode,
-  receiverIsLiveAvailable,
   receiverRatingDisplay,
   receiverVoiceVerificationSucceeded,
 } from '../utils/receiverDisplay';
+import { formatJoinedDate, formatPhoneIN } from '../utils/userDisplay';
+import { RECEIVER_LANGUAGES } from '../constants/profileLanguages';
 
 type Tab = 'all' | 'approved' | 'pending' | 'rejected';
-type ReceiverRange = '7d' | '30d' | 'all';
+type ReceiverRange = 'today' | '7d' | '30d' | 'all';
 
-const PAGE_SIZE = 20;
+const PAGE_SIZE = 50;
+
+async function countOnlineReceivers(params: {
+  q?: string;
+  range: ReceiverRange;
+  language?: string;
+}): Promise<number> {
+  let online = 0;
+  let seen = 0;
+  let total = 0;
+  let page = 1;
+  do {
+    const data = await fetchReceiversPage({
+      status: 'all',
+      q: params.q,
+      range: params.range,
+      language: params.language,
+      page,
+      limit: 100,
+    });
+    total = data.total;
+    seen += data.receivers.length;
+    online += data.receivers.filter((row) => receiverAvailabilityState(row) === 'online').length;
+    page += 1;
+  } while (seen < total && page <= 40);
+  return online;
+}
+
+function downloadCsv(filename: string, rows: string[][]) {
+  const esc = (cell: string) => `"${cell.replace(/"/g, '""')}"`;
+  const body = rows.map((r) => r.map(esc).join(',')).join('\n');
+  const blob = new Blob([body], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
 
 function kycLabel(status: string): { label: string; className: string } {
   if (status === 'approved') return { label: 'Approved', className: 'bg-emerald-100 text-emerald-800' };
@@ -36,15 +75,18 @@ export function ReceiversPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>('all');
-  const [range, setRange] = useState<ReceiverRange>('7d');
+  const [range, setRange] = useState<ReceiverRange>('today');
+  const [language, setLanguage] = useState('');
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
   const [tabCounts, setTabCounts] = useState({ all: 0, approved: 0, pending: 0, rejected: 0 });
+  const [onlineTotal, setOnlineTotal] = useState(0);
   const [detail, setDetail] = useState<ReceiverRecord | null>(null);
   const [editReceiver, setEditReceiver] = useState<ReceiverRecord | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [exporting, setExporting] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -54,12 +96,14 @@ export function ReceiversPage() {
         status: tab,
         q: debouncedSearch || undefined,
         range,
+        language: language || undefined,
         page,
         limit: PAGE_SIZE,
       });
       setRows(data.receivers);
       setTotal(data.total);
       setTabCounts(data.tabCounts);
+      setOnlineTotal(await countOnlineReceivers({ q: debouncedSearch || undefined, range, language: language || undefined }));
     } catch (err: unknown) {
       const msg =
         err && typeof err === 'object' && 'response' in err
@@ -69,7 +113,7 @@ export function ReceiversPage() {
     } finally {
       setLoading(false);
     }
-  }, [tab, debouncedSearch, range, page]);
+  }, [tab, debouncedSearch, range, language, page]);
 
   useEffect(() => {
     void load();
@@ -82,6 +126,72 @@ export function ReceiversPage() {
     }, 350);
     return () => window.clearTimeout(t);
   }, [search]);
+
+  const onExport = async () => {
+    setExporting(true);
+    setError(null);
+    try {
+      const collected: ReceiverRecord[] = [];
+      let p = 1;
+      let lastTotal = 0;
+      do {
+        const data = await fetchReceiversPage({
+          status: tab,
+          q: debouncedSearch || undefined,
+          range,
+          language: language || undefined,
+          page: p,
+          limit: 100,
+        });
+        lastTotal = data.total;
+        collected.push(...data.receivers);
+        p += 1;
+      } while (collected.length < lastTotal && p <= 60);
+
+      const header = [
+        'Receiver ID',
+        'Name',
+        'Phone',
+        'KYC status',
+        'Calls today',
+        'Total calls',
+        'Earnings today (INR)',
+        'Total earnings (INR)',
+        'Rating',
+        'Rating count',
+        'Availability',
+        'Joined',
+      ];
+      const rowsOut: string[][] = [header];
+      collected.forEach((r, i) => {
+        const availability = receiverAvailabilityState(r);
+        const rating = receiverRatingDisplay(r);
+        rowsOut.push([
+          receiverCode(i),
+          r.name,
+          formatPhoneIN(r.phone),
+          kycLabel(r.accountStatus).label,
+          String(r.callsToday ?? 0),
+          String(r.totalCalls ?? 0),
+          String(r.earningsToday ?? 0),
+          String(r.totalEarnings ?? 0),
+          rating ?? '',
+          String(r.ratingCount ?? 0),
+          availability === 'online' ? 'Online' : availability === 'busy' ? 'Busy' : 'Offline',
+          formatJoinedDate(r.createdAt),
+        ]);
+      });
+      downloadCsv(`nesthama-receivers-${tab}-${new Date().toISOString().slice(0, 10)}.csv`, rowsOut);
+    } catch (err: unknown) {
+      const msg =
+        err && typeof err === 'object' && 'response' in err
+          ? String((err as { response?: { data?: { message?: string } } }).response?.data?.message)
+          : 'Export failed';
+      setError(msg || 'Export failed');
+    } finally {
+      setExporting(false);
+    }
+  };
 
   const onDeletePermanently = async (r: ReceiverRecord) => {
     if (
@@ -112,12 +222,10 @@ export function ReceiversPage() {
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   const stats = useMemo(() => {
-    let online = 0;
     let voiceVerified = 0;
     let ratingWeightedSum = 0;
     let ratingWeightedN = 0;
     for (const r of rows) {
-      if (receiverIsLiveAvailable(r)) online += 1;
       if (receiverVoiceVerificationSucceeded(r)) voiceVerified += 1;
       if (r.accountStatus === 'approved' && typeof r.ratingAvg === 'number' && (r.ratingCount ?? 0) > 0) {
         const count = r.ratingCount ?? 0;
@@ -129,15 +237,16 @@ export function ReceiversPage() {
       ratingWeightedN > 0 ? Math.round((ratingWeightedSum / ratingWeightedN) * 10) / 10 : null;
     return {
       total: tabCounts.all,
-      online,
+      online: onlineTotal,
       pendingKyc: tabCounts.pending,
       rejected: tabCounts.rejected,
       voiceVerified,
       avgRating,
     };
-  }, [rows, tabCounts]);
+  }, [rows, tabCounts, onlineTotal]);
 
-  const rangeLabel = range === 'all' ? 'All time' : range === '30d' ? 'Last 30 days' : 'Last 7 days';
+  const rangeLabel =
+    range === 'all' ? 'All time' : range === 'today' ? 'Today' : range === '30d' ? 'Last 30 days' : 'Last 7 days';
 
   return (
     <div className="p-8">
@@ -157,9 +266,25 @@ export function ReceiversPage() {
             }}
             className="rounded-xl border border-neutral-200 bg-white px-3 py-2 text-sm font-semibold text-neutral-800 shadow-sm"
           >
+            <option value="today">Today</option>
             <option value="7d">Last 7 days</option>
             <option value="30d">Last 30 days</option>
             <option value="all">All time</option>
+          </select>
+          <select
+            value={language}
+            onChange={(e) => {
+              setLanguage(e.target.value);
+              setPage(1);
+            }}
+            className="rounded-xl border border-neutral-200 bg-white px-3 py-2 text-sm font-semibold text-neutral-800 shadow-sm"
+          >
+            <option value="">All languages</option>
+            {RECEIVER_LANGUAGES.map((lang) => (
+              <option key={lang} value={lang}>
+                {lang}
+              </option>
+            ))}
           </select>
           <div className="relative">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-neutral-400" />
@@ -171,6 +296,15 @@ export function ReceiversPage() {
               className="w-52 rounded-xl border border-neutral-200 bg-white py-2 pl-9 pr-3 text-sm outline-none ring-[#7b2cff]/20 focus:ring-2 md:w-64"
             />
           </div>
+          <button
+            type="button"
+            disabled={exporting}
+            onClick={() => void onExport()}
+            className="inline-flex items-center gap-2 rounded-xl bg-[#7b2cff] px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-[#6a24df] disabled:opacity-50"
+          >
+            <Download className="h-4 w-4" />
+            {exporting ? 'Exporting…' : 'Export CSV'}
+          </button>
           <button
             type="button"
             onClick={() => void load()}
@@ -197,7 +331,7 @@ export function ReceiversPage() {
         <div className="rounded-2xl border border-neutral-200 bg-white p-5 shadow-sm">
           <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">Online Now</p>
           <p className="mt-2 text-3xl font-bold text-emerald-600">{stats.online}</p>
-          <p className="mt-1 text-xs text-neutral-400">On this page</p>
+          <p className="mt-1 text-xs text-neutral-400">{rangeLabel}{debouncedSearch ? ' · filtered' : ''}</p>
         </div>
         <div className="rounded-2xl border border-neutral-200 bg-white p-5 shadow-sm">
           <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">Pending KYC</p>
@@ -344,7 +478,7 @@ export function ReceiversPage() {
                               availability === 'online'
                                 ? 'bg-emerald-500'
                                 : availability === 'busy'
-                                  ? 'bg-amber-500'
+                                  ? 'bg-orange-500'
                                   : 'bg-neutral-300'
                             }`}
                           />

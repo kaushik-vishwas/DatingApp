@@ -1,17 +1,20 @@
-import { Check, Copy } from 'lucide-react';
+import { Check, Copy, Eye, X } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
+  fetchWithdrawalReceiverBreakdown,
   fetchWithdrawals,
   getApiErrorMessage,
   resolveWithdrawal,
   type AdminWithdrawalRow,
   type AdminWithdrawalStats,
+  type WithdrawalReceiverBreakdown,
 } from '../api/client';
+import { formatPhoneIN } from '../utils/userDisplay';
 
 type ActionStatus = 'pending' | 'paid' | 'rejected';
 type WithdrawalTab = 'all' | 'pending' | 'paid' | 'rejected';
 
-const PAGE_SIZE = 20;
+const PAGE_SIZE = 50;
 
 function isPaidWithdrawal(row: AdminWithdrawalRow): boolean {
   return (
@@ -79,6 +82,16 @@ const rowActionStatus = (row: AdminWithdrawalRow): ActionStatus => {
 
 const formatInr = (n: number) =>
   `₹${Number(n || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 })}`;
+
+function formatTalkTime(sec: number): string {
+  const total = Math.max(0, Math.floor(sec));
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  const seconds = total % 60;
+  if (hours > 0) return `${hours} hr ${minutes} min`;
+  if (minutes > 0) return `${minutes} min ${seconds} sec`;
+  return `${seconds} sec`;
+}
 
 const payoutNet = (row: AdminWithdrawalRow) =>
   typeof row.payoutAmount === 'number' && Number.isFinite(row.payoutAmount) && row.payoutAmount > 0
@@ -184,13 +197,32 @@ export function WithdrawalsPage() {
   const [tabCounts, setTabCounts] = useState({ all: 0, pending: 0, paid: 0, rejected: 0 });
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
-  const [range, setRange] = useState<'7d' | '30d' | 'all'>('7d');
+  const [range, setRange] = useState<'today' | '7d' | '30d' | 'all'>('today');
   const [busyId, setBusyId] = useState<string | null>(null);
   const [confirm, setConfirm] = useState<ConfirmState | null>(null);
+  const [detailRow, setDetailRow] = useState<AdminWithdrawalRow | null>(null);
+  const [detail, setDetail] = useState<WithdrawalReceiverBreakdown | null>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [detailError, setDetailError] = useState<string | null>(null);
 
   useEffect(() => {
     setPage(1);
   }, [range, tab]);
+
+  const openBreakdown = useCallback(async (row: AdminWithdrawalRow) => {
+    setDetailRow(row);
+    setDetail(null);
+    setDetailError(null);
+    setDetailLoading(true);
+    try {
+      const data = await fetchWithdrawalReceiverBreakdown(row._id);
+      setDetail(data);
+    } catch (err: unknown) {
+      setDetailError(getApiErrorMessage(err, 'Failed to load receiver details'));
+    } finally {
+      setDetailLoading(false);
+    }
+  }, []);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -297,9 +329,10 @@ export function WithdrawalsPage() {
         <h1 className="text-2xl font-bold text-neutral-900">Withdrawal Management</h1>
         <select
           value={range}
-          onChange={(e) => setRange(e.target.value as '7d' | '30d' | 'all')}
+          onChange={(e) => setRange(e.target.value as 'today' | '7d' | '30d' | 'all')}
           className="rounded-lg border border-neutral-200 bg-white px-3 py-2 text-xs font-semibold text-neutral-600"
         >
+          <option value="today">Today</option>
           <option value="7d">Last 7 days</option>
           <option value="30d">Last 30 days</option>
           <option value="all">All time</option>
@@ -356,6 +389,7 @@ export function WithdrawalsPage() {
                 <th className="px-3 py-2">Payout destination</th>
                 <th className="px-3 py-2">Request date</th>
                 <th className="px-3 py-2">Status</th>
+                <th className="px-3 py-2">Details</th>
                 <th className="px-3 py-2">Actions</th>
               </tr>
             </thead>
@@ -406,6 +440,16 @@ export function WithdrawalsPage() {
                           {row.payoutError.length > 80 ? `${row.payoutError.slice(0, 80)}…` : row.payoutError}
                         </p>
                       ) : null}
+                    </td>
+                    <td className="px-3 py-2.5">
+                      <button
+                        type="button"
+                        title="Receiver breakdown"
+                        onClick={() => void openBreakdown(row)}
+                        className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-[#7b2cff] hover:bg-[var(--color-brand-muted)]"
+                      >
+                        <Eye className="h-4 w-4" />
+                      </button>
                     </td>
                     <td className="px-3 py-2.5">
                       <select
@@ -460,6 +504,98 @@ export function WithdrawalsPage() {
           </div>
         ) : null}
       </div>
+
+      {detailRow ? (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+          role="dialog"
+          aria-modal="true"
+          onClick={() => setDetailRow(null)}
+        >
+          <div
+            className="flex max-h-[90vh] w-full max-w-xl flex-col overflow-hidden rounded-2xl bg-white shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-3 border-b border-neutral-100 px-5 py-4">
+              <div>
+                <h2 className="text-base font-bold text-neutral-900">{detail?.receiverName || detailRow.receiverName}</h2>
+                <p className="mt-0.5 text-sm text-neutral-500">
+                  {formatPhoneIN(detail?.receiverPhone || detailRow.receiverPhone || '') || '—'}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setDetailRow(null)}
+                className="rounded-lg p-1 text-neutral-500 hover:bg-neutral-100"
+                title="Close"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+              {detailLoading ? <p className="text-sm text-neutral-500">Loading…</p> : null}
+              {detailError ? (
+                <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">{detailError}</p>
+              ) : null}
+              {detail ? (
+                <div className="space-y-2">
+                  {detail.callers.length === 0 ? (
+                    <p className="text-sm text-neutral-500">No calls or chats yet.</p>
+                  ) : (
+                    detail.callers.map((caller) => (
+                      <div key={caller.userId} className="rounded-xl border border-neutral-200 px-3 py-2.5">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <p className="truncate text-sm font-semibold text-neutral-900">{caller.name}</p>
+                            <p className="text-xs text-neutral-500">{formatPhoneIN(caller.phone) || '—'}</p>
+                          </div>
+                          <p className="shrink-0 text-sm font-bold text-neutral-900">{formatInr(caller.earnedInr)}</p>
+                        </div>
+                        <p className="mt-1.5 text-xs text-neutral-600">
+                          Talk {formatTalkTime(caller.talkSec)} · {caller.calls.toLocaleString('en-IN')} calls ·{' '}
+                          {formatInr(caller.callEarningsInr)}
+                          <span className="text-neutral-300"> · </span>
+                          Chat {caller.chatMessages.toLocaleString('en-IN')} · {formatInr(caller.chatEarningsInr)}
+                        </p>
+                      </div>
+                    ))
+                  )}
+                  {detail.referralEarningsInr > 0 ? (
+                    <div className="flex items-center justify-between rounded-xl border border-neutral-200 px-3 py-2.5 text-sm">
+                      <p className="font-semibold text-neutral-900">Referral rewards</p>
+                      <p className="font-bold text-neutral-900">{formatInr(detail.referralEarningsInr)}</p>
+                    </div>
+                  ) : null}
+                  {detail.otherCreditsInr !== 0 ? (
+                    <div className="flex items-center justify-between rounded-xl border border-neutral-200 px-3 py-2.5 text-sm">
+                      <p className="font-semibold text-neutral-900">Other credits</p>
+                      <p className="font-bold text-neutral-900">{formatInr(detail.otherCreditsInr)}</p>
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+            </div>
+            {detail ? (
+              <div className="space-y-2 border-t border-neutral-100 bg-neutral-50 px-5 py-4 text-sm">
+                <div className="flex justify-between gap-4">
+                  <span className="text-neutral-500">Total earned lifetime</span>
+                  <span className="font-semibold text-neutral-900">{formatInr(detail.totalEarningsInr)}</span>
+                </div>
+                <div className="flex justify-between gap-4">
+                  <span className="text-neutral-500">
+                    Total withdrawn · {detail.paidWithdrawalCount.toLocaleString('en-IN')}
+                  </span>
+                  <span className="font-semibold text-neutral-900">{formatInr(detail.withdrawnInr)}</span>
+                </div>
+                <div className="flex justify-between gap-4 border-t border-neutral-200 pt-2">
+                  <span className="font-semibold text-neutral-900">Current wallet balance</span>
+                  <span className="text-base font-bold text-neutral-900">{formatInr(detail.walletBalanceInr)}</span>
+                </div>
+              </div>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
 
       {confirm && confirmCopy ? (
         <div

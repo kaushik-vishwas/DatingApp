@@ -12,9 +12,9 @@ import { kycCode } from '../utils/receiverDisplay';
 import { resolveAdminProfileImageUrl } from '../utils/resolveProfileImageUrl';
 
 type Tab = 'all' | 'approved' | 'pending';
-type Range = '7d' | '30d' | 'all';
+type Range = 'today' | '7d' | '30d' | 'all';
 
-const PAGE_SIZE = 20;
+const PAGE_SIZE = 50;
 
 function kycStatus(tab: Tab): 'all' | 'kyc_approved' | 'kyc_pending' {
   if (tab === 'approved') return 'kyc_approved';
@@ -58,7 +58,7 @@ export function KycApprovalsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>('pending');
-  const [range, setRange] = useState<Range>('7d');
+  const [range, setRange] = useState<Range>('today');
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
   const [tabCounts, setTabCounts] = useState({ all: 0, approved: 0, pending: 0 });
@@ -172,6 +172,7 @@ export function KycApprovalsPage() {
             }}
             className="rounded-xl border border-neutral-200 bg-white px-3 py-2 text-sm font-semibold text-neutral-800 shadow-sm"
           >
+            <option value="today">Today</option>
             <option value="7d">Last 7 days</option>
             <option value="30d">Last 30 days</option>
             <option value="all">All time</option>

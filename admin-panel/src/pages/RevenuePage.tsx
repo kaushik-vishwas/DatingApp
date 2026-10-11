@@ -7,7 +7,7 @@ function inr(v: number): string {
 }
 
 export function RevenuePage() {
-  const [range, setRange] = useState<'7d' | '30d' | 'all'>('7d');
+  const [range, setRange] = useState<'today' | '7d' | '30d' | 'all'>('today');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [data, setData] = useState<RevenueDashboardResponse | null>(null);
@@ -29,7 +29,8 @@ export function RevenuePage() {
     void load();
   }, [load]);
 
-  const rangeLabel = range === 'all' ? 'All time' : `Last ${range === '7d' ? '7' : '30'} days`;
+  const rangeLabel =
+    range === 'all' ? 'All time' : range === 'today' ? 'Today' : range === '7d' ? 'Last 7 days' : 'Last 30 days';
 
   const statCards = useMemo(
     () => [
@@ -74,9 +75,10 @@ export function RevenuePage() {
         <div className="flex items-center gap-2">
           <select
             value={range}
-            onChange={(e) => setRange(e.target.value as '7d' | '30d' | 'all')}
+            onChange={(e) => setRange(e.target.value as 'today' | '7d' | '30d' | 'all')}
             className="rounded-lg border border-neutral-200 bg-white px-3 py-2 text-xs font-semibold text-neutral-600"
           >
+            <option value="today">Today</option>
             <option value="7d">Last 7 days</option>
             <option value="30d">Last 30 days</option>
             <option value="all">All time</option>

@@ -50,8 +50,8 @@ export function receiverAvailabilityState(r: {
   isOnline?: boolean;
   isBusyOnCall?: boolean;
 }): 'online' | 'busy' | 'offline' {
+  if (r.isBusyOnCall) return 'busy';
   const live = receiverIsLiveAvailable(r);
-  if (live && r.isBusyOnCall) return 'busy';
   if (live) return 'online';
   return 'offline';
 }

@@ -43,6 +43,7 @@ export function ReportsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [q, setQ] = useState('');
+  const [range, setRange] = useState<'today' | '6d' | '7d' | '30d' | 'all'>('today');
   const [detail, setDetail] = useState<ModerationReportRow | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
 
@@ -50,7 +51,7 @@ export function ReportsPage() {
     setLoading(true);
     setError(null);
     try {
-      const data = await fetchModerationReports({ q, status: 'all', page: 1 });
+      const data = await fetchModerationReports({ q, status: 'all', range, page: 1 });
       setStats(data.stats);
       setRows(data.reports);
     } catch (e: unknown) {
@@ -59,7 +60,7 @@ export function ReportsPage() {
     } finally {
       setLoading(false);
     }
-  }, [q]);
+  }, [q, range]);
 
   useEffect(() => {
     void load();
@@ -95,6 +96,17 @@ export function ReportsPage() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-2xl font-bold text-neutral-900">Reports &amp; Moderation</h1>
         <div className="flex flex-wrap items-center gap-2">
+          <select
+            value={range}
+            onChange={(e) => setRange(e.target.value as 'today' | '6d' | '7d' | '30d' | 'all')}
+            className="rounded-lg border border-neutral-200 bg-white px-3 py-2 text-sm font-semibold text-neutral-800 outline-none focus:border-violet-400"
+          >
+            <option value="today">Today</option>
+            <option value="6d">Last 6 days</option>
+            <option value="7d">Last 7 days</option>
+            <option value="30d">Last 30 days</option>
+            <option value="all">All time</option>
+          </select>
           <input
             value={q}
             onChange={(e) => setQ(e.target.value)}

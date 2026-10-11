@@ -12,8 +12,9 @@ import {
 import { AppUserDetailModal } from '../components/AppUserDetailModal';
 import { AppUserEditModal } from '../components/AppUserEditModal';
 import { appUserRowCode, formatJoinedDate, formatPhoneIN } from '../utils/userDisplay';
+import { CALLER_LANGUAGES } from '../constants/profileLanguages';
 
-const PAGE_SIZE = 20;
+const PAGE_SIZE = 50;
 
 function downloadCsv(filename: string, rows: string[][]) {
   const esc = (cell: string) => `"${cell.replace(/"/g, '""')}"`;
@@ -29,7 +30,8 @@ function downloadCsv(filename: string, rows: string[][]) {
 
 export function AppUsersPage() {
   const [tab, setTab] = useState<AppUserStatusTab>('all');
-  const [range, setRange] = useState<AppUserRange>('7d');
+  const [range, setRange] = useState<AppUserRange>('today');
+  const [language, setLanguage] = useState('');
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [page, setPage] = useState(1);
@@ -51,7 +53,7 @@ export function AppUsersPage() {
 
   useEffect(() => {
     setPage(1);
-  }, [tab, range, debouncedSearch]);
+  }, [tab, range, language, debouncedSearch]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -61,6 +63,7 @@ export function AppUsersPage() {
         status: tab,
         q: debouncedSearch || undefined,
         range,
+        language: language || undefined,
         page,
         limit: PAGE_SIZE,
       });
@@ -77,7 +80,7 @@ export function AppUsersPage() {
     } finally {
       setLoading(false);
     }
-  }, [tab, debouncedSearch, range, page]);
+  }, [tab, debouncedSearch, range, language, page]);
 
   useEffect(() => {
     void load();
@@ -97,6 +100,7 @@ export function AppUsersPage() {
           status: tab,
           q: debouncedSearch || undefined,
           range,
+          language: language || undefined,
           page: p,
           limit: 100,
         });
@@ -105,7 +109,7 @@ export function AppUsersPage() {
         p += 1;
       } while (collected.length < lastTotal && p <= 60);
 
-      const header = ['Caller ID', 'Name', 'Phone', 'Wallet (INR)', 'Access', 'Profile status', 'Joined'];
+      const header = ['Caller ID', 'Name', 'Phone', 'Wallet (INR)', 'Total recharged (INR)', 'Access', 'Profile status', 'Joined'];
       const rows: string[][] = [header];
       collected.forEach((u, i) => {
         const access = u.suspended ? 'Suspended' : 'Active';
@@ -114,6 +118,7 @@ export function AppUsersPage() {
           u.name,
           formatPhoneIN(u.phone),
           String(u.walletBalance),
+          String(u.totalRechargedInr ?? 0),
           access,
           u.accountStatus,
           formatJoinedDate(u.createdAt),
@@ -223,9 +228,22 @@ export function AppUsersPage() {
             onChange={(e) => setRange(e.target.value as AppUserRange)}
             className="rounded-xl border border-neutral-200 bg-white px-3 py-2 text-sm font-semibold text-neutral-800 shadow-sm"
           >
+            <option value="today">Today</option>
             <option value="7d">Last 7 days</option>
             <option value="30d">Last 30 days</option>
             <option value="all">All time</option>
+          </select>
+          <select
+            value={language}
+            onChange={(e) => setLanguage(e.target.value)}
+            className="rounded-xl border border-neutral-200 bg-white px-3 py-2 text-sm font-semibold text-neutral-800 shadow-sm"
+          >
+            <option value="">All languages</option>
+            {CALLER_LANGUAGES.map((lang) => (
+              <option key={lang} value={lang}>
+                {lang}
+              </option>
+            ))}
           </select>
           <div className="relative">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-neutral-400" />
@@ -300,6 +318,7 @@ export function AppUsersPage() {
                   <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-neutral-500">Name</th>
                   <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-neutral-500">Phone</th>
                   <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-neutral-500">Wallet</th>
+                  <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-neutral-500">Total recharged</th>
                   <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-neutral-500">Status</th>
                   <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-neutral-500">Actions</th>
                 </tr>
@@ -341,6 +360,9 @@ export function AppUsersPage() {
                       <td className="px-4 py-3 text-neutral-700">{formatPhoneIN(u.phone)}</td>
                       <td className="px-4 py-3 font-medium text-neutral-900">
                         ₹{u.walletBalance.toLocaleString('en-IN')}
+                      </td>
+                      <td className="px-4 py-3 font-medium text-neutral-900">
+                        ₹{(u.totalRechargedInr ?? 0).toLocaleString('en-IN', { maximumFractionDigits: 2 })}
                       </td>
                       <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
                         <span

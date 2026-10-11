@@ -8,7 +8,7 @@ function inr(v: number): string {
 }
 
 export function OverviewPage() {
-  const [range, setRange] = useState<'7d' | '30d' | 'all'>('7d');
+  const [range, setRange] = useState<'today' | '7d' | '30d' | 'all'>('today');
   const [data, setData] = useState<OverviewDashboardResponse | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
@@ -31,7 +31,7 @@ export function OverviewPage() {
   }, [load]);
 
   const rangeLabel =
-    range === 'all' ? 'All time' : range === '30d' ? 'Last 30 days' : 'Last 7 days';
+    range === 'all' ? 'All time' : range === 'today' ? 'Today' : range === '30d' ? 'Last 30 days' : 'Last 7 days';
 
   const cards = useMemo(
     () => [
@@ -79,9 +79,10 @@ export function OverviewPage() {
         <div className="flex gap-2">
           <select
             value={range}
-            onChange={(e) => setRange(e.target.value as '7d' | '30d' | 'all')}
+            onChange={(e) => setRange(e.target.value as 'today' | '7d' | '30d' | 'all')}
             className="rounded-xl border border-neutral-200 bg-white px-3 py-2 text-sm"
           >
+            <option value="today">Today</option>
             <option value="7d">Last 7 days</option>
             <option value="30d">Last 30 days</option>
             <option value="all">All time</option>

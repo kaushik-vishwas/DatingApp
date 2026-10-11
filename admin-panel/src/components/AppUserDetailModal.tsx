@@ -103,6 +103,12 @@ export function AppUserDetailModal({ user, onClose, onChanged, onEdit }: Props) 
             <dd className="font-medium text-neutral-900">₹{user.walletBalance.toLocaleString('en-IN')}</dd>
           </div>
           <div className="flex justify-between gap-4">
+            <dt className="text-neutral-500">Total recharged</dt>
+            <dd className="font-medium text-neutral-900">
+              ₹{(user.totalRechargedInr ?? 0).toLocaleString('en-IN', { maximumFractionDigits: 2 })}
+            </dd>
+          </div>
+          <div className="flex justify-between gap-4">
             <dt className="text-neutral-500">Joined</dt>
             <dd className="font-medium text-neutral-900">{formatJoinedDate(user.createdAt)}</dd>
           </div>

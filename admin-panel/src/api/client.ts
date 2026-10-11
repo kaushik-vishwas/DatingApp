@@ -139,7 +139,7 @@ export type AdminReceiverUpdatePayload = {
 };
 
 export type AppUserStatusTab = 'all' | 'active' | 'suspended';
-export type AppUserRange = '7d' | '30d' | 'all';
+export type AppUserRange = 'today' | '7d' | '30d' | 'all';
 
 export type AppUserRecord = {
   _id: string;
@@ -152,6 +152,8 @@ export type AppUserRecord = {
   profileImage: string | null;
   suspended: boolean;
   walletBalance: number;
+  /** Sum of Razorpay amounts this caller has paid. Present on the callers list. */
+  totalRechargedInr?: number;
   createdAt: string;
   updatedAt: string;
   userAudio?: string | null;
@@ -375,9 +377,9 @@ export type OverviewDashboardResponse = {
   };
 };
 
-export async function fetchOverviewDashboard(params?: { range?: '7d' | '30d' | 'all' }) {
+export async function fetchOverviewDashboard(params?: { range?: 'today' | '7d' | '30d' | 'all' }) {
   const { data } = await api.get<OverviewDashboardResponse>('/admin/overview', {
-    params: { range: params?.range ?? '7d' },
+    params: { range: params?.range ?? 'today' },
   });
   return data;
 }
@@ -394,7 +396,8 @@ export async function fetchAllReceivers() {
 export async function fetchReceiversPage(params: {
   status?: 'all' | 'approved' | 'pending' | 'rejected' | 'kyc_pending' | 'kyc_approved';
   q?: string;
-  range?: '7d' | '30d' | 'all';
+  range?: 'today' | '7d' | '30d' | 'all';
+  language?: string;
   page?: number;
   limit?: number;
 }) {
@@ -411,13 +414,15 @@ export async function fetchReceiversPage(params: {
       kycPending?: number;
       kycApproved?: number;
     };
+    onlineCount?: number;
   }>('/admin/receivers', {
     params: {
       status: params.status ?? 'all',
       q: params.q?.trim() || undefined,
-      range: params.range ?? '7d',
+      range: params.range ?? 'today',
+      language: params.language?.trim() || undefined,
       page: params.page ?? 1,
-      limit: params.limit ?? 20,
+      limit: params.limit ?? 50,
     },
   });
   return data;
@@ -455,6 +460,7 @@ export async function fetchAppUsers(params: {
   status: AppUserStatusTab;
   q?: string;
   range: AppUserRange;
+  language?: string;
   page: number;
   limit?: number;
 }) {
@@ -469,8 +475,9 @@ export async function fetchAppUsers(params: {
       status: params.status,
       q: params.q?.trim() || undefined,
       range: params.range,
+      language: params.language?.trim() || undefined,
       page: params.page,
-      limit: params.limit ?? 20,
+      limit: params.limit ?? 50,
     },
   });
 
@@ -574,7 +581,12 @@ export async function fetchReferralAlerts() {
   return data;
 }
 
-export async function fetchModerationReports(params?: { q?: string; status?: string; page?: number }) {
+export async function fetchModerationReports(params?: {
+  q?: string;
+  status?: string;
+  range?: 'today' | '6d' | '7d' | '30d' | 'all';
+  page?: number;
+}) {
   const { data } = await api.get<{
     stats: ModerationReportStats;
     reports: ModerationReportRow[];
@@ -585,6 +597,7 @@ export async function fetchModerationReports(params?: { q?: string; status?: str
     params: {
       q: params?.q?.trim() || undefined,
       status: params?.status && params.status !== 'all' ? params.status : undefined,
+      range: params?.range ?? 'today',
       page: params?.page ?? 1,
     },
   });
@@ -658,9 +671,9 @@ export type RevenueDashboardResponse = {
   }>;
 };
 
-export async function fetchRevenueDashboard(params?: { range?: '7d' | '30d' | 'all' }) {
+export async function fetchRevenueDashboard(params?: { range?: 'today' | '7d' | '30d' | 'all' }) {
   const { data } = await api.get<RevenueDashboardResponse>('/admin/revenue', {
-    params: { range: params?.range ?? '7d' },
+    params: { range: params?.range ?? 'today' },
   });
   return data;
 }
@@ -693,8 +706,9 @@ export type AdminTransactionRow = {
 
 export async function fetchTransactions(params?: {
   q?: string;
-  range?: '7d' | '30d' | 'all';
+  range?: 'today' | '7d' | '30d' | 'all';
   page?: number;
+  limit?: number;
 }) {
   const { data } = await api.get<{
     stats: AdminTransactionStats;
@@ -705,8 +719,9 @@ export async function fetchTransactions(params?: {
   }>('/admin/transactions', {
     params: {
       q: params?.q?.trim() || undefined,
-      range: params?.range ?? '7d',
+      range: params?.range ?? 'today',
       page: params?.page ?? 1,
+      limit: params?.limit ?? 50,
     },
   });
   return data;
@@ -772,7 +787,7 @@ export async function fetchWithdrawalPendingCount() {
 
 export async function fetchWithdrawals(params?: {
   q?: string;
-  range?: '7d' | '30d' | 'all';
+  range?: 'today' | '7d' | '30d' | 'all';
   status?: 'all' | 'pending' | 'paid' | 'approved' | 'rejected';
   page?: number;
   limit?: number;
@@ -786,12 +801,41 @@ export async function fetchWithdrawals(params?: {
   }>('/admin/withdrawals', {
     params: {
       q: params?.q?.trim() || undefined,
-      range: params?.range ?? '7d',
+      range: params?.range ?? 'today',
       status: params?.status ?? 'all',
       page: params?.page ?? 1,
-      limit: params?.limit ?? 20,
+      limit: params?.limit ?? 50,
     },
   });
+  return data;
+}
+
+export type WithdrawalCallerEarning = {
+  userId: string;
+  name: string;
+  phone: string;
+  talkSec: number;
+  calls: number;
+  callEarningsInr: number;
+  chatMessages: number;
+  chatEarningsInr: number;
+  earnedInr: number;
+};
+
+export type WithdrawalReceiverBreakdown = {
+  receiverName: string;
+  receiverPhone: string;
+  callers: WithdrawalCallerEarning[];
+  referralEarningsInr: number;
+  otherCreditsInr: number;
+  totalEarningsInr: number;
+  withdrawnInr: number;
+  paidWithdrawalCount: number;
+  walletBalanceInr: number;
+};
+
+export async function fetchWithdrawalReceiverBreakdown(withdrawalId: string) {
+  const { data } = await api.get<WithdrawalReceiverBreakdown>(`/admin/withdrawals/${withdrawalId}/breakdown`);
   return data;
 }
 
