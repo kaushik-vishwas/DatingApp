@@ -95,6 +95,7 @@ const receiverSchema = new mongoose_1.Schema({
     badgeLevel: { type: String, enum: ['platinum', 'diamond', 'supreme'], default: 'platinum' },
     earningRatePerMinute: { type: Number, default: 2.0, min: 0 },
     onlineSince: { type: Date, default: null },
+    lastActiveAt: { type: Date, default: null },
     authSessionVersion: { type: Number, default: 0, min: 0 },
     expoPushToken: { type: String, default: null },
     fcmDeviceToken: { type: String, default: null, trim: true },

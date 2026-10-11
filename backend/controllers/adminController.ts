@@ -27,11 +27,14 @@ import {
   countPaidReceiverWithdrawals,
 } from '../services/adminEarningsService';
 import { paidWithdrawalMatch } from '../constants/receiverWithdrawalFees';
+import { RESOLVED_RECEIVER_CALL_EARNING_EXPR } from '../utils/receiverCallEarnings';
 import WalletTopup from '../models/WalletTopup';
+import ReceiverWalletCredit from '../models/ReceiverWalletCredit';
 import { aggregateReceiverEarningsByReceiver, sumReceiverEarningsRollup } from '../services/receiverEarningsAggregate';
 import { CHAT_TEXT_CHARGE_INR } from '../constants/chatPricing';
 import { normalizeReceiverWelcome } from '../services/receiverWelcome';
 import { normalizeCallerNotification } from '../services/callerNotification';
+import { CALLER_LANGUAGE_ALLOWLIST } from '../constants/callerProfileAllowlist';
 import { toApiReceiver, toApiUser } from './authController';
 import { isReceiverLoggedInAndAvailable } from '../services/receiverPresence';
 import { getBusyReceiverIdSet } from '../services/callQueue';
@@ -752,6 +755,17 @@ function escapeRegex(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+const RECEIVER_LANGUAGE_ALLOWLIST = new Set<string>([...CALLER_LANGUAGE_ALLOWLIST, 'Bengali']);
+
+/** Exact language match against a profile `languages` array. Unknown values are ignored. */
+function languageListClause(raw: unknown, allow: Set<string>): Record<string, unknown> | null {
+  const language = String(raw ?? '').trim();
+  if (!language || language.toLowerCase() === 'all') return null;
+  const match = [...allow].find((item) => item.toLowerCase() === language.toLowerCase());
+  if (!match) return null;
+  return { languages: new RegExp(`^${escapeRegex(match)}$`, 'i') };
+}
+
 function roundInr(n: number): number {
   return Math.round(n * 100) / 100;
 }
@@ -760,9 +774,21 @@ function roundRating(n: number): number {
   return Math.round(n * 10) / 10;
 }
 
+function startOfToday(): Date {
+  const start = new Date();
+  start.setHours(0, 0, 0, 0);
+  return start;
+}
+
 function toRangeStart(range: string): Date | null {
   const now = new Date();
   const start = new Date(now);
+  if (range === 'today') return startOfToday();
+  if (range === '6d') {
+    start.setDate(now.getDate() - 6);
+    start.setHours(0, 0, 0, 0);
+    return start;
+  }
   if (range === '7d') {
     start.setDate(now.getDate() - 7);
     start.setHours(0, 0, 0, 0);
@@ -785,8 +811,8 @@ export const getRevenueDashboard = async (
 ): Promise<void> => {
   try {
     const range = String(req.query.range ?? 'all').toLowerCase();
-    if (range !== '7d' && range !== '30d' && range !== 'all') {
-      res.status(400).json({ message: 'range must be 7d, 30d, or all' });
+    if (range !== 'today' && range !== '7d' && range !== '30d' && range !== 'all') {
+      res.status(400).json({ message: 'range must be today, 7d, 30d, or all' });
       return;
     }
 
@@ -813,9 +839,9 @@ export const getOverviewDashboard = async (
   res: Response
 ): Promise<void> => {
   try {
-    const range = String(req.query.range ?? '7d').toLowerCase();
-    if (range !== '7d' && range !== '30d' && range !== 'all') {
-      res.status(400).json({ message: 'range must be 7d, 30d, or all' });
+    const range = String(req.query.range ?? 'today').toLowerCase();
+    if (range !== 'today' && range !== '7d' && range !== '30d' && range !== 'all') {
+      res.status(400).json({ message: 'range must be today, 7d, 30d, or all' });
       return;
     }
     const start = toRangeStart(range);
@@ -893,22 +919,23 @@ export const getOverviewDashboard = async (
 
 /**
  * GET /admin/users — app users (`users` collection) with filters and pagination.
- * Query: status=all|active|suspended, q=search, range=7d|30d|all, page, limit
+ * Query: status=all|active|suspended, q=search, range=today|7d|30d|all, page, limit
  */
 export const listAppUsers = async (req: Request, res: Response): Promise<void> => {
   try {
     const status = String(req.query.status ?? 'all').toLowerCase();
     const q = String(req.query.q ?? '').trim();
-    const range = String(req.query.range ?? '7d').toLowerCase();
+    const range = String(req.query.range ?? 'today').toLowerCase();
+    const languageClause = languageListClause(req.query.language, CALLER_LANGUAGE_ALLOWLIST);
     const page = Math.max(1, parseInt(String(req.query.page ?? '1'), 10) || 1);
-    const limit = Math.min(100, Math.max(1, parseInt(String(req.query.limit ?? '20'), 10) || 20));
+    const limit = Math.min(100, Math.max(1, parseInt(String(req.query.limit ?? '50'), 10) || 50));
 
     if (status !== 'all' && status !== 'active' && status !== 'suspended') {
       res.status(400).json({ message: 'status must be all, active, or suspended' });
       return;
     }
-    if (range !== '7d' && range !== '30d' && range !== 'all') {
-      res.status(400).json({ message: 'range must be 7d, 30d, or all' });
+    if (range !== 'today' && range !== '7d' && range !== '30d' && range !== 'all') {
+      res.status(400).json({ message: 'range must be today, 7d, 30d, or all' });
       return;
     }
 
@@ -917,10 +944,13 @@ export const listAppUsers = async (req: Request, res: Response): Promise<void> =
       const rx = new RegExp(escapeRegex(q), 'i');
       common.$or = [{ name: rx }, { email: rx }, { phone: rx }];
     }
-    if (range === '7d' || range === '30d') {
+    if (range === 'today') {
+      common.createdAt = { $gte: startOfToday() };
+    } else if (range === '7d' || range === '30d') {
       const days = range === '7d' ? 7 : 30;
       common.createdAt = { $gte: new Date(Date.now() - days * 24 * 60 * 60 * 1000) };
     }
+    if (languageClause) Object.assign(common, languageClause);
 
     const listFilter: Record<string, unknown> = { ...common };
     if (status === 'active') listFilter.suspended = { $ne: true };
@@ -941,8 +971,22 @@ export const listAppUsers = async (req: Request, res: Response): Promise<void> =
         .limit(limit),
     ]);
 
+    const userIds = users.map((u) => u._id);
+    const rechargeRows = userIds.length
+      ? await WalletTopup.aggregate<{ _id: mongoose.Types.ObjectId; total: number }>([
+          { $match: { userId: { $in: userIds } } },
+          { $group: { _id: '$userId', total: { $sum: '$payAmount' } } },
+        ])
+      : [];
+    const rechargeByUser = new Map(
+      rechargeRows.map((row) => [String(row._id), Math.round((row.total || 0) * 100) / 100])
+    );
+
     res.status(200).json({
-      users: users.map((u) => toApiUser(u as UserDocument)),
+      users: users.map((u) => ({
+        ...toApiUser(u as UserDocument),
+        totalRechargedInr: rechargeByUser.get(String(u._id)) ?? 0,
+      })),
       total,
       page,
       limit,
@@ -1495,33 +1539,37 @@ function withReceiverStatus(search: Record<string, unknown>, status: string): Re
 
 /**
  * GET /admin/receivers — all rows, or one page when `page` is set.
- * Page query: status=all|approved|pending|rejected, q, range=7d|30d|all, page, limit.
+ * Page query: status=all|approved|pending|rejected, q, range=today|7d|30d|all, language, page, limit.
  */
 export const listAllReceivers = async (req: Request, res: Response): Promise<void> => {
   try {
     const paginated = String(req.query.page ?? '').trim() !== '';
     let page = 1;
-    let limit = 20;
+    let limit = 50;
     let total = 0;
     let tabCounts:
       | { all: number; approved: number; pending: number; rejected: number; kycPending: number; kycApproved: number }
       | undefined;
+    let onlineCount = 0;
     let receivers;
 
     if (paginated) {
       page = Math.max(1, Number(req.query.page) || 1);
-      limit = Math.min(100, Math.max(1, Number(req.query.limit) || 20));
+      limit = Math.min(100, Math.max(1, Number(req.query.limit) || 50));
       const status = String(req.query.status ?? 'all').toLowerCase();
       const range = String(req.query.range ?? 'all').toLowerCase();
       const q = String(req.query.q ?? '').trim();
       const search: Record<string, unknown> = {};
-      const rangeStart = range === '7d' || range === '30d' ? toRangeStart(range) : null;
+      const rangeStart = range === 'today' || range === '7d' || range === '30d' ? toRangeStart(range) : null;
       if (rangeStart) search.createdAt = { $gte: rangeStart };
+      const languageClause = languageListClause(req.query.language, RECEIVER_LANGUAGE_ALLOWLIST);
+      if (languageClause) Object.assign(search, languageClause);
       if (q) {
         const rx = new RegExp(escapeRegex(q), 'i');
         search.$or = [{ name: rx }, { email: rx }, { phone: rx }];
       }
-      const [all, approved, pending, rejected, kycPending, kycApproved, pageRows] = await Promise.all([
+      const [all, approved, pending, rejected, kycPending, kycApproved, pageRows, availableRows] =
+        await Promise.all([
         Receiver.countDocuments(search),
         Receiver.countDocuments(withReceiverStatus(search, 'approved')),
         Receiver.countDocuments(withReceiverStatus(search, 'pending')),
@@ -1530,9 +1578,18 @@ export const listAllReceivers = async (req: Request, res: Response): Promise<voi
         Receiver.countDocuments(withReceiverStatus(search, 'kyc_approved')),
         Receiver.find(withReceiverStatus(search, status))
           .select('-otp -otpExpiry')
-          .sort({ createdAt: 1 })
+          .sort({ createdAt: -1 })
           .skip((page - 1) * limit)
           .limit(limit),
+        Receiver.find({ ...search, isAvailable: true })
+          .select('_id isAvailable discoverGraceUntil')
+          .lean<
+            {
+              _id: mongoose.Types.ObjectId;
+              isAvailable?: boolean;
+              discoverGraceUntil?: Date | null;
+            }[]
+          >(),
       ]);
       total =
         status === 'approved'
@@ -1547,9 +1604,17 @@ export const listAllReceivers = async (req: Request, res: Response): Promise<voi
                   ? rejected
                   : all;
       tabCounts = { all, approved, pending, rejected, kycPending, kycApproved };
+      onlineCount = availableRows.reduce((count, row) => {
+        const live = isReceiverLoggedInAndAvailable({
+          receiverId: String(row._id),
+          isAvailable: Boolean(row.isAvailable),
+          discoverGraceUntil: row.discoverGraceUntil ?? null,
+        });
+        return count + (live ? 1 : 0);
+      }, 0);
       receivers = pageRows;
     } else {
-      receivers = await Receiver.find({}).select('-otp -otpExpiry').sort({ createdAt: 1 });
+      receivers = await Receiver.find({}).select('-otp -otpExpiry').sort({ createdAt: -1 });
     }
 
     const receiverIds = receivers.map((r) => r._id);
@@ -1612,7 +1677,7 @@ export const listAllReceivers = async (req: Request, res: Response): Promise<voi
     });
 
     res.status(200).json(
-      paginated ? { receivers: list, total, page, limit, tabCounts } : { receivers: list }
+      paginated ? { receivers: list, total, page, limit, tabCounts, onlineCount } : { receivers: list }
     );
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -1882,6 +1947,7 @@ export const listModerationReports = async (req: Request, res: Response): Promis
   try {
     const q = String(req.query.q ?? '').trim();
     const status = String(req.query.status ?? 'all').toLowerCase();
+    const range = String(req.query.range ?? 'today').toLowerCase();
     const page = Math.max(1, parseInt(String(req.query.page ?? '1'), 10) || 1);
     const limit = Math.min(100, Math.max(1, parseInt(String(req.query.limit ?? '50'), 10) || 50));
 
@@ -1893,6 +1959,8 @@ export const listModerationReports = async (req: Request, res: Response): Promis
       const rx = new RegExp(escapeRegex(q), 'i');
       filter.$or = [{ preview: rx }, { reason: rx }];
     }
+    const rangeStart = toRangeStart(range);
+    if (rangeStart) filter.createdAt = { $gte: rangeStart };
 
     const start = new Date();
     start.setHours(0, 0, 0, 0);
@@ -2097,11 +2165,11 @@ export const listWithdrawals = async (
   res: Response
 ): Promise<void> => {
   try {
-    const range = String(req.query.range ?? '7d').toLowerCase();
+    const range = String(req.query.range ?? 'today').toLowerCase();
     const status = String(req.query.status ?? 'all').toLowerCase();
     const q = String(req.query.q ?? '').trim();
     const page = Math.max(1, Number(req.query.page ?? 1) || 1);
-    const limit = Math.min(100, Math.max(1, Number(req.query.limit ?? 20) || 20));
+    const limit = Math.min(100, Math.max(1, Number(req.query.limit ?? 50) || 50));
     const skip = (page - 1) * limit;
 
     const statusFilter: Record<string, unknown> = { status: { $ne: 'verification_pending' } };
@@ -2115,7 +2183,8 @@ export const listWithdrawals = async (
 
     const now = new Date();
     const since = new Date(now);
-    if (range === '7d') since.setDate(now.getDate() - 7);
+    if (range === 'today') since.setHours(0, 0, 0, 0);
+    else if (range === '7d') since.setDate(now.getDate() - 7);
     else if (range === '30d') since.setDate(now.getDate() - 30);
 
     const periodFilter =
@@ -2336,6 +2405,171 @@ export const listWithdrawals = async (
 };
 
 /**
+ * GET /admin/withdrawals/:id/breakdown — lifetime earnings for the receiver on this request.
+ */
+export const getWithdrawalReceiverBreakdown = async (
+  req: Request<{ id: string }>,
+  res: Response
+): Promise<void> => {
+  try {
+    const id = String(req.params.id ?? '').trim();
+    if (!mongoose.isValidObjectId(id)) {
+      res.status(400).json({ message: 'Invalid withdrawal id' });
+      return;
+    }
+
+    const withdrawal = await WithdrawalRequest.findById(id)
+      .select('receiverId amount platformFee payoutAmount status payoutStatus createdAt walletDebitedAt')
+      .lean<{
+        _id: mongoose.Types.ObjectId;
+        receiverId: mongoose.Types.ObjectId;
+        amount: number;
+        platformFee?: number;
+        payoutAmount?: number;
+        status: string;
+        payoutStatus?: string | null;
+        createdAt: Date;
+        walletDebitedAt?: Date | null;
+      } | null>();
+    if (!withdrawal || withdrawal.status === 'verification_pending') {
+      res.status(404).json({ message: 'Withdrawal not found' });
+      return;
+    }
+
+    const receiver = await Receiver.findById(withdrawal.receiverId)
+      .select('name phone walletBalance')
+      .lean<{
+        name?: string;
+        phone?: string | null;
+        walletBalance?: number;
+      } | null>();
+
+    const receiverId = withdrawal.receiverId;
+    const [callRows, chatRows, referralRows, withdrawalRows] = await Promise.all([
+      CallSession.aggregate<{ _id: mongoose.Types.ObjectId; talkSec: number; calls: number; earned: number }>([
+        { $match: { receiverId, status: 'completed', durationSec: { $gt: 0 } } },
+        { $addFields: { resolvedEarned: RESOLVED_RECEIVER_CALL_EARNING_EXPR } },
+        {
+          $group: {
+            _id: '$callerId',
+            talkSec: { $sum: '$durationSec' },
+            calls: { $sum: 1 },
+            earned: { $sum: '$resolvedEarned' },
+          },
+        },
+      ]),
+      ChatMessage.aggregate<{ _id: mongoose.Types.ObjectId; messages: number; earned: number }>([
+        { $match: { receiverId, senderType: 'u', feeInr: { $gt: 0 } } },
+        { $group: { _id: '$userId', messages: { $sum: 1 }, earned: { $sum: '$feeInr' } } },
+      ]),
+      ReceiverWalletCredit.aggregate<{ total: number }>([
+        { $match: { receiverId, source: 'referral_reward' } },
+        { $group: { _id: null, total: { $sum: '$amountInr' } } },
+      ]),
+      WithdrawalRequest.aggregate<{ withdrawnInr: number; paidWithdrawalCount: number }>([
+        {
+          $match: {
+            receiverId,
+            status: 'approved',
+            payoutStatus: 'success',
+            walletDebitedAt: { $ne: null },
+          },
+        },
+        {
+          $group: {
+            _id: null,
+            withdrawnInr: { $sum: { $ifNull: ['$amount', 0] } },
+            paidWithdrawalCount: { $sum: 1 },
+          },
+        },
+      ]),
+    ]);
+
+    const byUser = new Map<
+      string,
+      { talkSec: number; calls: number; callEarningsInr: number; chatMessages: number; chatEarningsInr: number }
+    >();
+    for (const row of callRows) {
+      const key = String(row._id);
+      byUser.set(key, {
+        talkSec: Math.max(0, Math.floor(Number(row.talkSec) || 0)),
+        calls: Math.max(0, Math.floor(Number(row.calls) || 0)),
+        callEarningsInr: roundInr(row.earned || 0),
+        chatMessages: 0,
+        chatEarningsInr: 0,
+      });
+    }
+    for (const row of chatRows) {
+      const key = String(row._id);
+      const current = byUser.get(key) ?? {
+        talkSec: 0,
+        calls: 0,
+        callEarningsInr: 0,
+        chatMessages: 0,
+        chatEarningsInr: 0,
+      };
+      current.chatMessages = Math.max(0, Math.floor(Number(row.messages) || 0));
+      current.chatEarningsInr = roundInr(row.earned || 0);
+      byUser.set(key, current);
+    }
+
+    const userIds = [...byUser.keys()].filter((id) => mongoose.isValidObjectId(id));
+    const users = userIds.length
+      ? await User.find({ _id: { $in: userIds } })
+          .select('name phone')
+          .lean<{ _id: mongoose.Types.ObjectId; name?: string; phone?: string }[]>()
+      : [];
+    const userById = new Map(users.map((user) => [String(user._id), user]));
+
+    const callers = [...byUser.entries()]
+      .map(([userId, row]) => ({
+        userId,
+        name: userById.get(userId)?.name?.trim() || 'Unknown',
+        phone: String(userById.get(userId)?.phone ?? '').trim(),
+        talkSec: row.talkSec,
+        calls: row.calls,
+        callEarningsInr: row.callEarningsInr,
+        chatMessages: row.chatMessages,
+        chatEarningsInr: row.chatEarningsInr,
+        earnedInr: roundInr(row.callEarningsInr + row.chatEarningsInr),
+      }))
+      .sort((a, b) => b.earnedInr - a.earnedInr || b.talkSec - a.talkSec);
+
+    const referralEarningsInr = roundInr(referralRows[0]?.total ?? 0);
+    const callerEarningsInr = roundInr(callers.reduce((sum, row) => sum + row.callEarningsInr, 0));
+    const listedEarningsInr = roundInr(
+      callers.reduce((sum, row) => sum + row.earnedInr, 0) + referralEarningsInr
+    );
+    const withdrawnInr = roundInr(withdrawalRows[0]?.withdrawnInr ?? 0);
+    const storedWalletInr = roundInr(
+      typeof receiver?.walletBalance === 'number' && Number.isFinite(receiver.walletBalance)
+        ? receiver.walletBalance
+        : 0
+    );
+    // Same balance the receiver app shows: call earnings plus the stored wallet.
+    const walletBalanceInr = roundInr(Math.max(0, callerEarningsInr + storedWalletInr));
+    const totalEarningsInr = roundInr(walletBalanceInr + withdrawnInr);
+    const otherCreditsInr = roundInr(totalEarningsInr - listedEarningsInr);
+
+    res.status(200).json({
+      receiverName: receiver?.name ?? 'Receiver',
+      receiverPhone: String(receiver?.phone ?? '').trim(),
+      callers,
+      referralEarningsInr,
+      otherCreditsInr,
+      totalEarningsInr,
+      withdrawnInr,
+      paidWithdrawalCount: withdrawalRows[0]?.paidWithdrawalCount ?? 0,
+      walletBalanceInr,
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error('getWithdrawalReceiverBreakdown error:', msg);
+    res.status(500).json({ message: msg || 'Server error' });
+  }
+};
+
+/**
  * PATCH /admin/withdrawals/:id — body `{ action: 'approve' | 'reject' }`
  */
 export const resolveWithdrawal = async (
@@ -2493,15 +2727,16 @@ export const listAdminTransactions = async (
   res: Response
 ): Promise<void> => {
   try {
-    const range = String(req.query.range ?? '7d').toLowerCase();
+    const range = String(req.query.range ?? 'today').toLowerCase();
     const q = String(req.query.q ?? '').trim();
     const page = Math.max(1, Number(req.query.page ?? 1) || 1);
-    const limit = Math.min(100, Math.max(1, Number(req.query.limit ?? 20) || 20));
+    const limit = Math.min(100, Math.max(1, Number(req.query.limit ?? 50) || 50));
     const skip = (page - 1) * limit;
 
     const now = new Date();
     const since = new Date(now);
-    if (range === '7d') since.setDate(now.getDate() - 7);
+    if (range === 'today') since.setHours(0, 0, 0, 0);
+    else if (range === '7d') since.setDate(now.getDate() - 7);
     else if (range === '30d') since.setDate(now.getDate() - 30);
 
     const periodFilter = range === 'all' ? {} : { createdAt: { $gte: since } };

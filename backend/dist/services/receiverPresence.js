@@ -143,7 +143,7 @@ async function syncReceiverPresenceInDatabase(receiverId) {
     const rid = normalizeReceiverId(receiverId);
     if (!rid)
         return;
-    const receiver = await Receiver_1.default.findById(rid).select('isAvailable onlineSince isOnline discoverGraceUntil');
+    const receiver = await Receiver_1.default.findById(rid).select('isAvailable onlineSince isOnline discoverGraceUntil lastActiveAt');
     if (!receiver)
         return;
     const socketLive = (0, socketRegistry_1.isReceiverSocketConnected)(rid);
@@ -153,6 +153,7 @@ async function syncReceiverPresenceInDatabase(receiverId) {
     const onlineSince = receiver.onlineSince;
     if (shouldBeOnline && !wasOnline) {
         receiver.isOnline = true;
+        receiver.lastActiveAt = new Date();
         if (!(onlineSince instanceof Date)) {
             receiver.onlineSince = new Date();
         }
@@ -163,6 +164,7 @@ async function syncReceiverPresenceInDatabase(receiverId) {
     if (!shouldBeOnline && wasOnline) {
         receiver.isOnline = false;
         receiver.onlineSince = null;
+        receiver.lastActiveAt = new Date();
         await receiver.save();
         if (onlineSince instanceof Date) {
             await (0, receiverScore_1.finalizeReceiverOnlineSession)({

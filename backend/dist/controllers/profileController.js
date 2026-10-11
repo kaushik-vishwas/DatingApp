@@ -2031,6 +2031,7 @@ const updateReceiverProfile = async (req, res) => {
                 receiver.isOnline = false;
                 receiver.onlineSince = null;
                 if (onlineSince instanceof Date) {
+                    receiver.lastActiveAt = endedAt;
                     await (0, receiverScore_1.finalizeReceiverOnlineSession)({
                         receiverId,
                         onlineSince,

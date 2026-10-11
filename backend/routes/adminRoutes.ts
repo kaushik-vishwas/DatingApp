@@ -30,6 +30,7 @@ import {
   updateAdminRole,
   getWithdrawalPendingCount,
   listWithdrawals,
+  getWithdrawalReceiverBreakdown,
   listAdminTransactions,
   resolveModerationReport,
   resolveWithdrawal,
@@ -85,6 +86,7 @@ router.get('/revenue', adminProtect, getRevenueDashboard);
 router.use('/earnings', adminEarningsRoutes);
 router.get('/withdrawals/pending-count', adminProtect, getWithdrawalPendingCount);
 router.get('/withdrawals', adminProtect, listWithdrawals);
+router.get('/withdrawals/:id/breakdown', adminProtect, getWithdrawalReceiverBreakdown);
 router.patch('/withdrawals/:id', adminProtect, resolveWithdrawal);
 router.get('/transactions', adminProtect, listAdminTransactions);
 

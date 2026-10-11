@@ -42,6 +42,7 @@ const discoverReceiverFilter_1 = require("../services/discoverReceiverFilter");
 const Receiver_1 = __importStar(require("../models/Receiver"));
 const ChatBlock_1 = __importDefault(require("../models/ChatBlock"));
 const ReceiverRating_1 = __importDefault(require("../models/ReceiverRating"));
+const ReceiverDailyScore_1 = __importDefault(require("../models/ReceiverDailyScore"));
 const accountAccess_1 = require("../utils/accountAccess");
 const callQueue_1 = require("../services/callQueue");
 const receiverPresence_1 = require("../services/receiverPresence");
@@ -62,6 +63,15 @@ function parseIntQuery(val) {
         return NaN;
     const n = parseInt(s, 10);
     return Number.isFinite(n) ? n : NaN;
+}
+function parseBoolQuery(val) {
+    const s = firstQueryString(val).toLowerCase();
+    return s === 'true' || s === '1' || s === 'yes';
+}
+/** Receivers who were online in this window stay on caller discover. */
+const DISCOVER_ACTIVE_WINDOW_MS = 10 * 24 * 60 * 60 * 1000;
+function utcDateKey(d) {
+    return d.toISOString().slice(0, 10);
 }
 function toCard(r, ratingByReceiverId, busyByReceiverId) {
     const o = r.toObject();
@@ -106,7 +116,12 @@ const listReceiversForCaller = async (req, res) => {
         const minAgeRaw = parseIntQuery(req.query.minAge);
         const maxAgeRaw = parseIntQuery(req.query.maxAge);
         const limitRaw = parseIntQuery(req.query.limit);
-        const limit = Math.min(100, Math.max(1, Number.isFinite(limitRaw) ? limitRaw : 50));
+        const limit = Math.min(100, Math.max(1, Number.isFinite(limitRaw) ? limitRaw : 40));
+        const skipRaw = parseIntQuery(req.query.skip);
+        const skip = Math.min(5000, Math.max(0, Number.isFinite(skipRaw) ? skipRaw : 0));
+        const onlineOnly = parseBoolQuery(req.query.onlineOnly);
+        const minRatingRaw = parseIntQuery(req.query.minRating);
+        const minRating = Number.isFinite(minRatingRaw) ? minRatingRaw : 0;
         const filter = (0, discoverReceiverFilter_1.buildDiscoverReceiverFilter)({
             language: firstQueryString(req.query.language),
             q: firstQueryString(req.query.q),
@@ -115,16 +130,44 @@ const listReceiversForCaller = async (req, res) => {
             minAge: minAgeRaw,
             maxAge: maxAgeRaw,
         });
+        const activeSince = new Date(Date.now() - DISCOVER_ACTIVE_WINDOW_MS);
+        const activeIds = await ReceiverDailyScore_1.default.distinct('receiverId', {
+            dateKey: { $gte: utcDateKey(activeSince) },
+        });
+        const activityClause = {
+            $or: [
+                { isOnline: true },
+                { onlineSince: { $type: 'date' } },
+                { lastActiveAt: { $gte: activeSince } },
+                ...(activeIds.length > 0 ? [{ _id: { $in: activeIds } }] : []),
+            ],
+        };
         const uid = new mongoose_1.default.Types.ObjectId(String(req.user._id));
         const blockedReceiverIds = await ChatBlock_1.default.distinct('receiverId', { userId: uid });
-        const blockClause = blockedReceiverIds.length > 0
-            ? { _id: { $nin: blockedReceiverIds } }
-            : {};
-        const receivers = await Receiver_1.default.find({ ...filter, ...blockClause })
+        const clauses = [filter, activityClause];
+        if (blockedReceiverIds.length > 0) {
+            clauses.push({ _id: { $nin: blockedReceiverIds } });
+        }
+        if (onlineOnly) {
+            clauses.push({ isAvailable: true, isOnline: true, isBusyOnCall: { $ne: true } });
+        }
+        if (minRating >= 1) {
+            const ratedIds = await ReceiverRating_1.default.aggregate([
+                { $group: { _id: '$receiverId', avg: { $avg: '$rating' } } },
+                { $match: { avg: { $gte: minRating } } },
+                { $project: { _id: 1 } },
+            ]);
+            clauses.push({ _id: { $in: ratedIds.map((row) => row._id) } });
+        }
+        const receivers = await Receiver_1.default.find({ $and: clauses })
             .select('name age state interests languages profileImage audioCallRate updatedAt gender isAvailable isOnline isBusyOnCall discoverGraceUntil expoPushToken fcmDeviceToken')
-            .sort({ updatedAt: -1 })
-            .limit(limit)
+            .sort({ isOnline: -1, isAvailable: -1, isBusyOnCall: 1, updatedAt: -1 })
+            .skip(skip)
+            .limit(limit + 1)
             .exec();
+        const hasMore = receivers.length > limit;
+        if (hasMore)
+            receivers.pop();
         const receiverIds = receivers.map((r) => new mongoose_1.default.Types.ObjectId(String(r._id)));
         const ratingRows = receiverIds.length === 0
             ? []
@@ -150,6 +193,7 @@ const listReceiversForCaller = async (req, res) => {
         const busyByReceiverId = await (0, callQueue_1.getBusyReceiverIdSet)(receivers.map((r) => String(r._id)));
         res.status(200).json({
             receivers: receivers.map((r) => toCard(r, ratingByReceiverId, busyByReceiverId)),
+            hasMore,
         });
     }
     catch (err) {

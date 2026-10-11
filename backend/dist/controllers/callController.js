@@ -72,6 +72,12 @@ function callerCallGrossAmountInr(durationSec, ratePerMinute) {
         return 0;
     return roundInr(Math.ceil(sec / 60) * rate);
 }
+/** Rupees of talk time not yet taken from the wallet. Zero while the current minute is already paid. */
+function unbilledCallGrossInr(call, now = new Date()) {
+    const gross = callerCallGrossAmountInr(callTalkDurationSec(call, now), Number(call.ratePerMinute) || 0);
+    const already = roundInr(Number(call.settledAmountInr) || 0);
+    return roundInr(Math.max(0, gross - already));
+}
 async function readCallerWalletBalanceInr(callerId) {
     if (!mongoose_1.default.Types.ObjectId.isValid(callerId))
         return 0;
@@ -240,10 +246,32 @@ async function settleCallSession(callId, complete) {
                 }
             }
             const nextSettled = roundInr(alreadySettled + settledNow);
+            const callerRate = Math.max(0, Number(call.ratePerMinute) || 0);
+            // Wallet cannot pay for the time already talked. Credit the receiver only for rupees collected.
+            const insufficientBalance = callerRate > 0 && roundInr(grossAmountInr - nextSettled) > 0;
+            if (insufficientBalance) {
+                const talkAnchor = callTalkStartedAt(call) ?? call.startedAt;
+                if (earningSettings.receiverEarningModel === 'fixed_per_minute') {
+                    const paidMs = (nextSettled / callerRate) * 60_000;
+                    receiverEarnedInr = (0, receiverEarningModel_1.computeProratedFixedEarningsInr)(talkAnchor, new Date(talkAnchor.getTime() + paidMs), earningSettings.fixedPerMinuteWindows);
+                }
+                else {
+                    receiverEarnedInr = roundInr((nextSettled / callerRate) * Math.max(0, Number(call.receiverPayoutRatePerMinute) || 0));
+                }
+                console.info('[call] end_unpaid', {
+                    callId,
+                    durationSec,
+                    grossAmountInr,
+                    settledAmountInr: nextSettled,
+                    receiverEarnedInr,
+                    forcedEnd: !complete,
+                });
+            }
+            const markComplete = complete || insufficientBalance;
             call.durationSec = durationSec;
             call.settledAmountInr = nextSettled;
             call.receiverEarnedInr = receiverEarnedInr;
-            if (complete) {
+            if (markComplete) {
                 call.status = 'completed';
                 call.endedAt = now;
             }
@@ -252,11 +280,11 @@ async function settleCallSession(callId, complete) {
                 durationSec,
                 settledAmountInr: nextSettled,
                 receiverEarnedInr,
-                status: complete ? 'completed' : 'ongoing',
+                status: markComplete ? 'completed' : 'ongoing',
                 receiverId: String(call.receiverId),
                 callerId: String(call.callerId),
                 startedAt: call.startedAt,
-                justCompleted: complete,
+                justCompleted: markComplete,
             };
         });
     }
@@ -275,7 +303,7 @@ async function settleCallSession(callId, complete) {
 /** Live calls hit sessionSync every ~5s, which bumps updatedAt. No updates for this long ⇒ abandoned. */
 const DEFAULT_STALE_ONGOING_MS = 90 * 1000;
 /**
- * Last time a participant synced each live call (light syncs included — they don't write to Mongo,
+ * Last time a participant synced each live call (light syncs included — they bill about once a minute; otherwise they don't write to Mongo,
  * so CallSession.updatedAt alone goes stale mid-talk). In-memory: single-process server.
  */
 const callLastSyncAtMs = new Map();
@@ -312,8 +340,8 @@ async function receiverHasBlockingOngoingSession(receiverId, callerUserId) {
     if (String(session.callerId) === callerUserId) {
         return false;
     }
-    // Light syncs (used for the whole talk phase) don't write to Mongo — include in-memory sync time,
-    // otherwise any call >90s into talk looked "stale" and got force-ended when someone else dialed.
+    // Light syncs write to Mongo about once a minute (when a new minute is billed). Between those
+    // writes, include in-memory sync time, otherwise a live call looked stale and was force-ended.
     const touch = Math.max(getCallLastSyncAtMs(session.callId) ?? 0, (session.updatedAt && session.updatedAt.getTime()) || 0, (session.startedAt && session.startedAt.getTime()) || 0);
     if (Date.now() - touch <= staleMs) {
         return true;
@@ -622,7 +650,10 @@ const syncVoiceSession = async (req, res) => {
         else {
             clearCallSyncActivity(callId);
         }
-        if (light) {
+        // Light sync is what the apps send for the whole talk. Bill when a new minute is owed, and
+        // fall through to settlement when the wallet cannot cover time already used.
+        const needsBilling = current.status === 'ongoing' && unbilledCallGrossInr(current) > 0;
+        if (light && !needsBilling) {
             const talkFields = callTalkApiFields(current);
             const durationSec = callTalkDurationSec(current);
             // Receivers need caller wallet during light sync to show remaining talk time after both join.
@@ -643,6 +674,22 @@ const syncVoiceSession = async (req, res) => {
             return;
         }
         const settled = await settleCallSession(callId, false);
+        if (settled.justCompleted) {
+            (0, socketRegistry_1.emitCallEndedFromServer)(callId, settled.callerId, settled.receiverId);
+            void (0, receiverScore_1.recordReceiverCallScore)({
+                callId,
+                receiverId: settled.receiverId,
+                callerId: settled.callerId,
+                startedAt: settled.startedAt,
+                durationSec: settled.durationSec,
+            }).catch((e) => {
+                const msg = e instanceof Error ? e.message : String(e);
+                console.error('receiver call score record error:', msg);
+                (0, instrument_1.captureServerError)(e, { area: 'call', handler: 'recordReceiverCallScore' });
+            });
+            (0, callQueue_1.releaseReceiverReservation)(settled.receiverId);
+            await (0, callQueue_1.syncReceiverQueueState)(settled.receiverId);
+        }
         const latest = await CallSession_1.default.findOne({ callId });
         const talkFields = callTalkApiFields((latest ?? current));
         const callerWalletBalanceInr = await readCallerWalletBalanceInr(String(current.callerId));

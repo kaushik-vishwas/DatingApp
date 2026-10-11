@@ -17,6 +17,7 @@ exports.emitCallerOnlineToReceiver = emitCallerOnlineToReceiver;
 exports.emitReceiverOnlineToCaller = emitReceiverOnlineToCaller;
 exports.emitCallTalkStarted = emitCallTalkStarted;
 exports.emitCallEndedToParticipants = emitCallEndedToParticipants;
+exports.emitCallEndedFromServer = emitCallEndedFromServer;
 exports.emitReceiverWithdrawalUpdate = emitReceiverWithdrawalUpdate;
 exports.emitAdminWithdrawalRequested = emitAdminWithdrawalRequested;
 const mongoose_1 = __importDefault(require("mongoose"));
@@ -130,6 +131,14 @@ function emitCallEndedToParticipants(callId, callerId, receiverId, fromType, fro
     });
     ioInstance.to(accountRoom('u', callerId)).emit('call:ended', payload);
     ioInstance.to(accountRoom('r', receiverId)).emit('call:ended', payload);
+}
+/**
+ * Wallet ran out on the server. Each installed app ignores `call:ended` when `fromType` is itself,
+ * so emit once as the caller and once as the receiver. The other phone hangs up; no app update needed.
+ */
+function emitCallEndedFromServer(callId, callerId, receiverId) {
+    emitCallEndedToParticipants(callId, callerId, receiverId, 'u', callerId);
+    emitCallEndedToParticipants(callId, callerId, receiverId, 'r', receiverId);
 }
 function emitReceiverWithdrawalUpdate(accountId, payload) {
     if (!ioInstance)

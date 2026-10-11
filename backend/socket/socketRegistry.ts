@@ -147,6 +147,15 @@ export function emitCallEndedToParticipants(
   ioInstance.to(accountRoom('r', receiverId)).emit('call:ended', payload);
 }
 
+/**
+ * Wallet ran out on the server. Each installed app ignores `call:ended` when `fromType` is itself,
+ * so emit once as the caller and once as the receiver. The other phone hangs up; no app update needed.
+ */
+export function emitCallEndedFromServer(callId: string, callerId: string, receiverId: string): void {
+  emitCallEndedToParticipants(callId, callerId, receiverId, 'u', callerId);
+  emitCallEndedToParticipants(callId, callerId, receiverId, 'r', receiverId);
+}
+
 export function emitReceiverWithdrawalUpdate(
   accountId: string,
   payload: {

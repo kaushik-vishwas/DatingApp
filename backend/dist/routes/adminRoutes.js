@@ -46,6 +46,7 @@ router.get('/revenue', adminAuth_1.adminProtect, adminController_1.getRevenueDas
 router.use('/earnings', adminEarningsRoutes_1.default);
 router.get('/withdrawals/pending-count', adminAuth_1.adminProtect, adminController_1.getWithdrawalPendingCount);
 router.get('/withdrawals', adminAuth_1.adminProtect, adminController_1.listWithdrawals);
+router.get('/withdrawals/:id/breakdown', adminAuth_1.adminProtect, adminController_1.getWithdrawalReceiverBreakdown);
 router.patch('/withdrawals/:id', adminAuth_1.adminProtect, adminController_1.resolveWithdrawal);
 router.get('/transactions', adminAuth_1.adminProtect, adminController_1.listAdminTransactions);
 // Wallet offers (recharge packs)
