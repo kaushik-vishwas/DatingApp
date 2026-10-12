@@ -16,39 +16,85 @@ export function isReceiverBusy(receiverId: string): boolean {
   return busyReceiverIds.has(normalizeId(receiverId));
 }
 
-function persistReceiverBusyFlag(receiverId: string, busy: boolean): void {
+const busyPersistTail = new Map<string, Promise<void>>();
+
+/**
+ * Writes the in-memory busy bit. Updates for one receiver run in order, and each write
+ * reads the set at send time, so an older "not busy" cannot land after a newer "busy".
+ */
+function persistReceiverBusyFlag(receiverId: string): void {
   const rid = normalizeId(receiverId);
   if (!rid || !mongoose.Types.ObjectId.isValid(rid)) return;
-  void Receiver.updateOne({ _id: rid }, { $set: { isBusyOnCall: busy } }).exec();
+  const prev = busyPersistTail.get(rid) ?? Promise.resolve();
+  const next = prev
+    .catch(() => undefined)
+    .then(async () => {
+      const busy = busyReceiverIds.has(rid);
+      await Receiver.updateOne({ _id: rid }, { $set: { isBusyOnCall: busy } }).exec();
+    });
+  busyPersistTail.set(rid, next);
 }
 
-/** In-memory invite/reservation, plus an actual ongoing voice session. */
+function rememberReceiverBusy(receiverId: string): void {
+  if (busyReceiverIds.has(receiverId)) return;
+  busyReceiverIds.add(receiverId);
+  waitingReceiverIds.delete(receiverId);
+  persistReceiverBusyFlag(receiverId);
+}
+
+function forgetReceiverBusy(receiverId: string): void {
+  const had = busyReceiverIds.delete(receiverId);
+  if (had) persistReceiverBusyFlag(receiverId);
+}
+
+/**
+ * Busy means a live ring on this process, or a call session that is still ongoing.
+ * A saved `isBusyOnCall` with neither of those is cleared so admin does not keep showing Busy.
+ */
 export async function getBusyReceiverIdSet(receiverIds: string[]): Promise<Set<string>> {
-  const set = new Set<string>();
-  const oids: mongoose.Types.ObjectId[] = [];
+  const requested: string[] = [];
   for (const raw of receiverIds) {
     const id = normalizeId(raw);
-    if (!id) continue;
-    if (busyReceiverIds.has(id) || hasPendingCallInviteForReceiver(id)) set.add(id);
+    if (id) requested.push(id);
+  }
+
+  const flagged = await Receiver.find({ isBusyOnCall: true })
+    .select('_id')
+    .lean<{ _id: mongoose.Types.ObjectId }[]>();
+  const flaggedIds = new Set(flagged.map((row) => String(row._id)));
+
+  const toCheck = new Set<string>([...requested, ...flaggedIds, ...busyReceiverIds]);
+  const oids: mongoose.Types.ObjectId[] = [];
+  for (const id of toCheck) {
     if (mongoose.Types.ObjectId.isValid(id)) oids.push(new mongoose.Types.ObjectId(id));
   }
-  if (oids.length === 0) return set;
-  const [ongoing, busyRows] = await Promise.all([
-    CallSession.find({
-      receiverId: { $in: oids },
-      status: 'ongoing',
-    })
-      .select('receiverId')
-      .lean<{ receiverId: mongoose.Types.ObjectId }[]>(),
-    Receiver.find({
-      _id: { $in: oids },
-      isBusyOnCall: true,
-    })
-      .select('_id')
-      .lean<{ _id: mongoose.Types.ObjectId }[]>(),
-  ]);
-  for (const row of ongoing) set.add(String(row.receiverId));
-  for (const row of busyRows) set.add(String(row._id));
+
+  const ongoing =
+    oids.length === 0
+      ? []
+      : await CallSession.find({
+          receiverId: { $in: oids },
+          status: 'ongoing',
+        })
+          .select('receiverId')
+          .lean<{ receiverId: mongoose.Types.ObjectId }[]>();
+  const ongoingIds = new Set(ongoing.map((row) => String(row.receiverId)));
+
+  const live = (id: string): boolean => ongoingIds.has(id) || hasPendingCallInviteForReceiver(id);
+
+  for (const id of toCheck) {
+    if (live(id)) {
+      rememberReceiverBusy(id);
+      continue;
+    }
+    forgetReceiverBusy(id);
+    if (flaggedIds.has(id)) persistReceiverBusyFlag(id);
+  }
+
+  const set = new Set<string>();
+  for (const id of requested) {
+    if (live(id)) set.add(id);
+  }
   return set;
 }
 
@@ -57,30 +103,32 @@ export function tryReserveReceiver(receiverId: string): boolean {
   if (!rid || busyReceiverIds.has(rid)) return false;
   busyReceiverIds.add(rid);
   waitingReceiverIds.delete(rid);
-  persistReceiverBusyFlag(rid, true);
+  persistReceiverBusyFlag(rid);
   return true;
 }
 
 export function releaseReceiverReservation(receiverId: string): void {
   const rid = normalizeId(receiverId);
   busyReceiverIds.delete(rid);
-  persistReceiverBusyFlag(rid, false);
+  persistReceiverBusyFlag(rid);
 }
 
-/** Clears in-memory "busy" when it is not backed by an ongoing session or an active socket invite. */
+/** Clears a busy reservation that is not a live ring or an ongoing call, including a leftover database flag. */
 export async function releaseIfStaleReceiverBusy(receiverId: string): Promise<void> {
   const rid = normalizeId(receiverId);
   if (!rid || !mongoose.Types.ObjectId.isValid(rid)) return;
-  if (!busyReceiverIds.has(rid)) return;
   if (hasPendingCallInviteForReceiver(rid)) return;
-  const ongoing = await CallSession.exists({
-    receiverId: new mongoose.Types.ObjectId(rid),
-    status: 'ongoing',
-  });
-  if (!ongoing) {
-    busyReceiverIds.delete(rid);
-    persistReceiverBusyFlag(rid, false);
+  const oid = new mongoose.Types.ObjectId(rid);
+  const [ongoing, flagged] = await Promise.all([
+    CallSession.exists({ receiverId: oid, status: 'ongoing' }),
+    Receiver.exists({ _id: oid, isBusyOnCall: true }),
+  ]);
+  if (ongoing) {
+    rememberReceiverBusy(rid);
+    return;
   }
+  const hadMemoryBusy = busyReceiverIds.delete(rid);
+  if (hadMemoryBusy || flagged) persistReceiverBusyFlag(rid);
 }
 
 export async function releaseStaleReceiverBusyFlags(): Promise<void> {
