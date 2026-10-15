@@ -44,6 +44,7 @@ const Admin_1 = __importDefault(require("../models/Admin"));
 const Receiver_1 = __importDefault(require("../models/Receiver"));
 const User_1 = __importDefault(require("../models/User"));
 const UserReport_1 = __importDefault(require("../models/UserReport"));
+const displayNameLimit_1 = require("../utils/displayNameLimit");
 const WithdrawalRequest_1 = __importDefault(require("../models/WithdrawalRequest"));
 const CallSession_1 = __importDefault(require("../models/CallSession"));
 const ReceiverRating_1 = __importDefault(require("../models/ReceiverRating"));
@@ -926,6 +927,11 @@ const updateAppUser = async (req, res) => {
                 res.status(400).json({ message: 'name cannot be empty' });
                 return;
             }
+            const nameTooLong = (0, displayNameLimit_1.displayNameTooLongMessage)(name);
+            if (nameTooLong) {
+                res.status(400).json({ message: nameTooLong });
+                return;
+            }
             user.name = name;
         }
         if (typeof body.phone === 'string') {
@@ -1052,6 +1058,11 @@ const updateReceiver = async (req, res) => {
             const name = body.name.trim();
             if (!name) {
                 res.status(400).json({ message: 'name cannot be empty' });
+                return;
+            }
+            const nameTooLong = (0, displayNameLimit_1.displayNameTooLongMessage)(name);
+            if (nameTooLong) {
+                res.status(400).json({ message: nameTooLong });
                 return;
             }
             receiver.name = name;
@@ -2131,6 +2142,7 @@ const getWithdrawalReceiverBreakdown = async (req, res) => {
                         talkSec: { $sum: '$durationSec' },
                         calls: { $sum: 1 },
                         earned: { $sum: '$resolvedEarned' },
+                        lastTalkedAt: { $max: { $ifNull: ['$endedAt', '$startedAt'] } },
                     },
                 },
             ]),
@@ -2163,12 +2175,14 @@ const getWithdrawalReceiverBreakdown = async (req, res) => {
         const byUser = new Map();
         for (const row of callRows) {
             const key = String(row._id);
+            const lastTalked = row.lastTalkedAt ? new Date(row.lastTalkedAt) : null;
             byUser.set(key, {
                 talkSec: Math.max(0, Math.floor(Number(row.talkSec) || 0)),
                 calls: Math.max(0, Math.floor(Number(row.calls) || 0)),
                 callEarningsInr: roundInr(row.earned || 0),
                 chatMessages: 0,
                 chatEarningsInr: 0,
+                lastTalkedAt: lastTalked && !Number.isNaN(lastTalked.getTime()) ? lastTalked.toISOString() : null,
             });
         }
         for (const row of chatRows) {
@@ -2179,6 +2193,7 @@ const getWithdrawalReceiverBreakdown = async (req, res) => {
                 callEarningsInr: 0,
                 chatMessages: 0,
                 chatEarningsInr: 0,
+                lastTalkedAt: null,
             };
             current.chatMessages = Math.max(0, Math.floor(Number(row.messages) || 0));
             current.chatEarningsInr = roundInr(row.earned || 0);
@@ -2202,6 +2217,7 @@ const getWithdrawalReceiverBreakdown = async (req, res) => {
             chatMessages: row.chatMessages,
             chatEarningsInr: row.chatEarningsInr,
             earnedInr: roundInr(row.callEarningsInr + row.chatEarningsInr),
+            lastTalkedAt: row.lastTalkedAt,
         }))
             .sort((a, b) => b.earnedInr - a.earnedInr || b.talkSec - a.talkSec);
         const referralEarningsInr = roundInr(referralRows[0]?.total ?? 0);

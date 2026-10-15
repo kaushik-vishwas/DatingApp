@@ -41,6 +41,7 @@ export default function RegisterScreen({ navigation, route }: Props) {
   const validate = (): string | null => {
     const name = fullName.trim();
     if (name.length < 2) return 'Enter your full name (at least 2 characters)';
+    if (name.length > 25) return 'Display name can be at most 25 characters.';
 
     const digits = normalizeIndianMobileDigits(phone);
     const phoneErr = validateIndianMobileDigits(digits);
@@ -112,6 +113,7 @@ export default function RegisterScreen({ navigation, route }: Props) {
             value={fullName}
             onChangeText={setFullName}
             onFocus={scrollToFocusedInput}
+            maxLength={25}
           />
 
           <Text style={styles.label}>Phone Number</Text>

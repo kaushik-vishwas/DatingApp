@@ -44,6 +44,7 @@ const bcryptjs_1 = __importDefault(require("bcryptjs"));
 const User_1 = __importDefault(require("../models/User"));
 const Receiver_1 = __importStar(require("../models/Receiver"));
 const accountAccess_1 = require("../utils/accountAccess");
+const displayNameLimit_1 = require("../utils/displayNameLimit");
 const authToken_1 = require("../utils/authToken");
 const authSessionService_1 = require("../services/authSessionService");
 const socketRegistry_1 = require("../socket/socketRegistry");
@@ -261,6 +262,13 @@ const register = async (req, res) => {
         }
         const allowed = ['caller', 'receiver', 'both'];
         const userRole = role && allowed.includes(role) ? role : 'receiver';
+        if (typeof name === 'string' && name.trim()) {
+            const nameTooLong = (0, displayNameLimit_1.displayNameTooLongMessage)(name);
+            if (nameTooLong) {
+                t.json(400, { message: nameTooLong, error: 'REGISTER_NAME_TOO_LONG' });
+                return;
+            }
+        }
         const resolvedName = typeof name === 'string' && name.trim() ? String(name).trim() : `Member ${phoneDigits.slice(-4)}`;
         if (userRole === 'caller') {
             const user = await User_1.default.create({
@@ -551,6 +559,13 @@ const sendOtp = async (req, res) => {
         // For new receiver signup - store in memory (NOT database)
         if (accountType === 'receiver' && signup) {
             const issued = await (0, smsOtp_1.issueSmsOtp)(phoneDigits, 'pending-receiver');
+            if (signup.name?.trim()) {
+                const nameTooLong = (0, displayNameLimit_1.displayNameTooLongMessage)(signup.name);
+                if (nameTooLong) {
+                    t.json(400, { message: nameTooLong, error: 'SEND_OTP_NAME_TOO_LONG' });
+                    return;
+                }
+            }
             const resolvedName = signup.name?.trim() || `Member ${phoneDigits.slice(-4)}`;
             pendingReceiverSignups.set(phoneDigits, {
                 phone: phoneDigits,
@@ -644,8 +659,8 @@ const verifyOtp = async (req, res) => {
                 const hasProfileImage = receiverDoc.profileImage && receiverDoc.profileImage.trim();
                 const hasUserAudio = receiverDoc.userAudio && receiverDoc.userAudio.trim();
                 if (hasName && hasProfileImage && hasUserAudio) {
-                    doc.accountStatus = 'approved';
-                    doc.voiceVerificationApproved = true;
+                    doc.accountStatus = 'pending_review';
+                    doc.voiceVerificationApproved = false;
                 }
             }
             await doc.save();

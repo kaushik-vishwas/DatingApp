@@ -1,6 +1,7 @@
 import { Pencil } from 'lucide-react';
 
 import type { ReceiverRecord } from '../api/client';
+import { AdminVoicePlayer } from './AdminVoicePlayer';
 import { ProfileImagePreview } from './ProfileImagePreview';
 import { resolveAdminProfileImageUrl } from '../utils/resolveProfileImageUrl';
 
@@ -230,7 +231,7 @@ export function ReceiverDetailModal({ receiver, onClose, onEdit }: Props) {
           <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">Voice sample</p>
           {receiver.userAudio ? (
             <div className="mt-2">
-              <audio controls preload="none" src={receiver.userAudio} className="w-full" />
+              <AdminVoicePlayer src={receiver.userAudio} className="w-full" />
             </div>
           ) : (
             <p className="mt-2 text-sm text-neutral-500">No voice verification audio on file.</p>

@@ -3,7 +3,7 @@ import React from 'react';
 import { Alert, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import VoiceVerificationRecorder from '../../components/VoiceVerificationRecorder';
+import VoiceVerificationRecorder, { isMicNotHeardMessage, MicNotHeardNotice } from '../../components/VoiceVerificationRecorder';
 import { CALLER_AUDIO_VERIFICATION_SCRIPT } from '../../constants/userOnboarding';
 import { useAuth } from '../../context/AuthContext';
 import { useUserOnboarding } from '../../context/UserOnboardingContext';
@@ -18,6 +18,7 @@ export default function AudioVerificationScreen({ navigation }: Props): React.JS
   const insets = useSafeAreaInsets();
   const { gender, userAudio, setUserAudio } = useUserOnboarding();
   const { applyServerUser } = useAuth();
+  const [notHeardVisible, setNotHeardVisible] = React.useState(false);
 
   React.useEffect(() => {
     if (gender && gender !== 'female') {
@@ -37,9 +38,15 @@ export default function AudioVerificationScreen({ navigation }: Props): React.JS
         const { data } = await profileApi.saveCallerUserAudio({ userAudio: url });
         applyServerUser(data.user);
       } catch (e) {
+        const message = getErrorMessage(e);
+        if (isMicNotHeardMessage(message)) {
+          setUserAudio(null);
+          setNotHeardVisible(true);
+          return;
+        }
         Alert.alert(
           'Could not save to server yet',
-          `${getErrorMessage(e)}\n\nYour recording is kept for this session and will be saved when you finish your profile.`
+          `${message}\n\nYour recording is kept for this session and will be saved when you finish your profile.`
         );
       }
     })();
@@ -76,6 +83,7 @@ export default function AudioVerificationScreen({ navigation }: Props): React.JS
           <Text style={styles.proceedText}>Continue</Text>
         </TouchableOpacity>
       </View>
+      <MicNotHeardNotice visible={notHeardVisible} onClose={() => setNotHeardVisible(false)} />
     </View>
   );
 }

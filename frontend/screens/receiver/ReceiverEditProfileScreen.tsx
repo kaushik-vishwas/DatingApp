@@ -41,6 +41,7 @@
   import { authApi, getErrorMessage, profileApi } from '../../services/api';
   import { resolveProfileImageSource } from '../../utils/avatarSource';
   import {
+    DISPLAY_NAME_MAX_LENGTH,
     englishDisplayNameError,
     isEnglishDisplayName,
     normalizeEnglishDisplayName,
@@ -347,6 +348,7 @@
                   onChangeText={(t) => setName(sanitizeEnglishDisplayNameInput(t))} 
                   placeholder="Enter your display name"
                   required
+                  maxLength={DISPLAY_NAME_MAX_LENGTH}
                 />
                 
                 {/* State Dropdown */}
@@ -553,6 +555,7 @@
     keyboardType,
     placeholder,
     required,
+    maxLength,
   }: {
     label: string;
     value: string;
@@ -560,6 +563,7 @@
     keyboardType?: 'default' | 'numeric';
     placeholder?: string;
     required?: boolean;
+    maxLength?: number;
   }) {
     return (
       <View style={styles.fieldWrap}>
@@ -571,6 +575,7 @@
           keyboardType={keyboardType ?? 'default'}
           placeholder={placeholder || label}
           placeholderTextColor="#999"
+          maxLength={maxLength}
         />
       </View>
     );

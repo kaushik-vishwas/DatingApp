@@ -820,6 +820,8 @@ export type WithdrawalCallerEarning = {
   chatMessages: number;
   chatEarningsInr: number;
   earnedInr: number;
+  /** End time of the latest completed call with this caller. */
+  lastTalkedAt?: string | null;
 };
 
 export type WithdrawalReceiverBreakdown = {

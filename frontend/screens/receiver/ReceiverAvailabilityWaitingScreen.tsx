@@ -6,6 +6,7 @@ import {
   ActivityIndicator,
   Alert,
   Animated,
+  DeviceEventEmitter,
   Image,
   StyleSheet,
   Text,
@@ -19,6 +20,7 @@ import { useCallSignals } from '../../context/CallSignalContext';
 import type { ReceiverStackParamList } from '../../navigation/ReceiverStackParamList';
 import { getErrorMessage, profileApi } from '../../services/api';
 import { resolveProfileImageSource } from '../../utils/avatarSource';
+import { PRESENCE_FORCED_OFFLINE_EVENT } from '../../utils/onlinePresenceFailure';
 
 type Nav = NativeStackNavigationProp<ReceiverStackParamList, 'ReceiverAvailabilityWaiting'>;
 
@@ -57,6 +59,13 @@ export default function ReceiverAvailabilityWaitingScreen(): React.JSX.Element {
   }, [ring0, ring1, ring2]);
 
   const { setQueueMode } = useCallSignals();
+
+  useEffect(() => {
+    const sub = DeviceEventEmitter.addListener(PRESENCE_FORCED_OFFLINE_EVENT, () => {
+      navigation.navigate('ReceiverMainTabs', { screen: 'ReceiverHome' });
+    });
+    return () => sub.remove();
+  }, [navigation]);
 
   const onGoOffline = () => {
     if (goingOffline) return;

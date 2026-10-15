@@ -6,6 +6,7 @@ import ReceiverOnboardingStepLayout from '../../../components/receiver/onboardin
 import { useReceiverOnboarding } from '../../../context/ReceiverOnboardingContext';
 import type { ReceiverOnboardingStackParamList } from '../../../navigation/ReceiverOnboardingStackParamList';
 import {
+  DISPLAY_NAME_MAX_LENGTH,
   englishDisplayNameError,
   isEnglishDisplayName,
   normalizeEnglishDisplayName,
@@ -46,7 +47,7 @@ export default function ReceiverOnboardingNicknameScreen({ navigation }: Props):
         onChangeText={(t) => setValue(sanitizeEnglishDisplayNameInput(t))}
         autoCapitalize="words"
         autoCorrect={false}
-        maxLength={40}
+        maxLength={DISPLAY_NAME_MAX_LENGTH}
       />
     </ReceiverOnboardingStepLayout>
   );

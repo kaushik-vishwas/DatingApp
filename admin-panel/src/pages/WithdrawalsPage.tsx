@@ -83,6 +83,19 @@ const rowActionStatus = (row: AdminWithdrawalRow): ActionStatus => {
 const formatInr = (n: number) =>
   `₹${Number(n || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 })}`;
 
+function formatLastTalked(iso: string | null | undefined): string {
+  if (!iso) return '—';
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return '—';
+  return date.toLocaleString('en-IN', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  });
+}
+
 function formatTalkTime(sec: number): string {
   const total = Math.max(0, Math.floor(sec));
   const hours = Math.floor(total / 3600);
@@ -556,6 +569,9 @@ export function WithdrawalsPage() {
                           {formatInr(caller.callEarningsInr)}
                           <span className="text-neutral-300"> · </span>
                           Chat {caller.chatMessages.toLocaleString('en-IN')} · {formatInr(caller.chatEarningsInr)}
+                        </p>
+                        <p className="mt-1 text-xs text-neutral-500">
+                          Last talked: {formatLastTalked(caller.lastTalkedAt)}
                         </p>
                       </div>
                     ))

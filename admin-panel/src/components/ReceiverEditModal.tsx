@@ -354,6 +354,7 @@ export function ReceiverEditModal({ receiver, onClose, onSaved }: Props) {
                       onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
                       className="w-full rounded-xl border border-neutral-200 px-3.5 py-2 text-sm outline-none ring-[#7b2cff]/20 focus:ring-2"
                       placeholder="Receiver name"
+                      maxLength={25}
                     />
                   </div>
                   <div>

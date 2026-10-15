@@ -31,7 +31,7 @@ import type { UserProfile } from '../types/user';
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
 function receiverSetupPhase(user: UserProfile): 'live' | 'setup' | 'edit' {
-  if (user.accountStatus === 'approved' || user.accountStatus === 'pending_review') return 'live';
+  if (user.accountStatus === 'approved') return 'live';
   if (user.accountStatus === 'pending_profile') return 'setup';
   return 'edit';
 }
@@ -195,7 +195,7 @@ export default function AppNavigator(): React.JSX.Element {
           ) : (
             <Stack.Screen name="UnderReview" component={UnderReviewScreen} />
           )
-        ) : accountStatus === 'rejected' ? (
+        ) : accountStatus === 'rejected' || accountStatus === 'pending_review' ? (
           <Stack.Screen name="UnderReview" component={UnderReviewScreen} />
         ) : (
           <Stack.Screen name="Home" component={ReceiverSignedInRoot} />

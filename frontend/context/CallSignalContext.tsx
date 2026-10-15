@@ -1,5 +1,5 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, AppState, type AppStateStatus } from 'react-native';
+import { Alert, AppState, DeviceEventEmitter, type AppStateStatus } from 'react-native';
 import { callDiag, isCallHoldGuardActive } from '../utils/callDiagnostics';
 import { instrumentedEmitCallEnd } from '../utils/callEndInstrumentation';
 import { CommonActions } from '@react-navigation/native';
@@ -62,6 +62,10 @@ import {
 } from '../utils/onlinePresenceNotifications';
 import { registerIncomingCallBootstrapPrefetch } from '../utils/incomingCallBootstrapPrefetch';
 import { clearVoiceCallStreamWarmup, warmVoiceCallStreamClient } from '../utils/voiceCallStreamWarmup';
+import {
+  PRESENCE_FORCED_OFFLINE_EVENT,
+  subscribeOnlinePresenceFailure,
+} from '../utils/onlinePresenceFailure';
 import {
   ensureVoiceCallPermissions,
   hasVoiceCallMicrophonePermission,
@@ -368,7 +372,7 @@ function callerShouldResetStackForVoiceCall(params: VoiceCallScreenParams): bool
 }
 
 export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { isSignedIn, user, bootstrapping } = useAuth();
+  const { isSignedIn, user, bootstrapping, refreshUser } = useAuth();
   const socketRef = useRef<Socket | null>(null);
   const peerProfileRef = useRef<Map<string, { name: string; image?: string | null }>>(new Map());
   const pendingOutgoingByCallIdRef = useRef<Map<string, PendingOutgoingCall>>(new Map());
@@ -1688,6 +1692,19 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       throw new Error(ack.error || 'Unable to update queue mode.');
     }
   }, [clearPendingInvites]);
+
+  useEffect(() => {
+    if (!isSignedIn || user?.role !== 'receiver') return;
+    return subscribeOnlinePresenceFailure((message) => {
+      userAvailableRef.current = false;
+      queueModeRef.current = false;
+      void setQueueMode(false).catch(() => {});
+      void profileApi.updateReceiverProfile({ isAvailable: false }).catch(() => {});
+      void refreshUser();
+      DeviceEventEmitter.emit(PRESENCE_FORCED_OFFLINE_EVENT);
+      Alert.alert('Go Online turned off', message);
+    });
+  }, [isSignedIn, user?.role, refreshUser, setQueueMode]);
 
   useEffect(() => {
     if (!isSignedIn || !user) {

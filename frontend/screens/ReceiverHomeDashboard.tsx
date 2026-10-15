@@ -13,6 +13,7 @@ import {
   StyleSheet,
   Text,
   Switch,
+  DeviceEventEmitter,
   TouchableOpacity,
   useWindowDimensions,
   View,
@@ -44,6 +45,7 @@ import EarnCoinsImg from '../assets/earn-coins.png';
 import EarnGiftImg from '../assets/earn-gift.png';
 import { useReceiverTabBarBottomInset } from '../utils/receiverTabBarInset';
 import { startReceiverOnlineKeepAlive, stopReceiverOnlineKeepAlive } from '../utils/receiverOnlineKeepAlive';
+import { PRESENCE_FORCED_OFFLINE_EVENT } from '../utils/onlinePresenceFailure';
 import { logPresenceDiagnostic } from '../utils/receiverPresenceDiagnostics';
 import { CHAT_RECEIVER_EARN_LABEL } from '../constants/chatPricing';
 
@@ -165,6 +167,13 @@ export default function ReceiverHomeDashboard(): React.JSX.Element {
     if (available) startReceiverOnlineKeepAlive();
     else stopReceiverOnlineKeepAlive();
   }, [available]);
+
+  React.useEffect(() => {
+    const sub = DeviceEventEmitter.addListener(PRESENCE_FORCED_OFFLINE_EVENT, () => {
+      setAvailable(false);
+    });
+    return () => sub.remove();
+  }, []);
 
   React.useEffect(() => {
     if (!receiverId || user?.role !== 'receiver') return;

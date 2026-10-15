@@ -6,6 +6,7 @@ import Admin from '../models/Admin';
 import Receiver, { type ReceiverDocument } from '../models/Receiver';
 import User, { type UserDocument } from '../models/User';
 import UserReport, { type ReportResolution } from '../models/UserReport';
+import { displayNameTooLongMessage } from '../utils/displayNameLimit';
 import WithdrawalRequest from '../models/WithdrawalRequest';
 import CallSession from '../models/CallSession';
 import ReceiverRating from '../models/ReceiverRating';
@@ -1066,6 +1067,11 @@ export const updateAppUser = async (
         res.status(400).json({ message: 'name cannot be empty' });
         return;
       }
+      const nameTooLong = displayNameTooLongMessage(name);
+      if (nameTooLong) {
+        res.status(400).json({ message: nameTooLong });
+        return;
+      }
       user.name = name;
     }
 
@@ -1231,6 +1237,11 @@ export const updateReceiver = async (
       const name = body.name.trim();
       if (!name) {
         res.status(400).json({ message: 'name cannot be empty' });
+        return;
+      }
+      const nameTooLong = displayNameTooLongMessage(name);
+      if (nameTooLong) {
+        res.status(400).json({ message: nameTooLong });
         return;
       }
       receiver.name = name;
@@ -2446,7 +2457,13 @@ export const getWithdrawalReceiverBreakdown = async (
 
     const receiverId = withdrawal.receiverId;
     const [callRows, chatRows, referralRows, withdrawalRows] = await Promise.all([
-      CallSession.aggregate<{ _id: mongoose.Types.ObjectId; talkSec: number; calls: number; earned: number }>([
+      CallSession.aggregate<{
+        _id: mongoose.Types.ObjectId;
+        talkSec: number;
+        calls: number;
+        earned: number;
+        lastTalkedAt: Date | null;
+      }>([
         { $match: { receiverId, status: 'completed', durationSec: { $gt: 0 } } },
         { $addFields: { resolvedEarned: RESOLVED_RECEIVER_CALL_EARNING_EXPR } },
         {
@@ -2455,6 +2472,7 @@ export const getWithdrawalReceiverBreakdown = async (
             talkSec: { $sum: '$durationSec' },
             calls: { $sum: 1 },
             earned: { $sum: '$resolvedEarned' },
+            lastTalkedAt: { $max: { $ifNull: ['$endedAt', '$startedAt'] } },
           },
         },
       ]),
@@ -2487,16 +2505,25 @@ export const getWithdrawalReceiverBreakdown = async (
 
     const byUser = new Map<
       string,
-      { talkSec: number; calls: number; callEarningsInr: number; chatMessages: number; chatEarningsInr: number }
+      {
+        talkSec: number;
+        calls: number;
+        callEarningsInr: number;
+        chatMessages: number;
+        chatEarningsInr: number;
+        lastTalkedAt: string | null;
+      }
     >();
     for (const row of callRows) {
       const key = String(row._id);
+      const lastTalked = row.lastTalkedAt ? new Date(row.lastTalkedAt) : null;
       byUser.set(key, {
         talkSec: Math.max(0, Math.floor(Number(row.talkSec) || 0)),
         calls: Math.max(0, Math.floor(Number(row.calls) || 0)),
         callEarningsInr: roundInr(row.earned || 0),
         chatMessages: 0,
         chatEarningsInr: 0,
+        lastTalkedAt: lastTalked && !Number.isNaN(lastTalked.getTime()) ? lastTalked.toISOString() : null,
       });
     }
     for (const row of chatRows) {
@@ -2507,6 +2534,7 @@ export const getWithdrawalReceiverBreakdown = async (
         callEarningsInr: 0,
         chatMessages: 0,
         chatEarningsInr: 0,
+        lastTalkedAt: null,
       };
       current.chatMessages = Math.max(0, Math.floor(Number(row.messages) || 0));
       current.chatEarningsInr = roundInr(row.earned || 0);
@@ -2532,6 +2560,7 @@ export const getWithdrawalReceiverBreakdown = async (
         chatMessages: row.chatMessages,
         chatEarningsInr: row.chatEarningsInr,
         earnedInr: roundInr(row.callEarningsInr + row.chatEarningsInr),
+        lastTalkedAt: row.lastTalkedAt,
       }))
       .sort((a, b) => b.earnedInr - a.earnedInr || b.talkSec - a.talkSec);
 

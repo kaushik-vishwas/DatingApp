@@ -57,6 +57,7 @@ export type IncomingCallAndroidModule = {
   markIncomingCallHandledNative(callId: string): boolean;
   isIncomingCallDeclined(callId: string): boolean;
   isOnlinePresenceKeepAliveRunning(): boolean;
+  consumeOnlinePresenceFailure(): string;
   readNativePresenceWakeLog(): string;
   clearNativePresenceWakeLog(): boolean;
   getPresenceDebugSnapshot(): Record<string, unknown>;
@@ -102,6 +103,7 @@ function unavailableMethod(name: string): (...args: unknown[]) => unknown {
     if (name === 'openOemAutostartSettings') return { opened: false, reason: 'unavailable' };
     if (name === 'canUseFullScreenIntent') return true;
     if (name === 'isOnlinePresenceKeepAliveRunning') return false;
+    if (name === 'consumeOnlinePresenceFailure') return '';
     if (name === 'readNativePresenceWakeLog') return '';
     if (name === 'clearNativePresenceWakeLog') return false;
     if (name === 'getPresenceDebugSnapshot') return { ok: false, reason: 'unavailable' };

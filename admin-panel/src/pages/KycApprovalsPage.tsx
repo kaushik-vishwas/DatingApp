@@ -7,6 +7,7 @@ import {
   rejectReceiver,
   type ReceiverRecord,
 } from '../api/client';
+import { AdminVoicePlayer } from '../components/AdminVoicePlayer';
 import { ReceiverDetailModal } from '../components/ReceiverDetailModal';
 import { kycCode } from '../utils/receiverDisplay';
 import { resolveAdminProfileImageUrl } from '../utils/resolveProfileImageUrl';
@@ -305,7 +306,7 @@ export function KycApprovalsPage() {
                       <td className="px-4 py-3 font-medium text-neutral-900">{r.name}</td>
                       <td className="px-4 py-3">
                         {r.userAudio ? (
-                          <audio controls preload="none" src={r.userAudio} className="h-9 max-w-[220px]" />
+                          <AdminVoicePlayer src={r.userAudio} className="h-9 max-w-[220px]" />
                         ) : (
                           <span className="text-neutral-400">—</span>
                         )}

@@ -17,11 +17,19 @@ class IncomingCallAndroidModule : Module() {
   override fun definition() = ModuleDefinition {
     Name("IncomingCallAndroid")
 
-    Events("onCellularCallStateChanged", "onNotificationTapRelayed", "onTelephonyDiagnostic")
+    Events(
+      "onCellularCallStateChanged",
+      "onNotificationTapRelayed",
+      "onTelephonyDiagnostic",
+      "onOnlinePresenceFailed"
+    )
 
     OnCreate {
       IncomingCallNotificationTapEventSink.emit = { payload ->
         sendEvent("onNotificationTapRelayed", payload)
+      }
+      OnlinePresenceFailureSink.emit = { message ->
+        sendEvent("onOnlinePresenceFailed", mapOf("message" to message))
       }
     }
 
@@ -194,6 +202,11 @@ class IncomingCallAndroidModule : Module() {
 
     Function("isOnlinePresenceKeepAliveRunning") {
       OnlinePresenceForegroundService.running
+    }
+
+    Function("consumeOnlinePresenceFailure") {
+      val context = appContext.reactContext ?: return@Function ""
+      OnlinePresenceForegroundService.consumeFailureMessage(context)
     }
 
     Function("readNativePresenceWakeLog") {

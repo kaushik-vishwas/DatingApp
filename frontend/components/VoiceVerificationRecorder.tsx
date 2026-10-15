@@ -1,3 +1,4 @@
+import { Ionicons } from '@expo/vector-icons';
 import { Audio, InterruptionModeAndroid, InterruptionModeIOS } from 'expo-av';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
@@ -5,7 +6,9 @@ import {
   Alert,
   Animated,
   Easing,
+  Modal,
   Platform,
+  Pressable,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -19,6 +22,59 @@ import {
 } from '../lib/cloudinary';
 
 const PURPLE = '#7b2cff';
+const MIN_DURATION_MS = 8_000;
+const MAX_DURATION_MS = 45_000;
+const PEAK_DB = -25;
+const SPEECH_DB = -40;
+const MIN_SPEECH_SAMPLES = 8;
+const MIC_DID_NOT_HEAR = "The mic didn't hear the paragraph. Please record again.";
+
+export function isMicNotHeardMessage(message: string): boolean {
+  return message.toLowerCase().includes("didn't hear");
+}
+
+export function MicNotHeardNotice({
+  visible,
+  onClose,
+}: {
+  visible: boolean;
+  onClose: () => void;
+}): React.JSX.Element {
+  return (
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+      <Pressable style={noticeStyles.backdrop} onPress={onClose}>
+        <Pressable style={noticeStyles.card} onPress={() => {}}>
+          <View style={noticeStyles.iconWrap}>
+            <Ionicons name="mic-off-outline" size={28} color="#6d28d9" />
+          </View>
+          <Text style={noticeStyles.title}>We couldn't hear you</Text>
+          <Text style={noticeStyles.body}>
+            {MIC_DID_NOT_HEAR} Hold the mic close and then speak. Read it again in a clear voice.
+          </Text>
+          <Pressable style={noticeStyles.button} onPress={onClose}>
+            <Text style={noticeStyles.buttonText}>Record again</Text>
+          </Pressable>
+        </Pressable>
+      </Pressable>
+    </Modal>
+  );
+}
+
+const VOICE_VERIFICATION_RECORDING_OPTIONS: Audio.RecordingOptions = {
+  ...Audio.RecordingOptionsPresets.HIGH_QUALITY,
+  isMeteringEnabled: true,
+};
+
+type MeterSample = { atMs: number; db: number };
+
+function recordingWasHeard(durationMs: number, samples: MeterSample[]): boolean {
+  if (durationMs < MIN_DURATION_MS || durationMs > MAX_DURATION_MS) return false;
+  if (!samples.some((sample) => sample.db >= PEAK_DB)) return false;
+  const speech = samples.filter((sample) => sample.db >= SPEECH_DB);
+  if (speech.length < MIN_SPEECH_SAMPLES) return false;
+  const windows = new Set(speech.map((sample) => Math.floor(sample.atMs / 500)));
+  return windows.size >= 2;
+}
 
 type Props = {
   scriptText: string;
@@ -165,11 +221,14 @@ export default function VoiceVerificationRecorder({
   onUploadError,
 }: Props): React.JSX.Element {
   const recordingRef = useRef<Audio.Recording | null>(null);
+  const meterTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const meterSamplesRef = useRef<MeterSample[]>([]);
   const [isRecording, setIsRecording] = useState(false);
   const [busy, setBusy] = useState(false);
   const [statusLine, setStatusLine] = useState<string | null>(null);
   /** Local file of the last recording whose upload failed — lets the user retry without re-recording. */
   const [failedUploadUri, setFailedUploadUri] = useState<string | null>(null);
+  const [notHeardVisible, setNotHeardVisible] = useState(false);
   const { ring1, ring2, hintOpacity, breathe } = useRecordingPulse(isRecording && !busy);
   const mountedRef = useRef(true);
 
@@ -177,6 +236,10 @@ export default function VoiceVerificationRecorder({
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
+      if (meterTimerRef.current) {
+        clearInterval(meterTimerRef.current);
+        meterTimerRef.current = null;
+      }
       recordingRef.current = null;
       void releaseLastPreparedRecording();
     };
@@ -230,13 +293,13 @@ export default function VoiceVerificationRecorder({
       rec = new Audio.Recording();
       lastPreparedRecording = rec;
       try {
-        await rec.prepareToRecordAsync(Audio.RecordingOptionsPresets.HIGH_QUALITY);
+        await rec.prepareToRecordAsync(VOICE_VERIFICATION_RECORDING_OPTIONS);
       } catch (e) {
         if (!isRecorderAlreadyPreparedError(e)) throw e;
         // The Recording that owns expo-av's flag was lost — reset it and retry once.
         debug('prepare_recorder_flag_reset');
         forceResetExpoAvRecorderFlag();
-        await rec.prepareToRecordAsync(Audio.RecordingOptionsPresets.HIGH_QUALITY);
+        await rec.prepareToRecordAsync(VOICE_VERIFICATION_RECORDING_OPTIONS);
       }
       debug('prepare_ok');
 
@@ -248,9 +311,29 @@ export default function VoiceVerificationRecorder({
         return;
       }
       recordingRef.current = rec;
+      meterSamplesRef.current = [];
+      if (meterTimerRef.current) clearInterval(meterTimerRef.current);
+      const activeRec = rec;
+      const startedAt = Date.now();
+      meterTimerRef.current = setInterval(() => {
+        void activeRec.getStatusAsync().then((status) => {
+          if (!status.isRecording || typeof status.metering !== 'number' || !Number.isFinite(status.metering)) {
+            return;
+          }
+          const atMs =
+            typeof status.durationMillis === 'number' && status.durationMillis > 0
+              ? status.durationMillis
+              : Date.now() - startedAt;
+          meterSamplesRef.current.push({ atMs, db: status.metering });
+        }).catch(() => {});
+      }, 250);
       setIsRecording(true);
       debug('recording_started');
     } catch (e) {
+      if (meterTimerRef.current) {
+        clearInterval(meterTimerRef.current);
+        meterTimerRef.current = null;
+      }
       await releaseRecording(rec);
       if (lastPreparedRecording === rec) lastPreparedRecording = null;
       recordingRef.current = null;
@@ -295,8 +378,14 @@ export default function VoiceVerificationRecorder({
     if (!rec) return;
     setBusy(true);
     setStatusLine(null);
+    if (meterTimerRef.current) {
+      clearInterval(meterTimerRef.current);
+      meterTimerRef.current = null;
+    }
+    let durationMs = 0;
     try {
       const status = await rec.getStatusAsync();
+      durationMs = status.durationMillis ?? 0;
       debug('record_status', `durationMs=${status.durationMillis ?? '?'} isRecording=${String(status.isRecording)}`);
     } catch (e) {
       debug('record_status_failed', e instanceof Error ? e.message : String(e));
@@ -326,6 +415,13 @@ export default function VoiceVerificationRecorder({
           : 'No audio file was produced.';
       setStatusLine('Recording failed. Tap the mic to record again.');
       Alert.alert('Recording failed', `${msg}\n\nPlease record again and read the full paragraph.`);
+      return;
+    }
+    if (!recordingWasHeard(durationMs, meterSamplesRef.current)) {
+      setBusy(false);
+      setFailedUploadUri(null);
+      setStatusLine(null);
+      setNotHeardVisible(true);
       return;
     }
     await upload(uri);
@@ -435,6 +531,7 @@ export default function VoiceVerificationRecorder({
           </TouchableOpacity>
         ) : null}
       </View>
+      <MicNotHeardNotice visible={notHeardVisible} onClose={() => setNotHeardVisible(false)} />
     </View>
   );
 }
@@ -572,6 +669,61 @@ const styles = StyleSheet.create({
   retryText: {
     color: PURPLE,
     fontSize: 14,
+    fontWeight: '700',
+  },
+});
+
+const noticeStyles = StyleSheet.create({
+  backdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(10, 0, 20, 0.55)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 28,
+  },
+  card: {
+    width: '100%',
+    maxWidth: 340,
+    backgroundColor: '#fff',
+    borderRadius: 20,
+    paddingHorizontal: 22,
+    paddingTop: 26,
+    paddingBottom: 20,
+    alignItems: 'center',
+  },
+  iconWrap: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 14,
+    backgroundColor: '#f3e8ff',
+  },
+  title: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#1a1025',
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  body: {
+    fontSize: 15,
+    lineHeight: 22,
+    color: '#5b5366',
+    textAlign: 'center',
+    marginBottom: 20,
+  },
+  button: {
+    alignSelf: 'stretch',
+    backgroundColor: PURPLE,
+    borderRadius: 12,
+    paddingVertical: 13,
+    alignItems: 'center',
+  },
+  buttonText: {
+    color: '#fff',
+    fontSize: 16,
     fontWeight: '700',
   },
 });

@@ -110,6 +110,10 @@ export default function CallerEditProfileScreen({ navigation }: Props): React.JS
       Alert.alert('Validation', 'Please enter your full name.');
       return;
     }
+    if (name.length > 25) {
+      Alert.alert('Validation', 'Display name can be at most 25 characters.');
+      return;
+    }
     if (!state.trim()) {
       Alert.alert('Validation', 'Please select your state.');
       return;
@@ -191,6 +195,7 @@ export default function CallerEditProfileScreen({ navigation }: Props): React.JS
             value={fullName}
             onChangeText={setFullName}
             autoCapitalize="words"
+            maxLength={25}
           />
 
           <Text style={styles.label}>Gender *</Text>

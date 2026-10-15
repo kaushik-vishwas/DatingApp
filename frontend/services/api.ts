@@ -59,27 +59,73 @@ import type {
 
 const JWT_KEY = 'jwt';
 
-let sessionSupersededHandler: (() => void) | null = null;
+const SESSION_END_ERRORS = new Set([
+  'PROTECT_SESSION_SUPERSEDED',
+  'PROTECT_JWT_EXPIRED',
+  'PROTECT_JWT_INVALID',
+  'PROTECT_INVALID_TOKEN_TYP',
+  'PROTECT_USER_NOT_FOUND',
+  'PROTECT_RECEIVER_NOT_FOUND',
+]);
+
+let sessionSupersededHandler: ((reason: 'superseded' | 'expired') => void) | null = null;
 let sessionSupersededHandling = false;
 
-/** Auth layer registers this so stale JWTs stop polling after login elsewhere. */
-export function registerSessionSupersededHandler(handler: (() => void) | null): void {
+/** Auth layer registers this so a dead session clears local login and leaves the app. */
+export function registerSessionSupersededHandler(
+  handler: ((reason: 'superseded' | 'expired') => void) | null
+): void {
   sessionSupersededHandler = handler;
+}
+
+function isRefreshAuthRequest(error: AxiosError): boolean {
+  const url = typeof error.config?.url === 'string' ? error.config.url : '';
+  return /\/auth\/refresh(?:-token)?(?:\?|$)/.test(url);
+}
+
+function requestHadAuthHeader(error: AxiosError): boolean {
+  const headers = error.config?.headers as { get?: (name: string) => unknown; Authorization?: unknown } | undefined;
+  if (!headers) return false;
+  const raw = typeof headers.get === 'function' ? headers.get('Authorization') : headers.Authorization;
+  return typeof raw === 'string' && raw.length > 0;
+}
+
+/** Single place that removes the saved login (AsyncStorage JWT and the native copy). */
+export async function clearLocalAuth(): Promise<void> {
+  await AsyncStorage.removeItem(JWT_KEY);
+  try {
+    const { clearNativeCallCredentials, stopReceiverOnlineKeepAlive } = await import(
+      '../utils/receiverOnlineKeepAlive'
+    );
+    stopReceiverOnlineKeepAlive();
+    clearNativeCallCredentials();
+  } catch {
+    // Expo Go has no native call module.
+  }
 }
 
 async function handleSessionSuperseded401(error: AxiosError): Promise<void> {
   if (error.response?.status !== 401) return;
-  const data = error.response.data as { error?: string } | undefined;
-  if (data?.error !== 'PROTECT_SESSION_SUPERSEDED') return;
+  const data = error.response.data as { error?: string; message?: string } | undefined;
+  const code = data?.error;
+  const message = typeof data?.message === 'string' ? data.message : '';
+  const refreshFailed = isRefreshAuthRequest(error);
+  const sessionDead =
+    refreshFailed ||
+    (typeof code === 'string' && SESSION_END_ERRORS.has(code)) ||
+    /invalid token|sign in again|signed in on another device/i.test(message);
+  if (!sessionDead) return;
+  if (!refreshFailed && !requestHadAuthHeader(error)) return;
   if (sessionSupersededHandling) return;
   sessionSupersededHandling = true;
   try {
-    await clearJwt();
-    sessionSupersededHandler?.();
+    await clearLocalAuth();
+    const reason = code === 'PROTECT_SESSION_SUPERSEDED' ? 'superseded' : 'expired';
+    sessionSupersededHandler?.(reason);
   } finally {
     setTimeout(() => {
       sessionSupersededHandling = false;
-    }, 5000);
+    }, 1500);
   }
 }
 
@@ -216,6 +262,7 @@ const api = axios.create({
 
 type AxiosConfigWithFetchFlag = {
   __fetchRetried?: boolean;
+  __gatewayRetry?: number;
   baseURL?: string;
   url?: string;
   method?: string;
@@ -224,6 +271,9 @@ type AxiosConfigWithFetchFlag = {
   timeout?: number;
   params?: Record<string, unknown>;
 };
+
+const GATEWAY_RETRY_STATUSES = new Set([502, 503, 504]);
+const GATEWAY_RETRY_DELAYS_MS = [1000, 2000, 4000];
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -423,12 +473,28 @@ api.interceptors.response.use(
   async (error: AxiosError) => {
     if (error.response) {
       await handleSessionSuperseded401(error);
-      if (error.response.status >= 500) {
+      const status = error.response.status;
+      const method = String(error.config?.method || 'get').toLowerCase();
+      if (
+        GATEWAY_RETRY_STATUSES.has(status) &&
+        method === 'get' &&
+        error.config
+      ) {
+        const cfg = error.config as AxiosConfigWithFetchFlag;
+        const attempt = cfg.__gatewayRetry ?? 0;
+        const delay = GATEWAY_RETRY_DELAYS_MS[attempt];
+        if (delay != null) {
+          cfg.__gatewayRetry = attempt + 1;
+          await sleep(delay);
+          return api.request(cfg);
+        }
+      }
+      if (status >= 500 && !GATEWAY_RETRY_STATUSES.has(status)) {
         const { captureClientError } = await import('../utils/sentry');
         const path = typeof error.config?.url === 'string' ? error.config.url : '';
         captureClientError(error, {
           area: 'api',
-          status: String(error.response.status),
+          status: String(status),
           path,
         });
       }
@@ -546,9 +612,7 @@ export const getJwt = async () => {
   return AsyncStorage.getItem(JWT_KEY);
 };
 
-export const clearJwt = async () => {
-  await AsyncStorage.removeItem(JWT_KEY);
-};
+export const clearJwt = () => clearLocalAuth();
 
 /** APIs */
 

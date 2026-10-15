@@ -123,6 +123,7 @@ export function AppUserEditModal({ user, onClose, onSaved }: Props) {
               required
               value={form.name}
               onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+              maxLength={25}
               className="w-full rounded-xl border border-neutral-200 px-3 py-2 text-sm outline-none ring-[#7b2cff]/20 focus:ring-2"
             />
           </div>

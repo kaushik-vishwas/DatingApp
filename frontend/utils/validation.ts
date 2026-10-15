@@ -54,6 +54,7 @@ export function validateAccountNumberDigits(s: string): string | null {
 }
 
 /** English letters and single spaces between words. No digits or special characters. */
+export const DISPLAY_NAME_MAX_LENGTH = 25;
 const ENGLISH_DISPLAY_NAME_RE = /^[A-Za-z]+(?: [A-Za-z]+)*$/;
 
 export function sanitizeEnglishDisplayNameInput(raw: string): string {
@@ -66,13 +67,14 @@ export function normalizeEnglishDisplayName(raw: string): string {
 
 export function isEnglishDisplayName(raw: string): boolean {
   const name = normalizeEnglishDisplayName(raw);
-  return name.length >= 2 && name.length <= 40 && ENGLISH_DISPLAY_NAME_RE.test(name);
+  return name.length >= 2 && name.length <= DISPLAY_NAME_MAX_LENGTH && ENGLISH_DISPLAY_NAME_RE.test(name);
 }
 
 export function englishDisplayNameError(raw: string): string | null {
   const name = normalizeEnglishDisplayName(raw);
   if (name.length < 2) return 'Please enter a display name with at least 2 English letters.';
-  if (!ENGLISH_DISPLAY_NAME_RE.test(name) || name.length > 40) {
+  if (name.length > DISPLAY_NAME_MAX_LENGTH) return 'Display name can be at most 25 characters.';
+  if (!ENGLISH_DISPLAY_NAME_RE.test(name)) {
     return 'Display name can use English letters only. Numbers and special characters are not allowed.';
   }
   return null;

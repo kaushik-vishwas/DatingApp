@@ -8,6 +8,7 @@ import {
   Image,
   KeyboardAvoidingView,
   Platform,
+  AppState,
   RefreshControl,
   ScrollView,
   StyleSheet,
@@ -44,6 +45,7 @@ import { withTimeout } from '../utils/withTimeout';
 import { computeWalletRechargeBreakdown, walletCreditForRecharge } from '../utils/walletRechargeFees';
 import {
   markCallerHomeOfferPopupSeen,
+  msUntilCallerHomeOfferPopup,
   shouldShowCallerHomeOfferPopup,
 } from '../utils/callerHomeOfferPopupStorage';
 import {
@@ -361,7 +363,7 @@ export default function CallerDiscoverHome(): React.JSX.Element {
   const contentBottomPadding = useReceiverTabBarBottomInset();
   const navigation = useCallerAppNavigation();
   const suppressMainTabSwipe = useSuppressMainTabSwipeHandlers();
-  const { user, refreshUser, token, bootstrapping, consumeCallerHomeOfferLoginShow } = useAuth();
+  const { user, refreshUser, token, bootstrapping } = useAuth();
   const { startCallInvite } = useCallSignals();
   const [language, setLanguage] = useState<string | null>(null);
   const [search, setSearch] = useState('');
@@ -570,36 +572,57 @@ export default function CallerDiscoverHome(): React.JSX.Element {
 
   useEffect(() => {
     if (!canFetchDiscover || !user?._id) return;
+    const userId = user._id;
     let cancelled = false;
-    void (async () => {
+    let timer: ReturnType<typeof setTimeout> | null = null;
+
+    const scheduleNext = (ms: number) => {
+      if (timer) clearTimeout(timer);
+      timer = null;
+      if (cancelled || ms <= 0) return;
+      timer = setTimeout(() => {
+        void evaluate();
+      }, ms);
+    };
+
+    const armFromLastShow = async () => {
+      const wait = await msUntilCallerHomeOfferPopup(userId);
+      if (!cancelled) scheduleNext(wait);
+    };
+
+    const evaluate = async () => {
+      if (cancelled) return;
       try {
         // Prefer free-talk popup (new caller + every 1 hour). Keep recharge offer as fallback.
-        const showFreeTalk = await shouldShowCallerFreeTalkPopup(user._id);
+        const showFreeTalk = await shouldShowCallerFreeTalkPopup(userId);
         if (cancelled) return;
         if (showFreeTalk) {
           setFreeTalkPopupVisible(true);
           setHomeOfferPopupVisible(false);
-          await markCallerFreeTalkPopupShown(user._id);
+          await markCallerFreeTalkPopupShown(userId);
           const { data } = await walletApi.offers();
           if (cancelled) return;
           const queued = data.popup ?? null;
           if (!queued?.offerId) {
             showOfferAfterFreeTalkRef.current = false;
             setHomeOfferPopup(null);
+            await armFromLastShow();
             return;
           }
-          const forceFromLogin = consumeCallerHomeOfferLoginShow();
-          const showOffer = await shouldShowCallerHomeOfferPopup({
-            userId: user._id,
-            offerId: queued.offerId,
-            forceFromLogin,
-          });
+          const showOffer = await shouldShowCallerHomeOfferPopup(userId);
           if (cancelled) return;
           setHomeOfferPopup(queued);
           showOfferAfterFreeTalkRef.current = showOffer;
           if (showOffer) {
-            await markCallerHomeOfferPopupSeen(user._id, queued.offerId);
+            await markCallerHomeOfferPopupSeen(userId);
           }
+          await armFromLastShow();
+          return;
+        }
+
+        const due = await shouldShowCallerHomeOfferPopup(userId);
+        if (!due) {
+          await armFromLastShow();
           return;
         }
 
@@ -612,29 +635,33 @@ export default function CallerDiscoverHome(): React.JSX.Element {
           }
           return;
         }
-        const forceFromLogin = consumeCallerHomeOfferLoginShow();
-        const show = await shouldShowCallerHomeOfferPopup({
-          userId: user._id,
-          offerId: popup.offerId,
-          forceFromLogin,
-        });
+        const show = await shouldShowCallerHomeOfferPopup(userId);
         if (cancelled) return;
         setHomeOfferPopup(popup);
-        setHomeOfferPopupVisible(show);
         if (show) {
-          await markCallerHomeOfferPopupSeen(user._id, popup.offerId);
+          setHomeOfferPopupVisible(true);
+          await markCallerHomeOfferPopupSeen(userId);
         }
+        await armFromLastShow();
       } catch {
         if (!cancelled) {
           setHomeOfferPopup(null);
           setHomeOfferPopupVisible(false);
         }
       }
-    })();
+    };
+
+    void evaluate();
+    const appStateSub = AppState.addEventListener('change', (next) => {
+      if (next === 'active') void evaluate();
+    });
+
     return () => {
       cancelled = true;
+      if (timer) clearTimeout(timer);
+      appStateSub.remove();
     };
-  }, [canFetchDiscover, user?._id, consumeCallerHomeOfferLoginShow]);
+  }, [canFetchDiscover, user?._id]);
 
   const dismissHomeOfferPopup = useCallback(() => {
     setHomeOfferPopupVisible(false);
@@ -724,10 +751,12 @@ export default function CallerDiscoverHome(): React.JSX.Element {
     <View style={styles.adminNoticeBtnIconWrap}>
       <Ionicons name="share-social" size={15} color={SHARE_BTN_ICON} />
     </View>
-    <Text style={styles.adminNoticeBtnText} numberOfLines={2}>
-      {'Tab for free\ntalk time'}
-    </Text>
-    <Ionicons name="chevron-forward" size={15} color="rgba(255,255,255,0.9)" />
+    <View style={styles.adminNoticeBtnLabel}>
+      <Text style={styles.adminNoticeBtnText} numberOfLines={2}>
+        {'Tab for free\ntalk time'}
+      </Text>
+      <Ionicons name="chevron-forward" size={15} color="rgba(255,255,255,0.9)" style={styles.adminNoticeBtnChevron} />
+    </View>
   </View>
 </TouchableOpacity>
             </View>
@@ -1310,7 +1339,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     paddingVertical: 10,
-    paddingHorizontal: 10,
+    paddingLeft: 8,
+    paddingRight: 0,
   },
   adminNoticeSeparator: {
     width: 1.5,
@@ -1319,8 +1349,6 @@ const styles = StyleSheet.create({
   },
  adminNoticeBtnWrap: {
   width: '100%',
-  maxWidth: 168,
-  // removed: borderRadius, overflow, backgroundColor, shadow, elevation
 },
   adminNoticeBtn: {
     width: '100%',
@@ -1349,8 +1377,16 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  adminNoticeBtnText: {
+  adminNoticeBtnLabel: {
     flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  adminNoticeBtnChevron: {
+    marginRight: 2,
+  },
+  adminNoticeBtnText: {
     flexShrink: 1,
     color: SHARE_BTN_TEXT,
     fontWeight: '800',

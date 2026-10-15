@@ -3,6 +3,7 @@ import type { Response, Request } from 'express';
 import User, { type UserDocument } from '../models/User';
 import Receiver, { RECEIVER_AUDIO_CALL_RATE_INR_PER_MIN, type ReceiverDocument } from '../models/Receiver';
 import { PAUSED_MSG } from '../utils/accountAccess';
+import { displayNameTooLongMessage } from '../utils/displayNameLimit';
 import { signAppAccessToken } from '../utils/authToken';
 import { bumpReceiverAuthSession, bumpUserAuthSession } from '../services/authSessionService';
 import { emitAuthSessionSuperseded } from '../socket/socketRegistry';
@@ -364,6 +365,13 @@ export const register = async (
 
     const allowed: LegacyRegisterRole[] = ['caller', 'receiver', 'both'];
     const userRole: LegacyRegisterRole = role && allowed.includes(role) ? role : 'receiver';
+    if (typeof name === 'string' && name.trim()) {
+      const nameTooLong = displayNameTooLongMessage(name);
+      if (nameTooLong) {
+        t.json(400, { message: nameTooLong, error: 'REGISTER_NAME_TOO_LONG' });
+        return;
+      }
+    }
     const resolvedName =
       typeof name === 'string' && name.trim() ? String(name).trim() : `Member ${phoneDigits.slice(-4)}`;
 
@@ -699,6 +707,13 @@ export const sendOtp = async (
     // For new receiver signup - store in memory (NOT database)
     if (accountType === 'receiver' && signup) {
       const issued = await issueSmsOtp(phoneDigits, 'pending-receiver');
+      if (signup.name?.trim()) {
+        const nameTooLong = displayNameTooLongMessage(signup.name);
+        if (nameTooLong) {
+          t.json(400, { message: nameTooLong, error: 'SEND_OTP_NAME_TOO_LONG' });
+          return;
+        }
+      }
       const resolvedName = signup.name?.trim() || `Member ${phoneDigits.slice(-4)}`;
 
       pendingReceiverSignups.set(phoneDigits, {
@@ -801,8 +816,8 @@ export const verifyOtp = async (
         const hasProfileImage = receiverDoc.profileImage && receiverDoc.profileImage.trim();
         const hasUserAudio = receiverDoc.userAudio && receiverDoc.userAudio.trim();
         if (hasName && hasProfileImage && hasUserAudio) {
-          doc.accountStatus = 'approved';
-          (doc as ReceiverDocument).voiceVerificationApproved = true;
+          doc.accountStatus = 'pending_review';
+          (doc as ReceiverDocument).voiceVerificationApproved = false;
         }
       }
 

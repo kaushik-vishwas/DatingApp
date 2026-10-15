@@ -52,6 +52,8 @@ export const ChatInboxProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const newMessageHandlerRef = useRef<((msg: ChatNewMessageEvent) => void) | null>(null);
   const typingTimersRef = useRef<Record<string, ReturnType<typeof setTimeout> | undefined>>({});
   const roleRef = useRef<'caller' | 'receiver' | null>(user?.role ?? null);
+  const userId = user?._id ?? null;
+  const userRole = user?.role ?? null;
 
   useEffect(() => {
     roleRef.current = user?.role ?? null;
@@ -91,7 +93,7 @@ export const ChatInboxProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   }, []);
 
   useEffect(() => {
-    if (!isSignedIn || !user) {
+    if (!isSignedIn || !userId) {
       if (socketRef.current) {
         socketRef.current.removeAllListeners();
         socketRef.current.disconnect();
@@ -172,7 +174,7 @@ export const ChatInboxProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       }
       typingTimersRef.current = {};
     };
-  }, [isSignedIn, refreshUnreadFromServer, user]);
+  }, [isSignedIn, refreshUnreadFromServer, userId, userRole]);
 
   const totalUnread = useMemo(
     () => Object.values(unreadByPeer).reduce((sum, count) => sum + Math.max(0, count), 0),

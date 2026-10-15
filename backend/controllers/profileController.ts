@@ -20,6 +20,7 @@ import ReceiverRating from '../models/ReceiverRating';
 import { CALLER_INTEREST_ALLOWLIST, CALLER_LANGUAGE_ALLOWLIST } from '../constants/callerProfileAllowlist';
 import { toApiReceiver, toApiUser } from './authController';
 import { blockReceiverUntilApproved } from '../utils/accountAccess';
+import { displayNameTooLongMessage } from '../utils/displayNameLimit';
 import { CHAT_TEXT_FEE_INR } from '../constants/chatPricing';
 import { scheduleReceiverAvailabilityNotifications } from '../services/receiverAvailabilityNotifier';
 import {
@@ -64,6 +65,7 @@ import { MISSED_OR_INCOMPLETE_MAX_SEC } from './callController';
 import { getReceiverEarningSettings, publicEarningSchedulePayload } from '../services/receiverEarningModel';
 import { getReceiverWelcomeSettings } from '../services/receiverWelcome';
 import { getCallerNotificationSettings } from '../services/callerNotification';
+import { voiceSampleRejectionMessage } from '../utils/voiceSampleAudio';
 
 function callerCallNotificationSubtitle(durationSec: number): string {
   const d = Math.max(0, Math.floor(Number(durationSec) || 0));
@@ -310,6 +312,12 @@ export const completeProfile = async (
       reply(400, { message: 'name is required', error: 'COMPLETE_PROFILE_MISSING_NAME' });
       return;
     }
+    const completeProfileNameTooLong = displayNameTooLongMessage(String(name));
+    if (completeProfileNameTooLong) {
+      warn('validation_failed_name_length');
+      reply(400, { message: completeProfileNameTooLong, error: 'COMPLETE_PROFILE_NAME_TOO_LONG' });
+      return;
+    }
     if (!profileImage || typeof profileImage !== 'string') {
       warn('validation_failed_profile_image');
       reply(400, { message: 'profileImage URL is required', error: 'COMPLETE_PROFILE_MISSING_PROFILE_IMAGE' });
@@ -401,6 +409,14 @@ export const completeProfile = async (
       typeof userAudio === 'string' && /^https?:\/\//i.test(userAudio.trim())
         ? userAudio.trim()
         : null;
+    if (receiverVoiceUrl) {
+      const silent = await voiceSampleRejectionMessage(receiverVoiceUrl);
+      if (silent) {
+        warn('validation_failed_voice_silent');
+        reply(400, { message: silent, error: 'VOICE_SAMPLE_SILENT' });
+        return;
+      }
+    }
     log('validation_passed', {
       hasUserAudio: Boolean(receiverVoiceUrl),
       languagesCount: Array.isArray(languages) ? languages.length : 0,
@@ -446,10 +462,10 @@ export const completeProfile = async (
     receiver.bankName = String(bankName).trim();
     receiver.audioCallRate = RECEIVER_AUDIO_CALL_RATE_INR_PER_MIN;
     receiver.userAudio = receiverVoiceUrl ?? null;
-    receiver.accountStatus = 'approved';
-    receiver.voiceVerificationApproved = true;
+    receiver.accountStatus = 'pending_review';
+    receiver.voiceVerificationApproved = false;
 
-    log('before_save', { receiverId: String(receiver._id), nextAccountStatus: 'approved' });
+    log('before_save', { receiverId: String(receiver._id), nextAccountStatus: 'pending_review' });
     await receiver.save();
     log('save_success', { receiverId: String(receiver._id) });
 
@@ -507,6 +523,11 @@ export const saveReceiverKycProfileInfo = async (
     const { name, profileImage, languages, interests, gender, state } = req.body;
     if (!name || !String(name).trim()) {
       t.json(400, { message: 'name is required', error: 'KYC_PROFILE_INFO_MISSING_NAME' });
+      return;
+    }
+    const kycNameTooLong = displayNameTooLongMessage(String(name));
+    if (kycNameTooLong) {
+      t.json(400, { message: kycNameTooLong, error: 'KYC_PROFILE_INFO_NAME_TOO_LONG' });
       return;
     }
     if (!profileImage || typeof profileImage !== 'string' || !/^https?:\/\//i.test(profileImage.trim())) {
@@ -802,6 +823,12 @@ export const saveCallerUserAudio = async (
       t.json(400, { message: 'userAudio must be a valid https URL', error: 'CALLER_AUDIO_INVALID_URL' });
       return;
     }
+    const silentCallerAudio = await voiceSampleRejectionMessage(voiceUrl);
+    if (silentCallerAudio) {
+      t.warn('caller_audio_silent');
+      t.json(400, { message: silentCallerAudio, error: 'VOICE_SAMPLE_SILENT' });
+      return;
+    }
 
     const updated = await User.findOneAndUpdate(
       { _id: authUser._id, accountStatus: 'pending_profile' },
@@ -862,6 +889,11 @@ export const saveReceiverUserAudio = async (
       });
       return;
     }
+    const silentReceiverAudio = await voiceSampleRejectionMessage(voiceUrl);
+    if (silentReceiverAudio) {
+      res.status(400).json({ message: silentReceiverAudio, error: 'VOICE_SAMPLE_SILENT' });
+      return;
+    }
 
     const receiver = await Receiver.findById(authReceiver._id);
     if (!receiver) {
@@ -916,6 +948,12 @@ export const completeCallerProfile = async (
       t.json(400, { message: 'name is required', error: 'COMPLETE_CALLER_MISSING_NAME' });
       return;
     }
+    const callerNameTooLong = displayNameTooLongMessage(String(name));
+    if (callerNameTooLong) {
+      t.warn('complete_caller_validation_name_length');
+      t.json(400, { message: callerNameTooLong, error: 'COMPLETE_CALLER_NAME_TOO_LONG' });
+      return;
+    }
     if (!profileImage || typeof profileImage !== 'string') {
       t.warn('complete_caller_validation_profile_image');
       t.json(400, {
@@ -948,6 +986,14 @@ export const completeCallerProfile = async (
       return;
     }
     const voiceUrl = parseCallerAudioHttpsUrl(req.body);
+    if (voiceUrl) {
+      const silent = await voiceSampleRejectionMessage(voiceUrl);
+      if (silent) {
+        t.warn('complete_caller_voice_silent');
+        t.json(400, { message: silent, error: 'VOICE_SAMPLE_SILENT' });
+        return;
+      }
+    }
     const updated = await User.findOneAndUpdate(
       { _id: authUser._id, accountStatus: 'pending_profile' },
       {
@@ -1010,6 +1056,11 @@ export const updateCallerProfile = async (
 
     if (!name || !String(name).trim()) {
       res.status(400).json({ message: 'name is required' });
+      return;
+    }
+    const callerEditNameTooLong = displayNameTooLongMessage(String(name));
+    if (callerEditNameTooLong) {
+      res.status(400).json({ message: callerEditNameTooLong });
       return;
     }
     if (!profileImage || typeof profileImage !== 'string') {
@@ -2363,7 +2414,12 @@ export const updateReceiverProfile = async (
 
     if (typeof req.body.name === 'string' && req.body.name.trim()) {
       const displayName = req.body.name.trim().replace(/ {2,}/g, ' ');
-      if (!/^[A-Za-z]+(?: [A-Za-z]+)*$/.test(displayName) || displayName.length < 2 || displayName.length > 40) {
+      const receiverNameTooLong = displayNameTooLongMessage(displayName);
+      if (receiverNameTooLong) {
+        res.status(400).json({ message: receiverNameTooLong });
+        return;
+      }
+      if (!/^[A-Za-z]+(?: [A-Za-z]+)*$/.test(displayName) || displayName.length < 2) {
         res.status(400).json({
           message: 'Display name can use English letters only. Numbers and special characters are not allowed.',
         });
@@ -2430,6 +2486,11 @@ export const updateReceiverProfile = async (
           res.status(400).json({ message: 'userAudio must be a valid http(s) URL' });
           return;
         }
+        const silent = await voiceSampleRejectionMessage(rawAudio);
+        if (silent) {
+          res.status(400).json({ message: silent, error: 'VOICE_SAMPLE_SILENT' });
+          return;
+        }
         receiver.userAudio = rawAudio;
       }
     }
@@ -2461,8 +2522,8 @@ export const updateReceiverProfile = async (
       const audioOk =
         Boolean(receiver.userAudio?.trim()) && /^https?:\/\//i.test(String(receiver.userAudio).trim());
       if (receiverOnboardingProfileFieldsComplete(receiver) && audioOk) {
-        receiver.accountStatus = 'approved';
-        receiver.voiceVerificationApproved = true;
+        receiver.accountStatus = 'pending_review';
+        receiver.voiceVerificationApproved = false;
       }
     }
 
@@ -2655,11 +2716,7 @@ export const completeReceiverAudioOnboarding = async (
     }
 
     const bodyVoiceUrl = parseCallerAudioHttpsUrl(req.body);
-    if (bodyVoiceUrl) {
-      receiver.userAudio = bodyVoiceUrl;
-    }
-
-    const voiceUrl = String(receiver.userAudio ?? '').trim();
+    const voiceUrl = bodyVoiceUrl || String(receiver.userAudio ?? '').trim();
     if (!voiceUrl || !/^https?:\/\//i.test(voiceUrl)) {
       res.status(400).json({
         message: 'Record and upload your voice sample before continuing',
@@ -2667,21 +2724,18 @@ export const completeReceiverAudioOnboarding = async (
       });
       return;
     }
-
-    const wasAvailable = Boolean(receiver.isAvailable);
-
-    receiver.accountStatus = 'approved';
-    receiver.voiceVerificationApproved = true;
-    await receiver.save();
-    await syncReceiverPresenceInDatabase(receiverId);
-
-    const becameCallAvailable = !wasAvailable && Boolean(receiver.isAvailable);
-    if (becameCallAvailable) {
-      void scheduleReceiverAvailabilityNotifications(receiverId).catch((e: unknown) => {
-        const msg = e instanceof Error ? e.message : String(e);
-        console.error('receiver availability notify error:', msg);
-      });
+    const silentOnboardingAudio = await voiceSampleRejectionMessage(voiceUrl);
+    if (silentOnboardingAudio) {
+      res.status(400).json({ message: silentOnboardingAudio, error: 'VOICE_SAMPLE_SILENT' });
+      return;
     }
+    if (bodyVoiceUrl) {
+      receiver.userAudio = bodyVoiceUrl;
+    }
+
+    receiver.accountStatus = 'pending_review';
+    receiver.voiceVerificationApproved = false;
+    await receiver.save();
 
     res.status(200).json({
       message: 'Voice sample saved',

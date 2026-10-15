@@ -14,7 +14,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Feather';
 import { LinearGradient } from 'expo-linear-gradient';
 
-import VoiceVerificationRecorder from '../../components/VoiceVerificationRecorder';
+import VoiceVerificationRecorder, { isMicNotHeardMessage, MicNotHeardNotice } from '../../components/VoiceVerificationRecorder';
 import OnboardingLogoutButton from '../../components/auth/OnboardingLogoutButton';
 import type { ReceiverStackParamList } from '../../navigation/ReceiverStackParamList';
 import { getErrorMessage, profileApi } from '../../services/api';
@@ -53,6 +53,7 @@ export default function ReceiverAutoVerificationScreen(): React.JSX.Element {
   const [selectedLanguage, setSelectedLanguage] = useState<Language>('english');
   const [userAudio, setUserAudio] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [notHeardVisible, setNotHeardVisible] = useState(false);
 
   const onUploadComplete = useCallback((url: string) => {
     setUserAudio(url);
@@ -68,16 +69,14 @@ export default function ReceiverAutoVerificationScreen(): React.JSX.Element {
     try {
       const { data } = await profileApi.completeReceiverAudioOnboarding({ userAudio });
       applyServerUser(data.user);
-      try {
-        navigation.reset({
-          index: 0,
-          routes: [{ name: 'ReceiverMainTabs', params: { screen: 'ReceiverHome' } }],
-        });
-      } catch {
-        navigation.replace('ReceiverMainTabs', { screen: 'ReceiverHome' });
-      }
     } catch (e: unknown) {
-      Alert.alert('Could not continue', getErrorMessage(e));
+      const message = getErrorMessage(e);
+      if (isMicNotHeardMessage(message)) {
+        setUserAudio(null);
+        setNotHeardVisible(true);
+        return;
+      }
+      Alert.alert('Could not continue', message);
     } finally {
       setSubmitting(false);
     }
@@ -167,6 +166,7 @@ export default function ReceiverAutoVerificationScreen(): React.JSX.Element {
           </LinearGradient>
         </TouchableOpacity>
       </View>
+      <MicNotHeardNotice visible={notHeardVisible} onClose={() => setNotHeardVisible(false)} />
     </SafeAreaView>
   );
 }

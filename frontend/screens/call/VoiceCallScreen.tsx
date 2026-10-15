@@ -928,14 +928,18 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
       Number.isFinite(payload.callerWalletBalanceInr)
     ) {
       nextWallet = Math.max(0, payload.callerWalletBalanceInr);
-      setSessionCallerWalletInr(nextWallet);
-      sessionCallerWalletInrRef.current = nextWallet;
+      if (nextWallet !== sessionCallerWalletInrRef.current) {
+        setSessionCallerWalletInr(nextWallet);
+        sessionCallerWalletInrRef.current = nextWallet;
+      }
       gotCallerWallet = true;
     }
     if (typeof payload.callRatePerMinute === 'number' && Number.isFinite(payload.callRatePerMinute)) {
       const nextRate = Math.max(0, payload.callRatePerMinute);
-      setSessionCallRatePerMinute(nextRate);
-      sessionCallRatePerMinuteRef.current = nextRate;
+      if (nextRate !== sessionCallRatePerMinuteRef.current) {
+        setSessionCallRatePerMinute(nextRate);
+        sessionCallRatePerMinuteRef.current = nextRate;
+      }
     }
 
     if (!talkActiveRef.current) {
@@ -975,6 +979,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
     const anchorMs = talkAnchorMsRef.current;
     if (anchorMs == null || !Number.isFinite(anchorMs)) return;
     const next = Math.max(0, Math.floor((Date.now() - anchorMs) / 1000));
+    if (elapsedSecRef.current === next) return;
     setElapsedSec(next);
     elapsedSecRef.current = next;
   }, []);
@@ -994,13 +999,16 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
       return false;
     }
     const wasTalkActive = talkActiveRef.current;
+    const sameAnchor = talkAnchorMsRef.current === anchorMs;
     talkAnchorMsRef.current = anchorMs;
     talkActiveRef.current = true;
-    setTalkActive(true);
     if (!wasTalkActive) {
+      setTalkActive(true);
       snapRemainingTalkBudgetRef.current();
     }
-    updateElapsedFromAnchor();
+    if (!wasTalkActive || !sameAnchor) {
+      updateElapsedFromAnchor();
+    }
     return true;
   };
   const applyTalkTimingFromServerRef = useRef(applyTalkTimingFromServer);
@@ -2218,7 +2226,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
 
   useEffect(() => {
     if (!ready || endingRef.current) return;
-    const pollMs = appInBackground ? (talkActive ? 1000 : 2000) : talkActive ? 3000 : 50;
+    const pollMs = appInBackground ? (talkActive ? 1000 : 2000) : talkActive ? 3000 : 1000;
     const poll = setInterval(() => {
       if (endingRef.current) return;
       void syncTalkTimingOnce();

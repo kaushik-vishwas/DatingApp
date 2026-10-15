@@ -85,6 +85,7 @@ export default function ProfileInfoScreen({ navigation }: Props): React.JSX.Elem
             onChangeText={(t) => update({ displayName: t })}
             placeholder="How should users call you?"
             autoCapitalize="words"
+            maxLength={25}
           />
 
           <Text style={styles.fieldLabel}>Gender *</Text>

@@ -10,9 +10,12 @@ import React, {
 } from 'react';
 import { Alert } from 'react-native';
 import { io, type Socket } from 'socket.io-client';
+import { getForcedAppKind } from '../config/appKind';
+import { navigationRef } from '../navigation/navigationRef';
+import type { RootStackParamList } from '../navigation/RootStackParamList';
 import {
   authApi,
-  clearJwt,
+  clearLocalAuth,
   getJwt,
   getResolvedApiBaseUrl,
   profileApi,
@@ -20,7 +23,6 @@ import {
 } from '../services/api';
 import { reconcilePendingWalletCheckout } from '../utils/pendingWalletCheckout';
 import { teardownCallSession } from '../utils/callSessionTeardown';
-import { stopReceiverOnlineKeepAlive } from '../utils/receiverOnlineKeepAlive';
 import { markAuthWelcomeSeen } from '../services/authWelcomeStorage';
 import type { UserProfile } from '../types/user';
 import { setSentryUser } from '../utils/sentry';
@@ -43,12 +45,38 @@ type AuthContextValue = {
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
+function resetNavigationToLogin(): void {
+  const preferred: keyof RootStackParamList =
+    getForcedAppKind() === 'caller'
+      ? 'UserLogin'
+      : getForcedAppKind() === 'receiver'
+        ? 'ReceiverLogin'
+        : 'MobileLogin';
+  const run = (): void => {
+    try {
+      if (!navigationRef.isReady()) return;
+      const names = navigationRef.getRootState()?.routeNames ?? [];
+      if (!names.includes(preferred)) return;
+      navigationRef.reset({ index: 0, routes: [{ name: preferred }] });
+    } catch {
+      // The login route mounts with the signed-out tree after the token is cleared.
+    }
+  };
+  run();
+  setTimeout(run, 50);
+}
+
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [token, setToken] = useState<string | null>(null);
   const [user, setUser] = useState<UserProfile | null>(null);
   const [bootstrapping, setBootstrapping] = useState(true);
   const [loadingUser, setLoadingUser] = useState(false);
   const callerHomeOfferLoginShowRef = useRef(false);
+  const signOutRef = useRef<() => Promise<void>>(async () => {
+    await clearLocalAuth();
+    setToken(null);
+    setUser(null);
+  });
 
   const refreshUser = useCallback(async (): Promise<void> => {
     const t = await getJwt();
@@ -62,9 +90,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setUser(data.user);
     } catch (err) {
       if (axios.isAxiosError(err) && err.response?.status === 401) {
-        setUser(null);
-        await clearJwt();
-        setToken(null);
+        await signOutRef.current();
       }
       // Non-401: keep existing user so a network blip does not revert onboarding or gate state.
     } finally {
@@ -133,24 +159,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const signOut = useCallback(async () => {
     const role = user?.role;
-    if (role === 'receiver') {
-      try {
-        await profileApi.updateReceiverProfile({ isAvailable: false });
-      } catch {
-        // Best-effort: clear local session even if offline request fails.
-      }
-      try {
-        await profileApi.clearReceiverPushTokens();
-      } catch {
-        // Best-effort: server may already be unreachable.
-      }
-      stopReceiverOnlineKeepAlive();
-    }
-    await teardownCallSession();
-    await clearJwt();
     setToken(null);
     setUser(null);
+    callerHomeOfferLoginShowRef.current = false;
+    setSentryUser(null);
+    await clearLocalAuth();
+    void teardownCallSession();
+    resetNavigationToLogin();
+    if (role === 'receiver') {
+      void profileApi.updateReceiverProfile({ isAvailable: false }).catch(() => {});
+      void profileApi.clearReceiverPushTokens().catch(() => {});
+    }
   }, [user?.role]);
+  signOutRef.current = signOut;
 
   const consumeCallerHomeOfferLoginShow = useCallback((): boolean => {
     if (!callerHomeOfferLoginShowRef.current) return false;
@@ -159,10 +180,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, []);
 
   useEffect(() => {
-    registerSessionSupersededHandler(() => {
+    registerSessionSupersededHandler((reason) => {
       void (async () => {
         await signOut();
-        Alert.alert('Signed out', 'This account was signed in on another device.');
+        if (reason === 'superseded') {
+          Alert.alert('Signed out', 'This account was signed in on another device.');
+        }
       })();
     });
     return () => registerSessionSupersededHandler(null);

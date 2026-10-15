@@ -41,17 +41,20 @@ export default function UnderReviewScreen(): React.JSX.Element {
       ? user?.rejectionReason?.trim() || 'Your application was not approved. Please edit and resubmit.'
       : 'Your application is being reviewed by our team. This usually takes 24-48 hours.';
 
+  const accountStatus = user?.accountStatus;
+  const refreshUserRef = React.useRef(refreshUser);
+  refreshUserRef.current = refreshUser;
+
   React.useEffect(() => {
-    if (!user) return;
-    // Keep session state fresh while waiting for admin decision so users are moved
-    // to dashboard immediately after approval without manual logout/login.
-    if (user.accountStatus !== 'pending_review') return;
-    void refreshUser();
+    // Depend on status only. `refreshUser` replaces `user` with a new object, and
+    // listing `user` here restarted this effect on every reply (a request storm).
+    if (accountStatus !== 'pending_review') return;
+    void refreshUserRef.current();
     const poll = setInterval(() => {
-      void refreshUser();
+      void refreshUserRef.current();
     }, 5000);
     return () => clearInterval(poll);
-  }, [user, refreshUser]);
+  }, [accountStatus]);
 
   return (
     <View style={styles.bg}>
@@ -80,7 +83,7 @@ export default function UnderReviewScreen(): React.JSX.Element {
         <View style={styles.helpBox}>
           <Text style={styles.helpText}>
             If you have any questions, please contact our support team at
-            <Text style={styles.helpEmail}> receiver-support@lap.com</Text>
+            <Text style={styles.helpEmail}> support@selecto.com</Text>
           </Text>
         </View>
 
