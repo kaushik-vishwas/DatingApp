@@ -1370,6 +1370,7 @@ const listAllReceivers = async (req, res) => {
         let total = 0;
         let tabCounts;
         let onlineCount = 0;
+        let versionCounts = [];
         let receivers;
         if (paginated) {
             page = Math.max(1, Number(req.query.page) || 1);
@@ -1388,7 +1389,7 @@ const listAllReceivers = async (req, res) => {
                 const rx = new RegExp(escapeRegex(q), 'i');
                 search.$or = [{ name: rx }, { email: rx }, { phone: rx }];
             }
-            const [all, approved, pending, rejected, kycPending, kycApproved, pageRows, availableRows] = await Promise.all([
+            const [all, approved, pending, rejected, kycPending, kycApproved, pageRows, availableRows, versionRows] = await Promise.all([
                 Receiver_1.default.countDocuments(search),
                 Receiver_1.default.countDocuments(withReceiverStatus(search, 'approved')),
                 Receiver_1.default.countDocuments(withReceiverStatus(search, 'pending')),
@@ -1403,7 +1404,12 @@ const listAllReceivers = async (req, res) => {
                 Receiver_1.default.find({ ...search, isAvailable: true })
                     .select('_id isAvailable discoverGraceUntil')
                     .lean(),
+                Receiver_1.default.aggregate([
+                    { $match: search },
+                    { $group: { _id: { $ifNull: ['$appVersion', null] }, count: { $sum: 1 } } },
+                ]),
             ]);
+            versionCounts = versionRows.map((row) => ({ version: row._id, count: row.count }));
             total =
                 status === 'approved'
                     ? approved
@@ -1482,7 +1488,9 @@ const listAllReceivers = async (req, res) => {
                 isLiveAvailable: isOnline,
             };
         });
-        res.status(200).json(paginated ? { receivers: list, total, page, limit, tabCounts, onlineCount } : { receivers: list });
+        res.status(200).json(paginated
+            ? { receivers: list, total, page, limit, tabCounts, onlineCount, versionCounts }
+            : { receivers: list });
     }
     catch (err) {
         const msg = err instanceof Error ? err.message : String(err);

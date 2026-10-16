@@ -192,7 +192,7 @@ export function attachChatSocket(httpServer: HTTPServer): Server {
       const msg = e instanceof Error ? e.message : String(e);
       console.error('socket settleAndReleaseCall error:', msg);
     } finally {
-      unregisterPendingCallInvite(receiverId);
+      unregisterPendingCallInvite(receiverId, callId);
       void clearPendingIncomingCall(receiverId);
       releaseReceiverReservation(receiverId);
       await syncReceiverQueueState(receiverId);
@@ -473,6 +473,7 @@ export function attachChatSocket(httpServer: HTTPServer): Server {
           if (session?.status === 'completed') {
             // Ended elsewhere (REST end) and already released there — just forget the invite.
             activeCallInvites.delete(callId);
+            unregisterPendingCallInvite(invite.receiverId, callId);
             return;
           }
           const bothConnected =
@@ -1247,7 +1248,7 @@ export function attachChatSocket(httpServer: HTTPServer): Server {
           ack?.({ ok: false, error: 'Busy on another call.' });
           return;
         }
-        registerPendingCallInvite(receiverForInviteId);
+        registerPendingCallInvite(receiverForInviteId, callId);
         removeReceiverFromQueue(receiverForInviteId);
         const invitedAt = new Date();
         const invite: ActiveCallInvite = {

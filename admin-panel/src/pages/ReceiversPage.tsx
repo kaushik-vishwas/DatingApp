@@ -244,7 +244,6 @@ export function ReceiversPage() {
       avgRating,
     };
   }, [rows, tabCounts, onlineTotal]);
-
   const rangeLabel =
     range === 'all' ? 'All time' : range === 'today' ? 'Today' : range === '30d' ? 'Last 30 days' : 'Last 7 days';
 

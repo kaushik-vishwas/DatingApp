@@ -99,6 +99,7 @@ const receiverSchema = new mongoose_1.Schema({
     authSessionVersion: { type: Number, default: 0, min: 0 },
     expoPushToken: { type: String, default: null },
     fcmDeviceToken: { type: String, default: null, trim: true },
+    appVersion: { type: String, default: null, trim: true },
     pendingIncomingCall: {
         type: {
             callId: { type: String, required: true, trim: true },

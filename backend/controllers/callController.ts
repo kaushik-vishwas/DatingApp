@@ -32,6 +32,7 @@ import {
   touchReceiverBackgroundPresence,
 } from '../services/receiverPresence';
 import { getLivePendingIncomingCall } from '../services/pendingIncomingCall';
+import { unregisterPendingCallInvite } from '../services/callInviteRegistry';
 import {
   acknowledgeInviteRinging,
   declineInviteByReceiver,
@@ -362,6 +363,7 @@ export async function settleCallSession(
   const result = snapshot as SettledCallSnapshot;
   if (result.status === 'completed') {
     clearCallSyncActivity(callId);
+    unregisterPendingCallInvite(result.receiverId, callId);
   }
   return result;
 }
