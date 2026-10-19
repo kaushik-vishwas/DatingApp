@@ -671,20 +671,23 @@ export function attachChatSocket(httpServer: HTTPServer): Server {
         });
     });
 
-    socket.on('disconnect', () => {
+    socket.on('disconnect', (reason: string) => {
       const leavingId = String(socket.data.accountId);
       const leavingType = socket.data.typ as AccountType;
+      // The app closed the socket itself (sign-out). Minimize / kill / network loss arrive as
+      // transport close or ping timeout, and keep the background grace.
+      const closedByApp = reason === 'client namespace disconnect';
       // Receivers only: a closed/unreachable receiver app is rung via FCM, so its ringing
       // invites must survive the socket drop (no-answer timer still ends them).
       const keepUnansweredTargetInvites = leavingType === 'r';
-      if (leavingType === 'r') {
+      if (leavingType === 'r' && !closedByApp) {
         armReceiverDiscoverGraceImmediate(leavingId);
         void markReceiverDiscoverGraceIfAvailable(leavingId);
       }
       setTimeout(() => {
         void (async () => {
           if (hasActiveSocketForAccount(leavingType, leavingId)) return;
-          if (leavingType === 'r') {
+          if (leavingType === 'r' && !closedByApp) {
             await markReceiverDiscoverGraceIfAvailable(leavingId);
           }
           waitingCallQueueAccounts.delete(queueKey(leavingType, leavingId));
@@ -730,7 +733,12 @@ export function attachChatSocket(httpServer: HTTPServer): Server {
           const stillConnected = hasActiveSocketForAccount('r', leavingId);
           if (!stillConnected) {
             void (async () => {
-              await markReceiverDiscoverGraceIfAvailable(leavingId);
+              if (closedByApp) {
+                clearReceiverDiscoverGrace(leavingId);
+                await syncReceiverPresenceInDatabase(leavingId);
+              } else {
+                await markReceiverDiscoverGraceIfAvailable(leavingId);
+              }
               await releaseIfStaleReceiverBusy(leavingId);
             })();
           }
