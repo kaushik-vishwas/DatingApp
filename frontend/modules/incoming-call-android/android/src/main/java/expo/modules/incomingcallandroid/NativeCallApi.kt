@@ -84,13 +84,13 @@ object NativeCallApi {
         val isDecline = action == "decline"
         val code =
           try {
-            post(base, token, id, action, isDecline)
+            post(appContext, base, token, id, action, isDecline)
           } catch (e: IOException) {
             // Network blip right after a Doze wake — the caller keeps ringing unless decline lands.
             if (!isDecline) throw e
             Log.w(TAG, "POST decline failed, retrying callId=$id", e)
             Thread.sleep(DECLINE_RETRY_DELAY_MS)
-            post(base, token, id, action, true)
+            post(appContext, base, token, id, action, true)
           }
         PresenceNativeWakeLog.append(appContext, "native_call_$action", mapOf("callId" to id, "status" to code))
       } catch (e: Exception) {
@@ -106,7 +106,14 @@ object NativeCallApi {
     }
   }
 
-  private fun post(base: String, token: String, callId: String, action: String, shortConnect: Boolean): Int {
+  private fun post(
+    context: Context,
+    base: String,
+    token: String,
+    callId: String,
+    action: String,
+    shortConnect: Boolean
+  ): Int {
     val path = URLEncoder.encode(callId, StandardCharsets.UTF_8.name())
     val conn = (URL("$base/calls/$path/$action").openConnection() as HttpURLConnection).apply {
       requestMethod = "POST"
@@ -116,6 +123,7 @@ object NativeCallApi {
       setRequestProperty("Authorization", "Bearer $token")
       setRequestProperty("Content-Type", "application/json")
       setRequestProperty("Accept", "application/json")
+      AppVersionHeader.apply(this, context)
     }
     try {
       conn.outputStream.use { it.write("{}".toByteArray(Charsets.UTF_8)) }

@@ -2,6 +2,7 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useR
 import { io, type Socket } from 'socket.io-client';
 import { useAuth } from './AuthContext';
 import { chatApi, getJwt, getResolvedApiBaseUrl } from '../services/api';
+import { getAppVersionCode } from '../utils/appVersion';
 
 import type { ChatMessageDto } from '../types/api';
 
@@ -114,6 +115,7 @@ export const ChatInboxProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
       const socket = io(base, {
         auth: { token },
+        query: { appVersion: getAppVersionCode() },
         transports: ['polling', 'websocket'],
         timeout: 20000,
         reconnectionAttempts: 6,

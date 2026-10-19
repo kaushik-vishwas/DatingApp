@@ -19,6 +19,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { io, type Socket } from 'socket.io-client';
 import { useAuth } from '../../context/AuthContext';
 import { getErrorMessage, getJwt, getResolvedApiBaseUrl, profileApi } from '../../services/api';
+import { getAppVersionCode } from '../../utils/appVersion';
 import type { ReceiverStackParamList } from '../../navigation/ReceiverStackParamList';
 import type { ReceiverWithdrawalOverviewResponse } from '../../types/api';
 import Icon from 'react-native-vector-icons/Ionicons';
@@ -272,6 +273,7 @@ export default function WithdrawEarningsScreen(): React.JSX.Element {
       if (!token || cancelled) return;
       socket = io(base, {
         auth: { token },
+        query: { appVersion: getAppVersionCode() },
         transports: ['polling', 'websocket'],
         timeout: 20000,
       });

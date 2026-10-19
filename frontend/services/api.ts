@@ -2,6 +2,7 @@ import axios, { AxiosError } from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
 import Constants from 'expo-constants';
+import { APP_VERSION_HEADER, getAppVersionCode } from '../utils/appVersion';
 import type {
   AuthAccountType,
   CompleteCallerPayload,
@@ -257,6 +258,7 @@ const api = axios.create({
   timeout: 20000,
   headers: {
     'Content-Type': 'application/json',
+    [APP_VERSION_HEADER]: getAppVersionCode(),
   },
 });
 
@@ -344,6 +346,7 @@ async function axiosConfigViaFetch(config: AxiosConfigWithFetchFlag) {
   const headers: Record<string, string> = {
     Accept: 'application/json',
     'Content-Type': 'application/json',
+    [APP_VERSION_HEADER]: getAppVersionCode(),
   };
   const rawHeaders = config.headers as {
     get?: (name: string) => unknown;

@@ -215,6 +215,7 @@ class OnlinePresenceForegroundService : Service() {
         readTimeout = 8_000
         setRequestProperty("Authorization", "Bearer $token")
         setRequestProperty("Accept", "application/json")
+        AppVersionHeader.apply(this, applicationContext)
       }
       val code = conn.responseCode
       val body =
@@ -304,6 +305,7 @@ class OnlinePresenceForegroundService : Service() {
         setRequestProperty("Authorization", "Bearer $token")
         setRequestProperty("Content-Type", "application/json")
         setRequestProperty("Accept", "application/json")
+        AppVersionHeader.apply(this, applicationContext)
       }
       conn.outputStream.use { it.write("""{"isAvailable":false}""".toByteArray(Charsets.UTF_8)) }
       conn.responseCode

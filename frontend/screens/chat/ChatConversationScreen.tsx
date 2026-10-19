@@ -31,6 +31,7 @@ import {
   getJwt,
   getResolvedApiBaseUrl,
 } from '../../services/api';
+import { getAppVersionCode } from '../../utils/appVersion';
 import type { ChatMessageDto } from '../../types/api';
 import { CALLER_MESSAGE_REQUIRES_CALL } from '../../constants/callerMessaging';
 import { useAuth } from '../../context/AuthContext';
@@ -331,6 +332,7 @@ export default function ChatConversationScreen({ navigation, route }: Props): Re
 
       const socket = io(base, {
         auth: { token },
+        query: { appVersion: getAppVersionCode() },
         transports: ['polling', 'websocket'],
         timeout: 20000,
         reconnectionAttempts: 5,

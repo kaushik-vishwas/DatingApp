@@ -9,6 +9,11 @@ import { callerHasSuccessfulCallWithReceiver } from '../utils/callerMessageEligi
 import User from '../models/User';
 import Receiver from '../models/Receiver';
 import { getPayloadSessionVersion, type AppJwtPayload } from '../utils/authToken';
+import {
+  APP_VERSION_HEADER,
+  isUnversionedClientBlockEnabled,
+  parseAppVersionCode,
+} from '../middleware/appVersionGate';
 import { ADMIN_NOTIFICATIONS_ROOM, isReceiverSocketConnected, registerSocketIOServer } from './socketRegistry';
 import { CHAT_TEXT_CHARGE_INR, CHAT_TEXT_EARN_INR } from '../constants/chatPricing';
 import { recordReceiverCallScore } from '../services/receiverScore';
@@ -541,6 +546,15 @@ export function attachChatSocket(httpServer: HTTPServer): Server {
 
         if (decoded.typ !== 'u' && decoded.typ !== 'r') {
           next(new Error('invalid token'));
+          return;
+        }
+
+        if (
+          isUnversionedClientBlockEnabled() &&
+          parseAppVersionCode(socket.handshake.query?.appVersion ?? socket.handshake.headers[APP_VERSION_HEADER]) ==
+            null
+        ) {
+          next(new Error('app update required'));
           return;
         }
         const appDecoded = decoded as AppJwtPayload;

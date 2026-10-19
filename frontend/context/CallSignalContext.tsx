@@ -22,6 +22,7 @@ import {
   getResolvedApiBaseUrl,
   profileApi,
 } from '../services/api';
+import { getAppVersionCode } from '../utils/appVersion';
 import type { VoiceBootstrapResponse } from '../types/api';
 import type { VoiceCallScreenParams } from '../navigation/voiceCallParams';
 import { getRootNavigation } from '../navigation/navigationRef';
@@ -1733,6 +1734,7 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
       const socket = io(base, {
         auth: { token },
+        query: { appVersion: getAppVersionCode() },
         ...getCallSocketIoOptions(),
       });
       socketRef.current = socket;

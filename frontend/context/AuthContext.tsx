@@ -21,6 +21,7 @@ import {
   profileApi,
   registerSessionSupersededHandler,
 } from '../services/api';
+import { getAppVersionCode } from '../utils/appVersion';
 import { reconcilePendingWalletCheckout } from '../utils/pendingWalletCheckout';
 import { teardownCallSession } from '../utils/callSessionTeardown';
 import { markAuthWelcomeSeen } from '../services/authWelcomeStorage';
@@ -202,6 +203,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (!authTok || cancelled) return;
       socket = io(base, {
         auth: { token: authTok },
+        query: { appVersion: getAppVersionCode() },
         transports: ['polling', 'websocket'],
         timeout: 20000,
       });

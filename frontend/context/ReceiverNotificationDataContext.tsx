@@ -10,6 +10,7 @@ import React, {
 } from 'react';
 import { io, type Socket } from 'socket.io-client';
 import { chatApi, getErrorMessage, getJwt, getResolvedApiBaseUrl, profileApi } from '../services/api';
+import { getAppVersionCode } from '../utils/appVersion';
 import type { ReceiverCallInsightRow, ReceiverWithdrawalRow } from '../types/api';
 import type { ReceiverNotificationKind, ReceiverNotificationRow } from '../types/receiverNotification';
 import { formatCallDurationCompact } from '../utils/callDurationDisplay';
@@ -159,6 +160,7 @@ export function ReceiverNotificationDataProvider({
       if (!token || cancelled) return;
       socket = io(base, {
         auth: { token },
+        query: { appVersion: getAppVersionCode() },
         transports: ['polling', 'websocket'],
         timeout: 20000,
       });

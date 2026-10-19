@@ -33,6 +33,7 @@ import { useCallSignals } from '../../context/CallSignalContext';
 import { useCallerMessageEligibilityOptional } from '../../context/CallerMessageEligibilityContext';
 import { useAuth } from '../../context/AuthContext';
 import { callApi, getErrorMessage, getJwt, getResolvedApiBaseUrl, profileApi } from '../../services/api';
+import { getAppVersionCode } from '../../utils/appVersion';
 import { ensureIncomingRingtonePlaying, startOutboundRingtoneLoop, stopOutboundRingtonePlayback } from '../../utils/callSounds';
 import {
   applyVoiceCallOutputRoute,
@@ -1967,6 +1968,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
       if (!token || cancelled) return;
       const socket = io(base, {
         auth: { token },
+        query: { appVersion: getAppVersionCode() },
         ...getCallSocketIoOptions(),
       });
       signalSocketRef.current = socket;
