@@ -1,11 +1,6 @@
-import React, { useMemo } from 'react';
+import React from 'react';
 import { Modal, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import {
-  hasOemAutostartSettings,
-  openOemAutostartSettings,
-  type ReachabilityCheckId,
-  type ReachabilityStatus,
-} from '../../utils/receiverReachability';
+import type { ReachabilityCheckId, ReachabilityStatus } from '../../utils/receiverReachability';
 
 type Props = {
   visible: boolean;
@@ -13,6 +8,7 @@ type Props = {
   missing: ReachabilityCheckId[];
   busy?: boolean;
   onFix: (id: ReachabilityCheckId) => void;
+  onAcknowledgeAutostart: () => void;
   onRetry: () => void;
   onClose: () => void;
 };
@@ -34,6 +30,10 @@ const LABELS: Record<ReachabilityCheckId, { title: string; body: string }> = {
     title: 'Call alerts not registered',
     body: 'We could not save a push token. Check Google Play services and try again.',
   },
+  autostart: {
+    title: 'Allow Autostart',
+    body: 'Lets calls ring even after Selecto is closed. Turn it on, then tap Done.',
+  },
 };
 
 export default function ReceiverReachabilityGate({
@@ -42,10 +42,10 @@ export default function ReceiverReachabilityGate({
   missing,
   busy,
   onFix,
+  onAcknowledgeAutostart,
   onRetry,
   onClose,
 }: Props): React.JSX.Element {
-  const canOpenAutostart = useMemo(() => (visible ? hasOemAutostartSettings() : false), [visible]);
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <View style={styles.backdrop}>
@@ -60,20 +60,24 @@ export default function ReceiverReachabilityGate({
                 <Text style={styles.rowTitle}>{LABELS[id].title}</Text>
                 <Text style={styles.rowBody}>{LABELS[id].body}</Text>
               </View>
-              <TouchableOpacity style={styles.fixBtn} onPress={() => onFix(id)} disabled={busy}>
-                <Text style={styles.fixText}>Fix</Text>
-              </TouchableOpacity>
+              {id === 'autostart' ? (
+                <View style={styles.rowActions}>
+                  <TouchableOpacity style={styles.fixBtn} onPress={() => onFix(id)} disabled={busy}>
+                    <Text style={styles.fixText}>Open</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={styles.doneBtn} onPress={onAcknowledgeAutostart} disabled={busy}>
+                    <Text style={styles.doneText}>Done</Text>
+                  </TouchableOpacity>
+                </View>
+              ) : (
+                <TouchableOpacity style={styles.fixBtn} onPress={() => onFix(id)} disabled={busy}>
+                  <Text style={styles.fixText}>Fix</Text>
+                </TouchableOpacity>
+              )}
             </View>
           ))}
-          {status?.oemHint ? <Text style={styles.hint}>{status.oemHint}</Text> : null}
-          {status?.oemHint && canOpenAutostart ? (
-            <TouchableOpacity
-              style={styles.autostartBtn}
-              onPress={() => void openOemAutostartSettings()}
-              disabled={busy}
-            >
-              <Text style={styles.autostartText}>Open Autostart settings</Text>
-            </TouchableOpacity>
+          {missing.includes('autostart') && status?.oemHint ? (
+            <Text style={styles.hint}>{status.oemHint}</Text>
           ) : null}
           <TouchableOpacity style={styles.primary} onPress={onRetry} disabled={busy}>
             <Text style={styles.primaryText}>{busy ? 'Checking…' : 'I fixed this — continue'}</Text>
@@ -125,16 +129,15 @@ const styles = StyleSheet.create({
     color: '#7c3aed',
     lineHeight: 17,
   },
-  autostartBtn: {
-    marginTop: 8,
-    alignSelf: 'flex-start',
+  rowActions: { flexDirection: 'row', gap: 6 },
+  doneBtn: {
     borderWidth: 1,
     borderColor: '#7c3aed',
     paddingHorizontal: 12,
     paddingVertical: 7,
     borderRadius: 8,
   },
-  autostartText: { color: '#7c3aed', fontWeight: '800', fontSize: 12 },
+  doneText: { color: '#7c3aed', fontWeight: '800', fontSize: 12 },
   primary: {
     marginTop: 16,
     backgroundColor: '#111',

@@ -1,3 +1,4 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Linking, Platform } from 'react-native';
 import * as Device from 'expo-device';
 import { getIncomingCallAndroidNativeModule } from '../modules/incoming-call-android';
@@ -7,18 +8,24 @@ import {
   registerReceiverPushTokens,
 } from './incomingCallNotifications';
 import { requestReceiverBatteryUnrestricted } from './receiverBatteryOptimization';
+import { getPresenceDiagnosticEntries, logPresenceDiagnostic } from './receiverPresenceDiagnostics';
+
+/** OEM autostart cannot be detected — the receiver confirms it once on this phone. */
+const AUTOSTART_ACK_KEY = 'selecto_receiver_autostart_ack_v1';
 
 export type ReachabilityCheckId =
   | 'notifications'
   | 'battery'
   | 'fullScreenIntent'
-  | 'pushToken';
+  | 'pushToken'
+  | 'autostart';
 
 export type ReachabilityStatus = {
   notifications: boolean;
   batteryUnrestricted: boolean;
   fullScreenIntent: boolean;
   pushToken: boolean;
+  autostartPending: boolean;
   oemHint: string | null;
 };
 
@@ -75,40 +82,87 @@ export async function openOemAutostartSettings(): Promise<boolean> {
   return false;
 }
 
+export async function isAutostartAcknowledged(): Promise<boolean> {
+  try {
+    return (await AsyncStorage.getItem(AUTOSTART_ACK_KEY)) === '1';
+  } catch {
+    return false;
+  }
+}
+
+export async function acknowledgeAutostart(): Promise<void> {
+  try {
+    await AsyncStorage.setItem(AUTOSTART_ACK_KEY, '1');
+  } catch {
+    // Row reappears next check; harmless.
+  }
+}
+
+/** Read-only: never shows the OS permission dialog. */
+async function hasNotificationPermission(): Promise<boolean> {
+  try {
+    const Notifications = await import('expo-notifications');
+    const current = await Notifications.getPermissionsAsync();
+    return current.status === 'granted';
+  } catch {
+    return true;
+  }
+}
+
+const PUSH_REFRESH_EVENT = 'push_token_refresh';
+const PUSH_REFRESH_FAILED_EVENT = 'push_token_refresh_failed';
+
+/** Outcome of the latest push-token refresh logged by the app (null = none logged yet). */
+function lastPushRegistrationOk(): boolean | null {
+  const entries = getPresenceDiagnosticEntries();
+  for (let i = entries.length - 1; i >= 0; i -= 1) {
+    const e = entries[i];
+    if (e.event === PUSH_REFRESH_FAILED_EVENT) return false;
+    if (e.event === PUSH_REFRESH_EVENT) {
+      return Boolean(e.details?.expoOk) || Boolean(e.details?.fcmOk);
+    }
+  }
+  return null;
+}
+
+/**
+ * Read-only: never shows a permission dialog and never registers push tokens.
+ * `pushToken` reflects the last logged registration (unknown counts as OK).
+ */
 export async function getReceiverReachabilityStatus(): Promise<ReachabilityStatus> {
+  const notifications = await hasNotificationPermission();
+  const pushToken = lastPushRegistrationOk() !== false;
   if (Platform.OS !== 'android') {
-    const push = await registerReceiverPushTokens(async (payload) => {
-      await profileApi.updateReceiverPushTokens(payload);
-    });
-    const notifications = await ensureIncomingCallNotificationPermission();
     return {
       notifications,
       batteryUnrestricted: true,
       fullScreenIntent: true,
-      pushToken: push.expoOk || push.fcmOk,
+      pushToken,
+      autostartPending: false,
       oemHint: null,
     };
   }
 
   const mod = getIncomingCallAndroidNativeModule();
-  const notifications = await ensureIncomingCallNotificationPermission();
-  const batteryUnrestricted = Boolean(mod?.isIgnoringBatteryOptimizations?.());
-  const fullScreenIntent =
-    androidSdk() < 34
-      ? true
-      : typeof mod?.canUseFullScreenIntent === 'function'
-        ? Boolean(mod.canUseFullScreenIntent())
-        : true;
-  const push = await registerReceiverPushTokens(async (payload) => {
-    await profileApi.updateReceiverPushTokens(payload);
-  });
+  let batteryUnrestricted = true;
+  let fullScreenIntent = true;
+  try {
+    batteryUnrestricted = Boolean(mod?.isIgnoringBatteryOptimizations?.());
+    if (androidSdk() >= 34 && typeof mod?.canUseFullScreenIntent === 'function') {
+      fullScreenIntent = Boolean(mod.canUseFullScreenIntent());
+    }
+  } catch {
+    // Native module unavailable — skip these rows rather than nag.
+  }
+  const autostartPending = hasOemAutostartSettings() && !(await isAutostartAcknowledged());
 
   return {
     notifications,
     batteryUnrestricted,
     fullScreenIntent,
-    pushToken: push.expoOk || push.fcmOk,
-    oemHint: oemBackgroundHint(),
+    pushToken,
+    autostartPending,
+    oemHint: autostartPending ? oemBackgroundHint() : null,
   };
 }
 
@@ -119,21 +173,28 @@ export function missingReachabilityChecks(status: ReachabilityStatus): Reachabil
   if (Platform.OS === 'android' && androidSdk() >= 34 && !status.fullScreenIntent) {
     missing.push('fullScreenIntent');
   }
-  if (!status.pushToken) missing.push('pushToken');
+  // Push registration needs notification permission; fixing that row fixes this one too.
+  if (!status.pushToken && status.notifications) missing.push('pushToken');
+  if (status.autostartPending) missing.push('autostart');
   return missing;
 }
 
 export async function promptReachabilityFix(id: ReachabilityCheckId): Promise<void> {
   const mod = getIncomingCallAndroidNativeModule();
   if (id === 'notifications') {
-    await ensureIncomingCallNotificationPermission();
-    if (Platform.OS === 'android') {
+    // Android stops showing the dialog after repeated denials — fall back to app settings.
+    const granted = await ensureIncomingCallNotificationPermission();
+    if (!granted && Platform.OS === 'android') {
       try {
         await Linking.openSettings();
       } catch {
         // ignore
       }
     }
+    return;
+  }
+  if (id === 'autostart') {
+    await openOemAutostartSettings();
     return;
   }
   if (id === 'battery') {
@@ -153,8 +214,21 @@ export async function promptReachabilityFix(id: ReachabilityCheckId): Promise<vo
     return;
   }
   if (id === 'pushToken') {
-    await registerReceiverPushTokens(async (payload) => {
-      await profileApi.updateReceiverPushTokens(payload);
-    });
+    try {
+      const result = await registerReceiverPushTokens(async (payload) => {
+        await profileApi.updateReceiverPushTokens(payload);
+      });
+      logPresenceDiagnostic(
+        PUSH_REFRESH_EVENT,
+        { expoOk: result.expoOk, fcmOk: result.fcmOk, source: 'reachability_fix' },
+        result.expoOk || result.fcmOk ? 'info' : 'warn'
+      );
+    } catch (e) {
+      logPresenceDiagnostic(
+        PUSH_REFRESH_FAILED_EVENT,
+        { reason: e instanceof Error ? e.message : String(e), source: 'reachability_fix' },
+        'error'
+      );
+    }
   }
 }

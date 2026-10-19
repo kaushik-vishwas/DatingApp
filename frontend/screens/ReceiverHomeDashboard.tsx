@@ -39,6 +39,8 @@ import { type ReceiverPresenceInfo } from '../utils/receiverStatus';
 import { resolveProfileImageSource } from '../utils/avatarSource';
 import SelectoLogo from '../assets/SelectoLogo.png';
 import { PresenceDiagnosticsTopBarButton } from '../components/call/PresenceDiagnosticsTopBarButton';
+import ReceiverReachabilityGate from '../components/receiver/ReceiverReachabilityGate';
+import { useReceiverReachabilityPrompt } from '../hooks/useReceiverReachabilityPrompt';
 import EarningsCardBg from '../assets/earnBg.png';
 import NoticeBg from '../assets/noticeBg.png';
 import EarnCoinsImg from '../assets/earn-coins.png';
@@ -136,6 +138,9 @@ export default function ReceiverHomeDashboard(): React.JSX.Element {
   const [notificationUnread, setNotificationUnread] = useState(0);
   const scrollBottomInset = useReceiverTabBarBottomInset();
   const { setQueueMode } = useCallSignals();
+  const reachabilityPrompt = useReceiverReachabilityPrompt(
+    user?.role === 'receiver' && user.accountStatus === 'approved'
+  );
 
   const topBarMetrics = useMemo(() => {
     const availableWidth = windowWidth - 32;
@@ -814,6 +819,7 @@ export default function ReceiverHomeDashboard(): React.JSX.Element {
           </CompactInfoCard>
         ) : null}
       </ScrollView>
+      <ReceiverReachabilityGate {...reachabilityPrompt} />
     </SafeAreaView>
   );
 }
