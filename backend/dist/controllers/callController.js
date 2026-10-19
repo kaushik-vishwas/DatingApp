@@ -59,6 +59,7 @@ const receiverEarningModel_1 = require("../services/receiverEarningModel");
 const socketRegistry_1 = require("../socket/socketRegistry");
 const receiverPresence_1 = require("../services/receiverPresence");
 const pendingIncomingCall_1 = require("../services/pendingIncomingCall");
+const callInviteRegistry_1 = require("../services/callInviteRegistry");
 const callInviteActions_1 = require("../services/callInviteActions");
 const callQueue_1 = require("../services/callQueue");
 function roundInr(n) {
@@ -297,6 +298,7 @@ async function settleCallSession(callId, complete) {
     const result = snapshot;
     if (result.status === 'completed') {
         clearCallSyncActivity(callId);
+        (0, callInviteRegistry_1.unregisterPendingCallInvite)(result.receiverId, callId);
     }
     return result;
 }

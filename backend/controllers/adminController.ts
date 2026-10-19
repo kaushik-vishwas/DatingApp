@@ -37,7 +37,7 @@ import { normalizeReceiverWelcome } from '../services/receiverWelcome';
 import { normalizeCallerNotification } from '../services/callerNotification';
 import { CALLER_LANGUAGE_ALLOWLIST } from '../constants/callerProfileAllowlist';
 import { toApiReceiver, toApiUser } from './authController';
-import { isReceiverLoggedInAndAvailable } from '../services/receiverPresence';
+import { isReceiverLoggedInAndAvailable, RECEIVER_DISCOVER_GRACE_MS } from '../services/receiverPresence';
 import { getBusyReceiverIdSet } from '../services/callQueue';
 import { sendOtpEmail } from '../config/email';
 import { getConfiguredAdminEmail } from '../services/superAdminSync';
@@ -58,6 +58,34 @@ import {
 
 type AdminJwtPayload = { adminId: string; typ: 'admin' };
 const OTP_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
+/**
+ * Best available "last seen": presence evidence (saved online/offline change, last heartbeat
+ * behind the grace lease, latest call), else the last account update, else sign-up.
+ * Presence was only saved from 5 Oct 2026, so older accounts fall back to the later steps.
+ */
+function receiverLastSeenIso(
+  r: {
+    lastActiveAt?: Date | null;
+    discoverGraceUntil?: Date | null;
+    updatedAt?: Date | null;
+    createdAt?: Date | null;
+  },
+  lastCallAt?: Date | null
+): string | null {
+  const candidates: number[] = [];
+  if (r.lastActiveAt instanceof Date) candidates.push(r.lastActiveAt.getTime());
+  if (r.discoverGraceUntil instanceof Date) {
+    candidates.push(r.discoverGraceUntil.getTime() - RECEIVER_DISCOVER_GRACE_MS);
+  }
+  if (lastCallAt instanceof Date) candidates.push(lastCallAt.getTime());
+  if (candidates.length === 0) {
+    const fallback = r.updatedAt instanceof Date ? r.updatedAt : r.createdAt;
+    if (!(fallback instanceof Date)) return null;
+    candidates.push(fallback.getTime());
+  }
+  return new Date(Math.min(Date.now(), Math.max(...candidates))).toISOString();
+}
 
 const signAdminToken = (adminId: string): string => {
   const secret = process.env.ADMIN_JWT_SECRET;
@@ -1634,7 +1662,7 @@ export const listAllReceivers = async (req: Request, res: Response): Promise<voi
     const weekStart = toRangeStart('7d') ?? todayStart;
     const monthStart = toRangeStart('30d') ?? todayStart;
 
-    const [ratingRows, earningsByReceiver] = await Promise.all([
+    const [ratingRows, earningsByReceiver, lastCallRows] = await Promise.all([
       receiverIds.length === 0
         ? Promise.resolve([] as { _id: mongoose.Types.ObjectId; avg: number; count: number }[])
         : ReceiverRating.aggregate<{ _id: mongoose.Types.ObjectId; avg: number; count: number }>([
@@ -1648,7 +1676,14 @@ export const listAllReceivers = async (req: Request, res: Response): Promise<voi
             },
           ]),
       aggregateReceiverEarningsByReceiver(receiverIds, todayStart, weekStart, monthStart),
+      receiverIds.length === 0
+        ? Promise.resolve([] as { _id: mongoose.Types.ObjectId; lastAt: Date | null }[])
+        : CallSession.aggregate<{ _id: mongoose.Types.ObjectId; lastAt: Date | null }>([
+            { $match: { receiverId: { $in: receiverIds } } },
+            { $group: { _id: '$receiverId', lastAt: { $max: { $ifNull: ['$endedAt', '$startedAt'] } } } },
+          ]),
     ]);
+    const lastCallAtByReceiverId = new Map(lastCallRows.map((row) => [String(row._id), row.lastAt]));
 
     const ratingByReceiverId = new Map(
       ratingRows.map((row) => [
@@ -1684,6 +1719,7 @@ export const listAllReceivers = async (req: Request, res: Response): Promise<voi
         earningsToday: earnings?.today.earnings ?? 0,
         totalEarnings: earnings?.lifetime.earnings ?? 0,
         isLiveAvailable: isOnline,
+        lastSeenAt: receiverLastSeenIso(r as ReceiverDocument, lastCallAtByReceiverId.get(id)),
       };
     });
 

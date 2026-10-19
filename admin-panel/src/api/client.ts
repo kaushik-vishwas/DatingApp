@@ -90,6 +90,7 @@ export type ReceiverRecord = {
   /** Logged in with availability switch on (isAvailable && isOnline). */
   isLiveAvailable?: boolean;
   isBusyOnCall?: boolean;
+  lastSeenAt?: string | null;
   ratingAvg?: number | null;
   ratingCount?: number;
   totalCalls?: number;

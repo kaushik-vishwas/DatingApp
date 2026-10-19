@@ -9,6 +9,7 @@ import { ReceiverDetailModal } from '../components/ReceiverDetailModal';
 import { ReceiverEditModal } from '../components/ReceiverEditModal';
 import {
   formatINR,
+  formatLastSeen,
   receiverAvailabilityState,
   receiverCode,
   receiverRatingDisplay,
@@ -485,6 +486,14 @@ export function ReceiversPage() {
                             {availability === 'online' ? 'Online' : availability === 'busy' ? 'Busy' : 'Offline'}
                           </span>
                         </span>
+                        {availability === 'offline' &&
+                        r.accountStatus !== 'pending_review' &&
+                        r.accountStatus !== 'pending_profile' &&
+                        formatLastSeen(r.lastSeenAt) ? (
+                          <span className="mt-0.5 block whitespace-nowrap text-[11px] text-neutral-400">
+                            Last {formatLastSeen(r.lastSeenAt)}
+                          </span>
+                        ) : null}
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-1">

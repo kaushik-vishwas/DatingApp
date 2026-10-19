@@ -70,6 +70,28 @@ const socketRegistry_1 = require("../socket/socketRegistry");
 const authSessionService_1 = require("../services/authSessionService");
 const phoneNormalize_1 = require("../utils/phoneNormalize");
 const OTP_TTL_MS = 5 * 60 * 1000; // 5 minutes
+/**
+ * Best available "last seen": presence evidence (saved online/offline change, last heartbeat
+ * behind the grace lease, latest call), else the last account update, else sign-up.
+ * Presence was only saved from 5 Oct 2026, so older accounts fall back to the later steps.
+ */
+function receiverLastSeenIso(r, lastCallAt) {
+    const candidates = [];
+    if (r.lastActiveAt instanceof Date)
+        candidates.push(r.lastActiveAt.getTime());
+    if (r.discoverGraceUntil instanceof Date) {
+        candidates.push(r.discoverGraceUntil.getTime() - receiverPresence_1.RECEIVER_DISCOVER_GRACE_MS);
+    }
+    if (lastCallAt instanceof Date)
+        candidates.push(lastCallAt.getTime());
+    if (candidates.length === 0) {
+        const fallback = r.updatedAt instanceof Date ? r.updatedAt : r.createdAt;
+        if (!(fallback instanceof Date))
+            return null;
+        candidates.push(fallback.getTime());
+    }
+    return new Date(Math.min(Date.now(), Math.max(...candidates))).toISOString();
+}
 const signAdminToken = (adminId) => {
     const secret = process.env.ADMIN_JWT_SECRET;
     if (!secret) {
@@ -1370,7 +1392,6 @@ const listAllReceivers = async (req, res) => {
         let total = 0;
         let tabCounts;
         let onlineCount = 0;
-        let versionCounts = [];
         let receivers;
         if (paginated) {
             page = Math.max(1, Number(req.query.page) || 1);
@@ -1389,7 +1410,7 @@ const listAllReceivers = async (req, res) => {
                 const rx = new RegExp(escapeRegex(q), 'i');
                 search.$or = [{ name: rx }, { email: rx }, { phone: rx }];
             }
-            const [all, approved, pending, rejected, kycPending, kycApproved, pageRows, availableRows, versionRows] = await Promise.all([
+            const [all, approved, pending, rejected, kycPending, kycApproved, pageRows, availableRows] = await Promise.all([
                 Receiver_1.default.countDocuments(search),
                 Receiver_1.default.countDocuments(withReceiverStatus(search, 'approved')),
                 Receiver_1.default.countDocuments(withReceiverStatus(search, 'pending')),
@@ -1404,12 +1425,7 @@ const listAllReceivers = async (req, res) => {
                 Receiver_1.default.find({ ...search, isAvailable: true })
                     .select('_id isAvailable discoverGraceUntil')
                     .lean(),
-                Receiver_1.default.aggregate([
-                    { $match: search },
-                    { $group: { _id: { $ifNull: ['$appVersion', null] }, count: { $sum: 1 } } },
-                ]),
             ]);
-            versionCounts = versionRows.map((row) => ({ version: row._id, count: row.count }));
             total =
                 status === 'approved'
                     ? approved
@@ -1441,7 +1457,7 @@ const listAllReceivers = async (req, res) => {
         todayStart.setHours(0, 0, 0, 0);
         const weekStart = toRangeStart('7d') ?? todayStart;
         const monthStart = toRangeStart('30d') ?? todayStart;
-        const [ratingRows, earningsByReceiver] = await Promise.all([
+        const [ratingRows, earningsByReceiver, lastCallRows] = await Promise.all([
             receiverIds.length === 0
                 ? Promise.resolve([])
                 : ReceiverRating_1.default.aggregate([
@@ -1455,7 +1471,14 @@ const listAllReceivers = async (req, res) => {
                     },
                 ]),
             (0, receiverEarningsAggregate_1.aggregateReceiverEarningsByReceiver)(receiverIds, todayStart, weekStart, monthStart),
+            receiverIds.length === 0
+                ? Promise.resolve([])
+                : CallSession_1.default.aggregate([
+                    { $match: { receiverId: { $in: receiverIds } } },
+                    { $group: { _id: '$receiverId', lastAt: { $max: { $ifNull: ['$endedAt', '$startedAt'] } } } },
+                ]),
         ]);
+        const lastCallAtByReceiverId = new Map(lastCallRows.map((row) => [String(row._id), row.lastAt]));
         const ratingByReceiverId = new Map(ratingRows.map((row) => [
             String(row._id),
             {
@@ -1486,11 +1509,10 @@ const listAllReceivers = async (req, res) => {
                 earningsToday: earnings?.today.earnings ?? 0,
                 totalEarnings: earnings?.lifetime.earnings ?? 0,
                 isLiveAvailable: isOnline,
+                lastSeenAt: receiverLastSeenIso(r, lastCallAtByReceiverId.get(id)),
             };
         });
-        res.status(200).json(paginated
-            ? { receivers: list, total, page, limit, tabCounts, onlineCount, versionCounts }
-            : { receivers: list });
+        res.status(200).json(paginated ? { receivers: list, total, page, limit, tabCounts, onlineCount } : { receivers: list });
     }
     catch (err) {
         const msg = err instanceof Error ? err.message : String(err);

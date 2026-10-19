@@ -132,7 +132,7 @@ function attachChatSocket(httpServer) {
             console.error('socket settleAndReleaseCall error:', msg);
         }
         finally {
-            (0, callInviteRegistry_1.unregisterPendingCallInvite)(receiverId);
+            (0, callInviteRegistry_1.unregisterPendingCallInvite)(receiverId, callId);
             void (0, pendingIncomingCall_1.clearPendingIncomingCall)(receiverId);
             (0, callQueue_1.releaseReceiverReservation)(receiverId);
             await (0, callQueue_1.syncReceiverQueueState)(receiverId);
@@ -410,6 +410,7 @@ function attachChatSocket(httpServer) {
                     if (session?.status === 'completed') {
                         // Ended elsewhere (REST end) and already released there — just forget the invite.
                         activeCallInvites.delete(callId);
+                        (0, callInviteRegistry_1.unregisterPendingCallInvite)(invite.receiverId, callId);
                         return;
                     }
                     const bothConnected = hasActiveSocketForAccount(invite.inviterType, invite.inviterId) &&
@@ -1122,7 +1123,7 @@ function attachChatSocket(httpServer) {
                     ack?.({ ok: false, error: 'Busy on another call.' });
                     return;
                 }
-                (0, callInviteRegistry_1.registerPendingCallInvite)(receiverForInviteId);
+                (0, callInviteRegistry_1.registerPendingCallInvite)(receiverForInviteId, callId);
                 (0, callQueue_1.removeReceiverFromQueue)(receiverForInviteId);
                 const invitedAt = new Date();
                 const invite = {

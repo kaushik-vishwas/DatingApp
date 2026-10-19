@@ -158,7 +158,7 @@ export default function ReceiverProfileScreen({ navigation, route }: Props): Rea
               ? 'Available'
               : presence.status === 'busy'
                 ? 'Busy right now'
-                : `Offline • Last seen ${formatLastSeen(receiver.updatedAt)}`}
+                : `Offline • Last ${formatLastSeen(receiver.updatedAt)}`}
           </Text>
         </View>
 

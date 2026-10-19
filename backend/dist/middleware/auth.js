@@ -10,14 +10,6 @@ const User_1 = __importDefault(require("../models/User"));
 const Receiver_1 = __importDefault(require("../models/Receiver"));
 const authToken_1 = require("../utils/authToken");
 const apiTraceLog_1 = require("../utils/apiTraceLog");
-const APP_VERSION_HEADER = 'x-app-version';
-function readAppVersionHeader(req) {
-    const raw = req.headers[APP_VERSION_HEADER];
-    const value = (Array.isArray(raw) ? raw[0] : raw)?.trim();
-    if (!value || value.length > 20 || !/^\d+(\.\d+){0,3}$/.test(value))
-        return null;
-    return value;
-}
 /**
  * JWT authentication middleware for protected routes.
  * Expects: Authorization: Bearer <token>
@@ -85,12 +77,6 @@ const protect = async (req, res, next) => {
         if (tokenSv !== dbSvR) {
             failStatus(401, { message: 'Signed in on another device. Please sign in again.', error: 'PROTECT_SESSION_SUPERSEDED' }, 'receiver_session_superseded', { decodedIdSuffix: String(decoded.id).slice(-6) });
             return;
-        }
-        const reportedVersion = readAppVersionHeader(req);
-        if (reportedVersion && reportedVersion !== receiver.appVersion) {
-            void Receiver_1.default.updateOne({ _id: receiver._id }, { $set: { appVersion: reportedVersion } })
-                .exec()
-                .catch(() => { });
         }
         req.user = undefined;
         req.receiver = receiver;

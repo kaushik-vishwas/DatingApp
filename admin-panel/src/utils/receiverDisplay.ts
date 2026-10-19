@@ -56,6 +56,25 @@ export function receiverAvailabilityState(r: {
   return 'offline';
 }
 
+/** e.g. `3:43 am, Today`, `11:05 pm, Yesterday`, `3 days ago`, `2 weeks ago`, `1 month ago`. */
+export function formatLastSeen(iso: string | null | undefined): string | null {
+  if (!iso) return null;
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return null;
+  const time = d
+    .toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit', hour12: true })
+    .toLowerCase();
+  const startOfDay = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+  const dayDiff = Math.round((startOfDay(new Date()) - startOfDay(d)) / 86_400_000);
+  if (dayDiff === 0) return `${time}, Today`;
+  if (dayDiff === 1) return `${time}, Yesterday`;
+  const ago = (n: number, unit: string) => `${n} ${unit}${n === 1 ? '' : 's'} ago`;
+  if (dayDiff < 7) return ago(dayDiff, 'day');
+  if (dayDiff < 30) return ago(Math.floor(dayDiff / 7), 'week');
+  if (dayDiff < 365) return ago(Math.floor(dayDiff / 30), 'month');
+  return ago(Math.floor(dayDiff / 365), 'year');
+}
+
 export function receiverRatingDisplay(r: {
   accountStatus: string;
   ratingAvg?: number | null;
