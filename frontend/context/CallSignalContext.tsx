@@ -1703,6 +1703,7 @@ export const CallSignalProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       void profileApi.updateReceiverProfile({ isAvailable: false }).catch(() => {});
       void refreshUser();
       DeviceEventEmitter.emit(PRESENCE_FORCED_OFFLINE_EVENT);
+      if (message.startsWith('Your login expired')) return;
       Alert.alert('Go Online turned off', message);
     });
   }, [isSignedIn, user?.role, refreshUser, setQueueMode]);

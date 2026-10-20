@@ -33,7 +33,7 @@ import DiscoverSearchModal from '../components/caller/DiscoverSearchModal';
 import { CALLER_LANGUAGE_OPTIONS } from '../constants/userOnboarding';
 import { useAuth } from '../context/AuthContext';
 import { useCallSignals } from '../context/CallSignalContext';
-import { discoverApi, getErrorMessage, profileApi, walletApi } from '../services/api';
+import { discoverApi, getErrorMessage, isNoInternetMessage, profileApi, walletApi } from '../services/api';
 import type { CallerNotificationContent, DiscoverReceiverSummary, WalletHomeOfferPopup } from '../types/api';
 import { resolveProfileImageSource } from '../utils/avatarSource';
 import {
@@ -478,13 +478,14 @@ export default function CallerDiscoverHome(): React.JSX.Element {
   useFocusEffect(
     useCallback(() => {
       if (!canFetchDiscover) return;
+      void refreshUser();
       void loadCallerNotification();
       if (skipNextFocusRefreshRef.current) {
         skipNextFocusRefreshRef.current = false;
         return;
       }
       void fetchDiscoverReceivers({ silent: true });
-    }, [canFetchDiscover, fetchDiscoverReceivers, loadCallerNotification])
+    }, [canFetchDiscover, fetchDiscoverReceivers, loadCallerNotification, refreshUser])
   );
 
   const onRefresh = useCallback(async () => {
@@ -826,7 +827,11 @@ export default function CallerDiscoverHome(): React.JSX.Element {
 
         {err ? (
           <View style={styles.errBlock}>
-            <Text style={styles.errText}>{err}</Text>
+            {isNoInternetMessage(err) ? (
+              <Text style={styles.noInternetText}>No Internet</Text>
+            ) : (
+              <Text style={styles.errText}>{err}</Text>
+            )}
             <TouchableOpacity
               style={styles.retryBtn}
               onPress={() => void fetchDiscoverReceivers()}
@@ -1231,6 +1236,12 @@ const styles = StyleSheet.create({
     color: '#b91c1c',
     fontSize: 13,
     marginBottom: 0,
+    textAlign: 'center',
+  },
+  noInternetText: {
+    color: '#9ca3af',
+    fontSize: 14,
+    fontWeight: '600',
     textAlign: 'center',
   },
   loader: {

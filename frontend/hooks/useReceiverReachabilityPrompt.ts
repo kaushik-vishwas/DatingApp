@@ -13,6 +13,8 @@ import {
 } from '../utils/receiverReachability';
 
 const RESUME_DEBOUNCE_MS = 800;
+/** Some fixes (e.g. FCM token on devices with broken Play Services) can hang; never lock the prompt. */
+const FIX_BUSY_MAX_MS = 8000;
 
 /** "Not now" hides the prompt for this long, across minimize / app kill / relaunch. */
 const SNOOZE_MS = 6 * 60 * 60 * 1000;

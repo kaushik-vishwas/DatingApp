@@ -2,34 +2,51 @@ import { Ionicons } from '@expo/vector-icons';
 import React from 'react';
 import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 
-export type CallResultKind = 'no_answer' | 'declined';
+export type CallResultKind = 'no_answer' | 'declined' | 'connect_failed';
 
 type Props = {
   visible: boolean;
   kind: CallResultKind | null;
   peerName: string;
+  message?: string;
   onClose: () => void;
 };
 
-export default function CallResultNotice({ visible, kind, peerName, onClose }: Props): React.JSX.Element {
-  const noAnswer = kind !== 'declined';
+export default function CallResultNotice({
+  visible,
+  kind,
+  peerName,
+  message,
+  onClose,
+}: Props): React.JSX.Element {
+  const connectFailed = kind === 'connect_failed';
+  const noAnswer = kind !== 'declined' && !connectFailed;
   const name = peerName.trim() || 'They';
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <Pressable style={styles.backdrop} onPress={onClose}>
         <Pressable style={styles.card} onPress={() => {}}>
-          <View style={[styles.iconWrap, noAnswer ? styles.iconWait : styles.iconDeclined]}>
+          <View
+            style={[
+              styles.iconWrap,
+              noAnswer || connectFailed ? styles.iconWait : styles.iconDeclined,
+            ]}
+          >
             <Ionicons
-              name={noAnswer ? 'time-outline' : 'call-outline'}
+              name={connectFailed ? 'cloud-offline-outline' : noAnswer ? 'time-outline' : 'call-outline'}
               size={28}
-              color={noAnswer ? '#6d28d9' : '#9d174d'}
+              color={noAnswer || connectFailed ? '#6d28d9' : '#9d174d'}
             />
           </View>
-          <Text style={styles.title}>{noAnswer ? 'No answer' : 'Call declined'}</Text>
+          <Text style={styles.title}>
+            {connectFailed ? 'Voice call error' : noAnswer ? 'No answer' : 'Call declined'}
+          </Text>
           <Text style={styles.body}>
-            {noAnswer
-              ? `${name} didn't pick up.`
-              : `The call with ${name} was declined.`}
+            {connectFailed
+              ? message
+              : noAnswer
+                ? `${name} didn't pick up.`
+                : `The call with ${name} was declined.`}
           </Text>
           <Pressable style={styles.button} onPress={onClose}>
             <Text style={styles.buttonText}>OK</Text>

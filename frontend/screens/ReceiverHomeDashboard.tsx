@@ -29,7 +29,7 @@ import {
   getNotificationLastSeenAt,
   markNotificationsSeenNow,
 } from '../services/notificationUnread';
-import { chatApi, getErrorMessage, profileApi } from '../services/api';
+import { chatApi, getErrorMessage, isNoInternetMessage, profileApi } from '../services/api';
 import type {
   ReceiverCallInsightsResponse,
   ReceiverWalletSummaryResponse,
@@ -705,7 +705,20 @@ export default function ReceiverHomeDashboard(): React.JSX.Element {
             </View>
 
             <View style={styles.infoSection}>
-              {summaryError ? <Text style={styles.summaryErrInline}>{summaryError}</Text> : null}
+              {summaryError && isNoInternetMessage(summaryError) ? (
+                <View style={styles.noInternetBlock}>
+                  <Text style={styles.noInternetText}>No Internet</Text>
+                  <TouchableOpacity
+                    style={styles.retryBtn}
+                    onPress={() => void onRefresh()}
+                    activeOpacity={0.85}
+                  >
+                    <Text style={styles.retryBtnText}>Retry</Text>
+                  </TouchableOpacity>
+                </View>
+              ) : summaryError ? (
+                <Text style={styles.summaryErrInline}>{summaryError}</Text>
+              ) : null}
               <View style={styles.smallEarningsRow}>
                 <LinearGradient
                   colors={[...CALL_EARN_GRADIENT]}
@@ -1328,6 +1341,28 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '700',
     marginBottom: 10,
+  },
+  noInternetBlock: {
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 10,
+  },
+  noInternetText: {
+    color: '#9ca3af',
+    fontSize: 14,
+    fontWeight: '600',
+    textAlign: 'center',
+  },
+  retryBtn: {
+    backgroundColor: PURPLE,
+    paddingHorizontal: 18,
+    paddingVertical: 8,
+    borderRadius: 10,
+  },
+  retryBtnText: {
+    color: '#fff',
+    fontSize: 13,
+    fontWeight: '800',
   },
 
   publicRateBtnInline: {

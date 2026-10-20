@@ -50,6 +50,8 @@ import { AvatarSoundWaveRings, CallingProfileTravelWaves, CallingWaitFooter } fr
 import { useCallScreenCaptureProtection } from '../../utils/callScreenCaptureProtection';
 import { useActiveCallOngoingNotification } from '../../utils/activeCallOngoingNotification';
 import { AndroidCellularHoldMonitor } from '../../components/call/AndroidCellularHoldMonitor';
+import CallResultNotice from '../../components/call/CallResultNotice';
+import ConnectingStatusText from '../../components/call/ConnectingStatusText';
 import InCallTalktimeRechargeModal from '../../components/call/InCallTalktimeRechargeModal';
 import type { StreamMicControl } from '../../components/call/StreamCallAvatarExtras';
 import { getVoiceSessionStartPromise } from '../../utils/voiceCallSessionStart';
@@ -366,6 +368,7 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
   const [talkActive, setTalkActive] = useState(false);
   /** True when Stream reports JOINED + remote participant (media path actually up). */
   const [streamBothConnected, setStreamBothConnected] = useState(false);
+  const [joinFailedMessage, setJoinFailedMessage] = useState<string | null>(null);
   /** Stream SFU grades local or remote connection as POOR (debounced in the bridge). */
   const [poorNetwork, setPoorNetwork] = useState(false);
   const [systemCallHold, setSystemCallHold] = useState(false);
@@ -1931,8 +1934,16 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
         )
           ? 'Could not connect the call. Please check your internet connection and try again.'
           : getErrorMessage(e);
-        setError(msg);
-        Alert.alert('Voice call error', msg, [{ text: 'OK', onPress: () => exitCallScreenRef.current() }]);
+        if (endingRef.current) return;
+        // End for both sides now so the peer is not left on Connecting.
+        setEnding(true, 'voice_call_join_failed');
+        endingStartedAtRef.current = Date.now();
+        talkActiveRef.current = false;
+        emitCallEnd('voice_call_join_failed');
+        void stopOutboundRingtonePlayback();
+        void leaveMediaRef.current();
+        void ensureSessionEndedRef.current();
+        setJoinFailedMessage(msg);
       }
     })();
 
@@ -2701,6 +2712,20 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
       : talkActive && streamBothConnected
         ? 'Call Active'
         : 'Connecting';
+  const shellConnecting =
+    shellStatusLabel === 'Connecting…' || shellStatusLabel === 'Connecting';
+  const streamConnecting =
+    !systemCallHold && !peerCallHold && !(talkActive && streamBothConnected);
+  const callEndingUi = endingRef.current;
+  const connectingActive =
+    !callEndingUi &&
+    ((showCallShell && shellConnecting) || (!showCallShell && showStreamChrome && streamConnecting));
+  const connectingSinceRef = useRef<number | null>(null);
+  if (connectingActive) {
+    if (connectingSinceRef.current == null) connectingSinceRef.current = Date.now();
+  } else {
+    connectingSinceRef.current = null;
+  }
   const shellHangupLabel =
     receiverAvailabilitySession && receiverSessionPhase === 'incoming'
       ? 'Decline'
@@ -2750,7 +2775,16 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
         />
         <View style={[styles.overlay, { paddingTop: Math.max(insets.top + 16, 36) }]}>
           <View style={styles.statusPill}>
-            <Text style={styles.statusText}>{shellStatusLabel}</Text>
+            {shellConnecting && callEndingUi ? (
+              <Text style={styles.statusText}>Call ended</Text>
+            ) : shellConnecting && connectingSinceRef.current != null ? (
+              <ConnectingStatusText
+                sinceMs={connectingSinceRef.current}
+                style={styles.statusText}
+              />
+            ) : (
+              <Text style={styles.statusText}>{shellStatusLabel}</Text>
+            )}
           </View>
           <View style={[styles.avatarRow, showCallingTravelWaves && styles.avatarRowCalling]}>
             <View style={styles.avatarCol}>
@@ -3184,6 +3218,23 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
             {(() => {
               const showPoorNetwork =
                 !systemCallHold && !peerCallHold && talkActive && streamBothConnected && poorNetwork;
+              if (streamConnecting && callEndingUi) {
+                return (
+                  <View style={styles.statusPill}>
+                    <Text style={styles.statusText}>Call ended</Text>
+                  </View>
+                );
+              }
+              if (streamConnecting && connectingSinceRef.current != null) {
+                return (
+                  <View style={styles.statusPill}>
+                    <ConnectingStatusText
+                      sinceMs={connectingSinceRef.current}
+                      style={styles.statusText}
+                    />
+                  </View>
+                );
+              }
               return (
                 <View style={[styles.statusPill, showPoorNetwork && styles.statusPillPoorNetwork]}>
                   <Text style={styles.statusText}>
@@ -3406,6 +3457,20 @@ export default function VoiceCallScreen({ navigation, route }: Props): React.JSX
         visible={talktimeRechargeOpen}
         onClose={() => setTalktimeRechargeOpen(false)}
         onRechargeSuccess={handleInCallRechargeSuccess}
+      />
+      <CallResultNotice
+        visible={joinFailedMessage != null}
+        kind="connect_failed"
+        peerName={peerDisplayName}
+        message={joinFailedMessage ?? undefined}
+        onClose={() => {
+          setJoinFailedMessage(null);
+          if (receiverAvailabilitySessionRef.current && userAvailableRef.current) {
+            resetReceiverToWaitingRef.current();
+            return;
+          }
+          exitCallScreenRef.current();
+        }}
       />
     </>
   );

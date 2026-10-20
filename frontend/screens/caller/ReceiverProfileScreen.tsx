@@ -21,7 +21,11 @@ import { getErrorMessage } from '../../services/api';
 import { resolveProfileImageSource } from '../../utils/avatarSource';
 import { CALLER_MESSAGE_REQUIRES_CALL } from '../../constants/callerMessaging';
 import { useCallerMessageEligibility } from '../../context/CallerMessageEligibilityContext';
-import { getReceiverPresenceInfo, isReceiverBusyCallError } from '../../utils/receiverStatus';
+import {
+  getReceiverPresenceInfo,
+  isInsufficientBalanceCallError,
+  isReceiverBusyCallError,
+} from '../../utils/receiverStatus';
 
 const PURPLE = '#7b2cff';
 const PINK = '#ff72d2';
@@ -42,7 +46,7 @@ function formatLastSeen(iso: string): string {
 
 export default function ReceiverProfileScreen({ navigation, route }: Props): React.JSX.Element {
   const { receiver } = route.params;
-  const { user } = useAuth();
+  const { user, refreshUser } = useAuth();
   const { startCallInvite } = useCallSignals();
   const [rechargeModal, setRechargeModal] = useState<'none' | 'low' | 'empty'>('none');
   const [calling, setCalling] = useState(false);
@@ -57,7 +61,8 @@ export default function ReceiverProfileScreen({ navigation, route }: Props): Rea
   useFocusEffect(
     useCallback(() => {
       void refreshMessageEligibility();
-    }, [refreshMessageEligibility])
+      void refreshUser();
+    }, [refreshMessageEligibility, refreshUser])
   );
   const selfProfileImageSource = resolveProfileImageSource(user?.profileImage);
   const receiverHeroSource = resolveProfileImageSource(receiver.profileImage);
@@ -96,7 +101,10 @@ export default function ReceiverProfileScreen({ navigation, route }: Props): Rea
         });
       } catch (e: unknown) {
         const msg = getErrorMessage(e);
-        if (!isReceiverBusyCallError(msg)) {
+        if (isInsufficientBalanceCallError(msg)) {
+          void refreshUser();
+          setRechargeModal('empty');
+        } else if (!isReceiverBusyCallError(msg)) {
           Alert.alert('Call failed', msg);
         }
       } finally {
