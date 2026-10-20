@@ -1,3 +1,4 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect, useIsFocused } from '@react-navigation/native';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { AppState, type AppStateStatus } from 'react-native';
@@ -13,8 +14,28 @@ import {
 
 const RESUME_DEBOUNCE_MS = 800;
 
-/** "Not now" lasts until the JS runtime restarts (next app launch). */
-let dismissedThisSession = false;
+/** "Not now" hides the prompt for this long, across minimize / app kill / relaunch. */
+const SNOOZE_MS = 6 * 60 * 60 * 1000;
+const SNOOZE_UNTIL_KEY = 'selecto_receiver_reachability_snooze_until_v1';
+
+let snoozeUntilCache: number | null = null;
+
+async function readSnoozeUntil(): Promise<number> {
+  if (snoozeUntilCache != null) return snoozeUntilCache;
+  try {
+    const raw = await AsyncStorage.getItem(SNOOZE_UNTIL_KEY);
+    const n = Number(raw);
+    snoozeUntilCache = Number.isFinite(n) ? n : 0;
+  } catch {
+    snoozeUntilCache = 0;
+  }
+  return snoozeUntilCache;
+}
+
+function snoozePrompt(): void {
+  snoozeUntilCache = Date.now() + SNOOZE_MS;
+  void AsyncStorage.setItem(SNOOZE_UNTIL_KEY, String(snoozeUntilCache)).catch(() => {});
+}
 
 /**
  * Read-only reachability check on home focus and every app resume. Shows the prompt only while
@@ -39,11 +60,11 @@ export function useReceiverReachabilityPrompt(enabled: boolean): {
   const [busy, setBusy] = useState(false);
 
   const check = useCallback(async () => {
-    if (!enabled || dismissedThisSession) {
-      setMissing([]);
+    const runId = ++runIdRef.current;
+    if (!enabled || Date.now() < (await readSnoozeUntil())) {
+      if (runId === runIdRef.current) setMissing([]);
       return;
     }
-    const runId = ++runIdRef.current;
     try {
       const next = await getReceiverReachabilityStatus();
       if (runId !== runIdRef.current) return;
@@ -94,12 +115,12 @@ export function useReceiverReachabilityPrompt(enabled: boolean): {
   }, [check]);
 
   const onClose = useCallback(() => {
-    dismissedThisSession = true;
+    snoozePrompt();
+    runIdRef.current += 1;
     setMissing([]);
   }, []);
 
-  const visible =
-    enabled && !dismissedThisSession && isFocused && missing.length > 0 && AppState.currentState === 'active';
+  const visible = enabled && isFocused && missing.length > 0 && AppState.currentState === 'active';
 
   return {
     visible,
