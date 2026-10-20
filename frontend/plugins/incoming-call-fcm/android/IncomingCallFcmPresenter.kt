@@ -59,17 +59,19 @@ object IncomingCallFcmPresenter {
     if (type != TYPE_INCOMING) return false
 
     val appContext = context.applicationContext
+    val callId = data["callId"]?.trim().orEmpty()
     if (!IncomingCallUiGate.isReceiverUiEnabled(appContext)) {
       IncomingCallRingtonePlayer.stop(appContext)
       Log.i(TAG, "Suppressed incoming call notification (receiver UI disabled)")
+      if (callId.isNotEmpty()) NativeCallApi.acknowledgeRinging(appContext, callId, "ui_disabled")
       return true
     }
     if (IncomingCallUiGate.isInAppVoiceCallActive(appContext)) {
       Log.i(TAG, "Suppressed incoming call notification (voice call already active)")
+      if (callId.isNotEmpty()) NativeCallApi.acknowledgeRinging(appContext, callId, "busy")
       return true
     }
 
-    val callId = data["callId"]?.trim().orEmpty()
     if (callId.isEmpty()) return false
     if (isCancelled(callId)) {
       // FCM can reorder: the "cancelled" push arrived first — never ring a finished call.

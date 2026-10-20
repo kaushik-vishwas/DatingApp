@@ -57,9 +57,13 @@ object NativeCallApi {
     postCallAction(context, callId, "decline", onDone)
   }
 
-  /** POST /calls/{callId}/ringing — native incoming-call notification is showing. */
-  fun acknowledgeRinging(context: Context, callId: String) {
-    postCallAction(context, callId, "ringing", null)
+  /**
+   * POST /calls/{callId}/ringing — native incoming-call notification is showing.
+   * [suppressed] ("busy" / "ui_disabled"): the phone got the push but deliberately did not ring.
+   */
+  fun acknowledgeRinging(context: Context, callId: String, suppressed: String? = null) {
+    val body = suppressed?.let { "{\"suppressed\":\"$it\"}" } ?: "{}"
+    postCallAction(context, callId, "ringing", null, body)
   }
 
   /**
@@ -70,7 +74,13 @@ object NativeCallApi {
     postCallAction(context, callId, "seen", null)
   }
 
-  private fun postCallAction(context: Context, callId: String, action: String, onDone: (() -> Unit)?) {
+  private fun postCallAction(
+    context: Context,
+    callId: String,
+    action: String,
+    onDone: (() -> Unit)?,
+    body: String = "{}"
+  ) {
     val id = callId.trim()
     val appContext = context.applicationContext
     executor.execute {
@@ -84,13 +94,13 @@ object NativeCallApi {
         val isDecline = action == "decline"
         val code =
           try {
-            post(appContext, base, token, id, action, isDecline)
+            post(appContext, base, token, id, action, isDecline, body)
           } catch (e: IOException) {
             // Network blip right after a Doze wake — the caller keeps ringing unless decline lands.
             if (!isDecline) throw e
             Log.w(TAG, "POST decline failed, retrying callId=$id", e)
             Thread.sleep(DECLINE_RETRY_DELAY_MS)
-            post(appContext, base, token, id, action, true)
+            post(appContext, base, token, id, action, true, body)
           }
         PresenceNativeWakeLog.append(appContext, "native_call_$action", mapOf("callId" to id, "status" to code))
       } catch (e: Exception) {
@@ -112,7 +122,8 @@ object NativeCallApi {
     token: String,
     callId: String,
     action: String,
-    shortConnect: Boolean
+    shortConnect: Boolean,
+    body: String
   ): Int {
     val path = URLEncoder.encode(callId, StandardCharsets.UTF_8.name())
     val conn = (URL("$base/calls/$path/$action").openConnection() as HttpURLConnection).apply {
@@ -126,7 +137,7 @@ object NativeCallApi {
       AppVersionHeader.apply(this, context)
     }
     try {
-      conn.outputStream.use { it.write("{}".toByteArray(Charsets.UTF_8)) }
+      conn.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
       return conn.responseCode
     } finally {
       conn.disconnect()

@@ -40,7 +40,10 @@ object IncomingCallKeepAlivePresenter {
     val inCall =
       prefs.getBoolean("in_app_voice_call_active", false) &&
         prefs.getInt("in_app_voice_call_pid", -1) == android.os.Process.myPid()
-    if (inCall) return false
+    if (inCall) {
+      NativeCallApi.acknowledgeRinging(appContext, id, "busy")
+      return false
+    }
     IncomingCallNotificationChannels.ensureIncomingCallChannel(appContext)
     acquireBriefWakeLock(appContext)
 

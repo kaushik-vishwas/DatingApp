@@ -38,7 +38,13 @@ import {
   declineInviteByReceiver,
   hasLiveInviteForReceiver,
   markInviteSeenByReceiver,
+  parseRingSuppressedReason,
 } from '../services/callInviteActions';
+import {
+  LAST_CLIENT_RING_REFRESH_MS,
+  parseClientInfo,
+  recordReceiverLastClient,
+} from '../middleware/clientInfo';
 import {
   releaseReceiverReservation,
   syncReceiverQueueState,
@@ -1085,7 +1091,13 @@ export const acknowledgeIncomingCallRinging = async (req: Request, res: Response
       return;
     }
     const receiverId = String(req.receiver._id);
-    const result = acknowledgeInviteRinging(callId, receiverId);
+    const body = (req.body ?? {}) as { suppressed?: unknown };
+    const client = parseClientInfo(req);
+    if (client) void recordReceiverLastClient(receiverId, client, LAST_CLIENT_RING_REFRESH_MS);
+    const result = acknowledgeInviteRinging(callId, receiverId, {
+      suppressed: parseRingSuppressedReason(body.suppressed),
+      client,
+    });
     // The phone just proved it is reachable — renew its discover presence lease.
     try {
       await touchReceiverBackgroundPresence(receiverId);

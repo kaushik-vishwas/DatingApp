@@ -17,6 +17,7 @@ import chatRoutes from './routes/chatRoutes';
 import callRoutes from './routes/callRoutes';
 import appRoutes from './routes/appRoutes';
 import { requireVersionedAppClient } from './middleware/appVersionGate';
+import { trackClientInfo } from './middleware/clientInfo';
 import { attachChatSocket } from './socket/chatSocket';
 import { reuseOrCreateApiTrace } from './utils/apiTraceLog';
 import { getLoadedAppEnv, getLoadedEnvPath, getServerPort } from './config/loadEnv';
@@ -58,6 +59,7 @@ app.get('/health', (_req, res) => {
 });
 
 app.use(['/auth', '/profile', '/discover', '/wallet', '/chat', '/calls'], requireVersionedAppClient);
+app.use(['/auth', '/profile', '/discover', '/wallet', '/chat', '/calls'], trackClientInfo);
 
 // Auth routes
 app.use('/auth', authRoutes);

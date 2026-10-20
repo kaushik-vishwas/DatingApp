@@ -4,11 +4,20 @@ import android.content.Context
 import android.os.Build
 import java.net.HttpURLConnection
 
-/** Mirrors the JS X-App-Version header so native requests pass the server's version gate. */
+/** Mirrors the JS X-App-Version / X-Device headers so native requests carry the same client info. */
 object AppVersionHeader {
   private const val NAME = "X-App-Version"
+  private const val DEVICE_NAME = "X-Device"
+  private const val DEVICE_MAX_LENGTH = 120
 
   @Volatile private var cached: String? = null
+
+  private val device: String by lazy {
+    fun clean(value: String?): String =
+      value.orEmpty().replace(Regex("[^\\x20-\\x7E]"), "").replace(";", " ").replace("=", " ").trim()
+    "mfr=${clean(Build.MANUFACTURER)}; model=${clean(Build.MODEL)}; os=${clean(Build.VERSION.RELEASE)}; sdk=${Build.VERSION.SDK_INT}"
+      .take(DEVICE_MAX_LENGTH)
+  }
 
   private fun versionCode(context: Context): String? {
     cached?.let { return it }
@@ -25,5 +34,6 @@ object AppVersionHeader {
 
   fun apply(conn: HttpURLConnection, context: Context) {
     versionCode(context)?.let { conn.setRequestProperty(NAME, it) }
+    conn.setRequestProperty(DEVICE_NAME, device)
   }
 }

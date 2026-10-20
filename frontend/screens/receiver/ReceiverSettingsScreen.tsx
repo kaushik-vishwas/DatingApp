@@ -1,5 +1,6 @@
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import Constants from 'expo-constants';
 import React from 'react';
 import { Alert, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -12,6 +13,8 @@ type Nav = NativeStackNavigationProp<ReceiverStackParamList, 'ReceiverSettings'>
 export default function ReceiverSettingsScreen(): React.JSX.Element {
   const navigation = useNavigation<Nav>();
   const { signOut } = useAuth();
+  const appVersion =
+    (typeof Constants.expoConfig?.version === 'string' && Constants.expoConfig.version) || '1.0.0';
 
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'left', 'right']}>
@@ -150,6 +153,8 @@ export default function ReceiverSettingsScreen(): React.JSX.Element {
             <Text style={styles.logoutText}>Log out</Text>
           </View>
         </TouchableOpacity>
+
+        <Text style={styles.version}>Version {appVersion}</Text>
       </ScrollView>
     </SafeAreaView>
   );
@@ -232,4 +237,5 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   logoutText: { color: '#dc2626', fontSize: 14, fontWeight: '700' },
+  version: { textAlign: 'center', color: '#B0A8C2', fontSize: 12, marginTop: 24, fontWeight: '600' },
 });

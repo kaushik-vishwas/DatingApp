@@ -8,6 +8,15 @@ export type Gender = 'male' | 'female' | 'other';
 export const RECEIVER_AUDIO_CALL_RATE_INR_PER_MIN = 5;
 export type ReceiverBadgeLevel = 'platinum' | 'diamond' | 'supreme';
 
+export type ReceiverLastClient = {
+  mfr: string;
+  model: string;
+  os: string;
+  sdk: number | null;
+  appVersionCode: number | null;
+  seenAt: Date;
+};
+
 /** Call receivers — KYC, bank, commission-related profile (collection: `receivers`) */
 export interface IReceiver {
   name: string;
@@ -56,6 +65,8 @@ export interface IReceiver {
   isBusyOnCall: boolean;
   /** Discover grace window end — keeps receiver visible after minimize/socket drop. */
   discoverGraceUntil: Date | null;
+  /** Last device / app build seen on an app request (X-Device + X-App-Version headers). */
+  lastClient: ReceiverLastClient | null;
   /** Set when an admin applies a warning from a moderation report. */
   moderationWarningAt: Date | null;
   /** Last admin-provided reason when KYC is rejected. */
@@ -151,6 +162,20 @@ const receiverSchema = new Schema<IReceiver>(
     isOnline: { type: Boolean, default: false },
     isBusyOnCall: { type: Boolean, default: false },
     discoverGraceUntil: { type: Date, default: null },
+    lastClient: {
+      type: new Schema<ReceiverLastClient>(
+        {
+          mfr: { type: String, default: '' },
+          model: { type: String, default: '' },
+          os: { type: String, default: '' },
+          sdk: { type: Number, default: null },
+          appVersionCode: { type: Number, default: null },
+          seenAt: { type: Date, required: true },
+        },
+        { _id: false }
+      ),
+      default: null,
+    },
     moderationWarningAt: { type: Date, default: null },
     rejectionReason: { type: String, default: null },
     pendingNameAsPerAadhaar: { type: String, default: null },

@@ -4,13 +4,27 @@
  * the incoming-call notification actually rang on the device.
  */
 
+import type { ReceiverLastClient } from '../models/Receiver';
+
 export type InviteActionResult =
   | { ok: true; alreadyAccepted?: boolean }
   | { ok: false; error: 'Unknown call invite' | 'Forbidden' | 'Unavailable' };
 
+/** Phone got the wake push but deliberately did not ring (sent by 1.0.42+ native code). */
+export type RingSuppressedReason = 'busy' | 'ui_disabled';
+
+export type RingAckDetails = {
+  suppressed: RingSuppressedReason | null;
+  client: Omit<ReceiverLastClient, 'seenAt'> | null;
+};
+
+export function parseRingSuppressedReason(raw: unknown): RingSuppressedReason | null {
+  return raw === 'busy' || raw === 'ui_disabled' ? raw : null;
+}
+
 type InviteActionHandlers = {
   declineByReceiver: (callId: string, receiverId: string) => InviteActionResult;
-  acknowledgeRinging: (callId: string, receiverId: string) => InviteActionResult;
+  acknowledgeRinging: (callId: string, receiverId: string, details: RingAckDetails) => InviteActionResult;
   markSeenByReceiver: (callId: string, receiverId: string, foreground: boolean) => InviteActionResult;
   hasLiveInviteForReceiver: (callId: string, receiverId: string, callerId: string) => boolean;
 };
@@ -25,8 +39,12 @@ export function declineInviteByReceiver(callId: string, receiverId: string): Inv
   return handlers?.declineByReceiver(callId, receiverId) ?? { ok: false, error: 'Unavailable' };
 }
 
-export function acknowledgeInviteRinging(callId: string, receiverId: string): InviteActionResult {
-  return handlers?.acknowledgeRinging(callId, receiverId) ?? { ok: false, error: 'Unavailable' };
+export function acknowledgeInviteRinging(
+  callId: string,
+  receiverId: string,
+  details: RingAckDetails = { suppressed: null, client: null }
+): InviteActionResult {
+  return handlers?.acknowledgeRinging(callId, receiverId, details) ?? { ok: false, error: 'Unavailable' };
 }
 
 /** Receiver opened the incoming call (native notification tap, before JS / socket are up). */

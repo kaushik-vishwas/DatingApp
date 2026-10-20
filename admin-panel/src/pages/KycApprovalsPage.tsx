@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Check, Eye, FileText, Image as ImageIcon, RefreshCw, X } from 'lucide-react';
+import { Check, Eye, FileText, Image as ImageIcon, RefreshCw, Search, X } from 'lucide-react';
 import {
   approveReceiver,
   fetchKycStats,
@@ -32,6 +32,22 @@ function formatSubmitted(iso?: string) {
   }
 }
 
+const NAME_MAX_CHARS = 10;
+
+function shortName(name: string): string {
+  const trimmed = (name ?? '').trim();
+  return trimmed.length > NAME_MAX_CHARS ? `${trimmed.slice(0, NAME_MAX_CHARS)}...` : trimmed;
+}
+
+/** Cloudinary delivery URLs carry the upload time as `/v<unix seconds>/`. */
+function formatVoiceRecorded(url?: string | null): string {
+  const match = url ? /\/v(\d{9,11})\//.exec(url) : null;
+  if (!match) return '—';
+  const d = new Date(Number(match[1]) * 1000);
+  if (Number.isNaN(d.getTime())) return '—';
+  return d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
+}
+
 function statusBadge(status: string) {
   if (status === 'approved') return { label: 'Approved', className: 'bg-emerald-100 text-emerald-800' };
   if (status === 'pending_review')
@@ -60,6 +76,8 @@ export function KycApprovalsPage() {
   const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>('pending');
   const [range, setRange] = useState<Range>('today');
+  const [search, setSearch] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
   const [tabCounts, setTabCounts] = useState({ all: 0, approved: 0, pending: 0 });
@@ -77,7 +95,13 @@ export function KycApprovalsPage() {
     setError(null);
     try {
       const [data, st] = await Promise.all([
-        fetchReceiversPage({ status: kycStatus(tab), range, page, limit: PAGE_SIZE }),
+        fetchReceiversPage({
+          status: kycStatus(tab),
+          q: debouncedSearch || undefined,
+          range,
+          page,
+          limit: PAGE_SIZE,
+        }),
         fetchKycStats(),
       ]);
       setRows(data.receivers);
@@ -97,7 +121,15 @@ export function KycApprovalsPage() {
     } finally {
       setLoading(false);
     }
-  }, [tab, range, page]);
+  }, [tab, range, page, debouncedSearch]);
+
+  useEffect(() => {
+    const t = setTimeout(() => {
+      setDebouncedSearch(search.trim());
+      setPage(1);
+    }, 350);
+    return () => clearTimeout(t);
+  }, [search]);
 
   useEffect(() => {
     void load();
@@ -165,6 +197,16 @@ export function KycApprovalsPage() {
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
+          <div className="relative">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-neutral-400" />
+            <input
+              type="search"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search name or phone"
+              className="w-56 rounded-xl border border-neutral-200 bg-white py-2 pl-9 pr-3 text-sm text-neutral-800 shadow-sm placeholder:text-neutral-400 focus:border-[#7b2cff] focus:outline-none"
+            />
+          </div>
           <select
             value={range}
             onChange={(e) => {
@@ -266,6 +308,9 @@ export function KycApprovalsPage() {
                   </th>
                   <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-neutral-500">Audio</th>
                   <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-neutral-500">
+                    Voice recorded
+                  </th>
+                  <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-neutral-500">
                     Last activity
                   </th>
                   <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-neutral-500">Documents</th>
@@ -303,13 +348,18 @@ export function KycApprovalsPage() {
                   return (
                     <tr key={r._id} className="border-b border-neutral-100 last:border-0">
                       <td className="px-4 py-3 font-mono text-xs font-medium text-neutral-800">{kycCode(i)}</td>
-                      <td className="px-4 py-3 font-medium text-neutral-900">{r.name}</td>
+                      <td className="px-4 py-3 font-medium text-neutral-900" title={r.name}>
+                        {shortName(r.name)}
+                      </td>
                       <td className="px-4 py-3">
                         {r.userAudio ? (
                           <AdminVoicePlayer src={r.userAudio} className="h-9 max-w-[220px]" />
                         ) : (
                           <span className="text-neutral-400">—</span>
                         )}
+                      </td>
+                      <td className="whitespace-nowrap px-4 py-3 text-neutral-600">
+                        {formatVoiceRecorded(r.userAudio)}
                       </td>
                       <td className="px-4 py-3 text-neutral-600">{formatSubmitted(activity)}</td>
                       <td className="px-4 py-3">

@@ -380,7 +380,7 @@ export default function ReceiverHomeDashboard(): React.JSX.Element {
         icon: iconById[w.id] ?? 'white-balance-sunny',
       }));
     }
-    if (!isFixedEarning) {
+    if (callInsights?.receiverEarningModel === 'score_based') {
       return [
         { id: 'platinum', label: 'Platinum', rate: '₹2/min', icon: 'medal-outline' as LevelIcon },
         { id: 'diamond', label: 'Diamond', rate: '₹2.3/min', icon: 'diamond-stone' as LevelIcon },
@@ -392,7 +392,7 @@ export default function ReceiverHomeDashboard(): React.JSX.Element {
       { id: 'evening', label: '9 PM – 11 PM', rate: '₹1.9/min', icon: 'weather-sunset' as LevelIcon },
       { id: 'night', label: '11 PM – 6 AM', rate: '₹2/min', icon: 'moon-waning-crescent' as LevelIcon },
     ];
-  }, [callInsights?.fixedPerMinuteWindows, isFixedEarning]);
+  }, [callInsights?.fixedPerMinuteWindows, callInsights?.receiverEarningModel, isFixedEarning]);
 
   const showReceiverWelcome =
     receiverWelcome != null &&
@@ -763,7 +763,7 @@ export default function ReceiverHomeDashboard(): React.JSX.Element {
               colors={[SKY_BLUE_START, SKY_BLUE_END]}
               bgImage={EarningsCardBg}
               title="Earning Levels"
-              subtitle={isFixedEarning ? 'IST time slots' : 'Score badges'}
+              subtitle={callInsights?.receiverEarningModel === 'score_based' ? 'Score badges' : 'IST time slots'}
             >
               <View style={styles.earningLevelsGrid}>
                 <View style={styles.earningLevelsRow}>
