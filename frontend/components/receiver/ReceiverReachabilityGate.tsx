@@ -1,3 +1,5 @@
+import { Ionicons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
 import React from 'react';
 import { Modal, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import type { ReachabilityCheckId, ReachabilityStatus } from '../../utils/receiverReachability';
@@ -21,6 +23,14 @@ const LABELS: Record<ReachabilityCheckId, string> = {
   autostart: 'Autostart',
 };
 
+const ICONS: Record<ReachabilityCheckId, React.ComponentProps<typeof Ionicons>['name']> = {
+  notifications: 'notifications-outline',
+  battery: 'battery-charging-outline',
+  fullScreenIntent: 'phone-portrait-outline',
+  pushToken: 'call-outline',
+  autostart: 'rocket-outline',
+};
+
 export default function ReceiverReachabilityGate({
   visible,
   missing,
@@ -32,28 +42,41 @@ export default function ReceiverReachabilityGate({
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <View style={styles.backdrop}>
-        <View style={styles.card}>
+        <LinearGradient
+          colors={['#3b0d7a', '#6d28d9', '#9333ea']}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={styles.card}
+        >
+          <View style={styles.headerIcon}>
+            <Ionicons name="call" size={26} color="#fff" />
+          </View>
           <Text style={styles.title}>Don't miss calls</Text>
           <Text style={styles.sub}>Enable these to receive calls reliably.</Text>
           {missing.map((id) => (
             <View key={id} style={styles.row}>
-              <Text style={styles.rowTitle}>{LABELS[id]}</Text>
+              <View style={styles.rowIcon}>
+                <Ionicons name={ICONS[id]} size={18} color="#fff" />
+              </View>
+              <Text style={styles.rowTitle} numberOfLines={1}>
+                {LABELS[id]}
+              </Text>
               <View style={styles.rowActions}>
-                <TouchableOpacity style={styles.allowBtn} onPress={() => onFix(id)} disabled={busy}>
-                  <Text style={styles.allowText}>Allow</Text>
-                </TouchableOpacity>
                 {id === 'autostart' ? (
                   <TouchableOpacity style={styles.doneBtn} onPress={onAcknowledgeAutostart} disabled={busy}>
                     <Text style={styles.doneText}>Done</Text>
                   </TouchableOpacity>
                 ) : null}
+                <TouchableOpacity style={styles.allowBtn} onPress={() => onFix(id)} disabled={busy}>
+                  <Text style={styles.allowText}>Allow</Text>
+                </TouchableOpacity>
               </View>
             </View>
           ))}
           <TouchableOpacity onPress={onClose} disabled={busy} hitSlop={10}>
             <Text style={styles.cancel}>Not now</Text>
           </TouchableOpacity>
-        </View>
+        </LinearGradient>
       </View>
     </Modal>
   );
@@ -62,38 +85,81 @@ export default function ReceiverReachabilityGate({
 const styles = StyleSheet.create({
   backdrop: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
+    backgroundColor: 'rgba(10,0,20,0.6)',
     justifyContent: 'center',
+    alignItems: 'center',
     padding: 24,
   },
   card: {
-    backgroundColor: '#fff',
-    borderRadius: 16,
-    padding: 20,
+    width: '100%',
+    maxWidth: 360,
+    borderRadius: 24,
+    paddingHorizontal: 18,
+    paddingTop: 24,
+    paddingBottom: 16,
+    alignItems: 'center',
   },
-  title: { fontSize: 18, fontWeight: '800', color: '#111', marginBottom: 4 },
-  sub: { fontSize: 13, color: '#71717a', marginBottom: 12 },
+  headerIcon: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: 'rgba(255,255,255,0.18)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 12,
+  },
+  title: { fontSize: 20, fontWeight: '800', color: '#fff', marginBottom: 4, textAlign: 'center' },
+  sub: {
+    fontSize: 13,
+    color: 'rgba(255,255,255,0.8)',
+    marginBottom: 16,
+    textAlign: 'center',
+  },
   row: {
+    alignSelf: 'stretch',
+    height: 56,
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: 10,
+    paddingHorizontal: 12,
+    marginBottom: 8,
+    borderRadius: 14,
+    backgroundColor: 'rgba(255,255,255,0.12)',
   },
-  rowTitle: { flex: 1, fontSize: 15, fontWeight: '600', color: '#18181b' },
-  rowActions: { flexDirection: 'row', gap: 6 },
+  rowIcon: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: 'rgba(255,255,255,0.18)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 10,
+  },
+  rowTitle: { flex: 1, fontSize: 14, fontWeight: '700', color: '#fff' },
+  rowActions: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   allowBtn: {
-    backgroundColor: '#7B2CFF',
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 999,
+    width: 72,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#22c55e',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  allowText: { color: '#fff', fontWeight: '700', fontSize: 13 },
+  allowText: { color: '#fff', fontWeight: '800', fontSize: 13 },
   doneBtn: {
-    backgroundColor: '#F1E9FF',
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 999,
+    width: 60,
+    height: 32,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.7)',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  doneText: { color: '#7B2CFF', fontWeight: '700', fontSize: 13 },
-  cancel: { textAlign: 'center', marginTop: 14, color: '#71717a', fontWeight: '600' },
+  doneText: { color: '#fff', fontWeight: '700', fontSize: 13 },
+  cancel: {
+    textAlign: 'center',
+    marginTop: 8,
+    paddingVertical: 6,
+    color: 'rgba(255,255,255,0.75)',
+    fontWeight: '600',
+  },
 });

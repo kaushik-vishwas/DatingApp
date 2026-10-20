@@ -61,6 +61,7 @@ const receiverPresence_1 = require("../services/receiverPresence");
 const pendingIncomingCall_1 = require("../services/pendingIncomingCall");
 const callInviteRegistry_1 = require("../services/callInviteRegistry");
 const callInviteActions_1 = require("../services/callInviteActions");
+const clientInfo_1 = require("../middleware/clientInfo");
 const callQueue_1 = require("../services/callQueue");
 function roundInr(n) {
     return Math.round(n * 100) / 100;
@@ -931,7 +932,14 @@ const acknowledgeIncomingCallRinging = async (req, res) => {
             return;
         }
         const receiverId = String(req.receiver._id);
-        const result = (0, callInviteActions_1.acknowledgeInviteRinging)(callId, receiverId);
+        const body = (req.body ?? {});
+        const client = (0, clientInfo_1.parseClientInfo)(req);
+        if (client)
+            void (0, clientInfo_1.recordReceiverLastClient)(receiverId, client, clientInfo_1.LAST_CLIENT_RING_REFRESH_MS);
+        const result = (0, callInviteActions_1.acknowledgeInviteRinging)(callId, receiverId, {
+            suppressed: (0, callInviteActions_1.parseRingSuppressedReason)(body.suppressed),
+            client,
+        });
         // The phone just proved it is reachable — renew its discover presence lease.
         try {
             await (0, receiverPresence_1.touchReceiverBackgroundPresence)(receiverId);

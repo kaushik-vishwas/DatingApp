@@ -5,6 +5,7 @@
  * the incoming-call notification actually rang on the device.
  */
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.parseRingSuppressedReason = parseRingSuppressedReason;
 exports.registerCallInviteActions = registerCallInviteActions;
 exports.declineInviteByReceiver = declineInviteByReceiver;
 exports.acknowledgeInviteRinging = acknowledgeInviteRinging;
@@ -12,6 +13,9 @@ exports.markInviteSeenByReceiver = markInviteSeenByReceiver;
 exports.hasLiveInviteForReceiver = hasLiveInviteForReceiver;
 exports.markReceiverRingAckCapable = markReceiverRingAckCapable;
 exports.isReceiverRingAckCapable = isReceiverRingAckCapable;
+function parseRingSuppressedReason(raw) {
+    return raw === 'busy' || raw === 'ui_disabled' ? raw : null;
+}
 let handlers = null;
 function registerCallInviteActions(next) {
     handlers = next;
@@ -19,8 +23,8 @@ function registerCallInviteActions(next) {
 function declineInviteByReceiver(callId, receiverId) {
     return handlers?.declineByReceiver(callId, receiverId) ?? { ok: false, error: 'Unavailable' };
 }
-function acknowledgeInviteRinging(callId, receiverId) {
-    return handlers?.acknowledgeRinging(callId, receiverId) ?? { ok: false, error: 'Unavailable' };
+function acknowledgeInviteRinging(callId, receiverId, details = { suppressed: null, client: null }) {
+    return handlers?.acknowledgeRinging(callId, receiverId, details) ?? { ok: false, error: 'Unavailable' };
 }
 /** Receiver opened the incoming call (native notification tap, before JS / socket are up). */
 function markInviteSeenByReceiver(callId, receiverId, foreground) {

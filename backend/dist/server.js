@@ -21,6 +21,8 @@ const walletRoutes_1 = __importDefault(require("./routes/walletRoutes"));
 const chatRoutes_1 = __importDefault(require("./routes/chatRoutes"));
 const callRoutes_1 = __importDefault(require("./routes/callRoutes"));
 const appRoutes_1 = __importDefault(require("./routes/appRoutes"));
+const appVersionGate_1 = require("./middleware/appVersionGate");
+const clientInfo_1 = require("./middleware/clientInfo");
 const chatSocket_1 = require("./socket/chatSocket");
 const apiTraceLog_1 = require("./utils/apiTraceLog");
 const loadEnv_1 = require("./config/loadEnv");
@@ -53,6 +55,8 @@ app.get('/health', (_req, res) => {
         envFile: (0, loadEnv_1.getLoadedEnvPath)(),
     });
 });
+app.use(['/auth', '/profile', '/discover', '/wallet', '/chat', '/calls'], appVersionGate_1.requireVersionedAppClient);
+app.use(['/auth', '/profile', '/discover', '/wallet', '/chat', '/calls'], clientInfo_1.trackClientInfo);
 // Auth routes
 app.use('/auth', authRoutes_1.default);
 app.use('/profile', profileRoutes_1.default);

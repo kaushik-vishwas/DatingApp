@@ -38,7 +38,7 @@ type AuthContextValue = {
   signIn: (jwt: string, initialUser?: UserProfile | null) => void;
   /** Merge server user into session without clearing on transient `/auth/me` errors. */
   applyServerUser: (profile: UserProfile) => void;
-  signOut: () => Promise<void>;
+  signOut: (opts?: { skipServerCleanup?: boolean }) => Promise<void>;
   refreshUser: () => Promise<void>;
   /** True once after a fresh login (not session restore). Home offer popup uses this. */
   consumeCallerHomeOfferLoginShow: () => boolean;
@@ -73,7 +73,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [bootstrapping, setBootstrapping] = useState(true);
   const [loadingUser, setLoadingUser] = useState(false);
   const callerHomeOfferLoginShowRef = useRef(false);
-  const signOutRef = useRef<() => Promise<void>>(async () => {
+  const signOutRef = useRef<(opts?: { skipServerCleanup?: boolean }) => Promise<void>>(async () => {
     await clearLocalAuth();
     setToken(null);
     setUser(null);
@@ -91,7 +91,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setUser(data.user);
     } catch (err) {
       if (axios.isAxiosError(err) && err.response?.status === 401) {
-        await signOutRef.current();
+        await signOutRef.current({ skipServerCleanup: true });
       }
       // Non-401: keep existing user so a network blip does not revert onboarding or gate state.
     } finally {
@@ -158,8 +158,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     void markAuthWelcomeSeen();
   }, []);
 
-  const signOut = useCallback(async () => {
+  const signOut = useCallback(async (opts?: { skipServerCleanup?: boolean }) => {
     const role = user?.role;
+    // Forced sign-outs (session moved to another device / expired) must not turn off the new session.
+    if (role === 'receiver' && opts?.skipServerCleanup !== true) {
+      // Must run while the JWT is still stored; capped so a bad network never blocks logout.
+      await Promise.race([
+        Promise.allSettled([
+          profileApi.updateReceiverProfile({ isAvailable: false }),
+          profileApi.clearReceiverPushTokens(),
+        ]),
+        new Promise((resolve) => setTimeout(resolve, 3000)),
+      ]);
+    }
     setToken(null);
     setUser(null);
     callerHomeOfferLoginShowRef.current = false;
@@ -167,10 +178,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     await clearLocalAuth();
     void teardownCallSession();
     resetNavigationToLogin();
-    if (role === 'receiver') {
-      void profileApi.updateReceiverProfile({ isAvailable: false }).catch(() => {});
-      void profileApi.clearReceiverPushTokens().catch(() => {});
-    }
   }, [user?.role]);
   signOutRef.current = signOut;
 
@@ -183,7 +190,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   useEffect(() => {
     registerSessionSupersededHandler((reason) => {
       void (async () => {
-        await signOut();
+        await signOut({ skipServerCleanup: true });
         if (reason === 'superseded') {
           Alert.alert('Signed out', 'This account was signed in on another device.');
         }
@@ -217,7 +224,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           const sv = typeof decoded.sv === 'number' ? decoded.sv : 0;
           if (sv < nextVer) {
             void (async () => {
-              await signOut();
+              await signOut({ skipServerCleanup: true });
               Alert.alert('Signed out', 'This account was signed in on another device.');
             })();
           }

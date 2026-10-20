@@ -32,6 +32,7 @@ router.patch('/users/:id', adminAuth_1.adminProtect, adminController_1.updateApp
 router.delete('/users/:id', adminAuth_1.adminProtect, adminController_1.deleteAppUser);
 router.get('/receivers', adminAuth_1.adminProtect, adminController_1.listAllReceivers);
 router.get('/receivers/pending', adminAuth_1.adminProtect, adminController_1.listPendingReceivers);
+router.get('/receivers/:id/calls', adminAuth_1.adminProtect, adminController_1.getReceiverDayCalls);
 router.get('/kyc/stats', adminAuth_1.adminProtect, adminController_1.getKycStats);
 router.patch('/receivers/:id/approve', adminAuth_1.adminProtect, adminController_1.approveReceiver);
 router.patch('/receivers/:id/reject', adminAuth_1.adminProtect, adminController_1.rejectReceiver);

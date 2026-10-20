@@ -76,6 +76,17 @@ const receiverSchema = new mongoose_1.Schema({
     isOnline: { type: Boolean, default: false },
     isBusyOnCall: { type: Boolean, default: false },
     discoverGraceUntil: { type: Date, default: null },
+    lastClient: {
+        type: new mongoose_1.Schema({
+            mfr: { type: String, default: '' },
+            model: { type: String, default: '' },
+            os: { type: String, default: '' },
+            sdk: { type: Number, default: null },
+            appVersionCode: { type: Number, default: null },
+            seenAt: { type: Date, required: true },
+        }, { _id: false }),
+        default: null,
+    },
     moderationWarningAt: { type: Date, default: null },
     rejectionReason: { type: String, default: null },
     pendingNameAsPerAadhaar: { type: String, default: null },

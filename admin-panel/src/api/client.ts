@@ -516,6 +516,27 @@ export async function updateReceiverProfile(receiverId: string, payload: AdminRe
 }
 
 /** Permanently delete receiver + related chats, sessions, scores, notifications. */
+export type ReceiverDayCall = {
+  callId: string;
+  startedAt: string;
+  talkStartedAt: string | null;
+  endedAt: string | null;
+  durationSec: number;
+  status: string;
+  settledAmountInr: number;
+  receiverEarned: number;
+  callerName: string | null;
+  callerPhone: string | null;
+};
+
+export async function fetchReceiverDayCalls(receiverId: string, date: string) {
+  const { data } = await api.get<{ date: string; calls: ReceiverDayCall[] }>(
+    `/admin/receivers/${receiverId}/calls`,
+    { params: { date } }
+  );
+  return data;
+}
+
 export async function deleteReceiverPermanently(receiverId: string) {
   const { data } = await api.delete<{ message: string; receiverId: string }>(
     `/admin/receivers/${receiverId}`

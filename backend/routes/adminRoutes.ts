@@ -31,6 +31,7 @@ import {
   getWithdrawalPendingCount,
   listWithdrawals,
   getWithdrawalReceiverBreakdown,
+  getReceiverDayCalls,
   listAdminTransactions,
   resolveModerationReport,
   resolveWithdrawal,
@@ -71,6 +72,7 @@ router.delete('/users/:id', adminProtect, deleteAppUser);
 
 router.get('/receivers', adminProtect, listAllReceivers);
 router.get('/receivers/pending', adminProtect, listPendingReceivers);
+router.get('/receivers/:id/calls', adminProtect, getReceiverDayCalls);
 router.get('/kyc/stats', adminProtect, getKycStats);
 router.patch('/receivers/:id/approve', adminProtect, approveReceiver);
 router.patch('/receivers/:id/reject', adminProtect, rejectReceiver);

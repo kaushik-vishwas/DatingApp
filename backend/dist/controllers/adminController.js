@@ -36,7 +36,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.listAdminTransactions = exports.resolveWithdrawal = exports.getWithdrawalReceiverBreakdown = exports.listWithdrawals = exports.getWithdrawalPendingCount = exports.resolveModerationReport = exports.listModerationReports = exports.rejectAppUser = exports.approveAppUser = exports.listPendingAppUsers = exports.rejectReceiver = exports.approveReceiver = exports.listPendingReceivers = exports.getKycStats = exports.listAllReceivers = exports.deleteReceiverPermanently = exports.updateReceiver = exports.deleteAppUser = exports.updateAppUser = exports.listAppUsers = exports.getOverviewDashboard = exports.getRevenueDashboard = exports.updateAdminRole = exports.updateAdminCallerNotification = exports.updateAdminReceiverWelcome = exports.updateAdminReceiverEarningModel = exports.updateAdminNotificationControls = exports.getAdminSettings = exports.adminConfirmEmailChange = exports.adminRequestEmailChange = exports.adminResetPassword = exports.adminForgotPassword = exports.adminMe = exports.adminLogin = void 0;
+exports.getReceiverDayCalls = exports.listAdminTransactions = exports.resolveWithdrawal = exports.getWithdrawalReceiverBreakdown = exports.listWithdrawals = exports.getWithdrawalPendingCount = exports.resolveModerationReport = exports.listModerationReports = exports.rejectAppUser = exports.approveAppUser = exports.listPendingAppUsers = exports.rejectReceiver = exports.approveReceiver = exports.listPendingReceivers = exports.getKycStats = exports.listAllReceivers = exports.deleteReceiverPermanently = exports.updateReceiver = exports.deleteAppUser = exports.updateAppUser = exports.listAppUsers = exports.getOverviewDashboard = exports.getRevenueDashboard = exports.updateAdminRole = exports.updateAdminCallerNotification = exports.updateAdminReceiverWelcome = exports.updateAdminReceiverEarningModel = exports.updateAdminNotificationControls = exports.getAdminSettings = exports.adminConfirmEmailChange = exports.adminRequestEmailChange = exports.adminResetPassword = exports.adminForgotPassword = exports.adminMe = exports.adminLogin = void 0;
 const bcryptjs_1 = __importDefault(require("bcryptjs"));
 const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
 const mongoose_1 = __importDefault(require("mongoose"));
@@ -2525,3 +2525,65 @@ const listAdminTransactions = async (req, res) => {
     }
 };
 exports.listAdminTransactions = listAdminTransactions;
+const IST_OFFSET_MS = 330 * 60 * 1000;
+/** Read-only: one receiver's call sessions for a single IST calendar day (`date=YYYY-MM-DD`). */
+const getReceiverDayCalls = async (req, res) => {
+    try {
+        const id = String(req.params.id ?? '').trim();
+        if (!mongoose_1.default.isValidObjectId(id)) {
+            res.status(400).json({ message: 'Invalid receiver id' });
+            return;
+        }
+        const date = String(req.query.date ?? '').trim();
+        const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date);
+        if (!match) {
+            res.status(400).json({ message: 'date must be YYYY-MM-DD' });
+            return;
+        }
+        const dayStartMs = Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])) - IST_OFFSET_MS;
+        const dayStart = new Date(dayStartMs);
+        const dayEnd = new Date(dayStartMs + 24 * 60 * 60 * 1000);
+        const rows = await CallSession_1.default.aggregate([
+            {
+                $match: {
+                    receiverId: new mongoose_1.default.Types.ObjectId(id),
+                    startedAt: { $gte: dayStart, $lt: dayEnd },
+                },
+            },
+            { $sort: { startedAt: 1 } },
+            { $limit: 500 },
+            { $addFields: { receiverEarned: receiverCallEarnings_1.RESOLVED_RECEIVER_CALL_EARNING_EXPR } },
+            {
+                $lookup: {
+                    from: User_1.default.collection.name,
+                    localField: 'callerId',
+                    foreignField: '_id',
+                    as: 'caller',
+                    pipeline: [{ $project: { name: 1, phone: 1 } }],
+                },
+            },
+            {
+                $project: {
+                    _id: 0,
+                    callId: 1,
+                    startedAt: 1,
+                    talkStartedAt: 1,
+                    endedAt: 1,
+                    durationSec: 1,
+                    status: 1,
+                    settledAmountInr: 1,
+                    receiverEarned: 1,
+                    callerName: { $ifNull: [{ $arrayElemAt: ['$caller.name', 0] }, null] },
+                    callerPhone: { $ifNull: [{ $arrayElemAt: ['$caller.phone', 0] }, null] },
+                },
+            },
+        ]);
+        res.json({ date, calls: rows });
+    }
+    catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error('getReceiverDayCalls error:', msg);
+        res.status(500).json({ message: msg || 'Server error' });
+    }
+};
+exports.getReceiverDayCalls = getReceiverDayCalls;

@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Download, Edit2, Eye, Mic, RefreshCw, Search, Star, Trash2 } from 'lucide-react';
+import { CalendarDays, Download, Edit2, Eye, Mic, RefreshCw, Search, Star, Trash2 } from 'lucide-react';
 import {
   deleteReceiverPermanently,
   fetchReceiversPage,
   type ReceiverRecord,
 } from '../api/client';
+import { ReceiverCallHistoryModal } from '../components/ReceiverCallHistoryModal';
 import { ReceiverDetailModal } from '../components/ReceiverDetailModal';
 import { ReceiverEditModal } from '../components/ReceiverEditModal';
 import {
@@ -85,6 +86,7 @@ export function ReceiversPage() {
   const [tabCounts, setTabCounts] = useState({ all: 0, approved: 0, pending: 0, rejected: 0 });
   const [onlineTotal, setOnlineTotal] = useState(0);
   const [detail, setDetail] = useState<ReceiverRecord | null>(null);
+  const [callHistoryReceiver, setCallHistoryReceiver] = useState<ReceiverRecord | null>(null);
   const [editReceiver, setEditReceiver] = useState<ReceiverRecord | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
@@ -507,6 +509,14 @@ export function ReceiversPage() {
                           </button>
                           <button
                             type="button"
+                            onClick={() => setCallHistoryReceiver(r)}
+                            className="rounded-lg p-2 text-[#7b2cff] hover:bg-[var(--color-brand-muted)]"
+                            title="Call history"
+                          >
+                            <CalendarDays className="h-5 w-5" />
+                          </button>
+                          <button
+                            type="button"
                             onClick={() => setEditReceiver(r)}
                             className="rounded-lg p-2 text-[#7b2cff] hover:bg-[var(--color-brand-muted)]"
                             title="Edit"
@@ -566,6 +576,10 @@ export function ReceiversPage() {
           setDetail(null);
           setEditReceiver(r);
         }}
+      />
+      <ReceiverCallHistoryModal
+        receiver={callHistoryReceiver}
+        onClose={() => setCallHistoryReceiver(null)}
       />
       <ReceiverEditModal
         receiver={editReceiver}

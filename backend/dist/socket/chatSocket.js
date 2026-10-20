@@ -15,6 +15,7 @@ const callerMessageEligibility_1 = require("../utils/callerMessageEligibility");
 const User_1 = __importDefault(require("../models/User"));
 const Receiver_1 = __importDefault(require("../models/Receiver"));
 const authToken_1 = require("../utils/authToken");
+const appVersionGate_1 = require("../middleware/appVersionGate");
 const socketRegistry_1 = require("./socketRegistry");
 const chatPricing_1 = require("../constants/chatPricing");
 const receiverScore_1 = require("../services/receiverScore");
@@ -23,6 +24,7 @@ const receiverAvailabilityNotifier_1 = require("../services/receiverAvailability
 const callInviteRegistry_1 = require("../services/callInviteRegistry");
 const pendingIncomingCall_1 = require("../services/pendingIncomingCall");
 const callInviteActions_1 = require("../services/callInviteActions");
+const CallRingEvent_1 = __importDefault(require("../models/CallRingEvent"));
 const callController_1 = require("../controllers/callController");
 const callQueue_1 = require("../services/callQueue");
 const expoPush_1 = require("../services/expoPush");
@@ -180,12 +182,14 @@ function attachChatSocket(httpServer) {
         activeCallInvites.delete(callId);
         notifyReceiverRingingCancelled(invite);
         void settleAndReleaseCall(callId, invite.receiverId, inviteCallerId(invite), invite.invitedAt);
+        // Suppressed rings also report `no_answer`: every caller build shows any other reason as "declined".
         io.to(accountRoom(invite.inviterType, invite.inviterId)).emit('call:response', {
             callId,
             accepted: false,
             fromType: invite.targetType,
             fromId: invite.targetId,
             reason: 'no_answer',
+            ...(invite.ringSuppressed ? { suppressed: invite.ringSuppressed } : {}),
         });
         io.to(accountRoom(invite.inviterType, invite.inviterId)).emit('call:ended', {
             callId,
@@ -266,9 +270,50 @@ function attachChatSocket(httpServer) {
         }
         else {
             activeCallInvites.delete(callId);
+            if (responderType === 'r' && invite.ringAckMissedAt != null) {
+                updateRingEvent(callId, { lateDeclineAt: new Date() });
+            }
             void (0, pendingIncomingCall_1.clearPendingIncomingCall)(invite.receiverId, callId);
             void settleAndReleaseCall(callId, invite.receiverId, inviteCallerId(invite), invite.invitedAt);
         }
+    };
+    /** Best-effort CallRingEvent insert (one row per call); never affects the call itself. */
+    const recordRingEvent = (invite, outcome, unreachableReason, ackAfterMs, client) => {
+        void (async () => {
+            try {
+                let lastClient = client ? { ...client, seenAt: new Date() } : null;
+                if (!lastClient) {
+                    const doc = await Receiver_1.default.findById(invite.targetId)
+                        .select('lastClient')
+                        .lean();
+                    lastClient = doc?.lastClient ?? null;
+                }
+                await CallRingEvent_1.default.create({
+                    callId: invite.callId,
+                    receiverId: invite.targetId,
+                    outcome,
+                    unreachable_reason: unreachableReason,
+                    ackAfterMs,
+                    lastClient,
+                });
+            }
+            catch (e) {
+                if (e?.code === 11000)
+                    return;
+                console.warn('call ring event write failed', {
+                    callId: invite.callId,
+                    error: e instanceof Error ? e.message : String(e),
+                });
+            }
+        })();
+    };
+    const updateRingEvent = (callId, set) => {
+        void CallRingEvent_1.default.updateOne({ callId, outcome: 'no_ack' }, { $set: set }).catch((e) => {
+            console.warn('call ring event update failed', {
+                callId,
+                error: e instanceof Error ? e.message : String(e),
+            });
+        });
     };
     /**
      * No ring ack (native notification) and no socket "seen" shortly after the wake push →
@@ -281,6 +326,8 @@ function attachChatSocket(httpServer) {
                 return;
             if (invite.accepted || invite.ringAckAt != null || invite.ringSeen !== 'unknown')
                 return;
+            if (invite.ringSuppressed)
+                return;
             const receiverId = invite.targetId;
             if (hasActiveSocketForAccount('r', receiverId))
                 return;
@@ -290,7 +337,10 @@ function attachChatSocket(httpServer) {
                 callId: invite.callId,
                 receiverId,
                 ackTimeoutMs: RING_ACK_TIMEOUT_MS,
+                unreachable_reason: 'no_ack',
             });
+            invite.ringAckMissedAt = Date.now();
+            recordRingEvent(invite, 'no_ack', 'no_ack', null, null);
             (0, receiverPresence_1.clearReceiverDiscoverGrace)(receiverId);
             void (0, receiverPresence_1.syncReceiverPresenceInDatabase)(receiverId);
         }, RING_ACK_TIMEOUT_MS);
@@ -309,7 +359,7 @@ function attachChatSocket(httpServer) {
             applyInviteResponse(invite, false, 'r', receiverId);
             return { ok: true };
         },
-        acknowledgeRinging: (callId, receiverId) => {
+        acknowledgeRinging: (callId, receiverId, details) => {
             (0, callInviteActions_1.markReceiverRingAckCapable)(receiverId);
             const invite = activeCallInvites.get(callId);
             if (!invite)
@@ -317,13 +367,42 @@ function attachChatSocket(httpServer) {
             if (invite.targetType !== 'r' || invite.targetId !== receiverId) {
                 return { ok: false, error: 'Forbidden' };
             }
+            const ackAfterMs = Date.now() - invite.invitedAt.getTime();
+            if (details.suppressed) {
+                // Phone is reachable but did not ring (busy / UI not ready): end the invite now and keep
+                // the receiver visible. Never touches an accepted or already-ringing call.
+                if (invite.accepted || invite.ringAckAt != null || invite.ringSuppressed) {
+                    return { ok: true, alreadyAccepted: invite.accepted || undefined };
+                }
+                invite.ringSuppressed = details.suppressed;
+                console.info('incoming call ring suppressed on device', {
+                    callId,
+                    receiverId,
+                    ackAfterMs,
+                    unreachable_reason: details.suppressed,
+                });
+                if (invite.ringAckMissedAt != null) {
+                    updateRingEvent(callId, { ackAfterMs });
+                }
+                else {
+                    recordRingEvent(invite, 'suppressed', details.suppressed, ackAfterMs, details.client);
+                }
+                expireInviteNoAnswer(callId);
+                return { ok: true };
+            }
             if (invite.ringAckAt == null) {
                 invite.ringAckAt = Date.now();
                 console.info('incoming call ring acknowledged', {
                     callId,
                     receiverId,
-                    ackAfterMs: invite.ringAckAt - invite.invitedAt.getTime(),
+                    ackAfterMs,
                 });
+                if (invite.ringAckMissedAt != null) {
+                    updateRingEvent(callId, { ackAfterMs });
+                }
+                else {
+                    recordRingEvent(invite, 'acked', null, ackAfterMs, details.client);
+                }
                 // Phone is ringing natively but JS may be dead — give tap + cold start time to reach us.
                 // An on-screen ("foreground") budget is already tighter by design; leave it alone.
                 if (!invite.accepted && invite.ringSeen !== 'foreground') {
@@ -468,6 +547,12 @@ function attachChatSocket(httpServer) {
                 }
                 if (decoded.typ !== 'u' && decoded.typ !== 'r') {
                     next(new Error('invalid token'));
+                    return;
+                }
+                if ((0, appVersionGate_1.isUnversionedClientBlockEnabled)() &&
+                    (0, appVersionGate_1.parseAppVersionCode)(socket.handshake.query?.appVersion ?? socket.handshake.headers[appVersionGate_1.APP_VERSION_HEADER]) ==
+                        null) {
+                    next(new Error('app update required'));
                     return;
                 }
                 const appDecoded = decoded;
@@ -1137,6 +1222,8 @@ function attachChatSocket(httpServer) {
                     timeoutHandle: null,
                     ringSeen: 'unknown',
                     ringAckAt: null,
+                    ringSuppressed: null,
+                    ringAckMissedAt: null,
                     accepted: false,
                     watchdogHandle: null,
                     noAnswerDeadlineAt: 0,

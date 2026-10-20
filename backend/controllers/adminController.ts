@@ -2913,3 +2913,82 @@ export const listAdminTransactions = async (
     res.status(500).json({ message: msg || 'Server error' });
   }
 };
+
+const IST_OFFSET_MS = 330 * 60 * 1000;
+
+/** Read-only: one receiver's call sessions for a single IST calendar day (`date=YYYY-MM-DD`). */
+export const getReceiverDayCalls = async (
+  req: Request<{ id: string }>,
+  res: Response
+): Promise<void> => {
+  try {
+    const id = String(req.params.id ?? '').trim();
+    if (!mongoose.isValidObjectId(id)) {
+      res.status(400).json({ message: 'Invalid receiver id' });
+      return;
+    }
+    const date = String(req.query.date ?? '').trim();
+    const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date);
+    if (!match) {
+      res.status(400).json({ message: 'date must be YYYY-MM-DD' });
+      return;
+    }
+    const dayStartMs =
+      Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])) - IST_OFFSET_MS;
+    const dayStart = new Date(dayStartMs);
+    const dayEnd = new Date(dayStartMs + 24 * 60 * 60 * 1000);
+
+    const rows = await CallSession.aggregate<{
+      callId: string;
+      startedAt: Date;
+      talkStartedAt: Date | null;
+      endedAt: Date | null;
+      durationSec: number;
+      status: string;
+      settledAmountInr: number;
+      receiverEarned: number;
+      callerName: string | null;
+      callerPhone: string | null;
+    }>([
+      {
+        $match: {
+          receiverId: new mongoose.Types.ObjectId(id),
+          startedAt: { $gte: dayStart, $lt: dayEnd },
+        },
+      },
+      { $sort: { startedAt: 1 } },
+      { $limit: 500 },
+      { $addFields: { receiverEarned: RESOLVED_RECEIVER_CALL_EARNING_EXPR } },
+      {
+        $lookup: {
+          from: User.collection.name,
+          localField: 'callerId',
+          foreignField: '_id',
+          as: 'caller',
+          pipeline: [{ $project: { name: 1, phone: 1 } }],
+        },
+      },
+      {
+        $project: {
+          _id: 0,
+          callId: 1,
+          startedAt: 1,
+          talkStartedAt: 1,
+          endedAt: 1,
+          durationSec: 1,
+          status: 1,
+          settledAmountInr: 1,
+          receiverEarned: 1,
+          callerName: { $ifNull: [{ $arrayElemAt: ['$caller.name', 0] }, null] },
+          callerPhone: { $ifNull: [{ $arrayElemAt: ['$caller.phone', 0] }, null] },
+        },
+      },
+    ]);
+
+    res.json({ date, calls: rows });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error('getReceiverDayCalls error:', msg);
+    res.status(500).json({ message: msg || 'Server error' });
+  }
+};
