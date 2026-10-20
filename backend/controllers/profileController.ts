@@ -2647,6 +2647,28 @@ export const updateReceiverExpoPushToken = async (req: Request, res: Response): 
 };
 
 /**
+ * GET /profile/receiver/push-token — whether this receiver has a saved push token (values never returned).
+ */
+export const getReceiverPushTokenStatus = async (req: Request, res: Response): Promise<void> => {
+  try {
+    if (req.accountKind !== 'receiver') {
+      res.status(403).json({ message: 'This endpoint is only for receiver accounts' });
+      return;
+    }
+    const receiver = await Receiver.findById(req.receiver!._id)
+      .select('expoPushToken fcmDeviceToken')
+      .lean<{ expoPushToken?: string | null; fcmDeviceToken?: string | null } | null>();
+    const hasExpo = Boolean(receiver?.expoPushToken?.trim());
+    const hasFcm = Boolean(receiver?.fcmDeviceToken?.trim());
+    res.status(200).json({ hasExpo, hasFcm, hasPushToken: hasExpo || hasFcm });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error('getReceiverPushTokenStatus error:', msg);
+    res.status(500).json({ message: msg || 'Server error' });
+  }
+};
+
+/**
  * DELETE /profile/receiver/push-token — remove push tokens on logout / account switch.
  */
 export const clearReceiverPushTokens = async (req: Request, res: Response): Promise<void> => {

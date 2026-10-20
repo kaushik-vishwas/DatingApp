@@ -1,7 +1,6 @@
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import React, { useCallback, useRef, useState } from 'react';
 import {
-  Alert,
   KeyboardAvoidingView,
   Keyboard,
   Platform,
@@ -12,6 +11,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import { appAlert } from '../ui/AppDialog';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 
@@ -84,7 +84,7 @@ export function AuthLoginCard({
   const onSendOtp = async () => {
     const err = validateIndianMobileDigits(digits);
     if (err) {
-      Alert.alert('Validation', err);
+      appAlert('Validation', err);
       return;
     }
     try {
@@ -92,21 +92,21 @@ export function AuthLoginCard({
       setOtp('');
       setStep('otp');
     } catch (e) {
-      Alert.alert('No account found', 'No account found');
+      appAlert('No account found', 'No account found');
     }
   };
 
   const onVerifyOtpAndLogin = async () => {
     const code = otp.trim();
     if (!/^\d{6}$/.test(code)) {
-      Alert.alert('Validation', 'Enter a valid 6-digit OTP.');
+      appAlert('Validation', 'Enter a valid 6-digit OTP.');
       return;
     }
     setLoading(true);
     try {
       const { data } = await authApi.verifyOtp(digits, code, authAccountType);
       if (!data?.token) {
-        Alert.alert('Error', 'No token returned from server');
+        appAlert('Error', 'No token returned from server');
         return;
       }
       await saveJwt(data.token);
@@ -115,7 +115,7 @@ export function AuthLoginCard({
       if (isAccountPausedError(e)) {
         setAccountPaused(true);
       } else {
-        Alert.alert('Error', getErrorMessage(e));
+        appAlert('Error', getErrorMessage(e));
       }
     } finally {
       setLoading(false);

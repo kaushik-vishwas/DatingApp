@@ -1,11 +1,11 @@
 import React from 'react';
 import {
-  Alert,
   StyleSheet,
   TouchableOpacity,
   type StyleProp,
   type ViewStyle,
 } from 'react-native';
+import { appAlert } from '../ui/AppDialog';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../context/AuthContext';
 
@@ -37,7 +37,7 @@ export default function OnboardingLogoutButton({
       run();
       return;
     }
-    Alert.alert(confirmTitle, confirmMessage, [
+    appAlert(confirmTitle, confirmMessage, [
       { text: 'Cancel', style: 'cancel' },
       { text: 'Logout', style: 'destructive', onPress: run },
     ]);

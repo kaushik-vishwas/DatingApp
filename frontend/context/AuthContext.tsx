@@ -8,7 +8,7 @@ import React, {
   useRef,
   useState,
 } from 'react';
-import { Alert } from 'react-native';
+import { appAlert } from '../components/ui/AppDialog';
 import { io, type Socket } from 'socket.io-client';
 import { getForcedAppKind } from '../config/appKind';
 import { navigationRef } from '../navigation/navigationRef';
@@ -192,7 +192,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       void (async () => {
         await signOut({ skipServerCleanup: true });
         if (reason === 'superseded') {
-          Alert.alert('Signed out', 'This account was signed in on another device.');
+          appAlert('Signed out', 'This account was signed in on another device.');
         }
       })();
     });
@@ -225,7 +225,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           if (sv < nextVer) {
             void (async () => {
               await signOut({ skipServerCleanup: true });
-              Alert.alert('Signed out', 'This account was signed in on another device.');
+              appAlert('Signed out', 'This account was signed in on another device.');
             })();
           }
         } catch {

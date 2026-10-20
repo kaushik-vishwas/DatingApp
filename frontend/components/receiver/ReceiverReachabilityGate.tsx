@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import React from 'react';
-import { Modal, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Modal, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import type { ReachabilityCheckId, ReachabilityStatus } from '../../utils/receiverReachability';
 
 type Props = {
@@ -9,6 +9,7 @@ type Props = {
   status: ReachabilityStatus | null;
   missing: ReachabilityCheckId[];
   busy?: boolean;
+  busyId?: ReachabilityCheckId | null;
   onFix: (id: ReachabilityCheckId) => void;
   onAcknowledgeAutostart: () => void;
   onRetry: () => void;
@@ -35,6 +36,7 @@ export default function ReceiverReachabilityGate({
   visible,
   missing,
   busy,
+  busyId,
   onFix,
   onAcknowledgeAutostart,
   onClose,
@@ -68,7 +70,11 @@ export default function ReceiverReachabilityGate({
                   </TouchableOpacity>
                 ) : null}
                 <TouchableOpacity style={styles.allowBtn} onPress={() => onFix(id)} disabled={busy}>
-                  <Text style={styles.allowText}>Allow</Text>
+                  {busyId === id ? (
+                    <ActivityIndicator size="small" color="#fff" />
+                  ) : (
+                    <Text style={styles.allowText}>Allow</Text>
+                  )}
                 </TouchableOpacity>
               </View>
             </View>

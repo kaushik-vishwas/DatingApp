@@ -1,7 +1,6 @@
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import React, { useCallback, useRef, useState, useEffect } from 'react';
 import {
-  Alert,
   Image,
   Keyboard,
   KeyboardAvoidingView,
@@ -16,6 +15,7 @@ import {
   Dimensions,
   FlatList,
 } from 'react-native';
+import { appAlert } from '../../components/ui/AppDialog';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 
@@ -156,13 +156,13 @@ export default function MobileLoginScreen({ navigation }: Props): React.JSX.Elem
 
   const onSendOtp = async () => {
     if (!privacyAccepted) {
-      Alert.alert('Privacy Policy', 'Please accept the Privacy Policy to continue.');
+      appAlert('Privacy Policy', 'Please accept the Privacy Policy to continue.');
       return;
     }
     const digitsOnly = mobile.replace(/\D/g, '');
     // Restrict to exactly 10 digits
     if (digitsOnly.length !== 10) {
-      Alert.alert('Validation', `Please enter exactly 10 digits (currently ${digitsOnly.length} digits).`);
+      appAlert('Validation', `Please enter exactly 10 digits (currently ${digitsOnly.length} digits).`);
       return;
     }
     setLoading(true);
@@ -175,7 +175,7 @@ export default function MobileLoginScreen({ navigation }: Props): React.JSX.Elem
       setResendEnabled(false);
       setResendTimer(60);
     } catch (e) {
-      Alert.alert('Could not send OTP', getErrorMessage(e));
+      appAlert('Could not send OTP', getErrorMessage(e));
     } finally {
       setLoading(false);
     }
@@ -184,7 +184,7 @@ export default function MobileLoginScreen({ navigation }: Props): React.JSX.Elem
   const onVerifyOtp = async () => {
     const code = otp.trim();
     if (!/^\d{6}$/.test(code)) {
-      Alert.alert('Validation', 'Enter a valid 6-digit OTP.');
+      appAlert('Validation', 'Enter a valid 6-digit OTP.');
       return;
     }
     setLoading(true);
@@ -196,7 +196,7 @@ export default function MobileLoginScreen({ navigation }: Props): React.JSX.Elem
         return;
       }
       if (!data.token) {
-        Alert.alert('Error', 'No token returned from server');
+        appAlert('Error', 'No token returned from server');
         return;
       }
       await saveJwt(data.token);
@@ -205,7 +205,7 @@ export default function MobileLoginScreen({ navigation }: Props): React.JSX.Elem
       if (isAccountPausedError(e)) {
         setAccountPaused(true);
       } else {
-        Alert.alert('Error', getErrorMessage(e));
+        appAlert('Error', getErrorMessage(e));
       }
     } finally {
       setLoading(false);
@@ -214,7 +214,7 @@ export default function MobileLoginScreen({ navigation }: Props): React.JSX.Elem
 
   const onResendOtp = async () => {
     if (!resendEnabled) {
-      Alert.alert('Please wait', `You can resend OTP after ${resendTimer} seconds`);
+      appAlert('Please wait', `You can resend OTP after ${resendTimer} seconds`);
       return;
     }
     await onSendOtp();

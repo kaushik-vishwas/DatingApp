@@ -1,6 +1,5 @@
 import React, { useState, useRef } from 'react';
 import {
-  Alert,
   StyleSheet,
   Text,
   TextInput,
@@ -12,6 +11,7 @@ import {
   Keyboard,
   TouchableWithoutFeedback,
 } from 'react-native';
+import { appAlert } from '../components/ui/AppDialog';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -56,7 +56,7 @@ export default function OtpScreen({ navigation, route }: Props) {
     const err = validateOtp();
 
     if (err) {
-      Alert.alert('Validation', err);
+      appAlert('Validation', err);
       return;
     }
 
@@ -70,7 +70,7 @@ export default function OtpScreen({ navigation, route }: Props) {
       );
 
       if (!data?.token) {
-        Alert.alert('Error', 'No token returned from server');
+        appAlert('Error', 'No token returned from server');
         return;
       }
 
@@ -80,7 +80,7 @@ export default function OtpScreen({ navigation, route }: Props) {
       if (isAccountPausedError(e)) {
         setAccountPaused(true);
       } else {
-        Alert.alert('Error', getErrorMessage(e));
+        appAlert('Error', getErrorMessage(e));
       }
     } finally {
       setLoading(false);
@@ -95,12 +95,12 @@ export default function OtpScreen({ navigation, route }: Props) {
     try {
       await authApi.sendOtp(phone, accountType);
 
-      Alert.alert(
+      appAlert(
         'OTP sent',
         'Check your mobile for the verification code.',
       );
     } catch (e) {
-      Alert.alert('Error', getErrorMessage(e));
+      appAlert('Error', getErrorMessage(e));
     } finally {
       setResendLoading(false);
     }

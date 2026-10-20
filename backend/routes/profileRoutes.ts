@@ -17,6 +17,7 @@ import {
   receiverBackgroundPresence,
   receiverForegroundPresence,
   updateReceiverExpoPushToken,
+  getReceiverPushTokenStatus,
   clearReceiverPushTokens,
   updateCallerExpoPushToken,
   sendReceiverBankUpdateOtp,
@@ -62,6 +63,7 @@ router.patch('/receiver/kyc/bank', protect, saveReceiverKycBankFinalize);
 router.patch('/receiver', protect, updateReceiverProfile);
 router.post('/receiver/presence/background', protect, receiverBackgroundPresence);
 router.post('/receiver/presence/foreground', protect, receiverForegroundPresence);
+router.get('/receiver/push-token', protect, getReceiverPushTokenStatus);
 router.patch('/receiver/push-token', protect, updateReceiverExpoPushToken);
 router.delete('/receiver/push-token', protect, clearReceiverPushTokens);
 router.patch('/caller/push-token', protect, updateCallerExpoPushToken);

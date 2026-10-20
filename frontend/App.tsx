@@ -7,6 +7,7 @@ import { AuthProvider } from './context/AuthContext';
 import { CallSignalProvider } from './context/CallSignalContext';
 import { ChatInboxProvider } from './context/ChatInboxContext';
 import AppUpdateGate from './components/AppUpdateGate';
+import { AppDialogHost } from './components/ui/AppDialog';
 import AppNavigator from './navigation/AppNavigator';
 import { ensureIncomingCallNotificationInfrastructure, setReceiverIncomingCallUiEnabled } from './utils/incomingCallNotifications';
 import { ensureOnlinePresenceNotificationInfrastructure } from './utils/onlinePresenceNotifications';
@@ -56,6 +57,7 @@ export default function App() {
               <AppUpdateGate>
                 <AppNavigator />
               </AppUpdateGate>
+              <AppDialogHost />
             </CallSignalProvider>
           </ChatInboxProvider>
         </AuthProvider>

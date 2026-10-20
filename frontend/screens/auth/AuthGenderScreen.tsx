@@ -1,6 +1,7 @@
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import React, { useMemo, useState } from 'react';
-import { Alert } from 'react-native';
+import {  } from 'react-native';
+import { appAlert } from '../../components/ui/AppDialog';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import SignupGenderSelection, {
@@ -28,7 +29,7 @@ export default function AuthGenderScreen({ navigation, route }: Props): React.JS
 
   const onContinue = async () => {
     if (!selected) {
-      Alert.alert('Select gender', 'Please choose an option to continue.');
+      appAlert('Select gender', 'Please choose an option to continue.');
       return;
     }
 
@@ -41,7 +42,7 @@ export default function AuthGenderScreen({ navigation, route }: Props): React.JS
         ...(referralCode ? { referralCode } : {}),
       });
       if (!data?.token) {
-        Alert.alert('Error', 'No token returned from server');
+        appAlert('Error', 'No token returned from server');
         return;
       }
       await clearPendingReferralCode();
@@ -51,7 +52,7 @@ export default function AuthGenderScreen({ navigation, route }: Props): React.JS
       }
       signIn(data.token, data.user);
     } catch (e) {
-      Alert.alert('Signup failed', getErrorMessage(e));
+      appAlert('Signup failed', getErrorMessage(e));
     } finally {
       setLoading(false);
     }

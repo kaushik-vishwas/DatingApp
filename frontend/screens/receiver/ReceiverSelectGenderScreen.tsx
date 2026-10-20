@@ -1,6 +1,7 @@
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import React, { useMemo, useState } from 'react';
-import { Alert, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { appAlert } from '../../components/ui/AppDialog';
 import { LinearGradient } from 'expo-linear-gradient';
 import type { Gender } from '../../types/user';
 import OnboardingLogoutButton from '../../components/auth/OnboardingLogoutButton';
@@ -56,7 +57,7 @@ export default function ReceiverSelectGenderScreen({ navigation }: Props): React
 
   const onContinue = async (): Promise<void> => {
     if (!selected) {
-      Alert.alert('Select gender', 'Please choose an option to continue.');
+      appAlert('Select gender', 'Please choose an option to continue.');
       return;
     }
     try {
@@ -64,7 +65,7 @@ export default function ReceiverSelectGenderScreen({ navigation }: Props): React
       applyServerUser(data.user);
       navigation.replace('ReceiverOnboarding', { gender: selected });
     } catch (e) {
-      Alert.alert('Update failed', getErrorMessage(e));
+      appAlert('Update failed', getErrorMessage(e));
     }
   };
 

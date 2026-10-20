@@ -2,7 +2,8 @@ import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import Constants from 'expo-constants';
 import React from 'react';
-import { Alert, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { appAlert } from '../../components/ui/AppDialog';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Feather';
 import { useAuth } from '../../context/AuthContext';
@@ -140,7 +141,7 @@ export default function ReceiverSettingsScreen(): React.JSX.Element {
         <TouchableOpacity
           style={styles.logout}
           onPress={() =>
-            Alert.alert('Log out', 'Do you want to log out?', [
+            appAlert('Log out', 'Do you want to log out?', [
               { text: 'Cancel', style: 'cancel' },
               { text: 'Log out', style: 'destructive', onPress: () => signOut() },
             ])

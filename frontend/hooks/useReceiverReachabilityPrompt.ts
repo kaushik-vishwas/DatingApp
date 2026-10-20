@@ -48,6 +48,7 @@ export function useReceiverReachabilityPrompt(enabled: boolean): {
   status: ReachabilityStatus | null;
   missing: ReachabilityCheckId[];
   busy: boolean;
+  busyId: ReachabilityCheckId | null;
   onFix: (id: ReachabilityCheckId) => void;
   onAcknowledgeAutostart: () => void;
   onRetry: () => void;
@@ -59,7 +60,8 @@ export function useReceiverReachabilityPrompt(enabled: boolean): {
   const runIdRef = useRef(0);
   const [status, setStatus] = useState<ReachabilityStatus | null>(null);
   const [missing, setMissing] = useState<ReachabilityCheckId[]>([]);
-  const [busy, setBusy] = useState(false);
+  const [busyId, setBusyId] = useState<ReachabilityCheckId | null>(null);
+  const busy = busyId != null;
 
   const check = useCallback(async () => {
     const runId = ++runIdRef.current;
@@ -101,7 +103,7 @@ export function useReceiverReachabilityPrompt(enabled: boolean): {
 
   const onFix = useCallback(
     (id: ReachabilityCheckId) => {
-      setBusy(true);
+      setBusyId(id);
       let timer: ReturnType<typeof setTimeout> | null = null;
       const fix = promptReachabilityFix(id).catch(() => {});
       // A slow fix may finish after the busy cap; re-check then too so the row clears.
@@ -113,7 +115,7 @@ export function useReceiverReachabilityPrompt(enabled: boolean): {
         }),
       ]).finally(() => {
         if (timer) clearTimeout(timer);
-        setBusy(false);
+        setBusyId(null);
         void check();
       });
     },
@@ -137,6 +139,7 @@ export function useReceiverReachabilityPrompt(enabled: boolean): {
     status,
     missing,
     busy,
+    busyId,
     onFix,
     onAcknowledgeAutostart,
     onRetry: () => void check(),

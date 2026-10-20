@@ -125,13 +125,23 @@ function lastPushRegistrationOk(): boolean | null {
   return null;
 }
 
+/** A failed local refresh is harmless when the server still holds a token from an earlier one. */
+async function serverHasPushToken(): Promise<boolean> {
+  try {
+    const { data } = await profileApi.getReceiverPushTokenStatus();
+    return Boolean(data?.hasPushToken);
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Read-only: never shows a permission dialog and never registers push tokens.
- * `pushToken` reflects the last logged registration (unknown counts as OK).
+ * `pushToken` reflects the last logged registration (unknown counts as OK), or a token saved on the server.
  */
 export async function getReceiverReachabilityStatus(): Promise<ReachabilityStatus> {
   const notifications = await hasNotificationPermission();
-  const pushToken = lastPushRegistrationOk() !== false;
+  const pushToken = lastPushRegistrationOk() !== false || (await serverHasPushToken());
   if (Platform.OS !== 'android') {
     return {
       notifications,
