@@ -522,7 +522,7 @@ api.interceptors.response.use(
 
 /** True for the getErrorMessage() texts produced when the server could not be reached. */
 export const isNoInternetMessage = (message: string | null | undefined): boolean =>
-  /^(Could not reach the server|Connection timed out)/.test(message || '');
+  /^(Could not reach the server|Connection timed out|Request timed out)/.test(message || '');
 
 /** Error handler */
 export const getErrorMessage = (error: unknown): string => {

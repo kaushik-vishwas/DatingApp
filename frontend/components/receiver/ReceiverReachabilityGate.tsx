@@ -40,7 +40,7 @@ export default function ReceiverReachabilityGate({
               <Text style={styles.rowTitle}>{LABELS[id]}</Text>
               <View style={styles.rowActions}>
                 <TouchableOpacity style={styles.allowBtn} onPress={() => onFix(id)} disabled={busy}>
-                  <Text style={styles.allowText}>{id === 'pushToken' ? 'Retry' : 'Allow'}</Text>
+                  <Text style={styles.allowText}>Allow</Text>
                 </TouchableOpacity>
                 {id === 'autostart' ? (
                   <TouchableOpacity style={styles.doneBtn} onPress={onAcknowledgeAutostart} disabled={busy}>

@@ -102,12 +102,20 @@ export function useReceiverReachabilityPrompt(enabled: boolean): {
   const onFix = useCallback(
     (id: ReachabilityCheckId) => {
       setBusy(true);
-      void promptReachabilityFix(id)
-        .catch(() => {})
-        .finally(() => {
-          setBusy(false);
-          void check();
-        });
+      let timer: ReturnType<typeof setTimeout> | null = null;
+      const fix = promptReachabilityFix(id).catch(() => {});
+      // A slow fix may finish after the busy cap; re-check then too so the row clears.
+      void fix.finally(() => void check());
+      void Promise.race([
+        fix,
+        new Promise<void>((resolve) => {
+          timer = setTimeout(resolve, FIX_BUSY_MAX_MS);
+        }),
+      ]).finally(() => {
+        if (timer) clearTimeout(timer);
+        setBusy(false);
+        void check();
+      });
     },
     [check]
   );
