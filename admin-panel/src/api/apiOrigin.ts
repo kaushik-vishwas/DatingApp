@@ -6,7 +6,7 @@
 const ADMIN_ENV_FILE = '.env';
 // const ADMIN_ENV_FILE = '.env.test';
 
-const ADMIN_API_ENDPOINT = 'https://backend.nesthamapp.com';
+const ADMIN_API_ENDPOINT = 'https://backend.nesthamapp.com'; 
 // const ADMIN_API_ENDPOINT = 'https://testbackend.nesthamapp.com';
 // const ADMIN_API_ENDPOINT = 'http://localhost:5000';
 // const ADMIN_API_ENDPOINT = 'http://localhost:5001';
