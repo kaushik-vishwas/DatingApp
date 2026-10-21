@@ -19,6 +19,7 @@ import appRoutes from './routes/appRoutes';
 import { requireVersionedAppClient } from './middleware/appVersionGate';
 import { trackClientInfo } from './middleware/clientInfo';
 import { attachChatSocket } from './socket/chatSocket';
+import { startStaleReceiverOnlineSweep } from './services/receiverPresence';
 import { reuseOrCreateApiTrace } from './utils/apiTraceLog';
 import { getLoadedAppEnv, getLoadedEnvPath, getServerPort } from './config/loadEnv';
 
@@ -131,6 +132,8 @@ const start = async (): Promise<void> => {
         '[razorpay] RAZORPAY_WEBHOOK_SECRET is not set — /wallet/razorpay-webhook is disabled. UPI payments that miss app verify will not auto-credit until webhook is configured.'
       );
     }
+
+    startStaleReceiverOnlineSweep();
 
     const port = getServerPort();
     httpServer.listen(port, '0.0.0.0', () => {

@@ -70,7 +70,23 @@ const SHARE_BTN_TEXT = '#ffffff';
 const SHARE_BTN_ICON = '#ffffff';
 /** Discover list only — shorter than generic screen timeout so home does not spin too long. */
 const DISCOVER_FETCH_TIMEOUT_MS = 12_000;
+const DISCOVER_FIRST_PAGE = 60;
+const DISCOVER_NEXT_PAGE = 40;
 const listFooterSpacer = <View style={{ height: 12 }} />;
+
+function LoadingMoreText(): React.JSX.Element {
+  const [dots, setDots] = useState(1);
+  useEffect(() => {
+    const id = setInterval(() => setDots((d) => (d % 3) + 1), 500);
+    return () => clearInterval(id);
+  }, []);
+  return (
+    <Text style={styles.loadMoreText}>
+      Loading{'.'.repeat(dots)}
+      <Text style={{ color: 'transparent' }}>{'.'.repeat(3 - dots)}</Text>
+    </Text>
+  );
+}
 
 /** Stable signature for presence + card fields — skip list state updates when unchanged. */
 function receiverRowSignature(r: DiscoverReceiverSummary): string {
@@ -380,6 +396,10 @@ export default function CallerDiscoverHome(): React.JSX.Element {
   const [callerNotification, setCallerNotification] = useState<CallerNotificationContent | null>(null);
   const discoverLoadGenRef = useRef(0);
   const hasDiscoverDataRef = useRef(false);
+  const discoverServerCountRef = useRef(0);
+  const discoverHasMoreRef = useRef(false);
+  const loadingMoreRef = useRef(false);
+  const [loadingMore, setLoadingMore] = useState(false);
   const skipNextFocusRefreshRef = useRef(true);
   const [homeOfferPopup, setHomeOfferPopup] = useState<WalletHomeOfferPopup | null>(null);
   const [homeOfferPopupVisible, setHomeOfferPopupVisible] = useState(false);
@@ -396,29 +416,48 @@ export default function CallerDiscoverHome(): React.JSX.Element {
 
   const appliedFiltersKey = useMemo(() => JSON.stringify(appliedFilters), [appliedFilters]);
 
-  const fetchList = useCallback(async (): Promise<DiscoverReceiverSummary[]> => {
-    const useModalLangs = appliedFilters.languages.length > 0;
-    const ageFilterActive = appliedFilters.ageMin !== 18 || appliedFilters.ageMax !== 50;
-    const { data } = await discoverApi.listReceivers({
-      language: useModalLangs ? undefined : language ?? undefined,
-      q: debounced || undefined,
-      langs: useModalLangs ? appliedFilters.languages.join(',') : undefined,
-      minAge: ageFilterActive ? appliedFilters.ageMin : undefined,
-      maxAge: ageFilterActive ? appliedFilters.ageMax : undefined,
-      limit: 80,
-    });
-    let rows = data.receivers;
-    if (appliedFilters.rating4Plus) {
-      rows = rows.filter((r) => (r.ratingAvg ?? 0) >= 4);
-    }
-    if (appliedFilters.onlineOnly) {
-      rows = rows.filter((r) => {
-        const presence = getReceiverPresenceInfo(r);
-        return presence.status === 'available';
+  const fetchPage = useCallback(
+    async (
+      skip: number,
+      limit: number
+    ): Promise<{ rows: DiscoverReceiverSummary[]; serverCount: number; hasMore: boolean }> => {
+      const useModalLangs = appliedFilters.languages.length > 0;
+      const ageFilterActive = appliedFilters.ageMin !== 18 || appliedFilters.ageMax !== 50;
+      const { data } = await discoverApi.listReceivers({
+        language: useModalLangs ? undefined : language ?? undefined,
+        q: debounced || undefined,
+        langs: useModalLangs ? appliedFilters.languages.join(',') : undefined,
+        minAge: ageFilterActive ? appliedFilters.ageMin : undefined,
+        maxAge: ageFilterActive ? appliedFilters.ageMax : undefined,
+        skip,
+        limit,
       });
-    }
-    return sortDiscoverReceivers(rows);
-  }, [language, debounced, appliedFilters]);
+      let rows = data.receivers;
+      if (appliedFilters.rating4Plus) {
+        rows = rows.filter((r) => (r.ratingAvg ?? 0) >= 4);
+      }
+      if (appliedFilters.onlineOnly) {
+        rows = rows.filter((r) => {
+          const presence = getReceiverPresenceInfo(r);
+          return presence.status === 'available';
+        });
+      }
+      return {
+        rows: sortDiscoverReceivers(rows),
+        serverCount: data.receivers.length,
+        hasMore: Boolean(data.hasMore),
+      };
+    },
+    [language, debounced, appliedFilters]
+  );
+
+  /** Refresh re-fetches everything already scrolled into, so extra pages are not dropped. */
+  const fetchList = useCallback(async (): Promise<DiscoverReceiverSummary[]> => {
+    const page = await fetchPage(0, Math.max(DISCOVER_FIRST_PAGE, discoverServerCountRef.current));
+    discoverServerCountRef.current = page.serverCount;
+    discoverHasMoreRef.current = page.hasMore;
+    return page.rows;
+  }, [fetchPage]);
 
   const fetchDiscoverReceivers = useCallback(
     async (opts?: { silent?: boolean }): Promise<void> => {
@@ -453,6 +492,8 @@ export default function CallerDiscoverHome(): React.JSX.Element {
       if (!bootstrapping) setLoading(false);
       return;
     }
+    discoverServerCountRef.current = 0;
+    discoverHasMoreRef.current = false;
     void fetchDiscoverReceivers({ silent: hasDiscoverDataRef.current });
     return () => {
       discoverLoadGenRef.current += 1;
@@ -503,6 +544,32 @@ export default function CallerDiscoverHome(): React.JSX.Element {
       setRefreshing(false);
     }
   }, [fetchList, refreshUser, loadCallerNotification]);
+
+  const loadMoreReceivers = useCallback(async () => {
+    if (loadingMoreRef.current || !discoverHasMoreRef.current || loading || refreshing) return;
+    loadingMoreRef.current = true;
+    setLoadingMore(true);
+    const gen = discoverLoadGenRef.current;
+    try {
+      const page = await withTimeout(
+        fetchPage(discoverServerCountRef.current, DISCOVER_NEXT_PAGE),
+        DISCOVER_FETCH_TIMEOUT_MS
+      );
+      if (gen !== discoverLoadGenRef.current) return;
+      discoverServerCountRef.current += page.serverCount;
+      discoverHasMoreRef.current = page.hasMore;
+      setReceivers((prev) => {
+        const seen = new Set(prev.map((r) => r._id));
+        const added = page.rows.filter((r) => !seen.has(r._id));
+        return added.length > 0 ? [...prev, ...added] : prev;
+      });
+    } catch {
+      // Next scroll to the end retries.
+    } finally {
+      loadingMoreRef.current = false;
+      setLoadingMore(false);
+    }
+  }, [fetchPage, loading, refreshing]);
 
   const showCallerNotification =
     callerNotification != null &&
@@ -895,7 +962,11 @@ export default function CallerDiscoverHome(): React.JSX.Element {
             renderItem={renderReceiverRow}
             contentContainerStyle={[styles.listContent, { paddingBottom: listBottomPad }]}
             ListHeaderComponent={listHeader}
-            ListFooterComponent={listFooterSpacer}
+            ListFooterComponent={
+              loadingMore ? <LoadingMoreText /> : listFooterSpacer
+            }
+            onEndReached={() => void loadMoreReceivers()}
+            onEndReachedThreshold={0.6}
             refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void onRefresh()} />}
             keyboardShouldPersistTaps="handled"
             ListEmptyComponent={listEmpty}
@@ -944,6 +1015,13 @@ export default function CallerDiscoverHome(): React.JSX.Element {
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: '#f6f6f7' },
+  loadMoreText: {
+    paddingVertical: 16,
+    textAlign: 'center',
+    color: '#9ca3af',
+    fontStyle: 'italic',
+    fontSize: 14,
+  },
 
   stickyTopCard: {
     backgroundColor: '#fff',

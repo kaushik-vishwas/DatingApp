@@ -184,6 +184,7 @@ export type WalletOffersResponse = {
 
 export interface DiscoverReceiversResponse {
   receivers: DiscoverReceiverSummary[];
+  hasMore?: boolean;
 }
 
 export type ChatSenderType = 'u' | 'r';

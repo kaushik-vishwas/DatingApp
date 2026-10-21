@@ -13,6 +13,8 @@ exports.armReceiverDiscoverGrace = armReceiverDiscoverGrace;
 exports.touchReceiverBackgroundPresence = touchReceiverBackgroundPresence;
 exports.touchReceiverForegroundPresence = touchReceiverForegroundPresence;
 exports.syncReceiverPresenceInDatabase = syncReceiverPresenceInDatabase;
+exports.clearStaleReceiverOnlineFlags = clearStaleReceiverOnlineFlags;
+exports.startStaleReceiverOnlineSweep = startStaleReceiverOnlineSweep;
 exports.isReceiverLoggedInForDiscover = isReceiverLoggedInForDiscover;
 exports.isReceiverDiscoverAvailable = isReceiverDiscoverAvailable;
 const Receiver_1 = __importDefault(require("../models/Receiver"));
@@ -181,6 +183,43 @@ async function syncReceiverPresenceInDatabase(receiverId) {
         await receiver.save();
     }
     await (0, callQueue_1.syncReceiverQueueState)(rid);
+}
+const STALE_ONLINE_SWEEP_FIRST_MS = 2 * 60 * 1000;
+const STALE_ONLINE_SWEEP_EVERY_MS = 5 * 60 * 1000;
+/**
+ * Grace-expiry timers live in memory, so a restart leaves `isOnline` stuck true. Session minutes
+ * are not credited here: the real end of a lost-timer session is unknown.
+ */
+async function clearStaleReceiverOnlineFlags() {
+    // A process with no receiver sockets (e.g. a local dev server on the shared DB) cannot judge presence.
+    if ((0, socketRegistry_1.getConnectedReceiverIds)().size === 0)
+        return 0;
+    const rows = await Receiver_1.default.find({ isOnline: true })
+        .select('_id isAvailable discoverGraceUntil')
+        .lean();
+    const staleIds = rows
+        .filter((r) => !isReceiverLoggedInAndAvailable({
+        receiverId: String(r._id),
+        isAvailable: Boolean(r.isAvailable),
+        discoverGraceUntil: r.discoverGraceUntil ?? null,
+    }))
+        .map((r) => r._id);
+    if (staleIds.length === 0)
+        return 0;
+    await Receiver_1.default.updateMany({ _id: { $in: staleIds }, isOnline: true }, { $set: { isOnline: false, onlineSince: null } });
+    return staleIds.length;
+}
+function startStaleReceiverOnlineSweep() {
+    const run = () => {
+        void clearStaleReceiverOnlineFlags()
+            .then((n) => {
+            if (n > 0)
+                console.log(`[presence] cleared stale isOnline on ${n} receiver(s)`);
+        })
+            .catch((e) => console.error('[presence] stale isOnline sweep failed:', e instanceof Error ? e.message : e));
+    };
+    setTimeout(run, STALE_ONLINE_SWEEP_FIRST_MS).unref();
+    setInterval(run, STALE_ONLINE_SWEEP_EVERY_MS).unref();
 }
 /** Whether callers should treat this receiver as logged-in right now. */
 function isReceiverLoggedInForDiscover(receiverId, discoverGraceUntil) {

@@ -1,5 +1,5 @@
 import Receiver from '../models/Receiver';
-import { isReceiverSocketConnected } from '../socket/socketRegistry';
+import { getConnectedReceiverIds, isReceiverSocketConnected } from '../socket/socketRegistry';
 import { finalizeReceiverOnlineSession } from './receiverScore';
 import { syncReceiverQueueState } from './callQueue';
 
@@ -203,6 +203,49 @@ export async function syncReceiverPresenceInDatabase(receiverId: string): Promis
     await receiver.save();
   }
   await syncReceiverQueueState(rid);
+}
+
+const STALE_ONLINE_SWEEP_FIRST_MS = 2 * 60 * 1000;
+const STALE_ONLINE_SWEEP_EVERY_MS = 5 * 60 * 1000;
+
+/**
+ * Grace-expiry timers live in memory, so a restart leaves `isOnline` stuck true. Session minutes
+ * are not credited here: the real end of a lost-timer session is unknown.
+ */
+export async function clearStaleReceiverOnlineFlags(): Promise<number> {
+  // A process with no receiver sockets (e.g. a local dev server on the shared DB) cannot judge presence.
+  if (getConnectedReceiverIds().size === 0) return 0;
+  const rows = await Receiver.find({ isOnline: true })
+    .select('_id isAvailable discoverGraceUntil')
+    .lean<{ _id: unknown; isAvailable?: boolean; discoverGraceUntil?: Date | null }[]>();
+  const staleIds = rows
+    .filter(
+      (r) =>
+        !isReceiverLoggedInAndAvailable({
+          receiverId: String(r._id),
+          isAvailable: Boolean(r.isAvailable),
+          discoverGraceUntil: r.discoverGraceUntil ?? null,
+        })
+    )
+    .map((r) => r._id);
+  if (staleIds.length === 0) return 0;
+  await Receiver.updateMany(
+    { _id: { $in: staleIds }, isOnline: true },
+    { $set: { isOnline: false, onlineSince: null } }
+  );
+  return staleIds.length;
+}
+
+export function startStaleReceiverOnlineSweep(): void {
+  const run = (): void => {
+    void clearStaleReceiverOnlineFlags()
+      .then((n) => {
+        if (n > 0) console.log(`[presence] cleared stale isOnline on ${n} receiver(s)`);
+      })
+      .catch((e) => console.error('[presence] stale isOnline sweep failed:', e instanceof Error ? e.message : e));
+  };
+  setTimeout(run, STALE_ONLINE_SWEEP_FIRST_MS).unref();
+  setInterval(run, STALE_ONLINE_SWEEP_EVERY_MS).unref();
 }
 
 /** Whether callers should treat this receiver as logged-in right now. */

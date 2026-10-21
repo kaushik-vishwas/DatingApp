@@ -783,6 +783,7 @@ export const discoverApi = {
     minAge?: number;
     maxAge?: number;
     limit?: number;
+    skip?: number;
   }) => api.get<DiscoverReceiversResponse>('/discover/receivers', { params }),
 };
 

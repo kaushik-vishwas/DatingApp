@@ -37,6 +37,7 @@ function parseBoolQuery(val: unknown): boolean {
 
 /** Receivers who were online in this window stay on caller discover. */
 const DISCOVER_ACTIVE_WINDOW_MS = 10 * 24 * 60 * 60 * 1000;
+const DISCOVER_MAX_LIMIT = 500;
 
 function utcDateKey(d: Date): string {
   return d.toISOString().slice(0, 10);
@@ -110,7 +111,7 @@ export const listReceiversForCaller = async (req: Request, res: Response): Promi
     const maxAgeRaw = parseIntQuery(req.query.maxAge);
 
     const limitRaw = parseIntQuery(req.query.limit);
-    const limit = Math.min(100, Math.max(1, Number.isFinite(limitRaw) ? limitRaw : 40));
+    const limit = Math.min(DISCOVER_MAX_LIMIT, Math.max(1, Number.isFinite(limitRaw) ? limitRaw : 40));
     const skipRaw = parseIntQuery(req.query.skip);
     const skip = Math.min(5000, Math.max(0, Number.isFinite(skipRaw) ? skipRaw : 0));
     const onlineOnly = parseBoolQuery(req.query.onlineOnly);
@@ -157,16 +158,49 @@ export const listReceiversForCaller = async (req: Request, res: Response): Promi
       clauses.push({ _id: { $in: ratedIds.map((row) => row._id) } });
     }
 
-    const receivers = await Receiver.find({ $and: clauses })
+    // Rank by live presence (DB `isOnline` can be stale), then page — keeps page order stable.
+    const candidates = await Receiver.find({ $and: clauses })
+      .select('_id isAvailable discoverGraceUntil lastActiveAt updatedAt')
+      .lean<
+        {
+          _id: mongoose.Types.ObjectId;
+          isAvailable?: boolean;
+          discoverGraceUntil?: Date | null;
+          lastActiveAt?: Date | null;
+          updatedAt?: Date;
+        }[]
+      >();
+    const busyByReceiverId = await getBusyReceiverIdSet(candidates.map((c) => String(c._id)));
+    const rankOf = (c: (typeof candidates)[number]): number => {
+      const id = String(c._id);
+      const live = isReceiverLoggedInAndAvailable({
+        receiverId: id,
+        isAvailable: Boolean(c.isAvailable),
+        discoverGraceUntil: c.discoverGraceUntil ?? null,
+      });
+      if (!live) return 2;
+      return busyByReceiverId.has(id) ? 1 : 0;
+    };
+    const recencyOf = (c: (typeof candidates)[number]): number =>
+      Math.max(c.lastActiveAt?.getTime() ?? 0, c.updatedAt?.getTime() ?? 0);
+    const ranked = candidates
+      .map((c) => ({ c, rank: rankOf(c), recency: recencyOf(c) }))
+      .sort(
+        (a, b) =>
+          a.rank - b.rank || b.recency - a.recency || String(a.c._id).localeCompare(String(b.c._id))
+      );
+    const pageIds = ranked.slice(skip, skip + limit).map((row) => row.c._id);
+    const hasMore = ranked.length > skip + limit;
+
+    const pageDocs = await Receiver.find({ _id: { $in: pageIds } })
       .select(
         'name age state interests languages profileImage audioCallRate updatedAt gender isAvailable isOnline isBusyOnCall discoverGraceUntil expoPushToken fcmDeviceToken'
       )
-      .sort({ isOnline: -1, isAvailable: -1, isBusyOnCall: 1, updatedAt: -1 })
-      .skip(skip)
-      .limit(limit + 1)
       .exec();
-    const hasMore = receivers.length > limit;
-    if (hasMore) receivers.pop();
+    const docById = new Map(pageDocs.map((d) => [String(d._id), d]));
+    const receivers = pageIds
+      .map((id) => docById.get(String(id)))
+      .filter((d): d is NonNullable<typeof d> => Boolean(d));
 
     const receiverIds = receivers.map((r) => new mongoose.Types.ObjectId(String(r._id)));
     const ratingRows =
@@ -197,7 +231,6 @@ export const listReceiversForCaller = async (req: Request, res: Response): Promi
     const ratingByReceiverId = new Map(
       ratingRows.map((row) => [String(row.receiverId), { avg: row.avg, count: row.count }])
     );
-    const busyByReceiverId = await getBusyReceiverIdSet(receivers.map((r) => String(r._id)));
     res.status(200).json({
       receivers: receivers.map((r) =>
         toCard(r as ReceiverDocument, ratingByReceiverId, busyByReceiverId)

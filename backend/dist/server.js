@@ -24,6 +24,7 @@ const appRoutes_1 = __importDefault(require("./routes/appRoutes"));
 const appVersionGate_1 = require("./middleware/appVersionGate");
 const clientInfo_1 = require("./middleware/clientInfo");
 const chatSocket_1 = require("./socket/chatSocket");
+const receiverPresence_1 = require("./services/receiverPresence");
 const apiTraceLog_1 = require("./utils/apiTraceLog");
 const loadEnv_1 = require("./config/loadEnv");
 const app = (0, express_1.default)();
@@ -114,6 +115,7 @@ const start = async () => {
         if (process.env.RAZORPAY_KEY_ID?.trim() && !process.env.RAZORPAY_WEBHOOK_SECRET?.trim()) {
             console.warn('[razorpay] RAZORPAY_WEBHOOK_SECRET is not set — /wallet/razorpay-webhook is disabled. UPI payments that miss app verify will not auto-credit until webhook is configured.');
         }
+        (0, receiverPresence_1.startStaleReceiverOnlineSweep)();
         const port = (0, loadEnv_1.getServerPort)();
         httpServer.listen(port, '0.0.0.0', () => {
             console.log(`[server] listening on 0.0.0.0:${port} (env=${(0, loadEnv_1.getLoadedAppEnv)() ?? 'unknown'}, file=${(0, loadEnv_1.getLoadedEnvPath)() ?? 'none'})`);

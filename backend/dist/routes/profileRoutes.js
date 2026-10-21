@@ -26,6 +26,7 @@ router.patch('/receiver/kyc/bank', auth_1.protect, profileController_1.saveRecei
 router.patch('/receiver', auth_1.protect, profileController_1.updateReceiverProfile);
 router.post('/receiver/presence/background', auth_1.protect, profileController_1.receiverBackgroundPresence);
 router.post('/receiver/presence/foreground', auth_1.protect, profileController_1.receiverForegroundPresence);
+router.get('/receiver/push-token', auth_1.protect, profileController_1.getReceiverPushTokenStatus);
 router.patch('/receiver/push-token', auth_1.protect, profileController_1.updateReceiverExpoPushToken);
 router.delete('/receiver/push-token', auth_1.protect, profileController_1.clearReceiverPushTokens);
 router.patch('/caller/push-token', auth_1.protect, profileController_1.updateCallerExpoPushToken);
